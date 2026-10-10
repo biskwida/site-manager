@@ -3,6 +3,7 @@ import { useState, type FormEvent } from "react";
 import type { DomainInstructions } from "@/src/deploy/types";
 import { normalizeDomain } from "@/src/deploy/vercel-domains";
 import { useLang } from "@/src/i18n";
+import { DICTS } from "@/src/i18n/dicts";
 import type { AdminOverview, DomainResult } from "@/src/server/admin";
 import { Chip, Section } from "./bits";
 import type { Post } from "./useAdminOverview";
@@ -102,7 +103,8 @@ export function DomainCard({ overview: o, post }: { overview: AdminOverview; pos
     setBusy(kind);
     setResult(null);
     const r = await post(body);
-    setResult(isResult(r.data) ? r.data : { ok: false, code: "provider", error: "failed", bg: t("admin.failed"), en: t("admin.failed") });
+    // Errors keep both languages so the line follows the toggle instead of freezing in the language it was submitted in.
+    setResult(isResult(r.data) ? r.data : { ok: false, code: "provider", error: "failed", bg: DICTS.bg["admin.failed"], en: DICTS.en["admin.failed"] });
     setBusy(null);
   }
   function submit(e: FormEvent) {
@@ -110,7 +112,7 @@ export function DomainCard({ overview: o, post }: { overview: AdminOverview; pos
     if (busy || !deployed) return;
     const clean = normalizeDomain(domain);
     if (!clean) {
-      setResult({ ok: false, code: "invalid_domain", error: "Invalid domain.", bg: t("admin.domainInvalid"), en: t("admin.domainInvalid") });
+      setResult({ ok: false, code: "invalid_domain", error: "Invalid domain.", bg: DICTS.bg["admin.domainInvalid"], en: DICTS.en["admin.domainInvalid"] });
       return;
     }
     setDomain(clean);
