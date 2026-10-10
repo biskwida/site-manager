@@ -53,6 +53,17 @@ async function waitFor(url: string, tries = 60) {
 const html = async (url: string) => (await fetch(url, { headers: { accept: "text/html" } })).text();
 
 let photoServer: ReturnType<typeof createServer> | null = null;
+let failed = false;
+
+/** Best effort: the last lines of WordPress's debug.log, so a PHP fatal behind a failed step is visible before teardown. */
+function printDebugLogTail() {
+  try {
+    const tail = sh("docker", ["compose", "-f", COMPOSE, "exec", "-T", "wordpress", "tail", "-n", "40", "/var/www/html/wp-content/debug.log"], { quiet: true });
+    console.error(`\n== wp-content/debug.log (last 40 lines)\n${tail || "(empty)"}`);
+  } catch {
+    // no container, or no debug.log yet
+  }
+}
 
 class PrintMessenger implements Messenger {
   private n = 1;
@@ -79,7 +90,14 @@ async function main() {
   try {
     wp("core", "is-installed");
   } catch {
-    wp("core", "install", `--url=${WP_URL}`, "--title=Smoke Café", "--admin_user=smoke", `--admin_password=${adminPass}`, "--admin_email=smoke@example.com", "--skip-email");
+    try {
+      wp("core", "install", `--url=${WP_URL}`, "--title=Smoke Café", "--admin_user=smoke", `--admin_password=${adminPass}`, "--admin_email=smoke@example.com", "--skip-email");
+    } catch (err) {
+      // execFileSync's error message (and its spawnargs/cmd fields) carry the full command line with the password;
+      // rethrow with wp-cli's stderr only, so nothing derived from the arguments reaches the console.
+      const stderr = (err as { stderr?: Buffer | string }).stderr;
+      throw new Error(`SMOKE FAIL: wp core install failed: ${String(stderr ?? "").trim()}`);
+    }
   }
   wp("rewrite", "structure", "/%postname%/", "--hard");
   wp("plugin", "activate", "site-manager");
@@ -127,10 +145,20 @@ async function main() {
   assert(!again.ok, "a used code must be refused");
 
   step("agent tools: edit page with a photo, preview, apply, undo");
-  photoServer = createServer((_req, res) => {
-    res.writeHead(200, { "content-type": "image/png" });
-    res.end(PNG);
-  }).listen(PHOTO_PORT);
+  try {
+    await new Promise<void>((ok, fail) => {
+      photoServer = createServer((_req, res) => {
+        res.writeHead(200, { "content-type": "image/png" });
+        res.end(PNG);
+      });
+      photoServer.once("error", fail);
+      photoServer.listen(PHOTO_PORT, ok);
+    });
+  } catch (err) {
+    photoServer = null; // never listened; nothing to close in finally
+    if ((err as NodeJS.ErrnoException).code === "EADDRINUSE") throw new Error(`SMOKE FAIL: port ${PHOTO_PORT} is busy; free it or stop the process using it`);
+    throw new Error(`SMOKE FAIL: photo server could not listen on port ${PHOTO_PORT}: ${(err as Error).message}`);
+  }
   const photo = await store.saveMedia(venue.id, PNG, "image/png");
   // The memory store's memory:// URLs are not fetchable; point the media row at the host server instead.
   const site = await store0.getSite(venue.id);
@@ -162,7 +190,13 @@ async function main() {
   assert(live.includes("/wp-content/uploads/") && !live.includes("{{sm_media"), "photo placeholder not resolved on the live page");
   const attachments = wp("post", "list", "--post_type=attachment", "--format=count");
   assert(attachments === "1", `expected 1 attachment, got ${attachments}`);
-  assert(wp("post", "meta", "get", String(about.id), "_thumbnail_id") !== "", "featured image not set");
+  let thumbnailId = "";
+  try {
+    thumbnailId = wp("post", "meta", "get", String(about.id), "_thumbnail_id");
+  } catch {
+    // wp post meta get exits 1 when the meta is absent
+  }
+  assert(thumbnailId !== "", "featured image not set");
   const syncs = await store.listSyncs({ venueId: venue.id });
   assert(syncs.at(-1)?.status === "done", `sync not done: ${JSON.stringify(syncs.at(-1))}`);
   const pushed = ((syncs.at(-1)?.result?.pushed ?? []) as { entity: string; revision_id?: unknown }[]).find((p) => p.entity === "wp_page");
@@ -220,9 +254,11 @@ main()
   .catch((e) => {
     console.error(e instanceof Error ? e.message : e);
     process.exitCode = 1;
+    failed = true;
   })
   .finally(() => {
     photoServer?.close(); // also on failure, or the process never exits
+    if (failed) printDebugLogTail();
     if (!keep) {
       step("docker compose down -v");
       try {

@@ -122,10 +122,12 @@ describe("WordPressClient against the fake plugin", () => {
     expect(pr.after).toMatchObject({ regular_price: "13.5", stock_status: "outofstock" });
   });
 
-  it("guards small edge cases: empty media delete, logo option values", async () => {
+  it("guards small edge cases: empty media delete, media upload validation, logo option values", async () => {
     const { wp } = setup();
     const client = wp.connected();
     await expect(client.deleteMedia({})).rejects.toMatchObject({ status: 400, code: "sm_invalid" });
+    await expect(client.uploadMedia({ url: "https://cdn.example/l.png", source_id: "" })).rejects.toMatchObject({ status: 400, code: "sm_invalid", message: "source_id is required." });
+    await expect(client.uploadMedia({ url: "file:///etc/passwd", source_id: "logo" })).rejects.toMatchObject({ status: 400, code: "sm_invalid", message: "url must be a public http(s) URL on port 80, 443 or 8080." });
     await client.uploadMedia({ url: "https://cdn.example/l.png", source_id: "logo" });
     expect(await client.setOption("custom_logo", "{{sm_media_id:logo}}")).toEqual({ key: "custom_logo", before: null, after: 101 });
     await expect(client.setOption("custom_logo", "{{sm_media_url:logo}}")).rejects.toMatchObject({ status: 400, code: "sm_invalid" });

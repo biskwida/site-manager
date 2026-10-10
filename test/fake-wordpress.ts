@@ -222,7 +222,9 @@ export class FakeWordPress {
     }
     if (path === "/media" && method === "POST") {
       const source = String(body.source_id ?? "");
-      if (!/^https?:\/\//.test(String(body.url ?? "")) || !source) return err(400, "sm_invalid", "url and source_id are required.");
+      // Same order and messages as the plugin's upload_media(): source_id first, then the URL check.
+      if (!source) return err(400, "sm_invalid", "source_id is required.");
+      if (!/^https?:\/\//.test(String(body.url ?? ""))) return err(400, "sm_invalid", "url must be a public http(s) URL on port 80, 443 or 8080.");
       const existing = [...this.media.values()].find((x) => x.source_id === source);
       if (existing) return Response.json({ id: existing.id, url: existing.url, alt: existing.alt, existed: true });
       const id = this.nextMedia++;
