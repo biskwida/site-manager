@@ -4,12 +4,8 @@ import type { ExtractFile, ExtractResult } from "@/src/wizard/extract";
 import type { PublishError, WizardDraft } from "@/src/wizard/schema";
 import type { DraftTexts } from "@/src/wizard/texts";
 
-// TODO(merge): switch to `WIZARD_MAX_IMAGE_BYTES` from src/wizard/schema.ts once Task 7's export lands (same value).
-/** Upload ceiling per image after client-side downscaling (Vercel's request body limit is 4.5 MB). */
-export const WIZARD_MAX_IMAGE_BYTES = 4 * 1024 * 1024;
-// TODO(merge): switch to `EXTRACT_MAX_TOTAL_BYTES` from src/wizard/schema.ts once Task 8b's export lands (same value).
-/** Total decoded bytes of all files in one extraction request. */
-export const EXTRACT_MAX_TOTAL_BYTES = 3 * 1024 * 1024;
+/** Server limits (R25): per-image upload ceiling after client downscaling, and total decoded bytes per extraction request. */
+export { EXTRACT_MAX_TOTAL_BYTES, WIZARD_MAX_IMAGE_BYTES } from "@/src/wizard/schema";
 
 export interface ApiError {
   code: string;

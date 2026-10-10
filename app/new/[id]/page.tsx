@@ -27,10 +27,9 @@ export default async function Page(props: PageProps<"/new/[id]">) {
   if (venue.status === "live") redirect(`/new/${id}/done`);
   const draft = venue.wizard_draft ?? emptyDraft(venue.template);
   const site = await deps.store.getSite(venue.id);
-  // TODO(merge): Task 8 adds `deps.anthropic` (null without a key); until then the key itself tells whether the AI routes can answer.
   // eslint-disable-next-line react-hooks/purity -- a server component renders once per request; this is the request time the preview ticks from
   const now = Date.now();
-  const aiAvailable = Boolean((deps as { anthropic?: unknown }).anthropic ?? deps.config.anthropicApiKey);
+  const aiAvailable = deps.anthropic !== null;
   return (
     <LangProvider defaultLang={draft.default_lang}>
       <Wizard id={id} initialDraft={draft} initialMedia={site.media} baseUrl={deps.config.publicBaseUrl} aiAvailable={aiAvailable} now={now} />
