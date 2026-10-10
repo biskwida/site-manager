@@ -127,6 +127,8 @@ Other scripts:
 | `npm run smoke -- --chat <chat id>` | The same against Supabase, with the preview really sent to that linked Telegram chat. |
 | `npm run cleanup:test-venues` | Deletes venues whose slug starts with `test-` (left by the live store contract test) and their images. |
 | `npm run telegram:set-webhook -- --delete` | Removes the webhook so `bot:dev` can poll again. |
+| `npm run wp:zip` | Rebuilds `public/wp/site-manager.zip` from `integrations/wordpress/site-manager` deterministically; `npm test` fails while the committed zip is stale. |
+| `npm run wp:smoke` | Throwaway WordPress + MySQL in Docker: installs WP, renders the plugin's blocks from the production feed, then connect → preview → apply → undo → options → menus → rate limit → log through our code; `-- --keep` leaves it at http://localhost:8088, `-- --feed <url>` picks another feed. |
 
 ## Landing page (Lovable)
 
@@ -197,3 +199,7 @@ Checked on 2026-10-10 on this branch:
 - The real phone run: `/start` with an invite code, voice notes, the whiteboard photo, the cover photo, the approval buttons and `/undo` on a phone have not been run end to end against the deployment.
 - The Lovable landing is not published yet, so the `/` redirect has not been seen with a real `NEXT_PUBLIC_LANDING_URL`.
 - Voice transcription with the configured provider and image turns at `high` effort were not part of the live smoke run.
+
+## Works with your existing website
+
+A café that already has a WordPress site keeps it: the **Site Manager plugin** (`public/wp/site-manager.zip`, source in `integrations/wordpress/site-manager`) shows the live menu, specials, hours, announcements and photos as blocks and shortcodes, and, after the owner sends one `/connect` line to the bot, lets the agent edit the site's pages, photos, title, logo, menus and WooCommerce products through the same preview → ✅ → undo flow. Set `DESTINATION_SECRET_KEY` (32 bytes, `openssl rand -hex 32`) in production to enable connecting. Full guide: [docs/INTEGRATION.md](docs/INTEGRATION.md). Checks: `npm run wp:lint`, `npm run wp:test`, `npm run wp:smoke` (Docker).

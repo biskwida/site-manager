@@ -207,7 +207,8 @@ final class SM_Rest
         if (is_wp_error($p)) {
             return $p;
         }
-        $rev = wp_get_post_revision((int) $r['revision_id']);
+        $revision_id = (int) $r['revision_id']; // wp_get_post_revision() takes its argument by reference
+        $rev = wp_get_post_revision($revision_id);
         if (!$rev || (int) $rev->post_parent !== (int) $p->ID) {
             return self::error(404, 'sm_not_found', 'No such revision for this page.');
         }
@@ -230,8 +231,12 @@ final class SM_Rest
         $b = self::body($r);
         $url = (string) ($b['url'] ?? '');
         $source = sanitize_text_field((string) ($b['source_id'] ?? ''));
-        if (!wp_http_validate_url($url) || $source === '') {
-            return self::error(400, 'sm_invalid', 'url and source_id are required.');
+        if ($source === '') {
+            return self::error(400, 'sm_invalid', 'source_id is required.');
+        }
+        if (!wp_http_validate_url($url)) {
+            // Core refuses private hosts and any external port other than 80, 443 and 8080.
+            return self::error(400, 'sm_invalid', 'url must be a public http(s) URL on port 80, 443 or 8080.');
         }
         $existing = SM_Pages::find_attachment($source);
         if ($existing) {
