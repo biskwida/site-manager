@@ -56,6 +56,8 @@ export async function connectWordPress(d: ConnectDeps, venueId: string, rawSiteU
   } catch (e) {
     return { ok: false, reason: handshakeReason(e) };
   }
+  // A 200 that is not the plugin's handshake reply (another plugin, a cache, a catch-all page that returns JSON).
+  if (!hs || typeof hs !== "object" || typeof hs.token !== "string" || hs.token === "" || !hs.site || typeof hs.site !== "object") return { ok: false, reason: { ...NO_PLUGIN } };
   const now = (d.now ?? (() => new Date()))().toISOString();
   const destination = await d.store.upsertDestination({
     venue_id: venueId,
@@ -67,11 +69,13 @@ export async function connectWordPress(d: ConnectDeps, venueId: string, rawSiteU
   return { ok: true, site: hs.site, destination };
 }
 
+const NO_PLUGIN = { bg: "На този адрес няма активен плъгин Site Manager.", en: "There is no active Site Manager plugin at that address." } as const;
+
 function handshakeReason(e: unknown): { bg: string; en: string } {
   if (e instanceof WordPressApiError) {
     if (e.status === 0) return { bg: "Не успях да се свържа със сайта. Проверете адреса и дали плъгинът е активиран.", en: "I could not reach the site. Check the address and that the plugin is active." };
     if (e.status === 403) return { bg: "Кодът е грешен, изтекъл или плъгинът е настроен за друго заведение. Генерирайте нов код от настройките на плъгина.", en: "The code is wrong or expired, or the plugin is set up for another venue. Generate a new code on the plugin's settings page." };
-    if (e.status === 404 || e.code === "sm_bad_json") return { bg: "На този адрес няма активен плъгин Site Manager.", en: "There is no active Site Manager plugin at that address." };
+    if (e.status === 404 || e.code === "sm_bad_json") return { ...NO_PLUGIN };
     if (e.status === 429) return { bg: "Твърде много опити. Изчакайте минута и опитайте пак.", en: "Too many attempts. Wait a minute and try again." };
     if (e.code === "sm_redirect") return { bg: "Сайтът пренасочва към друг адрес. Изпратете крайния адрес (например с www или https://).", en: "The site redirects to another address. Send its final address (for example with www or https://)." };
     return { bg: "Сайтът отговори с грешка. Опитайте пак след малко.", en: "The site answered with an error. Try again in a moment." };

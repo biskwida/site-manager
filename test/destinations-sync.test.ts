@@ -102,7 +102,8 @@ describe("withDestinationSync", () => {
     const store = withDestinationSync(demo.store, demo.d, () => T0);
     const cs = await store.createChangeSet({ venue_id: demo.venue.id, chat_id: 1001, summary_bg: "s", summary_en: "s", preview_bg: "p", preview_en: "p", source: "text", status: "proposed", changes: [{ ...edit, entity_id: "999" }] });
     await store.applyChangeSet(cs.id, T0.toISOString());
-    expect((await store.listSyncs({ changeSetId: cs.id }))[0]).toMatchObject({ status: "failed", attempts: 1, last_error: "No such page." });
+    expect((await store.listSyncs({ changeSetId: cs.id }))[0]).toMatchObject({ status: "failed", attempts: 1, last_error: "sm_not_found: No such page." });
+    expect(await syncLines(store, cs.id, "en")).toEqual(["WordPress: error: No such page."]);
   });
 });
 
@@ -200,5 +201,70 @@ describe("lease on rows created by the hook", () => {
     expect(await runPendingSyncs(demo.d, { venueId: demo.venue.id, now: T0 })).toEqual({ done: [], retry: [], failed: [] });
     expect(demo.wp.calls).toHaveLength(0);
     expect((await demo.store.getSync(row.id)).status).toBe("pending");
+  });
+});
+
+describe("runSync error classes and owner-facing lines", () => {
+  const propose = (demo: Awaited<ReturnType<typeof connected>>, changes: Change[]) =>
+    demo.store.createChangeSet({ venue_id: demo.venue.id, chat_id: 1001, summary_bg: "s", summary_en: "s", preview_bg: "p", preview_en: "p", source: "text", status: "proposed", changes });
+
+  it("treats a transient store error as retryable", async () => {
+    const demo = await connected();
+    const cs = await propose(demo, [edit]);
+    const [row] = await enqueueForChangeSet(demo.store, cs, T0);
+    let failOnce = true;
+    const flaky = new Proxy(demo.store, {
+      get(target, prop, receiver) {
+        if (prop === "getChangeSet" && failOnce) {
+          return async () => {
+            failOnce = false;
+            throw new Error("connection reset by peer");
+          };
+        }
+        const v = Reflect.get(target, prop, receiver);
+        return typeof v === "function" ? v.bind(target) : v;
+      },
+    });
+    const r = await runPendingSyncs({ ...demo.d, store: flaky }, { venueId: demo.venue.id, now: T0 });
+    expect(r).toEqual({ done: [], retry: [row.id], failed: [] });
+    expect(await demo.store.getSync(row.id)).toMatchObject({ status: "pending", attempts: 1, next_at: at(BACKOFF_MS[0]).toISOString(), last_error: "connection reset by peer" });
+    expect(await runPendingSyncs(demo.d, { venueId: demo.venue.id, now: at(BACKOFF_MS[0]) })).toEqual({ done: [row.id], retry: [], failed: [] });
+  });
+
+  it("fails at once when the secrets cannot be decrypted or the key is missing", async () => {
+    const demo = await connected();
+    const cs = await propose(demo, [edit]);
+    const [row] = await enqueueForChangeSet(demo.store, cs, T0);
+    await runPendingSyncs({ ...demo.d, secretKey: Buffer.alloc(32, 7) }, { venueId: demo.venue.id, now: T0 });
+    expect(await demo.store.getSync(row.id)).toMatchObject({ status: "failed", attempts: 1, last_error: expect.stringMatching(/Could not decrypt/) });
+    const cs2 = await propose(demo, [edit]);
+    const [row2] = await enqueueForChangeSet(demo.store, cs2, T0);
+    await runPendingSyncs({ ...demo.d, secretKey: null }, { venueId: demo.venue.id, now: at(BACKOFF_MS[0]) });
+    expect(await demo.store.getSync(row2.id)).toMatchObject({ status: "failed", attempts: 1, last_error: expect.stringMatching(/DESTINATION_SECRET_KEY/) });
+  });
+
+  it("stores the plugin's error code and maps known codes to the owner's language", async () => {
+    const demo = await connected();
+    const store = withDestinationSync(demo.store, demo.d, () => T0);
+    demo.wp.failNext = { status: 401, code: "sm_unauthorized", message: "Missing or invalid plugin token." };
+    const cs = await store.createChangeSet({ venue_id: demo.venue.id, chat_id: 1001, summary_bg: "s", summary_en: "s", preview_bg: "p", preview_en: "p", source: "text", status: "proposed", changes: [edit] });
+    await store.applyChangeSet(cs.id, T0.toISOString());
+    expect((await store.listSyncs({ changeSetId: cs.id }))[0]).toMatchObject({ status: "failed", last_error: "sm_unauthorized: Missing or invalid plugin token." });
+    expect(await store.getDestination(demo.venue.id, "wordpress")).toMatchObject({ status: "error", last_error: "sm_unauthorized: Missing or invalid plugin token." });
+    expect(await syncLines(store, cs.id, "bg")).toEqual(["WordPress: грешка: връзката с WordPress вече не е валидна; свържете сайта отново с /connect"]);
+    expect(await syncLines(store, cs.id, "en")).toEqual(["WordPress: error: the WordPress connection is no longer valid; reconnect with /connect"]);
+  });
+
+  it("says the change was not sent when the venue has no WordPress connection", async () => {
+    const demo = await makeDemo();
+    const cs = await demo.store.createChangeSet({ venue_id: demo.venue.id, chat_id: 1001, summary_bg: "s", summary_en: "s", preview_bg: "p", preview_en: "p", source: "text", status: "proposed", changes: [edit] });
+    expect(await syncLines(demo.store, cs.id, "bg")).toEqual(["WordPress: не е свързан, промяната не е изпратена"]);
+    expect(await syncLines(demo.store, cs.id, "en")).toEqual(["WordPress: not connected, the change was not sent"]);
+    const dest = await demo.store.upsertDestination({ venue_id: demo.venue.id, kind: "wordpress", config: { site_url: "https://cafe.example" }, secrets: "x" });
+    await demo.store.updateDestination(dest.id, { status: "disconnected" });
+    expect(await syncLines(demo.store, cs.id, "en")).toEqual(["WordPress: not connected, the change was not sent"]);
+    const site = await demo.store.getSite(demo.venue.id);
+    const plain = await demo.store.createChangeSet({ venue_id: demo.venue.id, chat_id: 1001, summary_bg: "s", summary_en: "s", preview_bg: "p", preview_en: "p", source: "text", status: "proposed", changes: planChanges(site, [{ op: "set_price", item_id: demo.items.Cappuccino.id, price_eur: 3.2 }], { newId: () => "n", now: T0.toISOString() }) });
+    expect(await syncLines(demo.store, plain.id, "bg")).toEqual([]); // nothing for WordPress in the set
   });
 });

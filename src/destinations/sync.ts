@@ -1,10 +1,11 @@
 // src/destinations/sync.ts
 // Server-only. Queues one sync row per (change set, destination) and pushes it; failures retry with backoff from the tick.
-import type { ChangeSet, Lang } from "../domain/types";
+import { isWpEntity, type ChangeSet, type Lang } from "../domain/types";
 import type { DestinationSync, Store } from "../store/types";
 import { adapterFor } from "./registry";
 import { decryptSecrets } from "./secrets";
 import type { PushResult } from "./types";
+import { formatSyncError, wpErrorText } from "./wp-errors";
 
 export interface SyncDeps {
   store: Store;
@@ -49,25 +50,35 @@ export async function runSync(d: SyncDeps, sync: DestinationSync, now: Date): Pr
     return null;
   }
   const attempts = sync.attempts + 1;
-  let result: PushResult;
-  try {
-    if (!d.secretKey) throw new Error("DESTINATION_SECRET_KEY is not set");
-    const secrets = decryptSecrets(withSecrets.secrets, d.secretKey);
-    const cs = await d.store.getChangeSet(sync.change_set_id);
-    result = await adapter.push({ venue, destination: dest, secrets, changeSet: cs, changes: adapter.relevant(cs.changes), fetch: d.fetch, now });
-  } catch (e) {
-    result = { ok: false, retry: false, error: e instanceof Error ? e.message : String(e), line: { bg: "WordPress: грешка при свързването", en: "WordPress: connection error" } };
-  }
+  const connectionError = (e: unknown, retry: boolean): PushResult => ({ ok: false, retry, error: e instanceof Error ? e.message : String(e), line: { bg: "WordPress: грешка при свързването", en: "WordPress: connection error" } });
+  // A missing key or undecryptable secrets will not fix themselves: fail at once. Anything else (a store hiccup
+  // while loading the set, an unexpected throw) is worth another attempt with the normal backoff.
+  const result = await (async (): Promise<PushResult> => {
+    if (!d.secretKey) return connectionError("DESTINATION_SECRET_KEY is not set", false);
+    let secrets: Record<string, string>;
+    try {
+      secrets = decryptSecrets(withSecrets.secrets, d.secretKey);
+    } catch (e) {
+      return connectionError(e, false);
+    }
+    try {
+      const cs = await d.store.getChangeSet(sync.change_set_id);
+      return await adapter.push({ venue, destination: dest, secrets, changeSet: cs, changes: adapter.relevant(cs.changes), fetch: d.fetch, now });
+    } catch (e) {
+      return connectionError(e, true);
+    }
+  })();
   if (result.ok) {
     await d.store.updateSync(sync.id, { status: "done", attempts, last_error: null, result: result.result, updated_at: now.toISOString() });
     if (dest.status === "error") await d.store.updateDestination(dest.id, { status: "connected", last_error: null });
     return result;
   }
+  const stored = formatSyncError(result.code, result.error);
   const giveUp = !result.retry || attempts >= MAX_ATTEMPTS;
   // Attempt n waits BACKOFF_MS[n-1]; attempts past the table reuse its last entry.
   const nextAt = new Date(now.getTime() + (BACKOFF_MS[Math.min(attempts, BACKOFF_MS.length) - 1] ?? BACKOFF_MS[BACKOFF_MS.length - 1])).toISOString();
-  await d.store.updateSync(sync.id, { status: giveUp ? "failed" : "pending", attempts, next_at: nextAt, last_error: result.error, updated_at: now.toISOString() });
-  if (giveUp) await d.store.updateDestination(dest.id, { status: "error", last_error: result.error });
+  await d.store.updateSync(sync.id, { status: giveUp ? "failed" : "pending", attempts, next_at: nextAt, last_error: stored, updated_at: now.toISOString() });
+  if (giveUp) await d.store.updateDestination(dest.id, { status: "error", last_error: stored });
   log(`[destinations] ${dest.kind} push for set ${sync.change_set_id} failed (attempt ${attempts}${giveUp ? ", giving up" : `, next at ${nextAt}`}): ${result.error}`);
   return result;
 }
@@ -118,13 +129,22 @@ export async function runPendingSyncs(d: SyncDeps, opts: { venueId?: string; now
   return report;
 }
 
-/** One line per destination for the owner's confirmation ("WordPress: updated ✅"), from the sync rows of the set. */
+/**
+ * One line per destination for the owner's confirmation ("WordPress: updated ✅"), from the sync rows of the set;
+ * a set with WordPress changes and no active WordPress connection gets "not connected, the change was not sent".
+ */
 export async function syncLines(store: Store, changeSetId: string, lang: Lang): Promise<string[]> {
   const rows = await store.listSyncs({ changeSetId });
+  const cs = await store.getChangeSet(changeSetId);
+  if (cs.changes.some((c) => isWpEntity(c.entity))) {
+    const wp = (await store.listDestinations(cs.venue_id)).find((x) => x.kind === "wordpress" && x.status !== "disconnected");
+    if (!wp) return [lang === "bg" ? "WordPress: не е свързан, промяната не е изпратена" : "WordPress: not connected, the change was not sent"];
+  }
   return rows.map((s) => {
     const name = String(s.payload.kind ?? "destination") === "wordpress" ? "WordPress" : String(s.payload.kind);
     if (s.status === "done") return lang === "bg" ? `${name}: обновено ✅` : `${name}: updated ✅`;
     if (s.status === "pending") return lang === "bg" ? `${name}: не успях да обновя, ще опитам пак` : `${name}: update failed, will retry`;
-    return lang === "bg" ? `${name}: грешка: ${s.last_error ?? ""}` : `${name}: error: ${s.last_error ?? ""}`;
+    const text = wpErrorText(s.last_error, lang);
+    return lang === "bg" ? `${name}: грешка: ${text}` : `${name}: error: ${text}`;
   });
 }

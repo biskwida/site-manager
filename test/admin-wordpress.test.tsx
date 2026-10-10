@@ -52,4 +52,15 @@ describe("WordPressCard", () => {
     expect(errored).toContain("Има проблем");
     expect(errored).toContain("WordPress unreachable");
   });
+  it("shows known plugin error codes in the owner's language, other errors as their message", () => {
+    const overview = { site_url: "https://cafe.example", site_name: "Smoke Café", status: "error" as const, connected_at: null, last_error: "sm_unauthorized: Missing or invalid plugin token.", syncs: [{ id: "s1", change_set_id: "c1", status: "failed" as const, summary_bg: "Снимка", summary_en: "Photo", updated_at: T0.toISOString(), last_error: "sm_upload_failed: could not download" }, { id: "s2", change_set_id: "c2", status: "failed" as const, summary_bg: "Текст", summary_en: "Text", updated_at: T0.toISOString(), last_error: "sm_not_found: No such page." }] };
+    const bg = render("bg", overview);
+    expect(bg).toContain("връзката с WordPress вече не е валидна; свържете сайта отново с /connect");
+    expect(bg).toContain("снимката не можа да се качи");
+    expect(bg).toContain("No such page.");
+    expect(bg).not.toContain("sm_");
+    const en = render("en", overview);
+    expect(en).toContain("the WordPress connection is no longer valid; reconnect with /connect");
+    expect(en).toContain("the photo could not be uploaded");
+  });
 });

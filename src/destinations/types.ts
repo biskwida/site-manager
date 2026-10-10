@@ -15,7 +15,7 @@ export interface PushContext {
 }
 export type PushResult =
   | { ok: true; result: Record<string, unknown>; line: { bg: string; en: string } }
-  | { ok: false; retry: boolean; error: string; line: { bg: string; en: string } };
+  | { ok: false; retry: boolean; error: string; line: { bg: string; en: string }; /** The plugin's error code (sm_unauthorized…), when it sent one. */ code?: string };
 
 export interface DestinationAdapter {
   kind: DestinationKind;

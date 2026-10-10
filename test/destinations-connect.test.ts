@@ -107,4 +107,13 @@ describe("connectWordPress", () => {
       expect(r.reason.en).toMatch(/error/);
     }
   });
+  it("explains a 200 handshake reply without a token or site as a missing plugin", async () => {
+    const { store, venue } = await makeDemo();
+    for (const body of [{}, { token: "t" }, { site: { name: "x" } }, { token: "", site: { name: "x" } }]) {
+      const fake: typeof fetch = async () => Response.json(body);
+      const r = await connectWordPress({ store, secretKey: KEY, fetch: fake, resolve }, venue.id, "https://cafe.example", "ABC");
+      expect(r, JSON.stringify(body)).toEqual({ ok: false, reason: { bg: "На този адрес няма активен плъгин Site Manager.", en: "There is no active Site Manager plugin at that address." } });
+    }
+    expect(await store.getDestination(venue.id, "wordpress")).toBeNull();
+  });
 });

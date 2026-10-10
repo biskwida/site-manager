@@ -1,6 +1,7 @@
 "use client";
 import { useState } from "react";
 import { useLang } from "@/src/i18n";
+import { wpErrorText } from "@/src/destinations/wp-errors";
 import type { WordPressOverview } from "@/src/server/admin";
 import { formatDateTime } from "@/src/time";
 import { Chip, Section } from "./bits";
@@ -57,7 +58,7 @@ export function WordPressCard({ overview, slug, adminKey, baseUrl, tz }: { overv
             </span>
           )}
         </div>
-        {overview?.last_error && <p role="alert" className="mt-2 text-sm font-semibold text-clay">{overview.last_error}</p>}
+        {overview?.last_error && <p role="alert" className="mt-2 text-sm font-semibold text-clay">{wpErrorText(overview.last_error, lang)}</p>}
         {!connected && <p className="mt-3 max-w-prose text-ink-soft">{t("admin.wp.intro")}</p>}
 
         <ol className="mt-4 space-y-4 text-sm text-ink">
@@ -107,7 +108,7 @@ export function WordPressCard({ overview, slug, adminKey, baseUrl, tz }: { overv
                       <span suppressHydrationWarning>{formatDateTime(s.updated_at, lang, tz)}</span>
                       <Chip tone={TONE[s.status]}>{t(SYNC_LABEL[s.status])}</Chip>
                     </span>
-                    {s.status !== "done" && s.last_error && <span className="[overflow-wrap:anywhere] w-full text-xs text-clay">{s.last_error}</span>}
+                    {s.status !== "done" && s.last_error && <span className="[overflow-wrap:anywhere] w-full text-xs text-clay">{wpErrorText(s.last_error, lang)}</span>}
                   </li>
                 ))}
               </ul>

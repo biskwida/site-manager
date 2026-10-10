@@ -106,7 +106,7 @@ export const wordpressAdapter: DestinationAdapter = {
     } catch (e) {
       const retry = e instanceof WordPressApiError ? e.retryable : true;
       const msg = e instanceof Error ? e.message : String(e);
-      return { ok: false, retry, error: msg, line: retry ? WP_LINES.retry : WP_LINES.error(msg) };
+      return { ok: false, retry, error: msg, line: retry ? WP_LINES.retry : WP_LINES.error(msg), ...(e instanceof WordPressApiError ? { code: e.code } : {}) };
     }
   },
 };
