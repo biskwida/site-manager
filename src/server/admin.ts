@@ -4,7 +4,7 @@ import { invertChanges } from "../domain/changes";
 import { isSoldOut } from "../domain/effective";
 import { renderPreview } from "../domain/preview";
 import type { ChangeSet, Venue } from "../domain/types";
-import type { Store } from "../store/types";
+import type { DestinationStatus, Store, SyncStatus } from "../store/types";
 import { formatDateTime } from "../time";
 
 export interface AdminOverview {
@@ -15,6 +15,7 @@ export interface AdminOverview {
   scheduled: ChangeSet[];
   log: ChangeSet[];
   sold_out: { id: string; name_bg: string; name_en: string; sold_out_until: string }[];
+  wordpress?: WordPressOverview | null;
 }
 
 export async function adminOverview(store: Store, venue: Venue, now: Date, baseUrl = ""): Promise<AdminOverview> {
@@ -33,6 +34,7 @@ export async function adminOverview(store: Store, venue: Venue, now: Date, baseU
     scheduled: [...scheduled].sort((a, b) => (a.apply_at ?? "").localeCompare(b.apply_at ?? "")),
     log,
     sold_out: site.items.filter((i) => i.active && isSoldOut(i, nowMs)).map((i) => ({ id: i.id, name_bg: i.name_bg, name_en: i.name_en, sold_out_until: i.sold_out_until as string })),
+    wordpress: await wordPressOverview(store, venue.id),
   };
 }
 
@@ -96,4 +98,32 @@ export async function adminAction(d: AdminDeps, venue: Venue, action: AdminActio
   if (r === "skipped") return { ok: false, error: `Change set is "${(await d.store.getChangeSet(cs.id)).status}".` };
   await editTelegram(d, cs, { bg: "✅ Приложено от таблото.", en: "✅ Applied from the dashboard." });
   return { ok: true, status: "applied", change_set_id: cs.id };
+}
+
+// --- WordPress card (integrations track, appended 2026-10-10) ---
+export interface WordPressOverview {
+  site_url: string;
+  site_name: string;
+  status: DestinationStatus;
+  connected_at: string | null;
+  last_error: string | null;
+  /** The last five pushes, newest first. */
+  syncs: { id: string; change_set_id: string; status: SyncStatus; summary_bg: string; summary_en: string; updated_at: string; last_error: string | null }[];
+}
+
+/** Never includes secrets: it reads the destination row and drops everything but display fields. */
+export async function wordPressOverview(store: Store, venueId: string): Promise<WordPressOverview | null> {
+  const d = await store.getDestination(venueId, "wordpress");
+  if (!d) return null;
+  const all = (await store.listSyncs({ venueId })).filter((s) => s.destination_id === d.id);
+  const last = all.slice(-5).reverse();
+  const sets = await Promise.all(last.map((s) => store.getChangeSet(s.change_set_id).catch(() => null)));
+  return {
+    site_url: String(d.config.site_url ?? ""),
+    site_name: String(d.config.site_name ?? ""),
+    status: d.status,
+    connected_at: typeof d.config.connected_at === "string" ? d.config.connected_at : null,
+    last_error: d.last_error,
+    syncs: last.map((s, i) => ({ id: s.id, change_set_id: s.change_set_id, status: s.status, summary_bg: sets[i]?.summary_bg ?? "", summary_en: sets[i]?.summary_en ?? "", updated_at: s.updated_at, last_error: s.last_error })),
+  };
 }

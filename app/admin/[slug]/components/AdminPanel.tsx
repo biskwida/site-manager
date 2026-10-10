@@ -8,6 +8,7 @@ import { InvalidKey } from "./InvalidKey";
 import { LogList } from "./LogList";
 import { QrCard } from "./QrCard";
 import { useAdminOverview } from "./useAdminOverview";
+import { WordPressCard } from "./WordPressCard";
 
 /** The owner's dashboard: decisions, schedule, sold-out items, change log with undo, QR and links. Client-polled every 3 s. */
 export function AdminPanel({ slug, adminKey, initial }: { slug: string; adminKey: string; initial: AdminOverview }) {
@@ -42,6 +43,7 @@ export function AdminPanel({ slug, adminKey, initial }: { slug: string; adminKey
           )}
         </Section>
         <LogList sets={o.log} tz={tz} decide={decide} />
+        <WordPressCard overview={o.wordpress ?? null} slug={slug} adminKey={adminKey} baseUrl={o.public_url.replace(new RegExp(`/${slug}$`), "")} tz={tz} />
         <QrCard publicUrl={o.public_url} slug={slug} />
       </main>
     </div>
