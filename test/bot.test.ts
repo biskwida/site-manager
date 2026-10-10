@@ -67,6 +67,17 @@ describe("bot", () => {
     expect(api.calls.some((c) => c.method === "sendChatAction")).toBe(true);
     expect(api.texts()).toEqual([]);
   });
+  it("a Cyrillic message from an English-speaking member runs the turn in Bulgarian", async () => {
+    const { bot, runs, store } = await setup();
+    await bot.handleUpdate(textUpdate(1002, "Баницата свърши"));
+    expect(runs[0].member.lang).toBe("bg");
+    expect((await store.findMember(1002))?.lang).toBe("en");
+  });
+  it("a Latin message keeps the stored language", async () => {
+    const { bot, runs } = await setup();
+    await bot.handleUpdate(textUpdate(1001, "ok"));
+    expect(runs[0].member.lang).toBe("bg");
+  });
   it("answers the callback first, then applies and edits the message", async () => {
     const { bot, api, store, venue, items } = await setup();
     const site = await store.getSite(venue.id);

@@ -1,6 +1,7 @@
 // src/bot/media.ts
 import type { Bot, Context } from "grammy";
 import type { ImageInput } from "../agent/run";
+import { detectLang } from "../domain/format";
 import type { BotDeps } from "./bot";
 import { requireMember } from "./bot";
 import { copy } from "./copy";
@@ -41,7 +42,8 @@ export function registerMediaHandlers(bot: Bot, d: BotDeps): void {
   const handleImage = async (ctx: Context, fileId: string, caption: string | undefined) => {
     const member = await requireMember(d, ctx);
     if (!member) return;
-    const c = copy(member.lang);
+    const lang = detectLang(caption ?? "") ?? member.lang;
+    const c = copy(lang);
     let media_type: ImageInput["media_type"] | null;
     let bytes: Uint8Array;
     try {
@@ -61,7 +63,7 @@ export function registerMediaHandlers(bot: Bot, d: BotDeps): void {
       return;
     }
     const media = await d.store.saveMedia(member.venue_id, bytes, media_type);
-    d.startRun({ venueId: member.venue_id, chatId: member.tg_chat_id, member, text: caption ?? "", source: "photo", image: { data: toBase64(bytes), media_type }, mediaId: media.id });
+    d.startRun({ venueId: member.venue_id, chatId: member.tg_chat_id, member: { ...member, lang }, text: caption ?? "", source: "photo", image: { data: toBase64(bytes), media_type }, mediaId: media.id });
     await ctx.replyWithChatAction("typing").catch(() => undefined);
   };
 
@@ -95,8 +97,9 @@ export function registerMediaHandlers(bot: Bot, d: BotDeps): void {
       await ctx.reply(c.voiceFailed);
       return;
     }
-    d.startRun({ venueId: member.venue_id, chatId: member.tg_chat_id, member, text, source: "voice" });
-    await ctx.reply(c.heard(text)).catch(() => undefined);
+    const lang = detectLang(text) ?? member.lang;
+    d.startRun({ venueId: member.venue_id, chatId: member.tg_chat_id, member: { ...member, lang }, text, source: "voice" });
+    await ctx.reply(copy(lang).heard(text)).catch(() => undefined);
   };
   bot.on("message:voice", (ctx) => handleVoice(ctx, ctx.message.voice.file_id));
   bot.on("message:audio", (ctx) => handleVoice(ctx, ctx.message.audio.file_id));

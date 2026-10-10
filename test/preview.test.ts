@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { applyChanges, invertChanges, planChanges, type PlanContext } from "@/src/domain/changes";
 import { isLiveSpecial, isSoldOut, visibleItems } from "@/src/domain/effective";
-import { formatPrice } from "@/src/domain/format";
+import { detectLang, formatPrice } from "@/src/domain/format";
 import { renderPreview } from "@/src/domain/preview";
 import { HOURS, NOW, TZ, item, state } from "./fixtures";
 
@@ -12,6 +12,18 @@ describe("format", () => {
     expect(formatPrice(2.9, "bg")).toBe("2,90 €");
     expect(formatPrice(2.9, "en")).toBe("€2.90");
     expect(formatPrice(12, "bg")).toBe("12,00 €");
+  });
+});
+
+describe("detectLang", () => {
+  it("returns bg for text with Cyrillic letters", () => {
+    expect(detectLang("Баницата свърши")).toBe("bg");
+    expect(detectLang("ok, цената е 3")).toBe("bg");
+  });
+  it("returns null for Latin or empty text", () => {
+    expect(detectLang("ok")).toBeNull();
+    expect(detectLang("Cappuccino 3.20")).toBeNull();
+    expect(detectLang("")).toBeNull();
   });
 });
 

@@ -2,6 +2,7 @@
 import { Bot, type Context } from "grammy";
 import type { UserFromGetMe } from "grammy/types";
 import type { ImageInput } from "../agent/run";
+import { detectLang } from "../domain/format";
 import type { Lang, Member } from "../domain/types";
 import type { Store } from "../store/types";
 import { handleDecision, parseCallback } from "./approvals";
@@ -113,7 +114,8 @@ export function createBot(d: BotDeps): Bot {
   bot.command("undo", async (ctx) => {
     const member = await requireMember(d, ctx);
     if (!member) return;
-    d.startRun({ venueId: member.venue_id, chatId: member.tg_chat_id, member, text: "Undo the last change.", source: "text" });
+    const lang = detectLang(ctx.message?.text ?? "") ?? member.lang;
+    d.startRun({ venueId: member.venue_id, chatId: member.tg_chat_id, member: { ...member, lang }, text: "Undo the last change.", source: "text" });
     await ctx.replyWithChatAction("typing").catch(() => undefined);
   });
 
@@ -122,7 +124,8 @@ export function createBot(d: BotDeps): Bot {
     const member = await requireMember(d, ctx);
     if (!member) return;
     // Start first: a failed acknowledgement must not lose the message.
-    d.startRun({ venueId: member.venue_id, chatId: member.tg_chat_id, member, text: ctx.message.text, source: "text" });
+    const lang = detectLang(ctx.message.text) ?? member.lang;
+    d.startRun({ venueId: member.venue_id, chatId: member.tg_chat_id, member: { ...member, lang }, text: ctx.message.text, source: "text" });
     await ctx.replyWithChatAction("typing").catch(() => undefined);
   });
 

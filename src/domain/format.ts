@@ -1,5 +1,10 @@
 import type { Category, Item, Lang, Weekday } from "./types";
 
+/** "bg" when the text has any Cyrillic letter; null otherwise (Latin text keeps the member's stored language). */
+export function detectLang(text: string): Lang | null {
+  return /\p{Script=Cyrillic}/u.test(text) ? "bg" : null;
+}
+
 export function tr(lang: Lang, bg: string, en: string): string {
   return lang === "bg" ? bg : en;
 }

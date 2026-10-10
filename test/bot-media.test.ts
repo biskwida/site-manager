@@ -47,4 +47,12 @@ describe("voice", () => {
     expect(runs[0]).toMatchObject({ source: "voice", text: "heard in bg" });
     expect(api.texts()[0]).toBe("🎤 Чух: „heard in bg“");
   });
+  it("runs the turn in Bulgarian when an English-speaking member speaks Bulgarian", async () => {
+    const { bot, api, runs, store } = await setup({ transcribe: async () => "Баницата свърши" });
+    await bot.handleUpdate(voiceUpdate(1002, "en"));
+    expect(runs[0]).toMatchObject({ source: "voice", text: "Баницата свърши" });
+    expect(runs[0].member.lang).toBe("bg");
+    expect(api.texts()[0]).toMatch(/^🎤 Чух/);
+    expect((await store.findMember(1002))?.lang).toBe("en");
+  });
 });
