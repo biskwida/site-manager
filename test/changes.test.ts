@@ -119,6 +119,8 @@ describe("validation", () => {
     ["bad text key", { op: "set_text", key: "menu" as never, text_bg: "x", text_en: "x" }, /key must be one of/],
     ["bad accent", { op: "set_theme", accent: "green" }, /#rrggbb/],
     ["empty patch", { op: "update_item", item_id: "i-cap", patch: {} }, /patch is empty/],
+    ["add item id collides", { op: "add_item", item: (OPS[2].op as Extract<ChangeOp, { op: "add_item" }>).item, id: "i-cap" }, /id "i-cap" already exists/],
+    ["add announcement bad id", { op: "add_announcement", text_bg: "Хей", text_en: "Hey", expires_at: null, id: "bad id!" }, /short identifier/],
   ];
   for (const [name, op, re] of cases) {
     it(name, () => {
@@ -126,6 +128,12 @@ describe("validation", () => {
       expect(() => planChange(state(), op, ctx())).toThrow(re);
     });
   }
+  it("add holiday id collides with an existing holiday", () => {
+    const s0 = state({ holidays: [{ id: "h1", venue_id: "v1", date: "2026-12-25", note_bg: "Коледа", note_en: "Christmas" }] });
+    const op: ChangeOp = { op: "add_holiday", date: "2026-12-24", note_bg: "Бъдни вечер", note_en: "Christmas Eve", id: "h1" };
+    expect(validateChange(s0, op, ctx())).toMatch(/already exists/);
+    expect(() => planChange(s0, op, ctx())).toThrow(/already exists/);
+  });
   it("accepts a valid op", () => {
     expect(validateChange(state(), { op: "set_price", item_id: "i-cap", price_eur: 3.2 }, ctx())).toBeNull();
   });

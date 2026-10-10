@@ -46,6 +46,13 @@ function mediaError(s: SiteState, id: unknown): string | null {
   return null;
 }
 
+/** A caller-chosen id must be short and unused, or the insert would overwrite a row and its undo would delete it. */
+function newIdError(id: string | undefined, list: { id: string }[]): string | null {
+  if (id === undefined) return null;
+  if (!UUIDISH.test(id)) return "id must be a short identifier.";
+  return list.some((x) => x.id === id) ? `id "${id}" already exists.` : null;
+}
+
 /** English error for the model, or null when the op can be planned against this state. */
 export function validateChange(s: SiteState, op: ChangeOp, ctx: PlanContext): string | null {
   switch (op.op) {
@@ -68,7 +75,7 @@ export function validateChange(s: SiteState, op: ChangeOp, ctx: PlanContext): st
         (typeof it.desc_bg !== "string" || typeof it.desc_en !== "string" ? "desc_bg and desc_en must be strings (may be empty)." : null) ??
         (it.is_special && it.special_expires_at !== null && !isIso(it.special_expires_at) ? 'special_expires_at must be null, "closing_today" (resolved by the tool) or ISO 8601.' : null) ??
         (it.image_media_id ? mediaError(s, it.image_media_id) : null) ??
-        (op.id !== undefined && !UUIDISH.test(op.id) ? "id must be a short identifier." : null)
+        newIdError(op.id, s.items)
       );
     }
     case "update_item": {
@@ -116,13 +123,13 @@ export function validateChange(s: SiteState, op: ChangeOp, ctx: PlanContext): st
     case "add_holiday": {
       if (!DATE.test(op.date) || Number.isNaN(Date.parse(op.date))) return "date must be YYYY-MM-DD.";
       if (s.holidays.some((h) => h.date === op.date)) return `A holiday on ${op.date} already exists.`;
-      return nonEmpty(op.note_bg, "note_bg") ?? nonEmpty(op.note_en, "note_en");
+      return nonEmpty(op.note_bg, "note_bg") ?? nonEmpty(op.note_en, "note_en") ?? newIdError(op.id, s.holidays);
     }
     case "remove_holiday":
       return s.holidays.some((h) => h.id === op.holiday_id) ? null : `holiday_id "${op.holiday_id}" not found; use an id from get_site.`;
     case "add_announcement": {
       if (op.expires_at !== null && !isIso(op.expires_at)) return "expires_at must be null or ISO 8601 with offset.";
-      return nonEmpty(op.text_bg, "text_bg") ?? nonEmpty(op.text_en, "text_en");
+      return nonEmpty(op.text_bg, "text_bg") ?? nonEmpty(op.text_en, "text_en") ?? newIdError(op.id, s.announcements);
     }
     case "remove_announcement":
       return s.announcements.some((a) => a.id === op.announcement_id) ? null : `announcement_id "${op.announcement_id}" not found; use an id from get_site.`;
