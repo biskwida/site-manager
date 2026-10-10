@@ -9,8 +9,9 @@ const supabaseHost = (() => {
 })();
 
 const nextConfig: NextConfig = {
-  // Dev request log: never print the owner's key (admin pages, admin API, draft previews with ?key=) or the tick path.
-  logging: { incomingRequests: { ignore: [/\/admin\//, /\/api\/admin\//, /\/api\/tick/, /[?&]key=/] } },
+  // Dev request log: never print the owner's key (admin pages, admin API, draft previews with ?key=), the tick path, or the
+  // Instagram OAuth callback (its query holds the one-time code and the signed state).
+  logging: { incomingRequests: { ignore: [/\/admin\//, /\/api\/admin\//, /\/api\/tick/, /[?&]key=/, /\/api\/new\/instagram\/callback/] } },
   turbopack: { rules: { "*.css": { loaders: ["@tailwindcss/turbopack"], as: "*.css" } } },
   images: {
     remotePatterns: [
