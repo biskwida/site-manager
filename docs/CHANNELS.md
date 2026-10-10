@@ -138,7 +138,20 @@ Status on 2026-10-10: **applied to the shared database.** The first dry run foun
 
 ### Phase 2 (after merge)
 
-After the branch is merged and production runs the new code, the legacy columns (`venue_members.tg_chat_id`, `change_sets.chat_id`, `change_sets.tg_message_id`, `conversations.chat_id`), their unique indexes and the `fill_chat_ref` trigger are dropped, and the three mapper lines marked `// legacy: remove in phase 2` go: see `migrations/2026-10-11-drop-legacy-chat-ids.sql`, added by the next task.
+Phase 1 left the Telegram-only production build working through a bridge: the legacy bigint columns (`venue_members.tg_chat_id`, `change_sets.chat_id`, `change_sets.tg_message_id`, `conversations.chat_id`), their unique indexes (`venue_members_tg_chat_id_key`, `conversations_chat_id_key`, and on databases migrated from the first schema also `venue_members_chat_idx`) and the `fill_chat_ref` trigger function with its three triggers. Phase 2 removes all of it once production runs the new code.
+
+Run order:
+
+1. Merge `build/channels` and redeploy production. Wait until the new build serves traffic: the old build still writes the bigint columns and needs the bridge.
+2. On a quiet moment right after the redeploy, run `npm run db:apply -- supabase/migrations/2026-10-11-drop-legacy-chat-ids.sql`. There is no `db:dry-run` check wired for this file. The file is idempotent and drops, in order, the three `fill_chat_ref` triggers, the `fill_chat_ref` function (it references the legacy columns, so it must go first), the legacy indexes, the legacy columns, then reloads the PostgREST schema cache.
+3. Do the code cleanup below in a follow-up commit. It is only safe once the migration has run, because until then the store still writes the legacy fields.
+
+Code cleanup list (do not do it before production is on the new code):
+
+- `src/store/supabase.ts`: delete `legacyColumns` (around lines 109-113) and its two uses (around lines 291 and 330), the `tg_chat_id: legacyTelegramId(...)` field (around line 252), the `chat_id: legacyTelegramId(chatRef)` field (around line 428), and the `legacyTelegramId` import.
+- `src/channels/ref.ts`: delete `legacyTelegramId`.
+- `test/supabase-mappers.test.ts` and `test/ref.test.ts`: delete the tests that cover the legacy columns and `legacyTelegramId`.
+- `supabase/schema.sql`: delete the legacy columns, the two legacy unique indexes (`venue_members_tg_chat_id_key`, `conversations_chat_id_key`) and the `fill_chat_ref` function with its triggers.
 
 ## Offline: no Meta account needed
 
