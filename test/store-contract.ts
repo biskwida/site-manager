@@ -213,7 +213,7 @@ export function storeContract(name: string, make: () => Promise<Store>, storageH
       const v = await s.createVenue({ slug: "t10", name: "Test" });
       const d = await s.createVenue({ slug: "t10d", name: "Draft", template: "nocturne", business_type: "bar", status: "draft" });
       try {
-        expect(v).toMatchObject({ template: "classic", business_type: "cafe", status: "live", deploy: null, wizard_draft: null });
+        expect(v).toMatchObject({ template: "classic", business_type: "cafe", status: "live", deploy: null, wizard_draft: null, instagram_import: null });
         expect(d).toMatchObject({ template: "nocturne", business_type: "bar", status: "draft" });
         expect(only(await s.listVenues(), v.id, d.id)).toEqual([v.id, d.id]); // oldest first
         expect(only(await s.listVenues({ status: "draft" }), v.id, d.id)).toEqual([d.id]);
@@ -259,6 +259,23 @@ export function storeContract(name: string, make: () => Promise<Store>, storageH
         expect((await s.getVenue(v.id)).wizard_draft).toEqual(draft);
         await s.updateVenue(v.id, { wizard_draft: null, status: "live" });
         expect(await s.getVenue(v.id)).toMatchObject({ wizard_draft: null, status: "live" });
+      } finally {
+        await s.deleteVenue(v.id);
+      }
+    });
+
+    it("stores the Instagram import list JSON and clears it", async () => {
+      const s = await make();
+      const v = await s.createVenue({ slug: "t12i", name: "Test", status: "draft" });
+      try {
+        expect(v.instagram_import).toBeNull();
+        const list = { fetched_at: "2026-10-09T09:00:00.000Z", username: "agala.cafe", items: [{ id: "179", url: "https://scontent-sof1-1.cdninstagram.com/a.jpg", thumb: "https://scontent-sof1-1.cdninstagram.com/a.jpg", caption: "Кафе „Ъгъла“", permalink: "https://www.instagram.com/p/abc/", taken_at: "2026-10-01T08:00:00.000Z" }] };
+        await s.updateVenue(v.id, { instagram_import: list });
+        expect((await s.getVenue(v.id)).instagram_import).toEqual(list);
+        await s.updateVenue(v.id, { name: "Other" }); // an unrelated write keeps it
+        expect((await s.getVenue(v.id)).instagram_import).toEqual(list);
+        await s.updateVenue(v.id, { instagram_import: null });
+        expect((await s.getVenue(v.id)).instagram_import).toBeNull();
       } finally {
         await s.deleteVenue(v.id);
       }

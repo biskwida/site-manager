@@ -26,6 +26,9 @@ export interface Config {
   maxSitesPerDay: number;
   /** For https://t.me/<bot>?start=<code> links on the wizard's done page. */
   telegramBotUsername: string | null;
+  /** Meta app (Instagram API with Instagram Login) for the wizard's photo import; the feature is off unless both are set. */
+  instagramAppId: string | null;
+  instagramAppSecret: string | null;
 }
 
 type Env = Record<string, string | undefined>;
@@ -65,5 +68,7 @@ export function loadConfig(env: Env = process.env, opts: { lenient?: boolean } =
     rateSalt: optional("RATE_SALT") ?? "dev-salt",
     maxSitesPerDay: maxSites,
     telegramBotUsername: optional("TELEGRAM_BOT_USERNAME")?.replace(/^@/, "") ?? null,
+    instagramAppId: optional("INSTAGRAM_APP_ID"),
+    instagramAppSecret: optional("INSTAGRAM_APP_SECRET"),
   };
 }

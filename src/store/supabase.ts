@@ -1,6 +1,6 @@
 // src/store/supabase.ts
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
-import type { Announcement, BusinessType, Category, Change, ChangeSet, Conversation, DeployInfo, DeployStatus, Holiday, Item, Lang, Media, Member, Role, SiteState, SiteText, SiteTextKey, TemplateId, Venue, VenueStatus } from "../domain/types";
+import type { Announcement, BusinessType, Category, Change, ChangeSet, Conversation, DeployInfo, DeployStatus, Holiday, InstagramImport, Item, Lang, Media, Member, Role, SiteState, SiteText, SiteTextKey, TemplateId, Venue, VenueStatus } from "../domain/types";
 import type { WizardDraft } from "../wizard/schema";
 import { DEFAULT_HOURS, extensionFor, newInviteCode, newToken, PUBLISH_CLAIM_TTL_MS, type ChangeSetPatch, type ExpiredTimer, type NewCategory, type NewChangeSet, type NewItem, type NewVenue, type Store, type VenuePatch } from "./types";
 
@@ -38,6 +38,8 @@ export function toVenue(r: Row): Venue {
     status: (r.status as VenueStatus) ?? "live",
     deploy: (r.deploy as DeployInfo | null) ?? null,
     wizard_draft: (r.wizard_draft as WizardDraft | null) ?? null,
+    // Missing before the column is added (schema.sql): read as null, so nothing breaks until it is applied.
+    instagram_import: (r.instagram_import as InstagramImport | null) ?? null,
     created_at: iso(r.created_at),
   };
 }

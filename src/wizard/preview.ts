@@ -31,6 +31,7 @@ export function buildPreviewState(d: WizardDraft, media: Media[], now: Date): Si
     status: "live",
     deploy: null,
     wizard_draft: null,
+    instagram_import: null,
   };
   const categories: Category[] = d.categories.map((c, i) => {
     const n = bothLangs(c.name_bg, c.name_en);
