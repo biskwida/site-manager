@@ -14,6 +14,7 @@ export function ExtractReview({ result, onAccept, onDiscard }: { result: Extract
   const { t, lang } = useT();
   const [cats, setCats] = useState<Cat[]>(() => result.categories.map((c) => ({ name_bg: c.name_bg, name_en: c.name_en, items: c.items.map((i) => ({ ...i, on: true })) })));
   const selected = cats.reduce((n, c) => n + c.items.filter((i) => i.on).length, 0);
+  const total = cats.reduce((n, c) => n + c.items.length, 0);
   const patch = (ci: number, ii: number, p: Partial<Row>) => setCats(cats.map((c, x) => (x === ci ? { ...c, items: c.items.map((i, y) => (y === ii ? { ...i, ...p } : i)) } : c)));
   const accept = (all: boolean) =>
     // eslint-disable-next-line @typescript-eslint/no-unused-vars
@@ -37,7 +38,7 @@ export function ExtractReview({ result, onAccept, onDiscard }: { result: Extract
                   <input type="checkbox" checked={it.on} onChange={(e) => patch(ci, ii, { on: e.target.checked })} className="size-5 accent-brand" />
                   <span>{t("extract.include")}: {name(it)} · {formatPrice(it.price_eur, lang)}</span>
                 </label>
-                <div className="grid gap-3 sm:grid-cols-[1fr_1fr_6.5rem]">
+                <div className="grid gap-3 sm:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_6.5rem]">
                   <TextField label={t("menu.item.nameBg")} value={it.name_bg} onChange={(name_bg) => patch(ci, ii, { name_bg })} />
                   <TextField label={t("menu.item.nameEn")} value={it.name_en} onChange={(name_en) => patch(ci, ii, { name_en })} />
                   <PriceField label={t("menu.item.price")} value={it.price_eur} onChange={(price_eur) => patch(ci, ii, { price_eur })} />
@@ -54,8 +55,9 @@ export function ExtractReview({ result, onAccept, onDiscard }: { result: Extract
         </section>
       ))}
       <div className="flex flex-wrap gap-2 border-t border-line pt-5">
-        <Button variant="primary" onClick={() => accept(true)}>{t("extract.acceptAll")}</Button>
-        <Button disabled={selected === 0} onClick={() => accept(false)}>{t("extract.acceptSelected", { n: selected })}</Button>
+        {/* Once something is unticked, "Add selected" is what the owner means, so it becomes the primary action. */}
+        <Button variant={selected < total ? "secondary" : "primary"} onClick={() => accept(true)}>{t("extract.acceptAll")}</Button>
+        <Button variant={selected < total ? "primary" : "secondary"} disabled={selected === 0} onClick={() => accept(false)}>{t("extract.acceptSelected", { n: selected })}</Button>
         <Button variant="quiet" onClick={onDiscard}>{t("extract.discard")}</Button>
       </div>
     </div>

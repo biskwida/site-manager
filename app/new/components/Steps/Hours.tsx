@@ -5,7 +5,7 @@ import type { StepProps } from "../types";
 import { useT } from "../useWizardText";
 
 const DEFAULT_DAY = { open: "08:00", close: "18:00" };
-const TIME = "min-h-11 w-full rounded-xl bg-panel px-3 text-base text-fg ring-1 ring-line transition-shadow duration-150 ease-out focus:ring-2 focus:ring-brand focus:outline-none disabled:bg-sunken disabled:text-fg-soft/60 disabled:ring-line/60";
+const TIME = "sm-field min-h-11 w-full rounded-xl bg-panel px-3 text-base text-fg ring-1 ring-line transition-shadow duration-150 ease-out focus:ring-2 focus:ring-brand focus:outline-none disabled:bg-sunken disabled:text-fg-soft/60 disabled:ring-line/60";
 
 /** One row per day: on a phone the day and its "closed" switch sit on the first line, the two times below; from sm everything is one line. */
 export function Hours({ draft, update }: StepProps) {

@@ -28,7 +28,7 @@ export function TextField({ label, hint, error, value, onChange, prefix, classNa
       <div className={`flex min-h-11 items-stretch ${error ? SHELL_ERR : SHELL}`}>
         {prefix && <span className="flex shrink-0 items-center pl-3.5 text-sm text-fg-soft" aria-hidden="true">{prefix}</span>}
         <input id={id} value={value} onChange={(e) => onChange(e.target.value)} aria-describedby={[hintId, errId].filter(Boolean).join(" ") || undefined} aria-invalid={error ? true : undefined}
-          className={`min-w-0 flex-1 bg-transparent py-2 text-base text-fg outline-none placeholder:text-fg-soft/70 ${prefix ? "pl-0.5 pr-3.5" : "px-3.5"}`} {...rest} />
+          className={`sm-field w-full min-w-0 flex-1 bg-transparent py-2 text-base text-fg outline-none placeholder:text-fg-soft/70 ${prefix ? "pl-0.5 pr-3.5" : "px-3.5"}`} {...rest} />
       </div>
       {hint && <p id={hintId} className="text-sm leading-snug text-fg-soft [overflow-wrap:anywhere]">{hint}</p>}
       {error && <p id={errId} role="alert" className="text-sm font-semibold text-danger">{error}</p>}
@@ -44,7 +44,7 @@ export function TextArea({ label, hint, error, value, onChange, className = "", 
     <div className={`grid gap-1.5 ${className}`}>
       <label htmlFor={id} className="text-sm font-semibold text-fg">{label}</label>
       <textarea id={id} value={value} onChange={(e) => onChange(e.target.value)} rows={rest.rows ?? 3} aria-describedby={[hintId, errId].filter(Boolean).join(" ") || undefined} aria-invalid={error ? true : undefined}
-        className={`min-h-11 resize-y px-3.5 py-2.5 text-base leading-relaxed text-fg outline-none placeholder:text-fg-soft/70 ${error ? SHELL_ERR : SHELL} focus:ring-2 focus:ring-brand`} {...rest} />
+        className={`sm-field min-h-11 w-full min-w-0 resize-y px-3.5 py-2.5 text-base leading-relaxed text-fg outline-none placeholder:text-fg-soft/70 ${error ? SHELL_ERR : SHELL} focus:ring-2 focus:ring-brand`} {...rest} />
       {hint && <p id={hintId} className="text-sm leading-snug text-fg-soft">{hint}</p>}
       {error && <p id={errId} role="alert" className="text-sm font-semibold text-danger">{error}</p>}
     </div>
@@ -52,13 +52,21 @@ export function TextArea({ label, hint, error, value, onChange, className = "", 
 }
 
 /** Price in euro as text with a decimal keyboard: a number input drops "1." mid-typing and refuses "1,80", which is how Bulgarians write it. */
-export function PriceField({ label, value, onChange, className = "" }: { label: string; value: number; onChange: (v: number) => void; className?: string }) {
-  const [text, setText] = useState(String(value));
+/** Two decimals with the language's separator: 1,80 in Bulgarian, 1.80 in English. */
+export function formatPriceInput(value: number, lang: "bg" | "en"): string {
+  if (!Number.isFinite(value)) return "";
+  const s = value.toFixed(2);
+  return lang === "bg" ? s.replace(".", ",") : s;
+}
+
+export function PriceField({ label, value, onChange, error, className = "" }: { label: string; value: number; onChange: (v: number) => void; error?: string; className?: string }) {
+  const { lang } = useT();
+  const [text, setText] = useState("");
   const [focused, setFocused] = useState(false);
-  const shown = focused ? text : String(value);
+  const shown = focused ? text : formatPriceInput(value, lang);
   return (
-    <TextField label={label} value={shown} inputMode="decimal" autoComplete="off" className={className}
-      onFocus={() => { setText(String(value)); setFocused(true); }}
+    <TextField label={label} value={shown} inputMode="decimal" autoComplete="off" className={className} error={error}
+      onFocus={() => { setText(formatPriceInput(value, lang)); setFocused(true); }}
       onBlur={() => setFocused(false)}
       onChange={(v) => {
         const clean = v.replace(/[^0-9.,]/g, "");
@@ -91,13 +99,13 @@ export function Fieldset({ legend, hint, children, className = "" }: { legend: s
   );
 }
 
-/** Hidden file input behind a visible button. */
+/** Hidden file input behind a visible button. The input is the label's `peer`, so keyboard focus on it rings the button. */
 export function FileButton({ label, accept, multiple = false, disabled = false, onFiles, variant = "secondary" }: { label: string; accept: string; multiple?: boolean; disabled?: boolean; onFiles: (files: File[]) => void; variant?: keyof typeof BUTTON_STYLES }) {
   const id = useId();
   return (
     <>
-      <input id={id} type="file" accept={accept} multiple={multiple} disabled={disabled} className="sr-only" onChange={(e) => { const files = Array.from(e.target.files ?? []); e.target.value = ""; if (files.length) onFiles(files); }} />
-      <label htmlFor={id} className={`${BUTTON_BASE} ${BUTTON_STYLES[variant]} cursor-pointer focus-within:ring-2 focus-within:ring-brand focus-within:ring-offset-2 focus-within:ring-offset-canvas ${disabled ? "pointer-events-none opacity-50" : ""}`}>{label}</label>
+      <input id={id} type="file" accept={accept} multiple={multiple} disabled={disabled} className="peer sr-only" onChange={(e) => { const files = Array.from(e.target.files ?? []); e.target.value = ""; if (files.length) onFiles(files); }} />
+      <label htmlFor={id} className={`${BUTTON_BASE} ${BUTTON_STYLES[variant]} cursor-pointer peer-focus-visible:ring-2 peer-focus-visible:ring-brand peer-focus-visible:ring-offset-2 peer-focus-visible:ring-offset-canvas ${disabled ? "pointer-events-none opacity-50" : ""}`}>{label}</label>
     </>
   );
 }

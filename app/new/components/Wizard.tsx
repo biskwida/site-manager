@@ -3,8 +3,9 @@ import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { Media } from "@/src/domain/types";
 import { LangToggle } from "@/src/i18n";
-import { stepForPath, validateForPublish, type PublishError, type WizardDraft, type WizardStep } from "@/src/wizard/schema";
+import { stepForPath, validateForPublish, type WizardDraft, type WizardStep } from "@/src/wizard/schema";
 import { api } from "./api";
+import { Autosave, type SaveSnapshot } from "./autosave";
 import { Button } from "./Field";
 import { Preview } from "./Preview";
 import { FORM_STEPS, Stepper } from "./Stepper";
@@ -19,7 +20,12 @@ import type { StepProps } from "./types";
 import { useT } from "./useWizardText";
 
 const AUTOSAVE_MS = 800;
-type SaveState = "idle" | "saving" | "saved" | "error";
+
+/** Media ids the draft points at directly (logo, cover, gallery, dish photos). */
+function referencedMedia(d: WizardDraft): Set<string> {
+  const ids = [d.logo_media_id, d.cover_media_id, ...d.gallery_media_ids, ...d.categories.flatMap((c) => c.items.map((i) => i.image_media_id))];
+  return new Set(ids.filter((x): x is string => typeof x === "string"));
+}
 
 export function Wizard({ id, initialDraft, initialMedia, baseUrl, aiAvailable, now }: { id: string; initialDraft: WizardDraft; initialMedia: Media[]; baseUrl: string; aiAvailable: boolean; now: number }) {
   const { t, lang } = useT();
@@ -28,57 +34,76 @@ export function Wizard({ id, initialDraft, initialMedia, baseUrl, aiAvailable, n
   const [media, setMedia] = useState(initialMedia);
   const [localUrls, setLocalUrls] = useState<Record<string, string>>({});
   const [step, setStep] = useState<WizardStep>(FORM_STEPS.includes(initialDraft.step) ? initialDraft.step : "basics");
-  const [save, setSave] = useState<SaveState>("idle");
-  const [serverErrors, setServerErrors] = useState<PublishError[]>([]);
+  const [save, setSave] = useState<SaveSnapshot>({ state: "idle", errors: [], message: null });
   const [showErrors, setShowErrors] = useState(false);
   const [previewOpen, setPreviewOpen] = useState(false);
-  const pending = useRef<Partial<WizardDraft>>({});
-  const timer = useRef<number | undefined>(undefined);
   const heading = useRef<HTMLHeadingElement>(null);
+  const stepBox = useRef<HTMLDivElement>(null);
+  const alertBox = useRef<HTMLDivElement>(null);
+  const draftRef = useRef(initialDraft);
+  /** Source of truth for blob: URLs (read in callbacks and on unmount); `localUrls` mirrors it for rendering. */
+  const localUrlsRef = useRef<Record<string, string>>({});
 
-  const flush = useCallback(async (keepalive = false) => {
-    window.clearTimeout(timer.current);
-    const patch = pending.current;
-    pending.current = {};
-    if (Object.keys(patch).length === 0) return;
-    setSave("saving");
-    const r = await api.put(id, patch, keepalive);
-    if (r.ok) {
-      setSave("saved");
-      setServerErrors([]);
-    } else {
-      setSave("error");
-      setServerErrors(r.error.details ?? (r.error.code === "slug_taken" ? [{ path: "slug", bg: r.error.bg, en: r.error.en }] : []));
-      pending.current = { ...patch, ...pending.current }; // retry with the next change
-    }
-  }, [id]);
+  // One queue per wizard: one PUT in flight, retries on its own, rejected fields come back as field errors.
+  const [queue] = useState(() => new Autosave<WizardDraft>({ send: (patch, keepalive) => api.put(id, patch, keepalive), onChange: setSave, debounceMs: AUTOSAVE_MS }));
+  const flush = useCallback((keepalive = false) => queue.flush(keepalive), [queue]);
+
+  /** Drop the blob: preview of media the draft stopped pointing at (a replaced logo, a removed photo). */
+  const releaseUnreferenced = useCallback((before: WizardDraft, after: WizardDraft) => {
+    const now = referencedMedia(after);
+    const gone = [...referencedMedia(before)].filter((m) => !now.has(m) && localUrlsRef.current[m]);
+    if (!gone.length) return;
+    for (const m of gone) URL.revokeObjectURL(localUrlsRef.current[m]);
+    localUrlsRef.current = Object.fromEntries(Object.entries(localUrlsRef.current).filter(([k]) => !gone.includes(k)));
+    setLocalUrls(localUrlsRef.current);
+  }, []);
 
   const update = useCallback((patch: Partial<WizardDraft>) => {
-    setDraft((d) => ({ ...d, ...patch }));
-    pending.current = { ...pending.current, ...patch };
-    window.clearTimeout(timer.current);
-    timer.current = window.setTimeout(() => void flush(), AUTOSAVE_MS);
-  }, [flush]);
+    const before = draftRef.current;
+    const after = { ...before, ...patch };
+    draftRef.current = after;
+    setDraft(after);
+    queue.edit(patch);
+    releaseUnreferenced(before, after);
+  }, [queue, releaseUnreferenced]);
 
   useEffect(() => {
-    const onHide = () => { if (document.visibilityState === "hidden") void flush(true); };
+    queue.resume();
+    const onHide = () => { if (document.visibilityState === "hidden") void queue.flush(true); };
     document.addEventListener("visibilitychange", onHide);
-    return () => { document.removeEventListener("visibilitychange", onHide); window.clearTimeout(timer.current); };
-  }, [flush]);
+    return () => {
+      document.removeEventListener("visibilitychange", onHide);
+      // Leaving the wizard (client navigation) must not lose the last edits: send them, then stop the timers.
+      void queue.flush(true);
+      queue.dispose();
+    };
+  }, [queue]);
+
+  useEffect(() => () => { for (const u of Object.values(localUrlsRef.current)) URL.revokeObjectURL(u); }, []);
 
   const addMedia = useCallback((m: Media, file: File) => {
     setMedia((list) => [...list, m]);
-    setLocalUrls((u) => ({ ...u, [m.id]: URL.createObjectURL(file) }));
+    localUrlsRef.current = { ...localUrlsRef.current, [m.id]: URL.createObjectURL(file) };
+    setLocalUrls(localUrlsRef.current);
   }, []);
   const shownMedia = useMemo(() => media.map((m) => (localUrls[m.id] ? { ...m, public_url: localUrls[m.id] } : m)), [media, localUrls]);
 
   const errors = useMemo(() => { const r = validateForPublish(draft); return r.ok ? [] : r.errors; }, [draft]);
   const stepErrors = errors.filter((e) => stepForPath(e.path) === step);
   const idx = FORM_STEPS.indexOf(step);
+  const fieldErrors = useMemo(() => [...save.errors, ...(showErrors ? stepErrors.filter((e) => !save.errors.some((s) => s.path === e.path)) : [])], [save.errors, showErrors, stepErrors]);
 
   function go(next: WizardStep) {
     if (FORM_STEPS.indexOf(next) > idx && stepErrors.length) {
       setShowErrors(true);
+      // On a phone the alert and the field can be a screen away from the Next button: take the owner there.
+      window.requestAnimationFrame(() => {
+        const field = stepBox.current?.querySelector<HTMLElement>('[aria-invalid="true"]');
+        const target = field ?? alertBox.current;
+        if (!target) return;
+        target.focus({ preventScroll: true });
+        target.scrollIntoView({ block: "center", behavior: window.matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth" });
+      });
       return;
     }
     setShowErrors(false);
@@ -90,12 +115,19 @@ export function Wizard({ id, initialDraft, initialMedia, baseUrl, aiAvailable, n
   }
 
   const closePreview = useCallback(() => setPreviewOpen(false), []);
-  const stepProps: StepProps = { id, draft, media: shownMedia, update, addMedia, baseUrl, aiAvailable, serverErrors };
-  const saveText = save === "saving" ? t("save.saving") : save === "saved" ? t("save.saved") : save === "error" ? t("save.error") : "";
+  const stepProps: StepProps = { id, draft, media: shownMedia, update, addMedia, baseUrl, aiAvailable, fieldErrors };
+  const saveText = {
+    idle: "",
+    saving: t("save.saving"),
+    saved: t("save.saved"),
+    retrying: t("save.retrying"),
+    rejected: save.message ? t("save.rejected", { msg: lang === "bg" ? save.message.bg : save.message.en }) : "",
+  }[save.state];
+  const saveBad = save.state === "retrying" || save.state === "rejected";
 
   return (
     <div className="flex-1 lg:grid lg:grid-cols-2">
-      <div className="mx-auto w-full max-w-xl px-4 pb-28 sm:px-6 lg:pb-16">
+      <div inert={previewOpen || undefined} className="mx-auto w-full max-w-xl px-4 pb-28 sm:px-6 lg:pb-16">
         <header className="flex items-center justify-between py-5">
           <span className="font-brand-display text-lg font-semibold tracking-tight">{t("brand")}</span>
           <LangToggle />
@@ -105,15 +137,15 @@ export function Wizard({ id, initialDraft, initialMedia, baseUrl, aiAvailable, n
         </div>
         <div className="mt-6 flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1">
           <h1 ref={heading} tabIndex={-1} className="text-[1.75rem] font-semibold leading-tight outline-none sm:text-[2rem]">{t(`step.${step}` as "step.basics")}</h1>
-          <p aria-live="polite" className={`min-h-5 text-sm ${save === "error" ? "font-semibold text-danger" : "text-fg-soft"}`}>{saveText}</p>
+          <p aria-live="polite" className={`min-h-5 text-sm ${saveBad ? "font-semibold text-danger" : "text-fg-soft"}`}>{saveText}</p>
         </div>
         {showErrors && stepErrors.length > 0 && (
-          <div role="alert" className="mt-4 rounded-xl bg-danger-soft px-4 py-3 text-sm text-fg">
+          <div ref={alertBox} role="alert" tabIndex={-1} className="mt-4 rounded-xl bg-danger-soft px-4 py-3 text-sm text-fg outline-none focus-visible:ring-2 focus-visible:ring-danger">
             <p className="font-semibold">{t("nav.fixFirst")}</p>
             <ul className="mt-1 list-disc pl-5">{stepErrors.map((e) => <li key={e.path}>{lang === "bg" ? e.bg : e.en}</li>)}</ul>
           </div>
         )}
-        <div key={step} className="sm-step mt-6">
+        <div key={step} ref={stepBox} className="sm-step mt-6">
           {step === "basics" && <Basics {...stepProps} />}
           {step === "look" && <Look {...stepProps} />}
           {step === "hours" && <Hours {...stepProps} />}
@@ -121,17 +153,17 @@ export function Wizard({ id, initialDraft, initialMedia, baseUrl, aiAvailable, n
           {step === "texts" && <Texts {...stepProps} />}
           {step === "photos" && <Photos {...stepProps} />}
           {step === "review" && (
-            <Review {...stepProps} errors={errors} goTo={(s) => { setShowErrors(false); setStep(s); update({ step: s }); window.requestAnimationFrame(() => heading.current?.focus()); }}
+            <Review {...stepProps} errors={errors} flush={flush} saveSnapshot={() => queue.snapshot} goTo={(s) => { setShowErrors(false); setStep(s); update({ step: s }); window.requestAnimationFrame(() => heading.current?.focus()); }}
               onPublished={(r) => { const key = new URL(r.admin_url, baseUrl).searchParams.get("key") ?? ""; router.push(`/new/${id}/done?code=${encodeURIComponent(r.invite_code)}&key=${encodeURIComponent(key)}`); }} />
           )}
         </div>
-        <nav className="mt-10 flex items-center justify-between gap-3 border-t border-line pt-5" aria-label={t("nav.steps")}>
+        <nav className="mt-10 flex items-center justify-between gap-3 border-t border-line pt-5" aria-label={t("nav.pager")}>
           <Button onClick={() => go(FORM_STEPS[idx - 1])} disabled={idx === 0}>{t("nav.back")}</Button>
           {step !== "review" && <Button variant="primary" className="px-6" onClick={() => go(FORM_STEPS[idx + 1])}>{t("nav.next")}</Button>}
         </nav>
       </div>
       <Preview draft={draft} media={shownMedia} now={now} open={previewOpen} onClose={closePreview} />
-      <div className="sm-bottom-bar fixed inset-x-0 bottom-0 z-40 border-t border-line bg-canvas/90 p-3 backdrop-blur lg:hidden" style={{ paddingBottom: "max(0.75rem, env(safe-area-inset-bottom))" }}>
+      <div inert={previewOpen || undefined} className="sm-bottom-bar fixed inset-x-0 bottom-0 z-40 border-t border-line bg-canvas/90 p-3 backdrop-blur lg:hidden" style={{ paddingBottom: "max(0.75rem, env(safe-area-inset-bottom))" }}>
         <Button variant="secondary" className="w-full" aria-haspopup="dialog" aria-expanded={previewOpen} onClick={() => setPreviewOpen(true)}>{t("preview.open")}</Button>
       </div>
     </div>

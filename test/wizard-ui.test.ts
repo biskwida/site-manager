@@ -3,7 +3,7 @@ import { createElement, type ReactElement, type ReactNode } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 import type { Lang } from "@/src/domain/types";
-import { LangProvider } from "@/src/i18n";
+import { LangProvider, LangScope, LangToggle } from "@/src/i18n";
 import { WIZARD_BG, WIZARD_EN } from "@/src/i18n/wizard";
 import { emptyDraft, validateForPublish } from "@/src/wizard/schema";
 import { Basics } from "@/app/new/components/Steps/Basics";
@@ -17,17 +17,19 @@ import { Texts } from "@/app/new/components/Steps/Texts";
 import { NoDraft } from "@/app/new/components/NoDraft";
 import { Stepper } from "@/app/new/components/Stepper";
 import type { StepProps } from "@/app/new/components/types";
+import { previewLinkAction } from "@/app/new/components/previewLinks";
 import { media } from "./fixtures";
 
 // createElement passes children positionally, which LangProvider's required `children` prop type does not model.
 const Provider = LangProvider as (props: { defaultLang: Lang; children?: ReactNode }) => ReactNode;
 const render = (lang: Lang, el: ReactElement) => renderToStaticMarkup(createElement(Provider, { defaultLang: lang }, el));
 const noop = () => undefined;
+const saveSnapshot = () => ({ state: "idle" as const, errors: [], message: null });
 function props(over: Partial<StepProps> = {}): StepProps {
   const draft = emptyDraft("classic");
   draft.categories = [{ key: "c1", name_bg: "Кафе", name_en: "Coffee", items: [{ key: "i1", name_bg: "Еспресо", name_en: "Espresso", desc_bg: "", desc_en: "", price_eur: 1.8, allergens: [7], image_media_id: null }] }];
   draft.gallery_media_ids = ["m2"];
-  return { id: "v1", draft, media: [media("m1"), media("m2")], update: noop, addMedia: noop, baseUrl: "https://site.example", aiAvailable: true, serverErrors: [], ...over };
+  return { id: "v1", draft, media: [media("m1"), media("m2")], update: noop, addMedia: noop, baseUrl: "https://site.example", aiAvailable: true, fieldErrors: [], ...over };
 }
 
 describe("wizard dictionary", () => {
@@ -52,7 +54,7 @@ describe("step components render labelled fields in both languages", () => {
     ["Menu", (p) => createElement(Menu, p), "Качете сегашното си меню", "Upload your current menu"],
     ["Texts", (p) => createElement(Texts, p), "Напиши вместо мен", "Write for me"],
     ["Photos", (p) => createElement(Photos, p), "Добави снимки", "Add photos"],
-    ["Review", (p) => createElement(Review, { ...p, errors: [], goTo: noop, onPublished: noop }), "Създай сайта ми", "Create my site"],
+    ["Review", (p) => createElement(Review, { ...p, errors: [], goTo: noop, onPublished: noop, flush: async () => true, saveSnapshot }), "Създай сайта ми", "Create my site"],
   ];
   for (const [name, make, bgLabel, enLabel] of cases) {
     it(`${name}: bg and en`, () => {
@@ -64,7 +66,7 @@ describe("step components render labelled fields in both languages", () => {
     });
   }
   it("Basics shows the slug prefix, the required name and a server slug error", () => {
-    const html = render("en", createElement(Basics, props({ serverErrors: [{ path: "slug", bg: "Зает", en: "Taken" }] })));
+    const html = render("en", createElement(Basics, props({ fieldErrors: [{ path: "slug", bg: "Зает", en: "Taken" }] })));
     expect(html).toContain("site.example/");
     expect(html).toContain('required=""');
     expect(html).toContain("Taken");
@@ -76,7 +78,7 @@ describe("step components render labelled fields in both languages", () => {
     expect(html).toContain('aria-pressed="true"');
     expect(html).toContain("Премести нагоре");
     expect(html).toContain("Премахни продукта");
-    expect(html).toContain('role="tablist"');
+    expect(html).not.toContain('role="tab');
   });
   it("Menu and Texts explain when AI is unavailable", () => {
     expect(render("en", createElement(Menu, props({ aiAvailable: false })))).toContain("not enabled on this server");
@@ -97,7 +99,7 @@ describe("step components render labelled fields in both languages", () => {
     const draft = emptyDraft("lumen");
     const r = validateForPublish(draft);
     const errors = r.ok ? [] : r.errors;
-    const html = render("en", createElement(Review, { ...props({ draft }), errors, goTo: noop, onPublished: noop }));
+    const html = render("en", createElement(Review, { ...props({ draft }), errors, goTo: noop, onPublished: noop, flush: async () => true, saveSnapshot }));
     expect(html).toContain("Before we create the site:");
     expect(html).toContain("Enter the venue&#x27;s name."); // React escapes the apostrophe
     expect(html).toContain("Fix: Basics");
@@ -126,5 +128,75 @@ describe("step components render labelled fields in both languages", () => {
     const html = render("bg", createElement(NoDraft));
     expect(html).toContain('href="/new"');
     expect(html).toContain("Изберете дизайн");
+  });
+
+  it("client validation errors land on their fields: aria-invalid plus a described-by error line", () => {
+    const html = render("en", createElement(Basics, props({ fieldErrors: [{ path: "name", bg: "Име", en: "Enter the venue name." }] })));
+    const input = html.match(/<input[^>]*autoComplete="organization"[^>]*>/i)?.[0] ?? html.match(/<input[^>]*autocomplete="organization"[^>]*>/)?.[0] ?? "";
+    expect(input).toContain('aria-invalid="true"');
+    const errId = input.match(/aria-describedby="([^"]+)"/)?.[1] ?? "";
+    expect(errId).not.toBe("");
+    expect(html).toMatch(new RegExp(`id="${errId.split(" ").at(-1)}"[^>]*>Enter the venue name.<`));
+  });
+  it("menu dish errors mark the dish's name and price fields", () => {
+    const html = render("en", createElement(Menu, props({ fieldErrors: [
+      { path: "categories.0.items.0.name", bg: "и", en: "Give the dish a name." },
+      { path: "categories.0.items.0.price_eur", bg: "ц", en: "Bad price." },
+    ] })));
+    expect(html).toContain("Give the dish a name.");
+    expect(html).toContain("Bad price.");
+    expect((html.match(/aria-invalid="true"/g) ?? []).length).toBe(2);
+  });
+  it("text inputs shrink inside grid tracks (w-full min-w-0) and the dish grid uses minmax(0,1fr) tracks", () => {
+    const html = render("en", createElement(Menu, props()));
+    const inputs = html.match(/<input[^>]*type="text"[^>]*>|<input(?![^>]*type=)[^>]*>/g) ?? [];
+    expect(inputs.length).toBeGreaterThan(0);
+    for (const i of inputs) expect(i).toMatch(/class="[^"]*\bw-full\b[^"]*"/);
+    for (const i of inputs) expect(i).toMatch(/class="[^"]*\bmin-w-0\b[^"]*"/);
+    expect(html).toContain("sm:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_6.5rem]");
+    expect(html).not.toContain("sm:grid-cols-[1fr_1fr_6.5rem]");
+  });
+  it("category picker is a labelled group of pressed buttons; the add button sits outside; the editor is named", () => {
+    const html = render("en", createElement(Menu, props()));
+    const group = html.match(/<div role="group" aria-label="Categories"[^>]*>(.*?)<\/div>/)?.[1] ?? "";
+    expect(group).toMatch(/<button[^>]*aria-pressed="true"[^>]*id="([^"]+)"|<button[^>]*id="([^"]+)"[^>]*aria-pressed="true"/);
+    expect(group).not.toContain("New category");
+    expect(html).toContain("New category");
+    const btnId = group.match(/id="([^"]+)"/)?.[1];
+    expect(html).toContain(`aria-labelledby="${btnId}"`);
+  });
+  it("allergen chips and stepper chips are 44 px targets; allergen text is text-sm", () => {
+    const menu = render("en", createElement(Menu, props()));
+    const chip = menu.match(/<button[^>]*aria-pressed="true"[^>]*>7 /)?.[0] ?? menu.match(/<button[^>]*aria-pressed="[^"]+"[^>]*>\d+ [A-Z]/)?.[0] ?? "";
+    expect(chip).toContain("min-h-11");
+    expect(chip).toContain("text-sm");
+    expect(chip).not.toContain("text-xs");
+    const stepper = render("en", createElement(Stepper, { current: "hours", onSelect: noop }));
+    expect(stepper).not.toContain("min-h-9");
+    expect(stepper).toContain("min-h-11");
+  });
+  it("file buttons show focus: the hidden input is a peer before its label", () => {
+    const html = render("en", createElement(Photos, props()));
+    expect(html).toMatch(/<input[^>]*type="file"[^>]*class="[^"]*\bpeer\b/);
+    expect(html).toMatch(/<label[^>]*class="[^"]*peer-focus-visible:/);
+  });
+  it("prices show two decimals with the language's separator when not being edited", () => {
+    expect(render("bg", createElement(Menu, props()))).toContain('value="1,80"');
+    expect(render("en", createElement(Menu, props()))).toContain('value="1.80"');
+  });
+});
+
+describe("live preview containment", () => {
+  it("maps template links to preview pages, keeps in-page anchors in the frame, ignores the rest", () => {
+    expect(previewLinkAction("/agala", "agala")).toEqual({ kind: "page", page: "home" });
+    expect(previewLinkAction("/agala/menu", "agala")).toEqual({ kind: "page", page: "menu" });
+    expect(previewLinkAction("#cat-1", "agala")).toEqual({ kind: "hash", id: "cat-1" });
+    expect(previewLinkAction("https://maps.google.com/x", "agala")).toEqual({ kind: "ignore" });
+    expect(previewLinkAction("tel:+359", "agala")).toEqual({ kind: "ignore" });
+    expect(previewLinkAction(null, "agala")).toEqual({ kind: "ignore" });
+  });
+  it("a LangScope gives the template its own language, separate from the wizard's", () => {
+    const html = render("bg", createElement(LangScope, { lang: "en", setLang: noop }, createElement(LangToggle)));
+    expect(html).toMatch(/<button[^>]*lang="en"[^>]*aria-pressed="true"/);
   });
 });

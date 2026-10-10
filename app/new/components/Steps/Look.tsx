@@ -3,6 +3,7 @@ import { useState } from "react";
 import type { Media } from "@/src/domain/types";
 import { TEMPLATE_ACCENT_DEFAULTS } from "@/src/wizard/schema";
 import { api, WIZARD_MAX_IMAGE_BYTES } from "../api";
+import { fieldError } from "../errors";
 import { Button, Fieldset, FileButton, Status, TextField } from "../Field";
 import { shrinkImage } from "../image";
 import { MediaThumb } from "../MediaThumb";
@@ -46,8 +47,8 @@ function ImageSlot({ id, label, hint, mediaId, media, onChange, addMedia, wide }
   );
 }
 
-export function Look({ id, draft, media, update, addMedia }: StepProps) {
-  const { t } = useT();
+export function Look({ id, draft, media, update, addMedia, fieldErrors }: StepProps) {
+  const { t, lang } = useT();
   const templateDefault = TEMPLATE_ACCENT_DEFAULTS[draft.template];
   const options = [templateDefault, ...PRESETS.filter((p) => p !== templateDefault)];
   const custom = !options.includes(draft.theme.accent.toLowerCase());
@@ -69,7 +70,7 @@ export function Look({ id, draft, media, update, addMedia }: StepProps) {
             <span>{t("look.accentCustom")}</span>
           </label>
         </div>
-        <TextField label={t("look.accentHex")} value={hex} maxLength={7} spellCheck={false} autoCapitalize="none" className="max-w-[12rem]" onChange={(v) => { setHex(v); if (HEX.test(v)) update({ theme: { accent: v } }); }} />
+        <TextField label={t("look.accentHex")} value={hex} error={fieldError(fieldErrors, "theme.accent", lang)} maxLength={7} spellCheck={false} autoCapitalize="none" className="max-w-[12rem]" onChange={(v) => { setHex(v); if (HEX.test(v)) update({ theme: { accent: v } }); }} />
       </Fieldset>
       <div className="grid gap-8 border-t border-line pt-8">
         <ImageSlot id={id} label={t("look.logo")} mediaId={draft.logo_media_id} media={media} addMedia={addMedia} onChange={(logo_media_id) => update({ logo_media_id })} />

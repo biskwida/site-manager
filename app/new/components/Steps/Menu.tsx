@@ -5,6 +5,7 @@ import { blankCategory, blankItem, mergeExtracted, moveIndex } from "@/src/wizar
 import { EXTRACT_MAX_FILES, IMAGE_MEDIA_TYPES, type ExtractFile, type ExtractResult } from "@/src/wizard/extract";
 import type { WizardCategory, WizardItem } from "@/src/wizard/schema";
 import { aiUnavailable, api, EXTRACT_MAX_TOTAL_BYTES, fileToBase64 } from "../api";
+import { fieldError } from "../errors";
 import { Button, FileButton, Note, PriceField, Status, TextField } from "../Field";
 import { shrinkImage } from "../image";
 import type { StepProps } from "../types";
@@ -36,7 +37,7 @@ export async function prepareExtractFiles(files: File[]): Promise<{ files: Extra
   return { files: out };
 }
 
-export function Menu({ id, draft, update, aiAvailable }: StepProps) {
+export function Menu({ id, draft, update, aiAvailable, fieldErrors }: StepProps) {
   const { t, lang } = useT();
   const cats = draft.categories;
   const [activeKey, setActiveKey] = useState<string | null>(cats[0]?.key ?? null);
@@ -76,23 +77,28 @@ export function Menu({ id, draft, update, aiAvailable }: StepProps) {
   }
 
   const ci = active ? cats.indexOf(active) : -1;
+  const err = (path: string) => fieldError(fieldErrors, path, lang);
   return (
     <div className="grid gap-8">
       <section aria-labelledby="menu-cats" className="grid gap-3">
         <h2 id="menu-cats" className="text-sm font-semibold">{t("menu.categories")}</h2>
-        <div role="tablist" aria-label={t("menu.categories")} className="flex flex-wrap gap-2">
-          {cats.map((c, i) => (
-            <button key={c.key} role="tab" type="button" aria-selected={active?.key === c.key} onClick={() => { setActiveKey(c.key); setAskRemove(false); }}
-              className={`${TAB} ${active?.key === c.key ? "bg-fg text-canvas" : "bg-panel text-fg ring-1 ring-line-strong hover:bg-sunken"}`}>
-              {catName(c, i)}
-            </button>
-          ))}
+        <div className="flex flex-wrap items-center gap-2">
+          {cats.length > 0 && (
+            <div role="group" aria-label={t("menu.categories")} className="flex flex-wrap gap-2">
+              {cats.map((c, i) => (
+                <button key={c.key} id={`cat-${c.key}`} type="button" aria-pressed={active?.key === c.key} onClick={() => { setActiveKey(c.key); setAskRemove(false); }}
+                  className={`${TAB} ${active?.key === c.key ? "bg-fg text-canvas" : "bg-panel text-fg ring-1 ring-line-strong hover:bg-sunken"}`}>
+                  {catName(c, i)}
+                </button>
+              ))}
+            </div>
+          )}
           <Button variant="quiet" onClick={() => { const c = blankCategory(); setCats([...cats, c]); setActiveKey(c.key); }}>+ {t("menu.addCategory")}</Button>
         </div>
         {active && (
-          <div role="tabpanel" className={ROW}>
+          <section aria-labelledby={`cat-${active.key}`} className={ROW}>
             <div className="grid gap-4 sm:grid-cols-2">
-              <TextField label={t("menu.category.nameBg")} value={active.name_bg} maxLength={80} onChange={(name_bg) => patchCat(active.key, { name_bg })} />
+              <TextField label={t("menu.category.nameBg")} value={active.name_bg} error={err(`categories.${ci}.name`)} maxLength={80} onChange={(name_bg) => patchCat(active.key, { name_bg })} />
               <TextField label={t("menu.category.nameEn")} value={active.name_en} maxLength={80} onChange={(name_en) => patchCat(active.key, { name_en })} />
             </div>
             <div className="flex flex-wrap items-center gap-1">
@@ -108,7 +114,7 @@ export function Menu({ id, draft, update, aiAvailable }: StepProps) {
                 </span>
               )}
             </div>
-          </div>
+          </section>
         )}
       </section>
 
@@ -120,10 +126,10 @@ export function Menu({ id, draft, update, aiAvailable }: StepProps) {
           <ol className="grid gap-3">
             {active.items.map((it, ii) => (
               <li key={it.key} className={ROW}>
-                <div className="grid gap-4 sm:grid-cols-[1fr_1fr_6.5rem]">
-                  <TextField label={t("menu.item.nameBg")} value={it.name_bg} maxLength={120} onChange={(name_bg) => patchItem(active.key, it.key, { name_bg })} />
+                <div className="grid gap-4 sm:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_6.5rem]">
+                  <TextField label={t("menu.item.nameBg")} value={it.name_bg} error={err(`categories.${ci}.items.${ii}.name`)} maxLength={120} onChange={(name_bg) => patchItem(active.key, it.key, { name_bg })} />
                   <TextField label={t("menu.item.nameEn")} value={it.name_en} maxLength={120} onChange={(name_en) => patchItem(active.key, it.key, { name_en })} />
-                  <PriceField label={t("menu.item.price")} value={it.price_eur} onChange={(price_eur) => patchItem(active.key, it.key, { price_eur })} />
+                  <PriceField label={t("menu.item.price")} value={it.price_eur} error={err(`categories.${ci}.items.${ii}.price_eur`)} onChange={(price_eur) => patchItem(active.key, it.key, { price_eur })} />
                 </div>
                 <details className="group">
                   <summary className="inline-flex min-h-11 cursor-pointer list-none items-center gap-2 text-sm font-semibold text-fg-soft hover:text-fg [&::-webkit-details-marker]:hidden">
@@ -143,7 +149,7 @@ export function Menu({ id, draft, update, aiAvailable }: StepProps) {
                           const on = it.allergens.includes(a.code);
                           return (
                             <button key={a.code} type="button" aria-pressed={on} onClick={() => patchItem(active.key, it.key, { allergens: on ? it.allergens.filter((c) => c !== a.code) : [...it.allergens, a.code].sort((x, y) => x - y) })}
-                              className={`min-h-9 rounded-full px-3 text-xs font-semibold transition-[background-color,color] duration-150 ease-out ${on ? "bg-fg text-canvas" : "bg-sunken text-fg hover:bg-line/60"}`}>
+                              className={`min-h-11 rounded-full px-3.5 text-sm font-semibold transition-[background-color,color] duration-150 ease-out ${on ? "bg-fg text-canvas" : "bg-sunken text-fg hover:bg-line/60"}`}>
                               {a.code} {allergenName(a.code, lang)}
                             </button>
                           );

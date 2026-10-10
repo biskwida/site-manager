@@ -3,25 +3,42 @@ import { useRef, useState } from "react";
 import { WEEKDAYS } from "@/src/domain/types";
 import { stepForPath, type PublishError, type WizardStep } from "@/src/wizard/schema";
 import { api, type PublishResponse } from "../api";
+import { publishOnce, type SaveSnapshot } from "../autosave";
 import { Button, Status } from "../Field";
 import type { StepProps } from "../types";
 import { useT } from "../useWizardText";
 
-export function Review({ id, draft, errors, goTo, onPublished, baseUrl }: StepProps & { errors: PublishError[]; goTo: (s: WizardStep) => void; onPublished: (r: PublishResponse) => void }) {
+export function Review({ id, draft, errors, goTo, onPublished, baseUrl, flush, saveSnapshot }: StepProps & {
+  errors: PublishError[];
+  goTo: (s: WizardStep) => void;
+  onPublished: (r: PublishResponse) => void;
+  /** Sends the pending autosave; false when the server does not have every edit. */
+  flush: () => Promise<boolean>;
+  /** Read after the flush: a rejected field explains itself in the refusal. */
+  saveSnapshot: () => SaveSnapshot;
+}) {
   const { t, lang } = useT();
   const [busy, setBusy] = useState(false);
   const [failed, setFailed] = useState<string | null>(null);
   // The server's publish is not atomic under concurrent requests: one click, one request, whatever the render timing.
+  // The pending autosave goes first: the server builds the site from the saved draft, not from this screen.
   const inFlight = useRef(false);
   const openDays = WEEKDAYS.filter((d) => draft.hours[d]).length;
   const items = draft.categories.reduce((n, c) => n + c.items.length, 0);
   async function create() {
     if (inFlight.current) return;
-    inFlight.current = true;
     setBusy(true);
     setFailed(null);
-    const r = await api.publish(id);
-    if (!r.ok) { setFailed(lang === "bg" ? r.error.bg : r.error.en); setBusy(false); inFlight.current = false; return; }
+    const out = await publishOnce({ inFlight, flush, publish: () => api.publish(id), succeeded: (r) => r.ok });
+    if (out.status === "busy") return;
+    if (out.status === "unsaved") {
+      const m = saveSnapshot().message;
+      setFailed(m ? t("review.unsavedField", { msg: lang === "bg" ? m.bg : m.en }) : t("review.unsaved"));
+      setBusy(false);
+      return;
+    }
+    const r = out.value;
+    if (!r.ok) { setFailed(lang === "bg" ? r.error.bg : r.error.en); setBusy(false); return; }
     onPublished(r.data); // stays busy: the page is about to change
   }
   const rows: [string, string][] = [

@@ -49,6 +49,14 @@ export async function shrinkImage(file: File, o: ShrinkOptions): Promise<File | 
   } catch {
     return file.size <= o.maxBytes ? file : null;
   }
+  try {
+    return await encode(file, img, o);
+  } finally {
+    if ("close" in img) img.close(); // ImageBitmaps hold decoded pixels until closed
+  }
+}
+
+async function encode(file: File, img: ImageBitmap | HTMLImageElement, o: ShrinkOptions): Promise<File | null> {
   const w = "naturalWidth" in img ? img.naturalWidth : img.width;
   const h = "naturalHeight" in img ? img.naturalHeight : img.height;
   const longest = Math.max(w, h);
@@ -64,9 +72,14 @@ export async function shrinkImage(file: File, o: ShrinkOptions): Promise<File | 
     const scale = edge / longest;
     canvas.width = Math.max(1, Math.round(w * scale));
     canvas.height = Math.max(1, Math.round(h * scale));
-    ctx.clearRect(0, 0, canvas.width, canvas.height);
-    ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
     const type = keepPng && attempt === 0 ? "image/png" : "image/jpeg";
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    if (type === "image/jpeg") {
+      // JPEG has no alpha: a transparent logo would turn black. Paint it on white first.
+      ctx.fillStyle = "#fff";
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+    }
+    ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
     const blob = await toBlob(canvas, type, quality);
     if (blob && blob.size <= o.maxBytes) {
       const ext = type === "image/png" ? "png" : "jpg";

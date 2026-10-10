@@ -12,6 +12,9 @@ export interface StepProps {
   baseUrl: string;
   /** false without ANTHROPIC_API_KEY: AI controls render an explanation instead. */
   aiAvailable: boolean;
-  /** Field errors from the last failed autosave (e.g. slug taken). */
-  serverErrors: PublishError[];
+  /**
+   * Errors to show next to their fields: the server's rejections from autosave (e.g. slug taken) plus, after a blocked
+   * Next, this step's validation errors. Paths are validateForPublish paths (`name`, `categories.0.items.1.price_eur`).
+   */
+  fieldErrors: PublishError[];
 }
