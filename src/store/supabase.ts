@@ -298,6 +298,15 @@ export class SupabaseStore implements Store {
     return "applied";
   }
 
+  /** Conditional flip, like applyChangeSet's: only a still-proposed set expires. */
+  async expireChangeSet(id: string, now: string) {
+    const flipped = await must(
+      this.db.from("change_sets").update({ status: "expired", decided_at: now }).eq("id", id).eq("status", "proposed").select("id"),
+      `expireChangeSet ${id}`,
+    );
+    return flipped.length === 0 ? "skipped" : "expired";
+  }
+
   private async writeEntity(venueId: string, c: Change) {
     const table = TABLE[c.entity];
     if (c.entity === "site_text") {
@@ -323,7 +332,7 @@ export class SupabaseStore implements Store {
 
   async listExpiredTimers(now: string, venueId?: string) {
     if (badVenue(venueId)) return [];
-    let a = this.db.from("items").select("*").not("sold_out_until", "is", null).lte("sold_out_until", now);
+    let a = this.db.from("items").select("*").eq("active", true).not("sold_out_until", "is", null).lte("sold_out_until", now);
     let b = this.db.from("items").select("*").eq("is_special", true).eq("active", true).not("special_expires_at", "is", null).lte("special_expires_at", now);
     if (venueId) {
       a = a.eq("venue_id", venueId);

@@ -238,12 +238,20 @@ export class InMemoryStore implements Store {
     }
     return "applied";
   }
+  async expireChangeSet(id: string, now: string) {
+    const cs = this.sets.get(id);
+    if (!cs) throw new Error(`change set ${id} not found`);
+    if (cs.status !== "proposed") return "skipped";
+    cs.status = "expired";
+    cs.decided_at = now;
+    return "expired";
+  }
   async listExpiredTimers(now: string, venueId?: string) {
     const out: ExpiredTimer[] = [];
     for (const s of this.sites.values()) {
       if (venueId && s.venue.id !== venueId) continue;
       for (const i of s.items) {
-        if (i.sold_out_until !== null && i.sold_out_until <= now) out.push({ item: clone(i), kind: "sold_out" });
+        if (i.active && i.sold_out_until !== null && i.sold_out_until <= now) out.push({ item: clone(i), kind: "sold_out" });
         if (i.is_special && i.active && i.special_expires_at !== null && i.special_expires_at <= now) out.push({ item: clone(i), kind: "special" });
       }
     }

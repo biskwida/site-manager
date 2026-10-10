@@ -3,7 +3,7 @@ import { betaZodTool } from "@anthropic-ai/sdk/helpers/beta/zod";
 import { z } from "zod";
 import type { Messenger } from "../bot/messenger";
 import { allergenName, allergenWarnings, suggestAllergens } from "../domain/allergens";
-import { invertChanges, planChanges, type PlanContext } from "../domain/changes";
+import { invertChanges, isIso, planChanges, type PlanContext } from "../domain/changes";
 import { isSoldOut, visibleItems } from "../domain/effective";
 import { categoryName, tr } from "../domain/format";
 import { closingToday, nextOpening, todayStatus } from "../domain/hours";
@@ -39,7 +39,12 @@ export function requireRole(member: Member, ops: ChangeOp[]): void {
   }
 }
 
-/** Replaces "next_opening" / "closing_today" with ISO instants from the venue's hours. */
+/** Model-supplied ISO instant → canonical UTC ("…Z"), so stored values compare as strings; anything invalid stays as-is for validateChange to report. */
+function canonical(x: string | null): string | null {
+  return x !== null && isIso(x) ? new Date(x).toISOString() : x;
+}
+
+/** Replaces "next_opening" / "closing_today" with ISO instants from the venue's hours and normalises explicit instants to UTC. */
 export function resolveTokens(ops: ChangeInput[], site: SiteState, now: Date): ChangeOp[] {
   const { hours, tz } = site.venue;
   const opening = () => {
@@ -53,9 +58,9 @@ export function resolveTokens(ops: ChangeInput[], site: SiteState, now: Date): C
     return iso;
   };
   return ops.map((op): ChangeOp => {
-    if (op.op === "set_sold_out") return { ...op, until: op.until === "next_opening" ? opening() : op.until };
-    if (op.op === "add_item") return { ...op, item: { ...op.item, special_expires_at: op.item.special_expires_at === "closing_today" ? closing() : op.item.special_expires_at } };
-    if (op.op === "add_announcement") return { ...op, expires_at: op.expires_at === "closing_today" ? closing() : op.expires_at };
+    if (op.op === "set_sold_out") return { ...op, until: op.until === "next_opening" ? opening() : canonical(op.until) };
+    if (op.op === "add_item") return { ...op, item: { ...op.item, special_expires_at: op.item.special_expires_at === "closing_today" ? closing() : canonical(op.item.special_expires_at) } };
+    if (op.op === "add_announcement") return { ...op, expires_at: op.expires_at === "closing_today" ? closing() : canonical(op.expires_at) };
     return op as ChangeOp;
   });
 }

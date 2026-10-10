@@ -113,6 +113,8 @@ export interface Store {
    * For an undo set, also marks the target reverted. Returns "skipped" when already decided.
    */
   applyChangeSet(id: string, now: string): Promise<"applied" | "skipped">;
+  /** Marks the set expired (decided_at = now) only if it is still proposed; "skipped" when it was already decided. */
+  expireChangeSet(id: string, now: string): Promise<"expired" | "skipped">;
   listExpiredTimers(now: string, venueId?: string): Promise<ExpiredTimer[]>;
 
   // media

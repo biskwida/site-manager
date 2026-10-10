@@ -51,6 +51,12 @@ describe("propose_changes", () => {
     expect(messenger.sent[0].text).toBe("✅ Баница със сирене: изчерпано до 10.10.2026, 09:00");
     expect(messenger.sent[0].setId).toBeUndefined();
   });
+  it("normalises an explicit until with an offset to a UTC instant", async () => {
+    const { tools, store, items, venue } = await setup();
+    const r = await call(tools, "propose_changes", { summary_bg: "Баницата свърши", summary_en: "Banitsa sold out", changes: [{ op: "set_sold_out", item_id: items["Cheese banitsa"].id, until: "2026-10-11T08:00:00+03:00" }] });
+    expect(r).toMatchObject({ status: "applied", sold_out_until: "2026-10-11T05:00:00.000Z" });
+    expect((await store.getSite(venue.id)).items.find((i) => i.id === items["Cheese banitsa"].id)?.sold_out_until).toBe("2026-10-11T05:00:00.000Z");
+  });
   it("returns an error for a stale id, a pending proposal, or a closed venue with next_opening unavailable", async () => {
     const { tools, items, store, venue } = await setup();
     expect(await call(tools, "propose_changes", { summary_bg: "x", summary_en: "x", changes: [{ op: "set_price", item_id: "nope", price_eur: 2 }] })).toEqual({ error: 'item_id "nope" not found; use an id from get_menu.' });

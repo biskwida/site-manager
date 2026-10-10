@@ -38,7 +38,8 @@ export async function runTick(d: TickDeps): Promise<TickReport> {
   // 1. Stale proposals (before applying, so a 2 h-old proposal cannot be applied by a late tap).
   const cutoff = new Date(d.now.getTime() - PROPOSAL_TTL_MS).toISOString();
   for (const cs of await d.store.listProposedBefore(cutoff, d.venueId)) {
-    await d.store.updateChangeSet(cs.id, { status: "expired", decided_at: now });
+    // Conditional: a tap that confirmed the set between the list and this write wins.
+    if ((await d.store.expireChangeSet(cs.id, now)) !== "expired") continue;
     report.expired.push(cs.id);
     if (d.messenger && cs.chat_id !== null && cs.tg_message_id !== null) {
       const { lang } = await langFor(d.store, cs.venue_id, cs.chat_id);

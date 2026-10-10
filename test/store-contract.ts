@@ -113,6 +113,20 @@ export function storeContract(name: string, make: () => Promise<Store>) {
       expect(await s.listProposedBefore("2020-01-01T00:00:00.000Z", v.id)).toEqual([]);
     });
 
+    it("expires only a still-proposed set", async () => {
+      const s = await make();
+      const v = await s.createVenue({ slug: "t6b", name: "Test" });
+      const base = { venue_id: v.id, chat_id: 10, summary_bg: "x", summary_en: "x", preview_bg: "x", preview_en: "x", source: "text" as const, changes: [] };
+      const proposed = await s.createChangeSet({ ...base, status: "proposed" });
+      expect(await s.expireChangeSet(proposed.id, LATER)).toBe("expired");
+      expect(await s.getChangeSet(proposed.id)).toMatchObject({ status: "expired", decided_at: LATER });
+      expect(await s.expireChangeSet(proposed.id, LATER)).toBe("skipped");
+      const applied = await s.createChangeSet({ ...base, status: "proposed" });
+      expect(await s.applyChangeSet(applied.id, NOW)).toBe("applied");
+      expect(await s.expireChangeSet(applied.id, LATER)).toBe("skipped");
+      expect(await s.getChangeSet(applied.id)).toMatchObject({ status: "applied", decided_at: NOW });
+    });
+
     it("lists expired sold-out and special timers", async () => {
       const s = await make();
       const v = await s.createVenue({ slug: "t7", name: "Test" });
@@ -127,6 +141,20 @@ export function storeContract(name: string, make: () => Promise<Store>) {
       expect(timers.map((t) => [t.item.id, t.kind])).toEqual(expect.arrayContaining([[a.id, "sold_out"], [sp.id, "special"]]));
       expect(timers).toHaveLength(2);
       expect(await s.listExpiredTimers(NOW, v.id)).toEqual([]);
+    });
+
+    it("ignores the sold-out timer of a removed item", async () => {
+      const s = await make();
+      const v = await s.createVenue({ slug: "t7b", name: "Test" });
+      const c = await s.insertCategory({ venue_id: v.id, name_bg: "Кафе", name_en: "Coffee", position: 0 });
+      const i = await s.insertItem({ venue_id: v.id, category_id: c.id, name_bg: "a", name_en: "a", desc_bg: "", desc_en: "", price_eur: 1, allergens: [], position: 0 });
+      const base = { venue_id: v.id, chat_id: null, summary_bg: "", summary_en: "", preview_bg: "", preview_en: "", source: "text" as const, status: "proposed" as const };
+      const soldOut = await s.createChangeSet({ ...base, changes: [{ position: 0, op: "set_sold_out", entity: "item", entity_id: i.id, before: { sold_out_until: null }, after: { sold_out_until: "2026-10-09T09:30:00.000Z" } }] });
+      await s.applyChangeSet(soldOut.id, NOW);
+      const removed = await s.createChangeSet({ ...base, changes: [{ position: 0, op: "remove_item", entity: "item", entity_id: i.id, before: { active: true }, after: { active: false } }] });
+      await s.applyChangeSet(removed.id, NOW);
+      expect((await s.getSite(v.id)).items[0]).toMatchObject({ active: false, sold_out_until: "2026-10-09T09:30:00.000Z" });
+      expect(await s.listExpiredTimers(LATER, v.id)).toEqual([]);
     });
 
     it("stores media and conversations", async () => {

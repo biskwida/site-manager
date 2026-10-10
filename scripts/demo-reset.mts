@@ -1,5 +1,6 @@
 // scripts/demo-reset.mts
-// npm run demo:reset [-- --slug agala]
+// npm run demo:reset [-- --slug agala] [-- --force]
+// Refuses any venue but DEMO_VENUE_SLUG unless --force is passed (it deletes a real café's menu otherwise).
 // Wipes the demo venue's content (menu, texts, holidays, announcements, media, change sets, conversations) and re-seeds
 // the demo menu, texts, hours, tagline/about and theme. Members (linked phones), invites and the admin link stay.
 import { createClient } from "@supabase/supabase-js";
@@ -19,8 +20,16 @@ if (!venue) {
   process.exit(1);
 }
 
+const force = process.argv.includes("--force");
+if (slug !== deps.config.demoVenueSlug && !force) {
+  console.error(`Refusing to reset "${slug}" (${venue.name}): it is not the demo venue ("${deps.config.demoVenueSlug}"). This deletes its whole menu and history; pass --force if you really mean it.`);
+  process.exit(1);
+}
+
 const before = await deps.store.getSite(venue.id);
 const sets = await deps.store.listChangeSets(venue.id, { limit: 1000 });
+console.log(`resetting venue "${venue.slug}" — ${venue.name} (${venue.id})${force ? " [--force]" : ""}`);
+console.log(`will delete: ${before.items.length} items, ${before.categories.length} categories, ${sets.length} change sets (plus texts, holidays, announcements, media rows, conversations)`);
 await deps.store.clearVenueContent(venue.id);
 
 // Venue-level fields the demo may have changed (set_text, set_hours, set_theme); the Store has no venue update, so write them here.

@@ -17,7 +17,7 @@ const DATE = /^\d{4}-\d{2}-\d{2}$/;
 const HEX = /^#[0-9a-f]{6}$/i;
 const UUIDISH = /^[A-Za-z0-9-]{1,64}$/;
 
-function isIso(s: unknown): s is string {
+export function isIso(s: unknown): s is string {
   return typeof s === "string" && ISO.test(s) && !Number.isNaN(Date.parse(s));
 }
 

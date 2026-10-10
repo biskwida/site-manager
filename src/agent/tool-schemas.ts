@@ -67,7 +67,7 @@ export const BulkSchema = z.object({
   delta_eur: z.number().optional().describe("e.g. 0.2 for +0.20 €"),
   rounding: z.enum(ROUNDINGS).describe('Round the new price to this step; "0.10" is the usual choice'),
 });
-export const CheckAllergensSchema = z.object({ name: z.string(), desc: z.string().optional(), declared: Allergens });
+export const CheckAllergensSchema = z.object({ name: z.string(), desc: z.string().optional(), declared: Allergens.default([]) });
 export const UndoSchema = z.object({ change_set_id: z.string().describe('An id from list_changes, or "last" for the most recent applied set') });
 export const ListSchema = z.object({ limit: z.number().int().min(1).max(50).default(10) });
 export const CancelSchema = z.object({ change_set_id: Id });
