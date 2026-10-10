@@ -9,7 +9,7 @@ import type { Store } from "../store/types";
 import { handleDecision, parseCallback } from "./approvals";
 import { copy, langFromCode } from "./copy";
 import { registerMediaHandlers } from "./media";
-import { type Messenger, TelegramMessenger } from "./messenger";
+import type { Messenger } from "./messenger";
 
 export interface RunRequest {
   venueId: string;
@@ -116,7 +116,7 @@ export function createBot(d: BotDeps): Bot {
     if (!member) return;
     const lang = detectLang(ctx.message?.text ?? "") ?? member.lang;
     d.startRun({ venueId: member.venue_id, chatRef: member.chat_ref, member: { ...member, lang }, text: "Undo the last change.", source: "text" });
-    await ctx.replyWithChatAction("typing").catch(() => undefined);
+    await d.messenger.typing(member.chat_ref);
   });
 
   bot.on("message:text", async (ctx) => {
@@ -126,7 +126,7 @@ export function createBot(d: BotDeps): Bot {
     // Start first: a failed acknowledgement must not lose the message.
     const lang = detectLang(ctx.message.text) ?? member.lang;
     d.startRun({ venueId: member.venue_id, chatRef: member.chat_ref, member: { ...member, lang }, text: ctx.message.text, source: "text" });
-    await ctx.replyWithChatAction("typing").catch(() => undefined);
+    await d.messenger.typing(member.chat_ref);
   });
 
   bot.on("callback_query:data", async (ctx) => {
@@ -135,13 +135,13 @@ export function createBot(d: BotDeps): Bot {
       await ctx.answerCallbackQuery().catch(() => undefined);
       return;
     }
-    // Answer first so the client stops spinning, then do the work, then edit the message.
+    // Answer first so the client stops spinning, then do the work, then conclude the proposal.
     await ctx.answerCallbackQuery().catch(() => undefined);
     const chatRef = makeRef("tg", ctx.chat.id);
     const r = await handleDecision({ store: d.store, messenger: d.messenger, now: d.now }, chatRef, parsed.decision, parsed.setId);
     const messageId = ctx.callbackQuery.message?.message_id;
-    // Edit through this update's API (removes the buttons); best-effort, never throws.
-    if (r.edit && messageId !== undefined) await new TelegramMessenger(ctx.api).edit(chatRef, String(messageId), r.edit);
+    // Edits the message and removes the buttons; best-effort, never throws.
+    if (r.edit) await d.messenger.conclude(chatRef, messageId !== undefined ? String(messageId) : null, r.edit.full, r.edit.short);
     if (r.reply) await ctx.reply(r.reply);
   });
 

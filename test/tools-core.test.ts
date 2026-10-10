@@ -76,8 +76,8 @@ describe("propose_changes", () => {
     const second = await call(tools, "propose_changes", { summary_bg: "y", summary_en: "y", changes: [{ op: "set_price", item_id: base.items.Latte.id, price_eur: 3.4 }] });
     expect(second.status).toBe("proposed");
     expect((await base.store.getChangeSet(first.change_set_id as string)).status).toBe("cancelled");
-    expect(base.messenger.edits[0]).toMatchObject({ messageRef: "100" });
-    expect(base.messenger.edits[0].text).toContain("✏️");
+    expect(base.messenger.concluded[0]).toMatchObject({ messageRef: "100" });
+    expect(base.messenger.concluded[0].full).toContain("✏️");
   });
   it("lets staff mark sold-out and add specials but not change prices", async () => {
     const base = await setup();
@@ -106,7 +106,7 @@ describe("cancel_change_set / list_changes", () => {
     const c = await call(tools, "cancel_change_set", { change_set_id: p.change_set_id });
     expect(c).toEqual({ change_set_id: p.change_set_id, status: "cancelled" });
     expect((await store.getChangeSet(p.change_set_id as string)).status).toBe("cancelled");
-    expect(messenger.edits[0].text).toContain("❌");
+    expect(messenger.concluded[0].full).toContain("❌");
     expect(await call(tools, "cancel_change_set", { change_set_id: p.change_set_id })).toEqual({ error: 'Change set is "cancelled"; only proposed or scheduled sets can be cancelled.' });
     await call(tools, "propose_changes", { summary_bg: "Баницата свърши", summary_en: "Banitsa out", changes: [{ op: "set_sold_out", item_id: items["Cheese banitsa"].id, until: null }] });
     const l = await call(tools, "list_changes", { limit: 5 });

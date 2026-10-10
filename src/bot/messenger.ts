@@ -4,21 +4,36 @@ import { InlineKeyboard } from "grammy";
 import { parseRef } from "../channels/ref";
 import type { Lang } from "../domain/types";
 
+export interface SendOpts {
+  /** Started by us, not a reply: the router enforces Meta's 24 h window. */
+  proactive?: boolean;
+}
+
 export interface Messenger {
   /** Plain message; returns the message ref or null if sending failed (never throws). */
-  send(chatRef: string, text: string): Promise<string | null>;
+  send(chatRef: string, text: string, opts?: SendOpts): Promise<string | null>;
   /** Preview with ✅ / ✏️ / ❌ buttons. */
   sendProposal(chatRef: string, text: string, setId: string, lang: Lang): Promise<string | null>;
-  /** Replaces the text and removes the buttons; best-effort. */
-  edit(chatRef: string, messageRef: string, text: string): Promise<void>;
+  /** Telegram: edits the proposal message to `full` and removes the buttons. Meta channels: send `short` as a new message. Best-effort. */
+  conclude(chatRef: string, messageRef: string | null, full: string, short: string, opts?: SendOpts): Promise<void>;
+  /** "typing…" indicator; `inReplyTo` is the inbound message ref (WhatsApp needs it). Best-effort. */
+  typing(chatRef: string, inReplyTo?: string): Promise<void>;
+}
+
+/** The three proposal buttons, shared by every channel (labels ≤ 20 characters for Meta). */
+export function proposalButtons(lang: Lang): { id: "apply" | "change" | "cancel"; label: string }[] {
+  const bg = lang === "bg";
+  return [
+    { id: "apply", label: bg ? "✅ Приложи" : "✅ Apply" },
+    { id: "change", label: bg ? "✏️ Промени" : "✏️ Change" },
+    { id: "cancel", label: bg ? "❌ Откажи" : "❌ Cancel" },
+  ];
 }
 
 export function proposalKeyboard(setId: string, lang: Lang): InlineKeyboard {
-  const bg = lang === "bg";
-  return new InlineKeyboard()
-    .text(bg ? "✅ Приложи" : "✅ Apply", `cs:apply:${setId}`)
-    .text(bg ? "✏️ Промени" : "✏️ Change", `cs:change:${setId}`)
-    .text(bg ? "❌ Откажи" : "❌ Cancel", `cs:cancel:${setId}`);
+  const kb = new InlineKeyboard();
+  for (const b of proposalButtons(lang)) kb.text(b.label, `cs:${b.id}:${setId}`);
+  return kb;
 }
 
 /** The numeric Telegram chat id inside a "tg:" ref; throws for any other channel (callers catch and log). */
@@ -48,11 +63,22 @@ export class TelegramMessenger implements Messenger {
       return null;
     }
   }
-  async edit(chatRef: string, messageRef: string, text: string) {
+  async conclude(chatRef: string, messageRef: string | null, full: string, short: string) {
+    if (messageRef === null) {
+      await this.send(chatRef, short);
+      return;
+    }
     try {
-      await this.api.editMessageText(telegramChat(chatRef), Number(messageRef), text, { reply_markup: { inline_keyboard: [] } });
+      await this.api.editMessageText(telegramChat(chatRef), Number(messageRef), full, { reply_markup: { inline_keyboard: [] } });
     } catch (e) {
-      console.error("[messenger] edit failed:", e instanceof Error ? e.message : e);
+      console.error("[messenger] conclude failed:", e instanceof Error ? e.message : e);
+    }
+  }
+  async typing(chatRef: string) {
+    try {
+      await this.api.sendChatAction(telegramChat(chatRef), "typing");
+    } catch (e) {
+      console.error("[messenger] typing failed:", e instanceof Error ? e.message : e);
     }
   }
 }

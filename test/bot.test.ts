@@ -1,6 +1,7 @@
 // test/bot.test.ts
 import { describe, expect, it } from "vitest";
 import { createBot, type BotDeps, type RunRequest } from "@/src/bot/bot";
+import { TelegramMessenger } from "@/src/bot/messenger";
 import { planChanges } from "@/src/domain/changes";
 import { FakeMessenger, makeDemo } from "./helpers";
 import { BOT_INFO, callbackUpdate, captureApi, textUpdate } from "./tg";
@@ -10,12 +11,12 @@ const T0 = new Date("2026-10-09T09:00:00.000Z");
 async function setup() {
   const demo = await makeDemo();
   const runs: RunRequest[] = [];
-  const messenger = new FakeMessenger();
   const deps: BotDeps = {
-    token: "t", store: demo.store, messenger, baseUrl: "https://site.example", now: () => T0,
+    token: "t", store: demo.store, messenger: new FakeMessenger(), baseUrl: "https://site.example", now: () => T0,
     startRun: (r) => runs.push(r), transcribe: null, download: async () => ({ bytes: new Uint8Array([1]), contentType: "image/jpeg" }), botInfo: BOT_INFO,
   };
   const bot = createBot(deps);
+  deps.messenger = new TelegramMessenger(bot.api); // as in src/server/deps.ts
   const api = captureApi(bot);
   return { ...demo, runs, bot, api, deps };
 }

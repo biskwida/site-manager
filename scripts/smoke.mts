@@ -32,9 +32,10 @@ class ConsoleMessenger implements Messenger {
     console.log(`→ [${chatRef}] ${t}\n   [✅ Приложи] [✏️ Промени] [❌ Откажи]`);
     return String(this.next++);
   }
-  async edit(chatRef: string, messageRef: string, t: string) {
-    console.log(`✎ [${chatRef}#${messageRef}] ${t}`);
+  async conclude(chatRef: string, messageRef: string | null, _full: string, short: string) {
+    console.log(`✎ [${chatRef}#${messageRef}] ${short}`);
   }
+  async typing() {}
 }
 
 let store: Store;

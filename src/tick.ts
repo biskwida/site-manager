@@ -41,10 +41,11 @@ export async function runTick(d: TickDeps): Promise<TickReport> {
     // Conditional: a tap that confirmed the set between the list and this write wins.
     if ((await d.store.expireChangeSet(cs.id, now)) !== "expired") continue;
     report.expired.push(cs.id);
-    if (d.messenger && cs.chat_ref !== null && cs.message_ref !== null) {
+    if (d.messenger && cs.chat_ref !== null) {
       const { lang } = await langFor(d.store, cs.venue_id, cs.chat_ref);
       const preview = lang === "bg" ? cs.preview_bg : cs.preview_en;
-      await d.messenger.edit(cs.chat_ref, cs.message_ref, `${preview}\n\n${tr(lang, "⌛ Изтекло: предложението не беше потвърдено в рамките на 2 часа.", "⌛ Expired: the proposal was not confirmed within 2 hours.")}`);
+      const line = tr(lang, "⌛ Изтекло: предложението не беше потвърдено в рамките на 2 часа.", "⌛ Expired: the proposal was not confirmed within 2 hours.");
+      await d.messenger.conclude(cs.chat_ref, cs.message_ref, `${preview}\n\n${line}`, line, { proactive: true });
     }
   }
 
@@ -62,7 +63,7 @@ export async function runTick(d: TickDeps): Promise<TickReport> {
     if (d.messenger && cs.chat_ref !== null) {
       const { lang } = await langFor(d.store, cs.venue_id, cs.chat_ref);
       const summary = lang === "bg" ? cs.summary_bg : cs.summary_en;
-      await d.messenger.send(cs.chat_ref, cs.source === "undo" ? `${tr(lang, "↩️ Отменено", "↩️ Reverted")}: ${summary}` : `${tr(lang, "✅ Приложено по график", "✅ Applied as scheduled")}: ${summary}`);
+      await d.messenger.send(cs.chat_ref, cs.source === "undo" ? `${tr(lang, "↩️ Отменено", "↩️ Reverted")}: ${summary}` : `${tr(lang, "✅ Приложено по график", "✅ Applied as scheduled")}: ${summary}`, { proactive: true });
     }
   }
 
@@ -84,7 +85,7 @@ export async function runTick(d: TickDeps): Promise<TickReport> {
     if (d.messenger && cs.chat_ref !== null && cs.apply_at) {
       const { lang, tz } = await langFor(d.store, cs.venue_id, cs.chat_ref);
       const summary = lang === "bg" ? cs.summary_bg : cs.summary_en;
-      await d.messenger.send(cs.chat_ref, `${tr(lang, "⏰ Напомняне: на", "⏰ Reminder: on")} ${formatDateTime(cs.apply_at, lang, tz)} ${tr(lang, "ще се приложи", "this will be applied")}: ${summary}`);
+      await d.messenger.send(cs.chat_ref, `${tr(lang, "⏰ Напомняне: на", "⏰ Reminder: on")} ${formatDateTime(cs.apply_at, lang, tz)} ${tr(lang, "ще се приложи", "this will be applied")}: ${summary}`, { proactive: true });
     }
   }
   return report;

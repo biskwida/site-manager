@@ -64,7 +64,7 @@ export function registerMediaHandlers(bot: Bot, d: BotDeps): void {
     }
     const media = await d.store.saveMedia(member.venue_id, bytes, media_type);
     d.startRun({ venueId: member.venue_id, chatRef: member.chat_ref, member: { ...member, lang }, text: caption ?? "", source: "photo", image: { data: toBase64(bytes), media_type }, mediaId: media.id });
-    await ctx.replyWithChatAction("typing").catch(() => undefined);
+    await d.messenger.typing(member.chat_ref);
   };
 
   bot.on("message:photo", (ctx) => handleImage(ctx, ctx.message.photo.at(-1)!.file_id, ctx.message.caption));

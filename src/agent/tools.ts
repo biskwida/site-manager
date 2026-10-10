@@ -115,10 +115,10 @@ export function makeTools(d: AgentDeps) {
     }
   };
 
-  /** Cancels a pending proposal (because the owner asked to change it) and edits its message. */
+  /** Cancels a pending proposal (because the owner asked to change it) and concludes its message. */
   const cancelPending = async (cs: ChangeSet, mark: string) => {
     await d.store.updateChangeSet(cs.id, { status: "cancelled", decided_at: d.now().toISOString() });
-    if (cs.chat_ref !== null && cs.message_ref !== null) await d.messenger.edit(cs.chat_ref, cs.message_ref, `${mine(cs)}\n\n${mark}`);
+    if (cs.chat_ref !== null) await d.messenger.conclude(cs.chat_ref, cs.message_ref, `${mine(cs)}\n\n${mark}`, mark);
   };
 
   /** One proposal per chat: replace it when the owner pressed ✏️, otherwise refuse. */

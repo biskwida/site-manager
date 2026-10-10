@@ -19,15 +19,15 @@ export interface DecisionDeps {
   now: () => Date;
 }
 export interface DecisionResult {
-  /** New text for the proposal message (buttons removed). */
-  edit?: string;
+  /** How to conclude the proposal: `full` replaces the message where editing works (buttons removed), `short` is the follow-up line elsewhere. */
+  edit?: { full: string; short: string };
   /** A fresh message to send. */
   reply?: string;
   /** Short callback-query answer. */
   toast?: string;
 }
 
-/** Answer the callback first (the caller does), then run this, then edit the message with `edit`. */
+/** Answer the callback first (the caller does), then run this, then conclude the proposal with `edit`. */
 export async function handleDecision(d: DecisionDeps, chatRef: string, decision: Decision, setId: string): Promise<DecisionResult> {
   const member = await d.store.findMember(chatRef);
   const lang: Lang = member?.lang ?? "bg";
@@ -43,7 +43,7 @@ export async function handleDecision(d: DecisionDeps, chatRef: string, decision:
   const venue = await d.store.getVenue(cs.venue_id);
   const now = d.now();
 
-  if (cs.status !== "proposed") return { edit: `${preview}\n\n${c.status[cs.status]}`, toast: c.status[cs.status] };
+  if (cs.status !== "proposed") return { edit: { full: `${preview}\n\n${c.status[cs.status]}`, short: c.status[cs.status] }, toast: c.status[cs.status] };
 
   if (decision === "change") {
     await setCorrection(d.store, cs.venue_id, chatRef, cs.id, now);
@@ -51,17 +51,17 @@ export async function handleDecision(d: DecisionDeps, chatRef: string, decision:
   }
   if (decision === "cancel") {
     await d.store.updateChangeSet(cs.id, { status: "cancelled", decided_at: now.toISOString() });
-    return { edit: `${preview}\n\n${c.cancelled}`, toast: c.cancelled };
+    return { edit: { full: `${preview}\n\n${c.cancelled}`, short: c.cancelled }, toast: c.cancelled };
   }
   if (cs.apply_at && Date.parse(cs.apply_at) > now.getTime()) {
     await d.store.updateChangeSet(cs.id, { status: "scheduled", decided_at: now.toISOString() });
     const line = c.scheduled(formatDateTime(cs.apply_at, lang, venue.tz));
-    return { edit: `${preview}\n\n${line}`, toast: line };
+    return { edit: { full: `${preview}\n\n${line}`, short: line }, toast: line };
   }
   const result = await d.store.applyChangeSet(cs.id, now.toISOString());
   if (result === "skipped") {
     const fresh = await d.store.getChangeSet(cs.id);
-    return { edit: `${preview}\n\n${c.status[fresh.status]}`, toast: c.status[fresh.status] };
+    return { edit: { full: `${preview}\n\n${c.status[fresh.status]}`, short: c.status[fresh.status] }, toast: c.status[fresh.status] };
   }
-  return { edit: `${preview}\n\n${c.applied}`, toast: c.applied };
+  return { edit: { full: `${preview}\n\n${c.applied}`, short: c.applied }, toast: c.applied };
 }

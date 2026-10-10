@@ -20,7 +20,7 @@ describe("runTick", () => {
     expect((await store.getChangeSet(future.id)).status).toBe("scheduled");
     expect((await store.getSite(venue.id)).items.find((i) => i.id === items.Cappuccino.id)?.price_eur).toBe(3.2);
     expect(m.sent).toHaveLength(1);
-    expect(m.sent[0]).toMatchObject({ chatRef: "tg:1001", text: "✅ Приложено по график: Нова цена на капучиното" });
+    expect(m.sent[0]).toMatchObject({ chatRef: "tg:1001", text: "✅ Приложено по график: Нова цена на капучиното", proactive: true });
   });
 
   it("writes auto sets once for elapsed sold-out and special timers", async () => {
@@ -47,13 +47,13 @@ describe("runTick", () => {
     const soon = await store.createChangeSet({ venue_id: venue.id, chat_ref: "tg:1001", summary_bg: "Коледно работно време", summary_en: "Christmas hours", preview_bg: "p", preview_en: "p", source: "text", status: "scheduled", apply_at: "2026-10-10T06:00:00.000Z", changes: [] });
     const r1 = await runTick({ store, messenger: m, now: T0 });
     expect(r1.reminded).toEqual([soon.id]);
-    expect(m.sent[0].text).toBe("⏰ Напомняне: на 10.10.2026, 09:00 ще се приложи: Коледно работно време");
+    expect(m.sent[0]).toMatchObject({ text: "⏰ Напомняне: на 10.10.2026, 09:00 ще се приложи: Коледно работно време", proactive: true });
     const r2 = await runTick({ store, messenger: m, now: new Date("2026-10-09T10:00:00.000Z") });
     expect(r2.reminded).toEqual([]);
     expect(m.sent).toHaveLength(1);
   });
 
-  it("expires proposals older than 2 h and edits their message", async () => {
+  it("expires proposals older than 2 h and concludes their message", async () => {
     const { store, venue } = await makeDemo();
     const m = new FakeMessenger();
     store.clock = () => "2026-10-09T06:00:00.000Z";
@@ -64,7 +64,7 @@ describe("runTick", () => {
     expect(r.expired).toEqual([old.id]);
     expect((await store.getChangeSet(old.id)).status).toBe("expired");
     expect((await store.getChangeSet(fresh.id)).status).toBe("proposed");
-    expect(m.edits[0]).toEqual({ chatRef: "tg:1001", messageRef: "42", text: "превю\n\n⌛ Изтекло: предложението не беше потвърдено в рамките на 2 часа." });
+    expect(m.concluded[0]).toEqual({ chatRef: "tg:1001", messageRef: "42", full: "превю\n\n⌛ Изтекло: предложението не беше потвърдено в рамките на 2 часа.", short: "⌛ Изтекло: предложението не беше потвърдено в рамките на 2 часа.", proactive: true });
   });
 
   it("limits itself to one venue when asked", async () => {

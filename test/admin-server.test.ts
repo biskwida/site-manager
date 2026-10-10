@@ -23,8 +23,8 @@ describe("admin", () => {
     expect(o.log).toEqual([]);
 
     expect(await adminAction(d, venue, "apply", p1.id)).toEqual({ ok: true, status: "applied", change_set_id: p1.id });
-    expect(messenger.edits[0]).toMatchObject({ chatRef: "tg:1001", messageRef: "42" });
-    expect(messenger.edits[0].text).toContain("✅");
+    expect(messenger.concluded[0]).toMatchObject({ chatRef: "tg:1001", messageRef: "42", proactive: true });
+    expect(messenger.concluded[0].full).toContain("✅");
     expect((await store.getSite(venue.id)).items.find((i) => i.id === items.Cappuccino.id)?.price_eur).toBe(3.2);
     expect(await adminAction(d, venue, "reject", p2.id)).toEqual({ ok: true, status: "rejected", change_set_id: p2.id });
     expect(await adminAction(d, venue, "cancel", s1.id)).toEqual({ ok: true, status: "cancelled", change_set_id: s1.id });

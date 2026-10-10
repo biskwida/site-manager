@@ -2,7 +2,7 @@
 import { seedDemo } from "@/src/seed/demo";
 import { InMemoryStore } from "@/src/store/memory";
 import type { Category, Item, Lang, Venue } from "@/src/domain/types";
-import type { Messenger } from "@/src/bot/messenger";
+import type { Messenger, SendOpts } from "@/src/bot/messenger";
 
 export interface Demo {
   store: InMemoryStore;
@@ -26,12 +26,13 @@ export async function makeDemo(): Promise<Demo> {
 }
 
 export class FakeMessenger implements Messenger {
-  sent: { chatRef: string; text: string; setId?: string; lang?: Lang; messageRef: string }[] = [];
-  edits: { chatRef: string; messageRef: string; text: string }[] = [];
+  sent: { chatRef: string; text: string; setId?: string; lang?: Lang; messageRef: string; proactive?: boolean }[] = [];
+  concluded: { chatRef: string; messageRef: string | null; full: string; short: string; proactive?: boolean }[] = [];
+  typed: string[] = [];
   private next = 100;
-  async send(chatRef: string, text: string) {
+  async send(chatRef: string, text: string, opts?: SendOpts) {
     const messageRef = String(this.next++);
-    this.sent.push({ chatRef, text, messageRef });
+    this.sent.push({ chatRef, text, messageRef, proactive: opts?.proactive });
     return messageRef;
   }
   async sendProposal(chatRef: string, text: string, setId: string, lang: Lang) {
@@ -39,8 +40,11 @@ export class FakeMessenger implements Messenger {
     this.sent.push({ chatRef, text, setId, lang, messageRef });
     return messageRef;
   }
-  async edit(chatRef: string, messageRef: string, text: string) {
-    this.edits.push({ chatRef, messageRef, text });
+  async conclude(chatRef: string, messageRef: string | null, full: string, short: string, opts?: SendOpts) {
+    this.concluded.push({ chatRef, messageRef, full, short, proactive: opts?.proactive });
+  }
+  async typing(chatRef: string) {
+    this.typed.push(chatRef);
   }
   last() {
     return this.sent[this.sent.length - 1];
