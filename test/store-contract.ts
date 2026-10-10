@@ -341,6 +341,28 @@ export function storeContract(name: string, make: () => Promise<Store>, storageH
       expect(await storageHas(s, mb.storage_path)).toBe(false);
     });
 
+    it("finds the newest open invite for a venue and role (unused, unexpired), or null", async () => {
+      const s = await make();
+      const v = await s.createVenue({ slug: "t15a", name: "A" });
+      const other = await s.createVenue({ slug: "t15b", name: "B" });
+      try {
+        expect(await s.findOpenInvite(v.id, "owner", NOW)).toBeNull();
+        await s.createInvite(v.id, "owner", "2026-10-09T08:00:00.000Z"); // expired at NOW
+        await s.createInvite(v.id, "staff", "2026-10-20T00:00:00.000Z"); // other role
+        await s.createInvite(other.id, "owner", "2026-10-20T00:00:00.000Z"); // other venue
+        expect(await s.findOpenInvite(v.id, "owner", NOW)).toBeNull();
+        const older = await s.createInvite(v.id, "owner", "2026-10-12T00:00:00.000Z");
+        const newer = await s.createInvite(v.id, "owner", "2026-10-15T00:00:00.000Z");
+        expect(await s.findOpenInvite(v.id, "owner", NOW)).toBe(newer);
+        expect(await s.redeemInvite(newer, 7101, "bg", NOW)).not.toBeNull();
+        expect(await s.findOpenInvite(v.id, "owner", NOW)).toBe(older); // used codes are skipped
+        expect(await s.findOpenInvite(v.id, "owner", "2026-10-13T00:00:00.000Z")).toBeNull();
+      } finally {
+        await s.deleteVenue(v.id);
+        await s.deleteVenue(other.id);
+      }
+    });
+
     it("lets one publish claim a draft; the claim expires so a crashed publish does not block a retry", async () => {
       const s = await make();
       const draft = await s.createVenue({ slug: "t13e", name: "E", status: "draft" });

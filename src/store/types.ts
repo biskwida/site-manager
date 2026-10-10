@@ -131,6 +131,8 @@ export interface Store {
   upsertMember(m: Omit<Member, "created_at">): Promise<Member>;
   setMemberLang(venueId: string, chatId: number, lang: Lang): Promise<void>;
   createInvite(venueId: string, role: Role, expiresAt: string): Promise<string>;
+  /** The open invite (unused, expires after `now`) for this venue and role that expires last; null when there is none. */
+  findOpenInvite(venueId: string, role: Role, now: string): Promise<string | null>;
   /** Links the chat and marks the code used; null when the code is unknown, used or expired. */
   redeemInvite(code: string, chatId: number, lang: Lang, now: string): Promise<Member | null>;
   /** Creates the token on first call. */

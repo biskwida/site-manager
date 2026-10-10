@@ -4,11 +4,11 @@ import type { Metadata } from "next";
 import { cookies } from "next/headers";
 import { notFound, redirect } from "next/navigation";
 import { after } from "next/server";
-import { INVITE_TTL_MS } from "@/src/bot/bot";
 import { LangProvider } from "@/src/i18n";
 import { DICTS } from "@/src/i18n/dicts";
 import { getServerDeps } from "@/src/server/deps";
 import { DRAFT_COOKIE, venueFromDraftCookie } from "@/src/server/draft-cookie";
+import { doneInviteCode } from "@/src/server/wizard";
 import { DoneStatus, type DoneStatusResponse } from "./DoneStatus";
 
 export const dynamic = "force-dynamic";
@@ -21,11 +21,6 @@ export const metadata: Metadata = {
 };
 
 const one = (v: string | string[] | undefined) => (Array.isArray(v) ? v[0] : v) ?? null;
-/** Invite codes are 8 chars from the bot's alphabet; anything else in ?code= is ignored (a fresh code is issued instead). */
-const CODE = /^[A-Z2-9]{8}$/;
-/** A fresh single-use owner invite (INVITE_TTL_MS from now). */
-const newOwnerInvite = (store: { createInvite(venueId: string, role: "owner", expiresAt: string): Promise<string> }, venueId: string) =>
-  store.createInvite(venueId, "owner", new Date(Date.now() + INVITE_TTL_MS).toISOString());
 
 export default async function Page(props: PageProps<"/new/[id]/done">) {
   const { id } = await props.params;
@@ -35,10 +30,10 @@ export default async function Page(props: PageProps<"/new/[id]/done">) {
   const venue = await venueFromDraftCookie(deps.store, jar.get(DRAFT_COOKIE)?.value, id);
   if (!venue) notFound();
   if (venue.status !== "live") redirect(`/new/${encodeURIComponent(id)}`);
-  const joined = (await deps.store.listMembers(venue.id)).some((m) => m.role === "owner");
-  // The publish redirect carries the fresh invite code. A reload without it gets a new single-use code (7 days), unless the owner already pressed Start.
-  const fromUrl = one(sp.code)?.toUpperCase() ?? null;
-  const code = joined ? null : fromUrl && CODE.test(fromUrl) ? fromUrl : await newOwnerInvite(deps.store, venue.id);
+  // The publish redirect carries the fresh invite code; a reload without it shows the newest open one (a new one only when
+  // none is open). No code once the owner pressed Start.
+  const code = await doneInviteCode(deps.store, venue.id, one(sp.code), new Date());
+  const joined = code === null;
   const adminKey = one(sp.key) || (await deps.store.getAdminToken(venue.id));
   const bot = deps.config.telegramBotUsername;
   const hosted = deps.deployer === null;

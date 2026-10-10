@@ -251,6 +251,20 @@ async function publishClaimed(store: Store, venue: Venue, d: WizardDraft, now: D
   return { venue: await store.getVenue(venue.id), inviteCode, adminToken };
 }
 
+/** Invite codes are 8 chars from the bot's alphabet. */
+const INVITE_CODE_RE = /^[A-Z2-9]{8}$/;
+
+/**
+ * The owner code the done page shows: null once an owner has joined; else the publish redirect's ?code= when it looks like
+ * a code; else the newest open owner invite; only when none is open, a fresh one (INVITE_TTL_MS). Reloads never pile up invites.
+ */
+export async function doneInviteCode(store: Store, venueId: string, codeParam: string | null, now: Date): Promise<string | null> {
+  if ((await store.listMembers(venueId)).some((m) => m.role === "owner")) return null;
+  const fromUrl = codeParam?.toUpperCase() ?? null;
+  if (fromUrl && INVITE_CODE_RE.test(fromUrl)) return fromUrl;
+  return (await store.findOpenInvite(venueId, "owner", now.toISOString())) ?? (await store.createInvite(venueId, "owner", new Date(now.getTime() + INVITE_TTL_MS).toISOString()));
+}
+
 // ---------------------------------------------------------------------------------------------------------------------
 // HTTP layer (the app/api/new routes only parse params and call these).
 

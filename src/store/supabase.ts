@@ -296,6 +296,12 @@ export class SupabaseStore implements Store {
     await must(this.db.from("venue_invites").insert({ code, venue_id: venueId, role, expires_at: expiresAt }).select("code"), "createInvite");
     return code;
   }
+  async findOpenInvite(venueId: string, role: Role, now: string) {
+    if (badVenue(venueId)) return null;
+    const { data, error } = await this.db.from("venue_invites").select("code").eq("venue_id", venueId).eq("role", role).is("used_at", null).gt("expires_at", now).order("expires_at", { ascending: false }).limit(1).maybeSingle();
+    if (error) throw new Error(`findOpenInvite: ${error.message}`);
+    return data ? (data.code as string) : null;
+  }
   async redeemInvite(code: string, chatId: number, lang: Lang, now: string) {
     const rows = await must(
       this.db.from("venue_invites").update({ used_at: now }).eq("code", code).is("used_at", null).gt("expires_at", now).select("*"),

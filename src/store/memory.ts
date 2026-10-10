@@ -209,6 +209,11 @@ export class InMemoryStore implements Store {
     this.invites.set(code, { code, venue_id: venueId, role, expires_at: expiresAt, used_at: null });
     return code;
   }
+  async findOpenInvite(venueId: string, role: Role, now: string) {
+    const open = [...this.invites.values()].filter((i) => i.venue_id === venueId && i.role === role && i.used_at === null && Date.parse(i.expires_at) > Date.parse(now));
+    open.sort((a, b) => b.expires_at.localeCompare(a.expires_at));
+    return open[0]?.code ?? null;
+  }
   async redeemInvite(code: string, chatId: number, lang: Lang, now: string) {
     const inv = this.invites.get(code);
     if (!inv || inv.used_at !== null || Date.parse(inv.expires_at) <= Date.parse(now)) return null;

@@ -2,7 +2,7 @@
 import { describe, expect, it } from "vitest";
 import { INVITE_TTL_MS } from "@/src/bot/bot";
 import { sha256Hex } from "@/src/server/hash";
-import { createDraft, publishDraft, rateLimitKeys, updateDraft, WizardError } from "@/src/server/wizard";
+import { createDraft, doneInviteCode, publishDraft, rateLimitKeys, updateDraft, WizardError } from "@/src/server/wizard";
 import { COOKIE_NAME, cookieFromHeader, DRAFT_COOKIE, draftCookieValue, parseDraftCookie, readDraftFromCookies, readDraftFromRequest, serializeDraftCookie, venueFromDraftCookie } from "@/src/server/draft-cookie";
 import { emptyDraft } from "@/src/wizard/schema";
 import { makeDemo } from "./helpers";
@@ -296,5 +296,28 @@ describe("createDraft → updateDraft → publishDraft", () => {
     await updateDraft(store, b.venue, { name: "B", slug: "same", ...menu });
     await publishDraft(store, await store.getVenue(a.venue.id), T0);
     await expect(publishDraft(store, await store.getVenue(b.venue.id), T0)).rejects.toMatchObject({ code: "slug_taken", status: 409 });
+  });
+});
+
+describe("doneInviteCode", () => {
+  it("reuses the newest open owner invite on reloads, issues one only when none is open, and none once an owner joined", async () => {
+    const { store } = await makeDemo();
+    const v = await store.createVenue({ slug: "nosht", name: "Нощ" });
+    const now = new Date("2026-10-09T09:00:00.000Z");
+    const count = () => [...store.invites.values()].filter((i) => i.venue_id === v.id).length;
+    const first = await doneInviteCode(store, v.id, null, now);
+    expect(first).toMatch(/^[A-Z2-9]{8}$/);
+    expect(await doneInviteCode(store, v.id, null, now)).toBe(first); // reload: same code, no new invite
+    expect(await doneInviteCode(store, v.id, "garbage", now)).toBe(first);
+    expect(count()).toBe(1);
+    expect(await doneInviteCode(store, v.id, first!.toLowerCase(), now)).toBe(first); // the publish redirect's ?code=
+    // after it expires, a fresh one
+    const later = new Date(now.getTime() + 8 * 24 * 3_600_000);
+    const second = await doneInviteCode(store, v.id, null, later);
+    expect(second).not.toBe(first);
+    expect(count()).toBe(2);
+    await store.redeemInvite(second!, 5001, "bg", later.toISOString());
+    expect(await doneInviteCode(store, v.id, null, later)).toBeNull(); // an owner exists: no code at all
+    expect(count()).toBe(2);
   });
 });
