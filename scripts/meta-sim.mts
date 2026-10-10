@@ -2,16 +2,24 @@
 // Posts a signed fake Meta webhook to a local server, so the whole path runs offline against the memory store:
 //   npm run dev:offline   (with META_APP_SECRET, META_VERIFY_TOKEN and DEMO_OWNER_CHAT_REF=fb:4242 in .env.local)
 //   npm run meta:sim -- fb text "Капучиното става 3,20"      npm run meta:sim -- wa button cs:apply:<id>      npm run meta:sim -- ig text "menu"
-// Replies appear in the dev server's terminal as "→ [fb:4242] …" (ConsoleMessenger). Options: --sender <id> (default 4242), --url (default http://localhost:3000/api/meta).
+// Replies appear in the dev server's terminal as "→ [fb:4242] …" (ConsoleMessenger). Options, anywhere on the line: --sender <id> (default 4242), --url <url> (default http://localhost:3000/api/meta).
 import { createHmac } from "node:crypto";
 
-const [channel, kind, ...rest] = process.argv.slice(2).filter((a) => !a.startsWith("--"));
-const opt = (name: string, def: string) => { const i = process.argv.indexOf(`--${name}`); return i > 0 ? process.argv[i + 1] : def; };
+// Positional args are everything except "--flag value" pairs, which may come before, between or after them.
+const positional: string[] = [];
+const flags = new Map<string, string>();
+const argv = process.argv.slice(2);
+for (let i = 0; i < argv.length; i++) {
+  if (argv[i].startsWith("--")) flags.set(argv[i].slice(2), argv[++i] ?? "");
+  else positional.push(argv[i]);
+}
+const [channel, kind, ...rest] = positional;
+const opt = (name: string, def: string) => flags.get(name) || def;
 const sender = opt("sender", "4242");
 const url = opt("url", "http://localhost:3000/api/meta");
 const secret = process.env.META_APP_SECRET?.trim();
 if (!secret || !["fb", "ig", "wa"].includes(channel) || !["text", "button"].includes(kind) || rest.length === 0) {
-  console.error('Usage: npm run meta:sim -- fb|ig|wa text|button "<text or cs:apply:<id>>" [--sender 4242]  (META_APP_SECRET must be set)');
+  console.error('Usage: npm run meta:sim -- fb|ig|wa text|button "<text or cs:apply:<id>>" [--sender 4242] [--url <url>]  (META_APP_SECRET must be set)');
   process.exit(1);
 }
 const payload = rest.join(" ");
