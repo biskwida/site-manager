@@ -1,5 +1,5 @@
 // test/server-deps.test.ts
-import type Anthropic from "@anthropic-ai/sdk";
+import Anthropic from "@anthropic-ai/sdk";
 import { describe, expect, it } from "vitest";
 import { makeServerDeps } from "@/src/server/deps";
 import { BOT_INFO, captureApi, textUpdate } from "./tg";
@@ -14,6 +14,15 @@ describe("makeServerDeps (memory mode)", () => {
     expect((await deps.store.getSite(venue!.id)).items.length).toBe(12);
     expect(await deps.store.findMember(777)).toMatchObject({ role: "owner" });
     expect(logs.join("\n")).toMatch(/admin link: http:\/\/localhost:3000\/admin\/agala\?key=/);
+    expect(deps.anthropic).toBeNull(); // no ANTHROPIC_API_KEY: the wizard AI routes answer 503
+  });
+
+  it("builds one Anthropic client from ANTHROPIC_API_KEY, or uses the injected client (R17)", async () => {
+    const keyed = await makeServerDeps({ defer: (fn) => void fn(), env: { SITE_MANAGER_STORE: "memory", ANTHROPIC_API_KEY: "sk-test-not-used" }, log: () => {} });
+    expect(keyed.anthropic).toBeInstanceOf(Anthropic);
+    const client = { beta: { messages: {} } } as unknown as Anthropic;
+    const injected = await makeServerDeps({ defer: (fn) => void fn(), env: { SITE_MANAGER_STORE: "memory", ANTHROPIC_API_KEY: "sk-test-not-used" }, log: () => {}, client });
+    expect(injected.anthropic).toBe(client);
   });
 
   it("uses the fake deployer in memory mode (even with a Vercel token) and deploys a live venue on demand", async () => {
@@ -36,6 +45,7 @@ describe("makeServerDeps (memory mode)", () => {
     // The agent turn inside handleRun gets a stub client that ends immediately; only the tick matters here.
     const client = { beta: { messages: { toolRunner: async () => ({ stop_reason: "end_turn", content: [{ type: "text", text: "ok" }] }) } } } as unknown as Anthropic;
     const deps = await makeServerDeps({ defer: (fn) => void jobs.push(fn()), env: { SITE_MANAGER_STORE: "memory" }, log: () => {}, client });
+    expect(deps.anthropic).toBe(client);
     deps.bot.botInfo = BOT_INFO;
     const venue = (await deps.store.getVenueBySlug("agala"))!;
     const code = await deps.store.createInvite(venue.id, "owner", "2099-01-01T00:00:00.000Z"); // the bot uses the real clock here
