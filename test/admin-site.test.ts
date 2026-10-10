@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 import { FakeDeployer } from "@/src/deploy/fake";
 import type { Deployer } from "@/src/deploy/types";
 import type { DeployInfo } from "@/src/domain/types";
-import { adminOverview, setTemplate } from "@/src/server/admin";
+import { adminOverview, checkDomain, connectDomain, setTemplate } from "@/src/server/admin";
 import { makeDemo } from "./helpers";
 
 const T0 = new Date("2026-10-10T10:00:00.000Z");
@@ -96,5 +96,104 @@ describe("set_template", () => {
     const after = await store.getVenue(venue.id);
     expect(after.deploy?.status).toBe("building");
     expect(after.template).toBe(after.deploy?.template);
+  });
+});
+
+describe("custom domain", () => {
+  it("normalises the input, attaches it through the deployer, stores it on the deploy record and returns the DNS records", async () => {
+    const { store, venue } = await makeDemo();
+    await store.setDeploy(venue.id, ready);
+    const deployer = withProject();
+    const d = deps(store, deployer);
+    const r = await connectDomain(d, await store.getVenue(venue.id), " https://Cafe.Example.COM/ ");
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    expect(r.domain).toBe("cafe.example.com");
+    expect(r.instructions.verified).toBe(false);
+    expect(r.instructions.records).toContainEqual({ type: "CNAME", name: "cafe", value: "cname.vercel-dns.com" });
+    expect(r.instructions.records.some((x) => x.type === "TXT" && x.name === "_vercel.example.com")).toBe(true);
+    expect(deployer.domains).toEqual([{ projectId: "prj_1", domain: "cafe.example.com" }]);
+    const v = await store.getVenue(venue.id);
+    expect(v.deploy).toMatchObject({ ...ready, custom_domain: "cafe.example.com", domain_verified: false, updated_at: T0.toISOString() });
+    const o = await adminOverview(store, v, T0, "https://site.example");
+    expect(o).toMatchObject({ custom_domain: "cafe.example.com", domain_verified: false });
+  });
+
+  it("check again re-attaches (idempotent) and flips to verified when the provider confirms the records", async () => {
+    const { store, venue } = await makeDemo();
+    await store.setDeploy(venue.id, ready);
+    const deployer = withProject();
+    const d = deps(store, deployer);
+    const first = await connectDomain(d, await store.getVenue(venue.id), "cafe.example.com");
+    expect(first).toMatchObject({ ok: true, instructions: { verified: false } });
+    const again = await checkDomain(d, await store.getVenue(venue.id));
+    expect(again).toMatchObject({ ok: true, domain: "cafe.example.com", instructions: { verified: true } });
+    if (!again.ok) return;
+    expect(again.instructions.records).toContainEqual({ type: "CNAME", name: "cafe", value: "cname.vercel-dns.com" });
+    expect(deployer.domains).toHaveLength(2);
+    const v = await store.getVenue(venue.id);
+    expect(v.deploy).toMatchObject({ custom_domain: "cafe.example.com", domain_verified: true });
+    expect((await adminOverview(store, v, T0)).domain_verified).toBe(true);
+  });
+
+  it("gives an apex domain an A record", async () => {
+    const { store, venue } = await makeDemo();
+    await store.setDeploy(venue.id, ready);
+    const r = await connectDomain(deps(store, withProject()), await store.getVenue(venue.id), "example.bg");
+    expect(r).toMatchObject({ ok: true, domain: "example.bg" });
+    if (!r.ok) return;
+    expect(r.instructions.records).toContainEqual({ type: "A", name: "@", value: "76.76.21.21" });
+  });
+
+  it("rejects an invalid hostname without touching the deployer or the store", async () => {
+    const { store, venue } = await makeDemo();
+    await store.setDeploy(venue.id, ready);
+    const deployer = withProject();
+    const v = await store.getVenue(venue.id);
+    for (const bad of ["nope", "not a domain", "localhost", "-x.example.com", 42, null, undefined, "https://"]) {
+      expect(await connectDomain(deps(store, deployer), v, bad)).toEqual({ ok: false, code: "invalid_domain", error: "Invalid domain.", bg: "Това не прилича на домейн.", en: "That does not look like a domain name." });
+    }
+    expect(deployer.domains).toEqual([]);
+    expect((await store.getVenue(venue.id)).deploy).toEqual(ready);
+  });
+
+  it("needs a ready deploy: refuses without one, while publishing, and after a failed publish", async () => {
+    const { store, venue } = await makeDemo();
+    const deployer = withProject();
+    const noSite = { ok: false, code: "no_site", error: "Publish the site first.", bg: "Първо публикувайте сайта.", en: "Publish the site first." };
+    expect(await connectDomain(deps(store, deployer), venue, "cafe.example.com")).toEqual(noSite);
+    for (const status of ["pending", "building", "error"] as const) {
+      await store.setDeploy(venue.id, { ...ready, status });
+      expect(await connectDomain(deps(store, deployer), await store.getVenue(venue.id), "cafe.example.com")).toEqual(noSite);
+      expect(await checkDomain(deps(store, deployer), await store.getVenue(venue.id))).toEqual(noSite);
+    }
+    expect(deployer.domains).toEqual([]);
+    expect((await store.getVenue(venue.id)).deploy?.custom_domain ?? null).toBeNull();
+  });
+
+  it("check again needs a connected domain", async () => {
+    const { store, venue } = await makeDemo();
+    await store.setDeploy(venue.id, ready);
+    expect(await checkDomain(deps(store, withProject()), await store.getVenue(venue.id))).toEqual({ ok: false, code: "no_domain", error: "No domain connected.", bg: "Няма свързан домейн.", en: "No domain connected." });
+  });
+
+  it("reports a short provider failure without the provider's message and stores nothing", async () => {
+    const { store, venue } = await makeDemo();
+    await store.setDeploy(venue.id, ready);
+    const failing: Deployer = { provider: "fake", createSite: async () => { throw new Error("x"); }, status: async () => ({ state: "building", url: null, error: null }), redeploy: async () => ({ deploymentId: "d" }), deleteSite: async () => {}, addDomain: async () => { throw new Error("HTTP 403 forbidden Bearer tok-SECRET"); } };
+    const r = await connectDomain(deps(store, failing), await store.getVenue(venue.id), "cafe.example.com");
+    expect(r).toMatchObject({ ok: false, code: "provider", error: "The domain could not be added." });
+    expect(JSON.stringify(r)).not.toContain("SECRET");
+    expect((await store.getVenue(venue.id)).deploy).toEqual(ready);
+  });
+
+  it("does not overwrite a deploy that started publishing while the provider call was in flight", async () => {
+    const { store, venue } = await makeDemo();
+    await store.setDeploy(venue.id, ready);
+    const building: DeployInfo = { ...ready, deployment_id: "dpl_2", status: "building" };
+    const racing: Deployer = { provider: "fake", createSite: async () => { throw new Error("x"); }, status: async () => ({ state: "building", url: null, error: null }), redeploy: async () => ({ deploymentId: "d" }), deleteSite: async () => {}, addDomain: async (projectId, domain) => { await store.setDeploy(venue.id, building); return { verified: false, records: [{ type: "CNAME", name: domain, value: projectId }] }; } };
+    const r = await connectDomain(deps(store, racing), await store.getVenue(venue.id), "cafe.example.com");
+    expect(r).toMatchObject({ ok: false, code: "busy" });
+    expect((await store.getVenue(venue.id)).deploy).toEqual(building);
   });
 });

@@ -42,6 +42,10 @@ export interface DeployInfo {
   template: TemplateId;
   /** ISO; set on every status transition (pollDeployments measures its 20-minute timeout from it). */
   updated_at: string;
+  /** Optional custom domain attached to the provider project (Task 11); absent or null when none. */
+  custom_domain?: string | null;
+  /** Whether the provider confirmed the DNS records for custom_domain at the last connect/check; absent or null when no domain. */
+  domain_verified?: boolean | null;
 }
 /** Moved here from src/server/site.ts (which re-exports it) so templates can import it. */
 export interface DraftInfo {
