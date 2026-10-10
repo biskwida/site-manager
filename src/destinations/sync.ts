@@ -15,8 +15,15 @@ export interface SyncDeps {
 export const BACKOFF_MS = [60_000, 300_000, 1_500_000, 7_200_000, 36_000_000] as const;
 export const MAX_ATTEMPTS = 5;
 
-/** One pending row per destination that has something to push for this set. */
-export async function enqueueForChangeSet(store: Store, cs: ChangeSet, now: Date): Promise<DestinationSync[]> {
+/** Lease the store hook puts on the rows it creates, so a tick running at the same time does not push them too. */
+export const HOOK_LEASE_MS = 5 * 60_000;
+
+/**
+ * One pending row per destination that has something to push for this set. `leaseMs` moves the row's first
+ * `next_at` into the future (the caller pushes it itself right away; a concurrent tick must not pick it).
+ */
+export async function enqueueForChangeSet(store: Store, cs: ChangeSet, now: Date, opts: { leaseMs?: number } = {}): Promise<DestinationSync[]> {
+  const nextAt = new Date(now.getTime() + (opts.leaseMs ?? 0)).toISOString();
   const out: DestinationSync[] = [];
   for (const dest of await store.listDestinations(cs.venue_id)) {
     if (dest.status === "disconnected") continue;
@@ -24,7 +31,7 @@ export async function enqueueForChangeSet(store: Store, cs: ChangeSet, now: Date
     if (!adapter) continue;
     const relevant = adapter.relevant(cs.changes);
     if (relevant.length === 0) continue;
-    out.push(await store.createSync({ venue_id: cs.venue_id, destination_id: dest.id, change_set_id: cs.id, payload: { kind: dest.kind, changes: relevant.length }, next_at: now.toISOString() }));
+    out.push(await store.createSync({ venue_id: cs.venue_id, destination_id: dest.id, change_set_id: cs.id, payload: { kind: dest.kind, changes: relevant.length }, next_at: nextAt }));
   }
   return out;
 }
@@ -65,17 +72,48 @@ export async function runSync(d: SyncDeps, sync: DestinationSync, now: Date): Pr
   return result;
 }
 
-/** Pushes every pending row that is due; called from the tick (and right after an apply by the store hook). */
-export async function runPendingSyncs(d: SyncDeps, opts: { venueId?: string; now: Date }): Promise<{ done: string[]; retry: string[]; failed: string[] }> {
-  const report = { done: [] as string[], retry: [] as string[], failed: [] as string[] };
-  for (const sync of await d.store.listSyncs({ venueId: opts.venueId, status: ["pending"], dueBefore: opts.now.toISOString(), limit: 50 })) {
-    const r = await runSync(d, sync, opts.now);
-    if (!r) {
-      report.failed.push(sync.id);
+type QueueReport = { done: string[]; retry: string[]; failed: string[] };
+
+/**
+ * Pushes one destination's pending rows strictly in order (oldest first), so a late retry can never overwrite a
+ * newer set or bring back an undone one. Stops at the first row that does not end `done`; the rows behind it stay
+ * pending and wait until that row's next attempt. `force` (the store hook, right after an apply) ignores next_at;
+ * without it only due rows run, and an older pending row that is not due yet still blocks the due ones behind it
+ * (a plain `dueBefore` filter would let them overtake it).
+ */
+export async function runDestinationQueue(d: SyncDeps, destinationId: string, now: Date, opts: { force: boolean; venueId?: string }): Promise<QueueReport> {
+  const report: QueueReport = { done: [], retry: [], failed: [] };
+  const all = (await d.store.listSyncs({ venueId: opts.venueId, status: ["pending"] })).filter((s) => s.destination_id === destinationId);
+  const nowIso = now.toISOString();
+  for (const [i, sync] of all.entries()) {
+    if (!opts.force && sync.next_at > nowIso) break; // the head is not due: nothing behind it may overtake it
+    const r = await runSync(d, sync, now);
+    const fresh = await d.store.getSync(sync.id);
+    if (fresh.status === "done") {
+      report.done.push(sync.id);
       continue;
     }
-    const fresh = await d.store.getSync(sync.id);
-    (fresh.status === "done" ? report.done : fresh.status === "failed" ? report.failed : report.retry).push(sync.id);
+    (r === null || fresh.status === "failed" ? report.failed : report.retry).push(sync.id);
+    for (const behind of all.slice(i + 1)) {
+      await d.store.updateSync(behind.id, { next_at: fresh.next_at, updated_at: nowIso });
+      report.retry.push(behind.id);
+    }
+    break;
+  }
+  return report;
+}
+
+/** Pushes every destination that has a due pending row, each destination's rows in order; called from the tick. */
+export async function runPendingSyncs(d: SyncDeps, opts: { venueId?: string; now: Date }): Promise<QueueReport> {
+  const report: QueueReport = { done: [], retry: [], failed: [] };
+  const due = await d.store.listSyncs({ venueId: opts.venueId, status: ["pending"], dueBefore: opts.now.toISOString(), limit: 50 });
+  const destinations = new Map<string, string>();
+  for (const s of due) if (!destinations.has(s.destination_id)) destinations.set(s.destination_id, s.venue_id);
+  for (const [destinationId, venueId] of destinations) {
+    const r = await runDestinationQueue(d, destinationId, opts.now, { force: false, venueId });
+    report.done.push(...r.done);
+    report.retry.push(...r.retry);
+    report.failed.push(...r.failed);
   }
   return report;
 }

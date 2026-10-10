@@ -397,7 +397,7 @@ export class InMemoryStore implements Store {
   async listSyncs(opts: { venueId?: string; changeSetId?: string; status?: SyncStatus[]; dueBefore?: string; limit?: number }) {
     const rows = [...this.syncs.values()]
       .filter((s) => (!opts.venueId || s.venue_id === opts.venueId) && (!opts.changeSetId || s.change_set_id === opts.changeSetId) && (!opts.status || opts.status.includes(s.status)) && (!opts.dueBefore || s.next_at <= opts.dueBefore))
-      .sort((a, b) => a.created_at.localeCompare(b.created_at));
+      .sort((a, b) => a.created_at.localeCompare(b.created_at) || a.id.localeCompare(b.id));
     return (opts.limit ? rows.slice(0, opts.limit) : rows).map(clone);
   }
   async updateSync(id: string, patch: SyncPatch) {

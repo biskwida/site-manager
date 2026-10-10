@@ -469,7 +469,7 @@ export class SupabaseStore implements Store {
   }
   async listSyncs(opts: { venueId?: string; changeSetId?: string; status?: SyncStatus[]; dueBefore?: string; limit?: number }) {
     if (badVenue(opts.venueId)) return [];
-    let q = this.db.from("destination_syncs").select("*").order("created_at");
+    let q = this.db.from("destination_syncs").select("*").order("created_at").order("id");
     if (opts.venueId) q = q.eq("venue_id", opts.venueId);
     if (opts.changeSetId) q = q.eq("change_set_id", opts.changeSetId);
     if (opts.status) q = q.in("status", opts.status);

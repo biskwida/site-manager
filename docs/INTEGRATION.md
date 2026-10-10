@@ -64,3 +64,4 @@ Add `lang="bg"` or `lang="en"` to force the language; the default is the venue's
 - Menu items are recreated on every menu change, so item CSS classes and link targets are lost.
 - Page previews use `?sm_preview=<key>`; themes that do not call `wp_body_open()` show the pending content without the yellow banner.
 - WooCommerce variations are not supported; simple products only.
+- Pushes to one site run strictly in order: a set that failed (site down) is retried before any newer set or undo is pushed, so the last approved change wins. A manual WordPress edit made between a proposal and a late retry of that proposal is overwritten by the retry.
