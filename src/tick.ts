@@ -121,6 +121,14 @@ export async function cleanupDrafts(d: { store: Store; now: Date; venueId?: stri
   const out: string[] = [];
   for (const v of await d.store.listVenues({ status: "draft" })) {
     if (v.status !== "draft") continue; // belt and braces: a store that ignores the filter must still never lose a live venue
+    // Fresh read right before the delete: a draft published between the list and this point must survive (R10).
+    let fresh;
+    try {
+      fresh = await d.store.getVenue(v.id);
+    } catch {
+      continue;
+    }
+    if (fresh.status !== "draft") continue;
     if (d.venueId && v.id !== d.venueId) continue;
     if (Date.parse(v.created_at) >= cutoff) continue;
     try {
