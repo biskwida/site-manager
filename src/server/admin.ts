@@ -15,6 +15,9 @@ export interface AdminOverview {
   public_url: string;
   template: TemplateId;
   status: VenueStatus;
+  /** True when this server has no deployer (no VERCEL_TOKEN): the hosted /<slug> is the site; no deploy record, no custom domain. */
+  hosted: boolean;
+  /** Always null when `hosted`. */
   deploy: DeployInfo | null;
   /** The provider URL when the deploy is ready, otherwise our hosted copy. */
   site_url: string;
@@ -27,7 +30,7 @@ export interface AdminOverview {
   sold_out: { id: string; name_bg: string; name_en: string; sold_out_until: string }[];
 }
 
-export async function adminOverview(store: Store, venue: Venue, now: Date, baseUrl = ""): Promise<AdminOverview> {
+export async function adminOverview(store: Store, venue: Venue, now: Date, baseUrl = "", opts: { hosted?: boolean } = {}): Promise<AdminOverview> {
   const [pending, scheduled, log, site] = await Promise.all([
     store.listChangeSets(venue.id, { status: ["proposed"], limit: 20 }),
     store.listChangeSets(venue.id, { status: ["scheduled"], limit: 50 }),
@@ -35,16 +38,20 @@ export async function adminOverview(store: Store, venue: Venue, now: Date, baseU
     store.getSite(venue.id),
   ]);
   const nowMs = now.getTime();
+  const hosted = opts.hosted ?? false;
+  // In hosted mode a deploy record left from an earlier setup means nothing: no provider is reachable from this server.
+  const deploy = hosted ? null : venue.deploy;
   return {
     venue: { id: venue.id, slug: venue.slug, name: venue.name, tz: venue.tz, default_lang: venue.default_lang },
     now: now.toISOString(),
     public_url: `${baseUrl}/${venue.slug}`,
     template: venue.template,
     status: venue.status,
-    deploy: venue.deploy,
-    site_url: venue.deploy?.status === "ready" && venue.deploy.url ? venue.deploy.url : `${baseUrl}/${venue.slug}`,
-    custom_domain: venue.deploy?.custom_domain ?? null,
-    domain_verified: venue.deploy?.custom_domain ? (venue.deploy.domain_verified ?? false) : null,
+    hosted,
+    deploy,
+    site_url: deploy?.status === "ready" && deploy.url ? deploy.url : `${baseUrl}/${venue.slug}`,
+    custom_domain: deploy?.custom_domain ?? null,
+    domain_verified: deploy?.custom_domain ? (deploy.domain_verified ?? false) : null,
     pending,
     scheduled: [...scheduled].sort((a, b) => (a.apply_at ?? "").localeCompare(b.apply_at ?? "")),
     log,
@@ -117,7 +124,8 @@ export async function adminAction(d: AdminDeps, venue: Venue, action: AdminActio
 export type AdminSiteActionName = "set_template" | "add_domain" | "check_domain";
 export interface AdminSiteDeps {
   store: Store;
-  deployer: Deployer;
+  /** null on a server without VERCEL_TOKEN (hosted mode). */
+  deployer: Deployer | null;
   feedUrlFor: (slug: string) => string;
   now: () => Date;
 }
@@ -137,6 +145,11 @@ export async function setTemplate(d: AdminSiteDeps, venue: Venue, template: unkn
   if (typeof template !== "string" || !(TEMPLATE_IDS as readonly string[]).includes(template)) return UNKNOWN_TEMPLATE;
   const id = template as TemplateId;
   const deploy = venue.deploy;
+  // Hosted mode: the hosted /<slug> renders the venue's template, so the switch is just the venue field.
+  if (!d.deployer) {
+    await d.store.updateVenue(venue.id, { template: id });
+    return { ok: true, template: id, deploy: null };
+  }
   if (!deploy) {
     await d.store.updateVenue(venue.id, { template: id });
     return { ok: true, template: id, deploy: null };
@@ -161,13 +174,14 @@ export async function setTemplate(d: AdminSiteDeps, venue: Venue, template: unkn
 
 export type DomainResult =
   | { ok: true; domain: string; instructions: DomainInstructions }
-  | { ok: false; code: "invalid_domain" | "no_site" | "no_domain" | "busy" | "refused" | "provider"; error: string; bg: string; en: string };
+  | { ok: false; code: "invalid_domain" | "no_site" | "no_domain" | "busy" | "refused" | "provider" | "unavailable"; error: string; bg: string; en: string };
 
 const INVALID_DOMAIN: DomainResult = { ok: false, code: "invalid_domain", error: "Invalid domain.", bg: "Това не прилича на домейн.", en: "That does not look like a domain name." };
 const NO_SITE: DomainResult = { ok: false, code: "no_site", error: "Publish the site first.", bg: "Първо публикувайте сайта.", en: "Publish the site first." };
 const NO_DOMAIN: DomainResult = { ok: false, code: "no_domain", error: "No domain connected.", bg: "Няма свързан домейн.", en: "No domain connected." };
 const DOMAIN_BUSY: DomainResult = { ok: false, code: "busy", error: BUSY.error, bg: BUSY.bg, en: BUSY.en };
 const DOMAIN_REFUSED: DomainResult = { ok: false, code: "refused", error: "The provider refused this domain.", bg: "Доставчикът отказа този домейн. Проверете дали не се използва от друг сайт.", en: "The provider refused this domain. Check that it is not used by another site." };
+const DOMAIN_UNAVAILABLE: DomainResult = { ok: false, code: "unavailable", error: "Not available on this server.", bg: "Това не е налично на този сървър.", en: "This is not available on this server." };
 const DOMAIN_FAILED: DomainResult = { ok: false, code: "provider", error: "The domain could not be added.", bg: "Домейнът не можа да бъде добавен. Опитайте след минута.", en: "The domain could not be added. Try again in a minute." };
 
 /**
@@ -192,7 +206,7 @@ async function attachDomain(d: AdminSiteDeps, venue: Venue, domain: string): Pro
   const deploy = venue.deploy;
   const gate = siteGate(deploy);
   if (gate || !deploy?.project_id) return gate ?? NO_SITE;
-  if (!d.deployer.addDomain) return DOMAIN_FAILED;
+  if (!d.deployer?.addDomain) return DOMAIN_FAILED;
   let instructions: DomainInstructions;
   try {
     instructions = await d.deployer.addDomain(deploy.project_id, domain);
@@ -208,6 +222,7 @@ async function attachDomain(d: AdminSiteDeps, venue: Venue, domain: string): Pro
 
 /** Dashboard "Connect": validate and normalise the hostname, attach it to the provider project, return the DNS records to set. */
 export async function connectDomain(d: AdminSiteDeps, venue: Venue, domainRaw: unknown): Promise<DomainResult> {
+  if (!d.deployer) return DOMAIN_UNAVAILABLE;
   const domain = normalizeDomain(domainRaw);
   if (!domain) return INVALID_DOMAIN;
   return attachDomain(d, venue, domain);
@@ -215,6 +230,7 @@ export async function connectDomain(d: AdminSiteDeps, venue: Venue, domainRaw: u
 
 /** Dashboard "Check again": re-reads the records and the verification for the stored domain (attaching again is idempotent). */
 export async function checkDomain(d: AdminSiteDeps, venue: Venue): Promise<DomainResult> {
+  if (!d.deployer) return DOMAIN_UNAVAILABLE;
   const gate = siteGate(venue.deploy);
   if (gate || !venue.deploy) return gate ?? NO_SITE;
   const domain = venue.deploy.custom_domain;

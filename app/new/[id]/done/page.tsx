@@ -41,7 +41,15 @@ export default async function Page(props: PageProps<"/new/[id]/done">) {
   const code = joined ? null : fromUrl && CODE.test(fromUrl) ? fromUrl : await newOwnerInvite(deps.store, venue.id);
   const adminKey = one(sp.key) || (await deps.store.getAdminToken(venue.id));
   const bot = deps.config.telegramBotUsername;
-  const initial: DoneStatusResponse = { status: venue.status, deploy: venue.deploy, site_url: venue.deploy?.status === "ready" ? venue.deploy.url : null };
+  const hosted = deps.deployer === null;
+  const deploy = hosted ? null : venue.deploy;
+  const initial: DoneStatusResponse = {
+    status: venue.status,
+    deploy,
+    site_url: deploy?.status === "ready" ? deploy.url : hosted ? `${deps.config.publicBaseUrl}/${venue.slug}` : null,
+    owner_joined: joined,
+    hosted,
+  };
   return (
     <LangProvider defaultLang={venue.default_lang}>
       <DoneStatus id={id} slug={venue.slug} code={code} startUrl={bot && code ? `https://t.me/${bot}?start=${code}` : null} adminKey={adminKey} baseUrl={deps.config.publicBaseUrl} initial={initial} />

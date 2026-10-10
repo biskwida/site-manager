@@ -16,7 +16,7 @@ export async function GET(req: Request, ctx: RouteContext<"/api/admin/[slug]">) 
   const { slug } = await ctx.params;
   const { deps, venue } = await auth(req, slug);
   if (!venue) return Response.json({ error: "unauthorized" }, { status: 401 });
-  return Response.json(await adminOverview(deps.store, venue, new Date(), deps.config.publicBaseUrl), { headers: { "cache-control": "no-store" } });
+  return Response.json(await adminOverview(deps.store, venue, new Date(), deps.config.publicBaseUrl, { hosted: deps.deployer === null }), { headers: { "cache-control": "no-store" } });
 }
 
 export async function POST(req: Request, ctx: RouteContext<"/api/admin/[slug]">) {
@@ -32,7 +32,7 @@ export async function POST(req: Request, ctx: RouteContext<"/api/admin/[slug]">)
   }
   if (body.action === "add_domain" || body.action === "check_domain") {
     const r = body.action === "add_domain" ? await connectDomain(siteDeps, venue, body.domain) : await checkDomain(siteDeps, venue);
-    // 400 for a hostname we cannot use; 409 when there is no ready site, no stored domain, a redeploy in flight, or the provider refused.
+    // 400 for a hostname we cannot use; 409 when there is no ready site, no stored domain, a redeploy in flight, the provider refused, or this server has no deployer.
     return Response.json(r, { status: r.ok ? 200 : r.code === "invalid_domain" ? 400 : 409 });
   }
   const actions: AdminActionName[] = ["apply", "reject", "cancel", "undo"];

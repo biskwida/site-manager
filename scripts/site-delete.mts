@@ -50,7 +50,7 @@ if (again !== slug) {
 if (deploy && !deploy.project_id) {
   console.log(`deploy record has no provider project id (status ${deploy.status}); nothing to delete at the provider`);
 } else if (deploy) {
-  if (deploy.provider === deps.deployer.provider) {
+  if (deps.deployer && deploy.provider === deps.deployer.provider) {
     try {
       await deps.deployer.deleteSite(deploy.project_id);
       console.log(`provider project ${deploy.project_id} deleted (${deploy.provider})`);
@@ -64,7 +64,7 @@ if (deploy && !deploy.project_id) {
     }
   } else {
     console.log(
-      `provider project ${deploy.project_id} NOT deleted: it was created with "${deploy.provider}" but this environment's deployer is "${deps.deployer.provider}". Delete it in the Vercel dashboard if it exists.`,
+      `provider project ${deploy.project_id} NOT deleted: it was created with "${deploy.provider}" but this environment's deployer is "${deps.deployer?.provider ?? "none (no VERCEL_TOKEN)"}". Delete it in the Vercel dashboard if it exists.`,
     );
   }
 }

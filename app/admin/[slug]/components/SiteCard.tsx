@@ -42,7 +42,8 @@ export function SiteCard({ overview: o, post }: { overview: AdminOverview; post:
     <Section id="your-site" title={t("admin.yourSite")}>
       <div className="rounded-3xl bg-card p-4 ring-1 ring-ink/10 sm:p-5">
         <div className="flex flex-wrap items-center gap-x-2 gap-y-1.5 text-sm text-ink-soft">
-          <Chip tone={statusTone}>{d ? t(`admin.deploy.${d.status}` as MessageKey) : t("admin.deploy.none")}</Chip>
+          {/* No deploy record (hosted mode, or before the first publish): the hosted /<slug> below is the site, so no deploy rows. */}
+          {d && <Chip tone={statusTone}>{t(`admin.deploy.${d.status}` as MessageKey)}</Chip>}
           <Chip>{t(`admin.template.${o.template}` as MessageKey)}</Chip>
           {d && <time dateTime={d.updated_at}>{t("admin.lastUpdate", { when: formatDateTime(d.updated_at, lang, o.venue.tz) })}</time>}
         </div>

@@ -27,6 +27,10 @@ describe("phaseOf", () => {
     expect(phaseOf({ status: "live", deploy: deploy("ready", "https://bar.example.test"), site_url: "https://bar.example.test" })).toBe("live");
     expect(phaseOf({ status: "live", deploy: deploy("error"), site_url: null })).toBe("error");
   });
+  it("without a deployer the hosted site is live as soon as the owner joined", () => {
+    expect(phaseOf({ status: "live", deploy: null, site_url: "https://site.example/bar", owner_joined: false, hosted: true })).toBe("waiting");
+    expect(phaseOf({ status: "live", deploy: null, site_url: "https://site.example/bar", owner_joined: true, hosted: true })).toBe("live");
+  });
 });
 
 describe("DoneStatus", () => {
@@ -66,6 +70,16 @@ describe("DoneStatus", () => {
     expect(render("bg", { status: "live", deploy: deploy("ready", "https://bar.example.test"), site_url: "https://bar.example.test" })).toContain("На живо на");
     expect(render("en", { status: "live", deploy: deploy("error"), site_url: null })).toContain("hit a snag");
     expect(render("bg", { status: "live", deploy: deploy("error"), site_url: null })).toContain("запъна");
+  });
+  it("hosted mode: the code stays until an owner exists, then the hosted URL shows as live", () => {
+    const before = render("en", { status: "live", deploy: null, site_url: "https://site.example/bar", owner_joined: false, hosted: true });
+    expect(before).toContain("/start ABCD2345");
+    expect(before).toContain('data-phase="waiting"');
+    const after = render("bg", { status: "live", deploy: null, site_url: "https://site.example/bar", owner_joined: true, hosted: true });
+    expect(after).not.toContain("/start ABCD2345");
+    expect(after).toContain("Telegram е свързан.");
+    expect(after).toContain('data-phase="live"');
+    expect(after).toContain('href="https://site.example/bar"');
   });
   it("never puts the admin key or the code anywhere a crawler could follow", () => {
     const html = render("en", waiting);

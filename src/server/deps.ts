@@ -27,9 +27,12 @@ export interface ServerDeps {
   /** Per-venue tick, then the agent turn. Logs and swallows errors. */
   handleRun: (r: RunRequest) => Promise<void>;
   isMemory: boolean;
-  /** VercelDeployer when VERCEL_TOKEN is set and the store is Supabase; FakeDeployer otherwise. */
-  deployer: Deployer;
-  /** Deferred: creates the venue's site (no-op when it is not live or already has one). */
+  /**
+   * FakeDeployer in memory mode; VercelDeployer when VERCEL_TOKEN is set; null otherwise (production without a token):
+   * no venue projects are created and every site is served from the hosted /<slug>.
+   */
+  deployer: Deployer | null;
+  /** Deferred: creates the venue's site (no-op when it is not live or already has one, or without a deployer). */
   startDeploy: (venueId: string) => void;
   /** Shared Anthropic client for the wizard AI routes; null without ANTHROPIC_API_KEY (offline mode). Tests inject `client`. */
   anthropic: Anthropic | null;
@@ -69,10 +72,16 @@ export async function makeServerDeps(o: DepsOptions): Promise<ServerDeps> {
   const s = store;
   const transcribe =
     o.transcribe !== undefined ? o.transcribe : config.sttApiKey ? makeTranscriber({ apiKey: config.sttApiKey, baseUrl: config.sttBaseUrl, model: config.sttModel }) : null;
-  const deployer: Deployer = o.deployer ?? (config.vercelToken && !isMemory ? new VercelDeployer({ token: config.vercelToken, teamId: config.vercelTeamId, files: (id) => buildFiles(id), log }) : new FakeDeployer());
-  if (deployer.provider === "fake") log(`[deploy] fake deployer (${isMemory ? "memory store" : "VERCEL_TOKEN not set"}): sites get https://<slug>.example.test`);
+  // The fake deployer is for offline mode only: in production it would hand owners https://<slug>.example.test.
+  const deployer: Deployer | null =
+    o.deployer ??
+    (isMemory ? new FakeDeployer() : config.vercelToken ? new VercelDeployer({ token: config.vercelToken, teamId: config.vercelTeamId, files: (id) => buildFiles(id), log }) : null);
+  if (deployer?.provider === "fake") log("[deploy] fake deployer (memory store): sites get https://<slug>.example.test");
+  if (!deployer) log("[deploy] no VERCEL_TOKEN: no venue deployments; sites are served from the hosted /<slug>");
   const feedUrlFor = (slug: string) => `${config.publicBaseUrl}/api/site/${encodeURIComponent(slug)}`;
-  const startDeploy = (venueId: string) => o.defer(() => runStartDeploy({ store: s, deployer, feedUrlFor, now: () => new Date(), log }, venueId));
+  const startDeploy = (venueId: string) => {
+    if (deployer) o.defer(() => runStartDeploy({ store: s, deployer, feedUrlFor, now: () => new Date(), log }, venueId));
+  };
 
   // createBot's handlers read `d.messenger` at call time, so the messenger (which needs bot.api) is set on this same object below.
   const botDeps: BotDeps = {
@@ -84,7 +93,8 @@ export async function makeServerDeps(o: DepsOptions): Promise<ServerDeps> {
     startRun: (r) => o.defer(() => handleRun(r)),
     transcribe,
     download: (filePath) => downloadTelegramFile(config.telegramToken, filePath),
-    onOwnerJoined: startDeploy,
+    // Without a deployer the hosted /<slug> is the site: nothing to publish, so no hook (and no "publishing" line).
+    onOwnerJoined: deployer ? startDeploy : undefined,
   };
   const bot = createBot(botDeps);
   const messenger = new TelegramMessenger(bot.api);

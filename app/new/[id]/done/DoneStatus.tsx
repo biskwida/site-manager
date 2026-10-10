@@ -5,15 +5,21 @@ import { useEffect, useRef, useState } from "react";
 import type { DeployInfo, VenueStatus } from "@/src/domain/types";
 import { LangToggle, useLang } from "@/src/i18n";
 
+/** GET /api/new/[id]/status (WizardStatusResponse). */
 export interface DoneStatusResponse {
   status: VenueStatus;
   deploy: DeployInfo | null;
   site_url: string | null;
+  /** An owner has pressed Start in Telegram. */
+  owner_joined?: boolean;
+  /** No deployer on this server: the hosted /<slug> is the site (deploy is always null). */
+  hosted?: boolean;
 }
 export type Phase = "waiting" | "publishing" | "live" | "error";
 
-/** No deploy yet = waiting for /start; pending/building = publishing; ready = live; error = error. */
+/** Hosted mode: live once the owner joined. Otherwise no deploy yet = waiting for /start; pending/building = publishing; ready = live; error = error. */
 export function phaseOf(s: DoneStatusResponse): Phase {
+  if (s.hosted) return s.owner_joined ? "live" : "waiting";
   if (!s.deploy) return "waiting";
   if (s.deploy.status === "ready") return "live";
   if (s.deploy.status === "error") return "error";
@@ -105,9 +111,9 @@ export function DoneStatus({ id, slug, code, startUrl, adminKey, baseUrl, initia
         <LangToggle />
       </div>
       <h1 className="mt-6 text-3xl font-semibold leading-tight text-balance sm:mt-8 sm:text-4xl">{t("done.title")}</h1>
-      <p className="mt-3 max-w-prose text-lg leading-snug text-ink-soft text-pretty">{t("done.lead")}</p>
+      <p className="mt-3 max-w-prose text-lg leading-snug text-ink-soft text-pretty">{t(status.hosted ? "done.leadHosted" : "done.lead")}</p>
 
-      {code ? (
+      {code && !status.owner_joined ? (
         <section aria-labelledby="tg" className="mt-7 rounded-3xl bg-card p-4 ring-1 ring-ink/10 sm:p-6">
           <h2 id="tg" className="sr-only">Telegram</h2>
           <div className="grid gap-5 sm:grid-cols-[auto_1fr] sm:gap-6">

@@ -383,15 +383,20 @@ export async function handlePublish(d: WizardDeps, venue: Venue): Promise<Respon
 
 export interface WizardStatusResponse {
   status: Venue["status"];
+  /** Always null without a deployer (hosted mode). */
   deploy: Venue["deploy"];
   site_url: string | null;
+  /** An owner has pressed Start in Telegram. */
+  owner_joined: boolean;
+  /** No deployer on this server: the hosted /<slug> is the site, live as soon as the owner joined. */
+  hosted: boolean;
 }
 
 /** Polls the deployer for this venue when its deploy is pending/building, then reports status, deploy and the best site URL. */
-export async function handleStatus(d: WizardDeps & { deployer: Deployer; messenger: Messenger | null }, venue: Venue): Promise<Response> {
+export async function handleStatus(d: WizardDeps & { deployer: Deployer | null; messenger: Messenger | null }, venue: Venue): Promise<Response> {
   try {
     let v = venue;
-    if (v.deploy && (v.deploy.status === "pending" || v.deploy.status === "building")) {
+    if (d.deployer && v.deploy && (v.deploy.status === "pending" || v.deploy.status === "building")) {
       try {
         await pollDeployments({ store: d.store, deployer: d.deployer, messenger: d.messenger, now: d.now, venueId: v.id });
       } catch (e) {
@@ -399,8 +404,11 @@ export async function handleStatus(d: WizardDeps & { deployer: Deployer; messeng
       }
       v = await d.store.getVenue(v.id);
     }
-    const site_url = v.deploy?.status === "ready" && v.deploy.url ? v.deploy.url : v.status === "live" ? publicUrl(d.config.publicBaseUrl, v.slug) : null;
-    const body: WizardStatusResponse = { status: v.status, deploy: v.deploy, site_url };
+    const deploy = d.deployer ? v.deploy : null;
+    const hostedUrl = v.status === "live" ? publicUrl(d.config.publicBaseUrl, v.slug) : null;
+    const site_url = deploy?.status === "ready" && deploy.url ? deploy.url : hostedUrl;
+    const owner_joined = v.status === "live" && (await d.store.listMembers(v.id)).some((m) => m.role === "owner");
+    const body: WizardStatusResponse = { status: v.status, deploy, site_url, owner_joined, hosted: !d.deployer };
     return Response.json(body, { headers: NO_STORE });
   } catch (e) {
     return wizardErrorResponse(e);

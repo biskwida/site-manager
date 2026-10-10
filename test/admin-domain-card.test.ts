@@ -15,7 +15,7 @@ const Provider = LangProvider as (props: { defaultLang: Lang; children?: ReactNo
 const ready: DeployInfo = { provider: "fake", project_id: "prj_1", deployment_id: "dpl_1", url: "https://agala.example.test", status: "ready", error: null, template: "classic", updated_at: "2026-10-10T09:00:00.000Z" };
 const base: AdminOverview = {
   venue: { id: "v1", slug: "agala", name: "Кафене „Ъгъла“", tz: "Europe/Sofia", default_lang: "bg" },
-  now: "2026-10-10T10:00:00.000Z", public_url: "https://site.example/agala", template: "classic", status: "live", deploy: null, site_url: "https://site.example/agala",
+  now: "2026-10-10T10:00:00.000Z", public_url: "https://site.example/agala", template: "classic", status: "live", hosted: false, deploy: null, site_url: "https://site.example/agala",
   custom_domain: null, domain_verified: null, pending: [], scheduled: [], log: [], sold_out: [],
 };
 const post = async () => ({ ok: true, data: null });

@@ -216,3 +216,31 @@ describe("custom domain", () => {
     expect((await store.getVenue(venue.id)).deploy).toEqual(building);
   });
 });
+
+describe("without a deployer (production without VERCEL_TOKEN)", () => {
+  const hostedDeps = (store: Awaited<ReturnType<typeof makeDemo>>["store"]) => ({ store, deployer: null, feedUrlFor: (slug: string) => `https://site.example/api/site/${slug}`, now: () => T0 });
+  const unavailable = { ok: false, code: "unavailable", error: "Not available on this server.", bg: "Това не е налично на този сървър.", en: "This is not available on this server." };
+
+  it("set_template only updates the venue (the hosted /<slug> shows the new template at once)", async () => {
+    const { store, venue } = await makeDemo();
+    expect(await setTemplate(hostedDeps(store), venue, "nocturne")).toEqual({ ok: true, template: "nocturne", deploy: null });
+    const after = await store.getVenue(venue.id);
+    expect(after.template).toBe("nocturne");
+    expect(after.deploy).toBeNull();
+    expect(await setTemplate(hostedDeps(store), after, "neon")).toMatchObject({ ok: false, code: "unknown_template" });
+  });
+
+  it("refuses custom domains with a bilingual 'not available on this server'", async () => {
+    const { store, venue } = await makeDemo();
+    expect(await connectDomain(hostedDeps(store), venue, "cafe.example.com")).toEqual(unavailable);
+    expect(await checkDomain(hostedDeps(store), venue)).toEqual(unavailable);
+  });
+
+  it("the overview reports hosted mode: no deploy record and the hosted URL", async () => {
+    const { store, venue } = await makeDemo();
+    await store.setDeploy(venue.id, ready); // a stale record from an earlier setup must not leak through
+    const o = await adminOverview(store, await store.getVenue(venue.id), T0, "https://site.example", { hosted: true });
+    expect(o).toMatchObject({ hosted: true, deploy: null, site_url: "https://site.example/agala", custom_domain: null, domain_verified: null });
+    expect((await adminOverview(store, await store.getVenue(venue.id), T0, "https://site.example")).hosted).toBe(false);
+  });
+});
