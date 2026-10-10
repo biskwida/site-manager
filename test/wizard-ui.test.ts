@@ -15,6 +15,7 @@ import { Photos } from "@/app/new/components/Steps/Photos";
 import { Review } from "@/app/new/components/Steps/Review";
 import { Texts } from "@/app/new/components/Steps/Texts";
 import { NoDraft } from "@/app/new/components/NoDraft";
+import { ResumeDraft } from "@/app/new/components/ResumeDraft";
 import { Stepper } from "@/app/new/components/Stepper";
 import type { StepProps } from "@/app/new/components/types";
 import { previewLinkAction } from "@/app/new/components/previewLinks";
@@ -123,6 +124,26 @@ describe("step components render labelled fields in both languages", () => {
     expect(html).toContain('aria-current="step"');
     expect((html.match(/<li>/g) ?? []).length).toBe(7);
     expect((html.match(/<button/g) ?? []).length).toBe(2); // basics and look are reachable, later steps are not
+  });
+  it("ResumeDraft links back to an unfinished draft, or to the hand-off page of a published site", () => {
+    const bg = render("bg", createElement(ResumeDraft, { resume: { id: "v1", kind: "draft", name: "Бар Нощ" } }));
+    expect(bg).toContain('href="/new/v1"');
+    expect(bg).toContain("Продължете черновата");
+    expect(bg).toContain("Бар Нощ");
+    const en = render("en", createElement(ResumeDraft, { resume: { id: "v1", kind: "draft", name: "" } }));
+    expect(en).toContain("Continue your draft");
+    const live = render("en", createElement(ResumeDraft, { resume: { id: "v 2", kind: "live", name: "Bar" } }));
+    expect(live).toContain('href="/new/v%202/done"');
+    expect(live).toContain("Bar");
+    expect(render("bg", createElement(ResumeDraft, { resume: { id: "v2", kind: "live", name: "Бар" } }))).toContain("Сайтът ви е създаден");
+  });
+  it("Look offers the three templates with the draft's one checked", () => {
+    const html = render("en", createElement(Look, props()));
+    expect(html).toContain("Design");
+    for (const name of ["Classic", "Nocturne", "Lumen"]) expect(html).toContain(name);
+    expect(html).toMatch(/name="template" checked="" value="classic"/);
+    expect(html).not.toMatch(/checked="" value="lumen"/);
+    expect(render("bg", createElement(Look, props()))).toContain("Дизайн");
   });
   it("NoDraft links back to the chooser", () => {
     const html = render("bg", createElement(NoDraft));

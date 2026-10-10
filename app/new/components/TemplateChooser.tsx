@@ -6,16 +6,24 @@ import { LangToggle } from "@/src/i18n";
 import { getTemplate } from "@/src/templates";
 import { api, type ApiError } from "./api";
 import { Button } from "./Field";
+import { ResumeDraft, type Resume } from "./ResumeDraft";
 import { ScaledFrame } from "./ScaledFrame";
 import { useT } from "./useWizardText";
 
-export function TemplateChooser({ demo, now }: { demo: SiteState; now: number }) {
+export function TemplateChooser({ demo, now, resume = null }: { demo: SiteState; now: number; resume?: Resume | null }) {
   const { t, lang } = useT();
   const router = useRouter();
   const [busy, setBusy] = useState<TemplateId | null>(null);
   const [error, setError] = useState<ApiError | null>(null);
+  // With a draft (or a just-published site) in this browser, a new one replaces its cookie: ask first.
+  const [confirming, setConfirming] = useState<TemplateId | null>(null);
 
   async function start(id: TemplateId) {
+    if (resume && confirming !== id) {
+      setConfirming(id);
+      return;
+    }
+    setConfirming(null);
     setBusy(id);
     setError(null);
     const r = await api.create(id);
@@ -35,6 +43,7 @@ export function TemplateChooser({ demo, now }: { demo: SiteState; now: number })
       </header>
       <h1 className="mt-8 max-w-[22ch] text-[2rem] font-semibold leading-[1.05] sm:mt-14 sm:text-[2.75rem]">{t("chooser.h1")}</h1>
       <p className="mt-4 max-w-[58ch] text-lg leading-relaxed text-fg-soft">{t("chooser.lead")}</p>
+      {resume && <ResumeDraft resume={resume} />}
       <ul className="mt-10 grid gap-5 md:grid-cols-3 sm:mt-14" aria-label={t("chooser.h1")}>
         {TEMPLATE_IDS.map((id) => {
           const def = getTemplate(id);
@@ -52,6 +61,15 @@ export function TemplateChooser({ demo, now }: { demo: SiteState; now: number })
                   {busy === id ? t("chooser.starting") : t("chooser.start")}
                 </Button>
                 <span id={`tpl-${id}-desc`} className="sr-only">{t("a11y.preview", { name })}</span>
+                {confirming === id && resume && (
+                  <div role="alertdialog" aria-labelledby={`tpl-${id}-confirm`} className="mt-2 rounded-xl bg-sunken p-3 ring-1 ring-line">
+                    <p id={`tpl-${id}-confirm`} className="text-sm leading-relaxed">{t(resume.kind === "draft" ? "chooser.confirmNew" : "chooser.confirmNewLive")}</p>
+                    <div className="mt-3 flex flex-wrap gap-2">
+                      <Button variant="primary" autoFocus onClick={() => void start(id)}>{t("chooser.confirmYes")}</Button>
+                      <Button variant="quiet" onClick={() => setConfirming(null)}>{t("chooser.confirmNo")}</Button>
+                    </div>
+                  </div>
+                )}
               </div>
             </li>
           );

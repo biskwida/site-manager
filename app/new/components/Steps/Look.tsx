@@ -1,6 +1,6 @@
 "use client";
 import { useState } from "react";
-import type { Media } from "@/src/domain/types";
+import { TEMPLATE_IDS, type Media, type TemplateId } from "@/src/domain/types";
 import { TEMPLATE_ACCENT_DEFAULTS } from "@/src/wizard/schema";
 import { api, WIZARD_MAX_IMAGE_BYTES } from "../api";
 import { fieldError } from "../errors";
@@ -53,8 +53,26 @@ export function Look({ id, draft, media, update, addMedia, fieldErrors }: StepPr
   const options = [templateDefault, ...PRESETS.filter((p) => p !== templateDefault)];
   const custom = !options.includes(draft.theme.accent.toLowerCase());
   const [hex, setHex] = useState(draft.theme.accent);
+  // Switching designs keeps everything; an accent still on the old design's default follows the new design's default.
+  function chooseTemplate(next: TemplateId) {
+    if (next === draft.template) return;
+    const followDefault = draft.theme.accent.toLowerCase() === templateDefault;
+    if (followDefault) setHex(TEMPLATE_ACCENT_DEFAULTS[next]);
+    update({ template: next, ...(followDefault ? { theme: { accent: TEMPLATE_ACCENT_DEFAULTS[next] } } : {}) });
+  }
   return (
     <div className="grid gap-8">
+      <Fieldset legend={t("look.template")} hint={t("look.templateHint")}>
+        <div className="flex flex-wrap gap-2">
+          {TEMPLATE_IDS.map((id) => (
+            <label key={id} className={SWATCH}>
+              <input type="radio" name="template" value={id} checked={draft.template === id} onChange={() => chooseTemplate(id)} className="sr-only" />
+              <span aria-hidden="true" className="size-7 rounded-full ring-1 ring-fg/10" style={{ background: TEMPLATE_ACCENT_DEFAULTS[id] }} />
+              <span>{t(`chooser.template.${id}`)}</span>
+            </label>
+          ))}
+        </div>
+      </Fieldset>
       <Fieldset legend={t("look.accent")}>
         <div className="flex flex-wrap gap-2">
           {options.map((c, i) => (
