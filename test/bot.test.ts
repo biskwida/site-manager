@@ -36,6 +36,14 @@ describe("bot", () => {
     await bot.handleUpdate(textUpdate(2000, "hello"));
     expect(api.texts()).toHaveLength(3);
   });
+  it("links a staff invite with the staff welcome and no dashboard link", async () => {
+    const { bot, api, store, venue } = await setup();
+    const code = await store.createInvite(venue.id, "staff", "2026-10-10T00:00:00.000Z");
+    await bot.handleUpdate(textUpdate(2001, `/start ${code}`, "en"));
+    expect(api.texts()[0]).toBe("You are linked as staff of Кафене „Ъгъла“. You can mark items sold out and add today's specials.\n\nSite: https://site.example/agala");
+    expect(api.texts()[0]).not.toContain("/admin/");
+    expect(await store.findMember(2001)).toMatchObject({ role: "staff", lang: "en" });
+  });
   it("handles /lang, /help, /menu and /undo", async () => {
     const { bot, api, runs, store } = await setup();
     await bot.handleUpdate(textUpdate(1001, "/lang en"));

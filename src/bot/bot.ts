@@ -6,6 +6,7 @@ import type { Lang, Member } from "../domain/types";
 import type { Store } from "../store/types";
 import { handleDecision, parseCallback } from "./approvals";
 import { copy, langFromCode } from "./copy";
+import { registerMediaHandlers } from "./media";
 import { type Messenger, TelegramMessenger } from "./messenger";
 
 export interface RunRequest {
@@ -149,10 +150,4 @@ export function createBot(d: BotDeps): Bot {
     await err.ctx.reply(copy(lang).error).catch(() => undefined);
   });
   return bot;
-}
-
-/** Photo, image-document and voice handlers (Task 14 fills this in). */
-export function registerMediaHandlers(bot: Bot, d: BotDeps): void {
-  void bot;
-  void d;
 }
