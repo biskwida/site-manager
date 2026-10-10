@@ -6451,6 +6451,12 @@ export default function NotFound() {
 }
 ```
 
+- [ ] **Step 5b: Lovable landing (user's decision 2026-10-10: the public landing is built in Lovable as a hackathon requirement)**
+
+1. In `app/page.tsx`, before rendering `<Landing>`, read `process.env.NEXT_PUBLIC_LANDING_URL?.trim()`; when it is a non-empty `https://` URL, `redirect(url)` (from `next/navigation`). Otherwise render the Next.js landing as the fallback. Add `NEXT_PUBLIC_LANDING_URL=` with a comment ("the Lovable landing; when set, / redirects there") to `.env.example` and `.env.local`.
+2. Create `docs/lovable/LANDING-PROMPT.md`: a prompt pack the user pastes into Lovable. Contents, in this order: (a) one paragraph telling Lovable what to build: a single-page bilingual (BG/EN toggle, default EN, remember the choice) marketing landing for "Site Manager", mobile-first, no backend, no forms, no contact section, one primary button "Open the demo café →" linking to `{{DEMO_URL}}` (the user replaces it with `<PUBLIC_BASE_URL>/agala`), and a small footer line "Landing built with Lovable · product by Site Manager"; (b) the exact copy for every section in both languages, taken verbatim from `src/i18n/dicts.ts` keys `landing.*` (eyebrow, h1, lead, cta, ctaNote, how + 3 steps, what + 6 features, price, priceNote, evidence, built, footer), presented as two columns or two blocks per section; (c) design tokens: paper `#faf7f2`, paper-deep `#f1ebe1`, card `#fffdf9`, ink `#1d2a24`, ink-soft `#4b5a53`, accent `#2f6b4f`, amber `#8f5c10`; fonts Literata (display, headings) and Onest (body) from Google Fonts with Cyrillic subsets; rounded-3xl cards, generous whitespace, WCAG AA contrast; a dark ink "price" block; (d) rules: no testimonials or logos that are not in the copy, no stock photos of people, no invented numbers, keep the three venue names and amounts exactly; (e) after it is published: paste the Lovable URL into `NEXT_PUBLIC_LANDING_URL` (Vercel env + `.env.local`) so `/` redirects there, and put `<PUBLIC_BASE_URL>/agala` into the demo button.
+3. `test/i18n.test.ts` gains nothing; the README (Task 19) gets a "Landing page (Lovable)" subsection pointing at the prompt pack.
+
 - [ ] **Step 6: Verify**
 
 Run: `npx vitest run test/i18n.test.ts` → PASS; `npx tsc --noEmit`; `npx next build` → green (fonts download at build; if the network blocks Google Fonts, the build fails with a clear message: then switch to `next/font/local` with `@fontsource` files and note it). Then start `npx next dev -p 3100` in the background, `curl -s http://localhost:3100/ | grep -o "Your café's website, managed by chat."`, confirm, stop the server.
@@ -6458,8 +6464,8 @@ Run: `npx vitest run test/i18n.test.ts` → PASS; `npx tsc --noEmit`; `npx next 
 - [ ] **Step 7: Commit**
 
 ```bash
-git add src/i18n app/globals.css app/layout.tsx app/page.tsx app/components/Landing.tsx app/not-found.tsx test/i18n.test.ts
-git commit -m "Web: bilingual i18n layer, design tokens and fonts, landing page with the pitch
+git add src/i18n app/globals.css app/layout.tsx app/page.tsx app/components/Landing.tsx app/not-found.tsx test/i18n.test.ts docs/lovable/LANDING-PROMPT.md .env.example
+git commit -m "Web: bilingual i18n layer, design tokens and fonts, fallback landing, Lovable landing prompt pack
 
 Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>"
 ```
@@ -7150,6 +7156,7 @@ console.log("\nOFFLINE E2E OK");
   2. **Demo** (2 minutes): the eight steps from the spec, as a table "You say / What happens".
   3. **How it works**: change sets, approval policy, read-time effectiveness and the tick, bilingual content, allergens, multi-venue; the architecture block from the spec.
   4. **Run locally**: `npm install`, `.env.local` from `.env.example` (table of every key: name, where to get it, required?), `npm run env:set`, offline mode (`npm run dev:offline` and `npm run e2e`), real mode (`npm run db:apply`, `npm run check:rls`, `npm run venue:create -- --name … --slug agala --lang bg --seed demo`, `npm run dev` + `npm run bot:dev`, `/start <code>` on the phone).
+  4b. **Landing page (Lovable)**: the public landing is built in Lovable from `docs/lovable/LANDING-PROMPT.md` (hackathon requirement); after publishing, set `NEXT_PUBLIC_LANDING_URL` so `/` redirects there; the Next.js `/` is the fallback.
   5. **Deploy to Vercel** step by step: `vercel login`, `vercel link`, `vercel env add` for each key (or the dashboard), set `CRON_SECRET` equal to `TICK_SECRET`, `vercel --prod`, set `PUBLIC_BASE_URL` to the deployment URL and redeploy, `npm run telegram:set-webhook -- https://<deployment>`, check `curl -H "x-tick-secret: …" https://<deployment>/api/tick`, note Hobby cron is daily (`vercel.json`) and Pro can use `*/5 * * * *` or `supabase/cron.sql`.
   6. **Demo-day checklist**: webhook set (or bot:dev running, never both), `npm run demo:reset`, phone on Telegram with the bot open, projector on `/agala`, admin page in a second tab, backup: typed messages if voice fails, `/undo`.
   7. **Security notes**: what the anon key can read, where the service key lives, admin link = key, webhook secret, no file-URL logging.
@@ -7195,4 +7202,5 @@ git push
 - `/menu` in the bot sends the public link, the menu link and the dashboard link (where the QR lives) instead of a QR image.
 - Speech-to-text is any OpenAI-compatible endpoint (`STT_*` keys, Groq by default), per the updated spec.
 - Draft preview on the public pages (`?draft=&key=`) added at the user's request.
+- The marketing landing is built in Lovable (hackathon requirement, user's decision 2026-10-10) from a prompt pack; the Next.js `/` is a fallback that redirects when `NEXT_PUBLIC_LANDING_URL` is set.
 - TypeScript stays at 5.9 (create-next-app's pin) rather than 7.0.2; Tailwind uses `@tailwindcss/turbopack` (the create-next-app 16.4 default) instead of PostCSS.
