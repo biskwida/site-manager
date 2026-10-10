@@ -102,7 +102,7 @@ describe("createDraft → updateDraft → publishDraft", () => {
     expect((await store.getVenue(venue.id)).slug).toMatch(/^draft-/); // the row keeps its placeholder until publish
     await expect(updateDraft(store, await store.getVenue(venue.id), { slug: "agala" })).rejects.toMatchObject({ code: "slug_taken", status: 409 });
     await expect(updateDraft(store, await store.getVenue(venue.id), { slug: "admin" })).rejects.toMatchObject({ code: "invalid", status: 400, errors: [{ path: "slug", en: "This address is reserved. Choose another." }] });
-    await expect(updateDraft(store, await store.getVenue(venue.id), { slug: "My Cafe" })).rejects.toMatchObject({ code: "invalid", errors: [{ path: "slug", en: "The address must be 2–39 lowercase letters, digits and dashes." }] });
+    await expect(updateDraft(store, await store.getVenue(venue.id), { slug: "My Cafe" })).rejects.toMatchObject({ code: "invalid", errors: [{ path: "slug", en: "The address must be 2–39 characters: lowercase letters, digits and single dashes between them." }] });
     await expect(updateDraft(store, await store.getVenue(venue.id), { slug: "draft-0a1b2c3d" })).rejects.toMatchObject({ code: "invalid", errors: [{ path: "slug", en: "This address is reserved. Choose another." }] });
     await expect(updateDraft(store, await store.getVenue(venue.id), { categories: [{ key: "c", name_bg: "x", name_en: "x", items: [{ key: "i", name_bg: "x", name_en: "x", desc_bg: "", desc_en: "", price_eur: 0.01, allergens: [], image_media_id: null }] }] })).rejects.toBeInstanceOf(WizardError);
     // a second draft may still choose the same slug as an unpublished first draft (only published venues are taken)

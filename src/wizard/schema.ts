@@ -8,7 +8,8 @@ import { PRICE_MAX, PRICE_MIN, round2 } from "../domain/pricing";
 import { BUSINESS_TYPES, LANGS, TEMPLATE_IDS, WEEKDAYS, type BusinessType, type Lang, type TemplateId, type WeekHours, type Weekday } from "../domain/types";
 import { DEFAULT_HOURS } from "../store/types";
 
-export const SLUG_RE = /^[a-z0-9][a-z0-9-]{1,38}$/;
+/** 2–39 chars: lowercase letters and digits, single dashes only between them (no leading, trailing or doubled dash). */
+export const SLUG_RE = /^[a-z0-9](?:[a-z0-9]|-(?=[a-z0-9])){1,38}$/;
 export const RESERVED_SLUGS = ["new", "admin", "api", "embed", "draft", "demo", "www", "static", "_next"];
 /** Placeholder slug of an unpublished draft: `draft-<8 hex>`. Never accepted as the final address. */
 export const DRAFT_SLUG_PREFIX = "draft-";
@@ -191,7 +192,7 @@ export function bothLangs(bg: string, en: string): { bg: string; en: string } {
 
 /** Why a slug cannot be the final address (format, reserved word or the draft placeholder); null when it can. */
 export function slugError(slug: string): { bg: string; en: string } | null {
-  if (!SLUG_RE.test(slug)) return { bg: "Адресът трябва да е 2–39 малки латински букви, цифри и тирета.", en: "The address must be 2–39 lowercase letters, digits and dashes." };
+  if (!SLUG_RE.test(slug)) return { bg: "Адресът трябва да е от 2 до 39 знака: малки латински букви, цифри и единични тирета между тях.", en: "The address must be 2–39 characters: lowercase letters, digits and single dashes between them." };
   if (RESERVED_SLUGS.includes(slug) || slug.startsWith(DRAFT_SLUG_PREFIX)) return { bg: "Този адрес е запазен. Изберете друг.", en: "This address is reserved. Choose another." };
   return null;
 }

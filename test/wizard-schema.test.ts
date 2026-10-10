@@ -16,7 +16,7 @@ function full() {
 }
 
 describe("slug rules", () => {
-  it("accepts 2–39 lowercase letters, digits and dashes starting with a letter or digit", () => {
+  it("accepts 2–39 lowercase letters, digits and single inner dashes, starting and ending with a letter or digit", () => {
     expect(SLUG_RE.test("agala")).toBe(true);
     expect(SLUG_RE.test("a1")).toBe(true);
     expect(SLUG_RE.test("my-cafe-2")).toBe(true);
@@ -26,6 +26,13 @@ describe("slug rules", () => {
     expect(SLUG_RE.test("кафе")).toBe(false);
     expect(SLUG_RE.test("a".repeat(40))).toBe(false);
     expect(SLUG_RE.test("a".repeat(39))).toBe(true);
+    // no consecutive dashes, no trailing dash (a leading one was already refused)
+    expect(SLUG_RE.test("my--cafe")).toBe(false);
+    expect(SLUG_RE.test("cafe-")).toBe(false);
+    expect(SLUG_RE.test("a-")).toBe(false);
+    expect(SLUG_RE.test("a-b")).toBe(true);
+    expect(SLUG_RE.test(`a-${"b".repeat(37)}`)).toBe(true); // 39
+    expect(SLUG_RE.test(`a-${"b".repeat(38)}`)).toBe(false); // 40
   });
   it("lists the reserved words", () => {
     expect(RESERVED_SLUGS).toEqual(["new", "admin", "api", "embed", "draft", "demo", "www", "static", "_next"]);
@@ -117,7 +124,7 @@ describe("validateForPublish", () => {
     if (r.ok) return;
     const byPath = Object.fromEntries(r.errors.map((e) => [e.path, e]));
     expect(byPath.name).toEqual({ path: "name", bg: "Въведете името на заведението.", en: "Enter the venue's name." });
-    expect(byPath.slug).toEqual({ path: "slug", bg: "Адресът трябва да е 2–39 малки латински букви, цифри и тирета.", en: "The address must be 2–39 lowercase letters, digits and dashes." });
+    expect(byPath.slug).toEqual({ path: "slug", bg: "Адресът трябва да е от 2 до 39 знака: малки латински букви, цифри и единични тирета между тях.", en: "The address must be 2–39 characters: lowercase letters, digits and single dashes between them." });
     expect(byPath.categories).toEqual({ path: "categories", bg: "Добавете поне един продукт в менюто.", en: "Add at least one menu item." });
     for (const e of r.errors) {
       expect(e.bg.length).toBeGreaterThan(0);
@@ -134,7 +141,7 @@ describe("validateForPublish", () => {
     expect(validateForPublish(b)).toMatchObject({ ok: false, errors: [{ path: "slug" }] });
     const c = full();
     c.slug = "";
-    expect(validateForPublish(c)).toMatchObject({ ok: false, errors: [{ path: "slug", en: "The address must be 2–39 lowercase letters, digits and dashes." }] });
+    expect(validateForPublish(c)).toMatchObject({ ok: false, errors: [{ path: "slug", en: "The address must be 2–39 characters: lowercase letters, digits and single dashes between them." }] });
   });
   it("needs a name in at least one language per category and item, and unique keys", () => {
     const d = full();
