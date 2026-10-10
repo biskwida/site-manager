@@ -103,7 +103,7 @@ npm test              # unit and integration tests
 
 ```bash
 npm run db:apply      # applies supabase/schema.sql and policies.sql (idempotent)
-npm run check:rls     # proves with the anon key what the browser can and cannot do; every line must say PASS
+npm run check:rls     # proves with the anon key what the browser can and cannot do; every line must say PASS (or SKIP before the demo venue exists)
 npm run venue:create -- --name "Кафене „Ъгъла“" --slug agala --lang bg --seed demo
 ```
 
@@ -174,12 +174,14 @@ Cron: `vercel.json` runs `/api/tick` once a day (`0 3 * * *`), because the Hobby
 - The demo venue is fictional.
 - Payments and billing for selling the service are out of scope.
 - Vercel Hobby cron is daily (see Deploy); minute-precise scheduling needs Pro or `supabase/cron.sql`.
+- Overnight opening hours (closing after midnight) are not supported yet: `set_hours` requires open < close on the same day.
+- The offline memory mode never renders photos: its `memory://` URLs are not served.
 
 ## What is verified
 
 Checked on 2026-10-10 on this branch:
 
-- `npm test`: 162 tests pass (26 files). One file is skipped by default: the live Supabase store contract, which runs only with `SUPABASE_CONTRACT=1`.
+- `npm test`: 170 tests pass (26 files). One file is skipped by default: the live Supabase store contract, which runs only with `SUPABASE_CONTRACT=1`.
 - `npx tsc --noEmit` and `npm run lint`: clean.
 - `npm run e2e`: the demo sequence offline (proposal and approve, instant sold-out, a special until closing, scheduled holidays, undo, a bulk change applied from the dashboard, the tick writing auto sets and applying the schedule): `OFFLINE E2E OK`.
 - `npx next build`: succeeds; no service-role key and no bot token in `.next/static`.
@@ -187,11 +189,11 @@ Checked on 2026-10-10 on this branch:
 - `npm run smoke -- --dry`: a real Anthropic call (`claude-opus-5-5`, effort `medium`) turned "Капучиното става 3,20" into a `set_price` proposal 2,90 € → 3,20 € with the approval buttons.
 - The production build served locally against live Supabase: `/agala` and `/agala/menu` render the demo menu, the admin page answers with a valid key, a wrong key and a tick without a secret get 401.
 - `npm run dev:offline` serves `/agala` from the in-memory store.
-- The bot token is valid (`getMe` answers as @restaurant_site_manager_bot); no webhook is set.
+- The bot token is valid (`getMe` answers as @restaurant_site_manager_bot).
+- The Vercel production deployment at https://site-manager-lovat.vercel.app: the environment is set, `/agala` answers 200 with the live menu, `/api/tick` answers 401 without the secret and a tick report with it, and the Telegram webhook points at `/api/telegram`.
 
 ## What is not verified
 
-- The real phone run: `/start` with an invite code, voice notes, the whiteboard photo and the approval buttons on a phone have not been run end to end in this pass.
-- The Vercel deployment: nothing is deployed yet, so the webhook, Vercel Cron, `after()` timing under `maxDuration` and the deployed admin link are untested.
+- The real phone run: `/start` with an invite code, voice notes, the whiteboard photo, the cover photo, the approval buttons and `/undo` on a phone have not been run end to end against the deployment.
 - The Lovable landing is not published yet, so the `/` redirect has not been seen with a real `NEXT_PUBLIC_LANDING_URL`.
 - Voice transcription with the configured provider and image turns at `high` effort were not part of the live smoke run.
