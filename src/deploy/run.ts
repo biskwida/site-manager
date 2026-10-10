@@ -80,41 +80,76 @@ export interface PollDeps {
   venueId?: string;
 }
 
-/** Checks venues with deploy.status pending|building (max POLL_MAX), 20-minute timeout → error; notifies owners on ready/error. */
+const inFlight = (dep: DeployInfo | null) => dep?.status === "pending" || dep?.status === "building";
+
+/**
+ * Checks venues with deploy.status pending|building (max POLL_MAX). The provider is asked first; the 20-minute timeout
+ * applies only when the answer is still pending/building (or there is no deployment id / the provider cannot be reached).
+ * Ready/error are written through claimDeploy with the polled deployment id, so a result lands only once (one owner
+ * message however many pollers run) and never on a newer deployment. A ready redeploy (the record already had a URL
+ * from an earlier ready deploy) gets the short "new design is live" message; the first one gets the full "site is live".
+ */
 export async function pollDeployments(d: PollDeps): Promise<{ ready: string[]; failed: string[] }> {
   const report = { ready: [] as string[], failed: [] as string[] };
   const venues = (await d.store.listVenues({ deploying: true })).filter((v) => !d.venueId || v.id === d.venueId).slice(0, POLL_MAX);
   for (const v of venues) {
     const dep = v.deploy;
-    if (!dep) continue;
+    if (!dep || !inFlight(dep)) continue;
     const now = d.now();
-    let result: DeployStatusResult;
-    if (now.getTime() - Date.parse(dep.updated_at) > DEPLOY_TIMEOUT_MS) {
-      result = { state: "error", url: null, error: "timeout: no result after 20 minutes" };
-    } else if (!dep.deployment_id) {
-      continue; // createSite still running in another request; the timeout above catches a lost one
-    } else {
+    const timedOut = now.getTime() - Date.parse(dep.updated_at) > DEPLOY_TIMEOUT_MS;
+    let result: DeployStatusResult | null = null;
+    if (dep.deployment_id) {
       try {
         result = await d.deployer.status(dep.deployment_id);
       } catch (e) {
         console.error(`[deploy] status ${v.slug} failed:`, short(e));
-        continue; // transient: next tick retries
+        if (!timedOut) continue; // transient: next poll retries
       }
     }
+    if (!result || result.state === "pending" || result.state === "building") {
+      // No deployment id yet means createSite is still running in another request; the timeout catches a lost one.
+      if (timedOut) result = { state: "error", url: null, error: "timeout: no result after 20 minutes" };
+      else if (!result) continue;
+    }
+    const claim = (next: DeployInfo) => d.store.claimDeploy(v.id, next, { whenStatusIn: ["pending", "building"], whenDeploymentId: dep.deployment_id });
+    const updated_at = now.toISOString();
     if (result.state === "ready") {
       const url = result.url ?? dep.url;
-      await d.store.setDeploy(v.id, { ...dep, status: "ready", url, error: null, updated_at: now.toISOString() });
+      const redeploy = dep.url !== null;
+      if (!(await claim({ ...dep, status: "ready", url, error: null, updated_at }))) continue;
       report.ready.push(v.id);
-      await notify(d, v, (lang) => copy(lang).siteLive(v.name, url ?? ""));
+      await notify(d, v, (lang) => (redeploy ? copy(lang).designLive(url ?? "") : copy(lang).siteLive(v.name, url ?? "")));
     } else if (result.state === "error") {
-      await d.store.setDeploy(v.id, { ...dep, status: "error", error: mask(result.error ?? "error").slice(0, ERROR_MAX), updated_at: now.toISOString() });
+      if (!(await claim({ ...dep, status: "error", error: mask(result.error ?? "error").slice(0, ERROR_MAX), updated_at }))) continue;
       report.failed.push(v.id);
       await notify(d, v, (lang) => copy(lang).siteFailed(v.name));
     } else if (result.state !== dep.status) {
-      await d.store.setDeploy(v.id, { ...dep, status: result.state, updated_at: now.toISOString() });
+      await claim({ ...dep, status: result.state, updated_at });
     }
   }
   return report;
+}
+
+/** Background watch after a deploy starts: one poll every WATCH_INTERVAL_MS, at most WATCH_MAX_MS (fits a 300 s function). */
+export const WATCH_INTERVAL_MS = 10_000;
+export const WATCH_MAX_MS = 240_000;
+
+/**
+ * Polls one venue's deployment until it is ready/error or WATCH_MAX_MS has passed, so completion (and the owner's Telegram
+ * message) never depends on an open tab. Runs inside after(); the 5-minute cron and the page nudges cover anything longer.
+ * Never throws.
+ */
+export async function watchDeploy(d: Omit<PollDeps, "venueId"> & { sleep?: (ms: number) => Promise<void>; log?: (s: string) => void }, venueId: string): Promise<void> {
+  const sleep = d.sleep ?? ((ms: number) => new Promise<void>((r) => setTimeout(r, ms)));
+  try {
+    for (let waited = 0; waited + WATCH_INTERVAL_MS <= WATCH_MAX_MS; waited += WATCH_INTERVAL_MS) {
+      if (!inFlight((await d.store.getVenue(venueId)).deploy)) return;
+      await sleep(WATCH_INTERVAL_MS);
+      await pollDeployments({ store: d.store, deployer: d.deployer, messenger: d.messenger, now: d.now, venueId });
+    }
+  } catch (e) {
+    (d.log ?? ((s: string) => console.log(s)))(`[deploy] watch ${venueId}: ${short(e)}`);
+  }
 }
 
 async function notify(d: PollDeps, venue: Venue, text: (lang: Lang) => string): Promise<void> {

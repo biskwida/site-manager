@@ -93,10 +93,12 @@ export interface Store {
   setDeploy(id: string, deploy: DeployInfo | null): Promise<void>;
   /**
    * Conditional deploy write: sets `deploy = next` only while the current deploy status is one of `whenStatusIn`
-   * (`null` = no deploy yet). One atomic update; true when the row changed, false when another request got there first
-   * (or the venue is unknown). Deploy starts and template switches claim through this so two requests never both deploy.
+   * (`null` = no deploy yet) and, when `whenDeploymentId` is given, the current deploy.deployment_id equals it.
+   * One atomic update; true when the row changed, false when another request got there first (or the venue is unknown).
+   * Deploy starts and template switches claim through this so two requests never both deploy; deploy polls claim their
+   * ready/error result with the deployment id they polled, so a result never lands on a newer deployment.
    */
-  claimDeploy(id: string, next: DeployInfo, opts: { whenStatusIn: (DeployStatus | null)[] }): Promise<boolean>;
+  claimDeploy(id: string, next: DeployInfo, opts: { whenStatusIn: (DeployStatus | null)[]; whenDeploymentId?: string }): Promise<boolean>;
   /**
    * Marks a draft as "publishing now" (`now` ISO, defaults to the clock) only if its status is still `draft` and no other
    * publish claimed it in the last PUBLISH_CLAIM_TTL_MS (a crashed publish releases itself). True when this call won the claim.

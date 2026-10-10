@@ -10,7 +10,7 @@ import { makeTranscriber, type Transcriber } from "../bot/voice";
 import { loadConfig, type Config } from "../config";
 import { FakeDeployer } from "../deploy/fake";
 import { buildFiles } from "../deploy/manifest";
-import { startDeploy as runStartDeploy } from "../deploy/run";
+import { startDeploy as runStartDeploy, watchDeploy as runWatchDeploy } from "../deploy/run";
 import type { Deployer } from "../deploy/types";
 import { VercelDeployer } from "../deploy/vercel";
 import { seedDemo } from "../seed/demo";
@@ -32,8 +32,10 @@ export interface ServerDeps {
    * no venue projects are created and every site is served from the hosted /<slug>.
    */
   deployer: Deployer | null;
-  /** Deferred: creates the venue's site (no-op when it is not live or already has one, or without a deployer). */
+  /** Deferred: creates the venue's site (no-op when it is not live or already has one, or without a deployer), then watches it. */
   startDeploy: (venueId: string) => void;
+  /** Deferred: polls the venue's in-flight deployment every 10 s for up to 240 s (after a template switch); no-op without a deployer. */
+  watchDeploy: (venueId: string) => void;
   /** Shared Anthropic client for the wizard AI routes; null without ANTHROPIC_API_KEY (offline mode). Tests inject `client`. */
   anthropic: Anthropic | null;
 }
@@ -47,6 +49,8 @@ export interface DepsOptions {
   client?: Anthropic;
   log?: (line: string) => void;
   deployer?: Deployer;
+  /** watchDeploy's wait between polls; tests pass a no-op. */
+  sleep?: (ms: number) => Promise<void>;
 }
 
 export async function makeServerDeps(o: DepsOptions): Promise<ServerDeps> {
@@ -79,8 +83,17 @@ export async function makeServerDeps(o: DepsOptions): Promise<ServerDeps> {
   if (deployer?.provider === "fake") log("[deploy] fake deployer (memory store): sites get https://<slug>.example.test");
   if (!deployer) log("[deploy] no VERCEL_TOKEN: no venue deployments; sites are served from the hosted /<slug>");
   const feedUrlFor = (slug: string) => `${config.publicBaseUrl}/api/site/${encodeURIComponent(slug)}`;
+  // The messenger is created below (it needs bot.api); these closures read it when they run, after this function returned.
+  const watch = (dep: Deployer, venueId: string) => runWatchDeploy({ store: s, deployer: dep, messenger, now: () => new Date(), sleep: o.sleep, log }, venueId);
   const startDeploy = (venueId: string) => {
-    if (deployer) o.defer(() => runStartDeploy({ store: s, deployer, feedUrlFor, now: () => new Date(), log }, venueId));
+    if (deployer)
+      o.defer(async () => {
+        await runStartDeploy({ store: s, deployer, feedUrlFor, now: () => new Date(), log }, venueId);
+        await watch(deployer, venueId);
+      });
+  };
+  const watchDeploy = (venueId: string) => {
+    if (deployer) o.defer(() => watch(deployer, venueId));
   };
 
   // createBot's handlers read `d.messenger` at call time, so the messenger (which needs bot.api) is set on this same object below.
@@ -97,7 +110,7 @@ export async function makeServerDeps(o: DepsOptions): Promise<ServerDeps> {
     onOwnerJoined: deployer ? startDeploy : undefined,
   };
   const bot = createBot(botDeps);
-  const messenger = new TelegramMessenger(bot.api);
+  const messenger: Messenger = new TelegramMessenger(bot.api);
   botDeps.messenger = messenger;
 
   async function handleRun(r: RunRequest): Promise<void> {
@@ -118,7 +131,7 @@ export async function makeServerDeps(o: DepsOptions): Promise<ServerDeps> {
     }
   }
 
-  return { config, store: s, messenger, bot, handleRun, isMemory, deployer, startDeploy, anthropic };
+  return { config, store: s, messenger, bot, handleRun, isMemory, deployer, startDeploy, watchDeploy, anthropic };
 }
 
 // On globalThis, not a module variable: `next dev` (HMR, separate route bundles) then shares one in-memory store between pages and API routes.

@@ -39,6 +39,7 @@ const BG = {
   error: "Възникна грешка. Опитайте отново.",
   publishing: "Сайтът ви се публикува. Ще ви пиша, когато е готов (обикновено до 2–3 минути).",
   siteLive: (name: string, url: string) => `🎉 Сайтът на ${name} е готов: ${url}\n\nОт тук нататък промените от този чат се появяват на него за секунди.`,
+  designLive: (url: string) => `✅ Новият дизайн е онлайн: ${url}`,
   siteFailed: (name: string) => `Публикуването на сайта на ${name} не успя. Ще го погледнем; дотогава сайтът ви остава достъпен на адреса от приветственото съобщение.`,
 };
 
@@ -75,6 +76,7 @@ const EN: typeof BG = {
   error: "Something went wrong. Please try again.",
   publishing: "Your site is being published. I'll message you when it's live (usually within 2–3 minutes).",
   siteLive: (name, url) => `🎉 ${name}'s site is live: ${url}\n\nFrom now on, changes from this chat show up there within seconds.`,
+  designLive: (url) => `✅ The new design is live: ${url}`,
   siteFailed: (name) => `Publishing ${name}'s site failed. We'll look into it; until then your site stays available at the address from the welcome message.`,
 };
 

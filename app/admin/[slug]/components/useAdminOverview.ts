@@ -47,8 +47,9 @@ export function useAdminOverview(initial: AdminOverview, slug: string, adminKey:
 
   const decide = useCallback(async (action: AdminActionName, changeSetId: string): Promise<boolean> => (await post({ action, change_set_id: changeSetId })).ok, [post]);
 
-  return { overview, unauthorized, decide, post };
+  return { overview, unauthorized, decide, post, refresh: load };
 }
 
 export type Decide = ReturnType<typeof useAdminOverview>["decide"];
 export type Post = ReturnType<typeof useAdminOverview>["post"];
+export type Refresh = ReturnType<typeof useAdminOverview>["refresh"];

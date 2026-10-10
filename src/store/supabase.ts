@@ -181,13 +181,16 @@ export class SupabaseStore implements Store {
   async setDeploy(id: string, deploy: DeployInfo | null) {
     await mustRows(this.db.from("venues").update({ deploy }).eq("id", id).select("id"), `setDeploy ${id}`);
   }
-  async claimDeploy(id: string, next: DeployInfo, opts: { whenStatusIn: (DeployStatus | null)[] }) {
+  async claimDeploy(id: string, next: DeployInfo, opts: { whenStatusIn: (DeployStatus | null)[]; whenDeploymentId?: string }) {
     if (badVenue(id)) return false;
     // One conditional UPDATE: the row filter is the claim, so two concurrent callers cannot both see the old status.
     const statuses = opts.whenStatusIn.filter((s): s is DeployStatus => s !== null);
     const parts = [...(opts.whenStatusIn.includes(null) ? ["deploy.is.null"] : []), ...(statuses.length ? [`deploy->>status.in.(${statuses.join(",")})`] : [])];
     if (parts.length === 0) return false;
-    const { data, error } = await this.db.from("venues").update({ deploy: next }).eq("id", id).or(parts.join(",")).select("id");
+    let q = this.db.from("venues").update({ deploy: next }).eq("id", id).or(parts.join(","));
+    // ->> yields text; a deploy record always carries deployment_id (possibly ""), so eq("") matches a create still in flight.
+    if (opts.whenDeploymentId !== undefined) q = q.eq("deploy->>deployment_id", opts.whenDeploymentId);
+    const { data, error } = await q.select("id");
     if (error) throw new Error(`claimDeploy ${id}: ${error.message}`);
     return (data?.length ?? 0) === 1;
   }

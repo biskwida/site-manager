@@ -91,9 +91,10 @@ export class InMemoryStore implements Store {
   async setDeploy(id: string, deploy: DeployInfo | null) {
     this.site(id).venue.deploy = deploy ? clone(deploy) : null;
   }
-  async claimDeploy(id: string, next: DeployInfo, opts: { whenStatusIn: (DeployStatus | null)[] }) {
+  async claimDeploy(id: string, next: DeployInfo, opts: { whenStatusIn: (DeployStatus | null)[]; whenDeploymentId?: string }) {
     const s = this.sites.get(id);
     if (!s || !opts.whenStatusIn.includes(s.venue.deploy?.status ?? null)) return false;
+    if (opts.whenDeploymentId !== undefined && s.venue.deploy?.deployment_id !== opts.whenDeploymentId) return false;
     s.venue.deploy = clone(next);
     return true;
   }

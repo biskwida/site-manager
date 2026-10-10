@@ -300,6 +300,16 @@ export function storeContract(name: string, make: () => Promise<Store>) {
         expect((await s.getVenue(v.id)).deploy).toEqual(building);
         expect(await s.claimDeploy(v.id, building, { whenStatusIn: [] })).toBe(false);
         expect(await s.claimDeploy("00000000-0000-0000-0000-000000000000", pending, { whenStatusIn: [null] })).toBe(false);
+        // whenDeploymentId: a poll result for deployment d1 must not land on a newer deployment (a template switch started d2)
+        const ready = { ...building, status: "ready" as const, url: "https://x.example.test" };
+        expect(await s.claimDeploy(v.id, ready, { whenStatusIn: ["pending", "building"], whenDeploymentId: "d0" })).toBe(false);
+        expect((await s.getVenue(v.id)).deploy).toEqual(building);
+        expect(await s.claimDeploy(v.id, ready, { whenStatusIn: ["pending", "building"], whenDeploymentId: "d1" })).toBe(true);
+        expect((await s.getVenue(v.id)).deploy).toEqual(ready);
+        expect(await s.claimDeploy(v.id, ready, { whenStatusIn: ["pending", "building"], whenDeploymentId: "d1" })).toBe(false); // already ready: a second poller loses
+        const switching = { ...ready, deployment_id: "", status: "building" as const };
+        expect(await s.claimDeploy(v.id, switching, { whenStatusIn: ["ready"] })).toBe(true);
+        expect(await s.claimDeploy(v.id, { ...switching, status: "error" as const }, { whenStatusIn: ["building"], whenDeploymentId: "" })).toBe(true); // empty id matches a create still in flight
       } finally {
         await s.deleteVenue(v.id);
       }

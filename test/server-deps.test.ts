@@ -30,23 +30,26 @@ describe("makeServerDeps (memory mode)", () => {
   it("uses the fake deployer in memory mode (even with a Vercel token) and deploys a live venue on demand", async () => {
     const jobs: Promise<void>[] = [];
     const logs: string[] = [];
-    const deps = await makeServerDeps({ defer: (fn) => void jobs.push(fn()), env: { SITE_MANAGER_STORE: "memory", VERCEL_TOKEN: "never-used" }, log: (s) => logs.push(s) });
+    const sleeps: number[] = [];
+    const deps = await makeServerDeps({ defer: (fn) => void jobs.push(fn()), env: { SITE_MANAGER_STORE: "memory", VERCEL_TOKEN: "never-used" }, log: (s) => logs.push(s), sleep: async (ms) => void sleeps.push(ms) });
     expect(deps.deployer?.provider).toBe("fake");
     expect(logs.join("\n")).toContain("[deploy] fake deployer (memory store)");
     expect(logs.join("\n")).not.toContain("never-used");
     const venue = await deps.store.getVenueBySlug("agala");
     deps.startDeploy(venue!.id);
     await Promise.all(jobs);
-    expect((await deps.store.getVenue(venue!.id)).deploy).toMatchObject({ provider: "fake", status: "building", template: "classic" });
+    // the background watch after the start polls until the fake is ready (second status call): no open tab needed
+    expect(sleeps).toEqual([10_000, 10_000]);
+    expect((await deps.store.getVenue(venue!.id)).deploy).toMatchObject({ provider: "fake", status: "ready", template: "classic" });
     expect((await deps.store.getVenue(venue!.id)).deploy?.project_id).toMatch(/^fake-prj-/);
     expect(deps.bot).toBeDefined();
   });
 
-  it("wires onOwnerJoined to startDeploy so an owner redeem publishes the site, and the per-webhook tick polls it", async () => {
+  it("wires onOwnerJoined to startDeploy so an owner redeem publishes the site and the background watch finishes it", async () => {
     const jobs: Promise<void>[] = [];
     // The agent turn inside handleRun gets a stub client that ends immediately; only the tick matters here.
     const client = { beta: { messages: { toolRunner: async () => ({ stop_reason: "end_turn", content: [{ type: "text", text: "ok" }] }) } } } as unknown as Anthropic;
-    const deps = await makeServerDeps({ defer: (fn) => void jobs.push(fn()), env: { SITE_MANAGER_STORE: "memory" }, log: () => {}, client });
+    const deps = await makeServerDeps({ defer: (fn) => void jobs.push(fn()), env: { SITE_MANAGER_STORE: "memory" }, log: () => {}, client, sleep: async () => {} });
     expect(deps.anthropic).toBe(client);
     deps.bot.botInfo = BOT_INFO;
     const venue = (await deps.store.getVenueBySlug("agala"))!;
@@ -54,15 +57,24 @@ describe("makeServerDeps (memory mode)", () => {
     const api = captureApi(deps.bot);
     await deps.bot.handleUpdate(textUpdate(4001, `/start ${code}`, "bg"));
     await Promise.all(jobs);
-    expect(api.texts().at(-1)).toMatch(/^Сайтът ви се публикува/);
-    expect((await deps.store.getVenue(venue.id)).deploy).toMatchObject({ provider: "fake", status: "building" });
-    // handleRun runs the venue tick with the deployer: the fake is ready on its second status() call
-    const member = (await deps.store.findMember(4001))!;
-    const run = { venueId: venue.id, chatId: 4001, member, text: "", source: "text" as const };
-    await deps.handleRun(run);
-    await deps.handleRun(run);
-    expect((await deps.store.getVenue(venue.id)).deploy).toMatchObject({ status: "ready", url: "https://agala.example.test" });
+    expect(api.texts()[1]).toMatch(/^Сайтът ви се публикува/);
+    expect((await deps.store.getVenue(venue.id)).deploy).toMatchObject({ provider: "fake", status: "ready", url: "https://agala.example.test" });
     expect(api.texts().filter((t) => t.includes("https://agala.example.test"))).toHaveLength(1);
+    // a later per-webhook tick (handleRun) finds nothing in flight and sends nothing more
+    const member = (await deps.store.findMember(4001))!;
+    await deps.handleRun({ venueId: venue.id, chatId: 4001, member, text: "", source: "text" as const });
+    expect(api.texts().filter((t) => t.includes("https://agala.example.test"))).toHaveLength(1);
+  });
+
+  it("watchDeploy polls an in-flight template switch in the background", async () => {
+    const jobs: Promise<void>[] = [];
+    const deps = await makeServerDeps({ defer: (fn) => void jobs.push(fn()), env: { SITE_MANAGER_STORE: "memory" }, log: () => {}, sleep: async () => {} });
+    const venue = (await deps.store.getVenueBySlug("agala"))!;
+    const created = await deps.deployer!.createSite({ slug: "agala", templateId: "lumen", feedUrl: "x" });
+    await deps.store.setDeploy(venue.id, { provider: "fake", project_id: created.projectId, deployment_id: created.deploymentId, url: "https://agala.example.test", status: "building", error: null, template: "lumen", updated_at: new Date().toISOString() });
+    deps.watchDeploy(venue.id);
+    await Promise.all(jobs);
+    expect((await deps.store.getVenue(venue.id)).deploy?.status).toBe("ready");
   });
 });
 

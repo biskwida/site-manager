@@ -3,6 +3,8 @@ import { adminAction, adminOverview, checkDomain, connectDomain, setTemplate, ty
 import { getServerDeps } from "@/src/server/deps";
 
 export const dynamic = "force-dynamic";
+// A template switch keeps watching the redeploy in after() for up to 240 s.
+export const maxDuration = 300;
 
 async function auth(req: Request, slug: string) {
   const deps = await getServerDeps((fn) => after(fn));
@@ -27,6 +29,8 @@ export async function POST(req: Request, ctx: RouteContext<"/api/admin/[slug]">)
   const siteDeps = { store: deps.store, deployer: deps.deployer, feedUrlFor: (s: string) => `${deps.config.publicBaseUrl}/api/site/${encodeURIComponent(s)}`, now: () => new Date() };
   if (body.action === "set_template") {
     const r = await setTemplate(siteDeps, venue, body.template);
+    // Finish the redeploy (and send the owner's "new design is live") without depending on an open dashboard.
+    if (r.ok && (r.deploy?.status === "pending" || r.deploy?.status === "building")) deps.watchDeploy(venue.id);
     // 409 while a deploy is in flight (the card shows the localized message); 400 for a template id we do not have.
     return Response.json(r, { status: r.ok ? 200 : r.code === "busy" ? 409 : 400 });
   }

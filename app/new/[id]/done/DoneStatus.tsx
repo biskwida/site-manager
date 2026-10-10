@@ -1,9 +1,10 @@
 "use client";
 // The moment the owner connects Telegram. Self-contained (no wizard components): brand tokens, Literata headings, Onest body.
 import { QRCodeSVG } from "qrcode.react";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import type { DeployInfo, VenueStatus } from "@/src/domain/types";
 import { LangToggle, useLang } from "@/src/i18n";
+import { startTickNudge } from "@/app/components/tickNudge";
 
 /** GET /api/new/[id]/status (WizardStatusResponse). */
 export interface DoneStatusResponse {
@@ -27,8 +28,6 @@ export function phaseOf(s: DoneStatusResponse): Phase {
 }
 
 const POLL_MS = 5_000;
-const TICK_MS = 30_000;
-const TICK_WINDOW_MS = 10 * 60_000;
 const defaultFetch: typeof fetch = (input, init) => fetch(input, init);
 
 interface Props {
@@ -49,7 +48,6 @@ export function DoneStatus({ id, slug, code, startUrl, adminKey, baseUrl, initia
   const { t } = useLang();
   const [status, setStatus] = useState(initial);
   const [copied, setCopied] = useState(false);
-  const started = useRef<number | null>(null);
   const phase = phaseOf(status);
 
   useEffect(() => {
@@ -74,18 +72,11 @@ export function DoneStatus({ id, slug, code, startUrl, adminKey, baseUrl, initia
     };
   }, [id, phase, fetcher]);
 
-  // Vercel cron is daily: while publishing, nudge the tick with the owner's key (allowed by ?key= auth) for the first 10 minutes,
-  // so the deploy is polled and the "your site is live" Telegram message goes out promptly.
+  // While publishing, nudge the tick with the owner's key so the deploy is polled and this page turns live promptly
+  // (the background watch after /start and the 5-minute cron finish it too, with or without this page).
   useEffect(() => {
     if (phase !== "publishing") return;
-    started.current ??= Date.now();
-    const nudge = () => {
-      if (Date.now() - (started.current ?? Date.now()) > TICK_WINDOW_MS) return;
-      void fetcher(`/api/tick?key=${encodeURIComponent(adminKey)}`, { method: "POST" }).catch(() => undefined);
-    };
-    nudge();
-    const timer = window.setInterval(nudge, TICK_MS);
-    return () => window.clearInterval(timer);
+    return startTickNudge({ adminKey, fetcher });
   }, [phase, adminKey, fetcher]);
 
   async function copy() {

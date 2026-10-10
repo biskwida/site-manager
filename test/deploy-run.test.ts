@@ -1,7 +1,7 @@
 // test/deploy-run.test.ts
 import { describe, expect, it } from "vitest";
 import { FakeDeployer } from "@/src/deploy/fake";
-import { DEPLOY_TIMEOUT_MS, POLL_MAX, pollDeployments, startDeploy } from "@/src/deploy/run";
+import { DEPLOY_TIMEOUT_MS, POLL_MAX, pollDeployments, startDeploy, watchDeploy, WATCH_INTERVAL_MS, WATCH_MAX_MS } from "@/src/deploy/run";
 import type { Deployer, DeployStatusResult } from "@/src/deploy/types";
 import { FakeMessenger, makeDemo } from "./helpers";
 
@@ -184,6 +184,66 @@ describe("pollDeployments", () => {
     expect(polls).toBe(0);
   });
 
+  it("asks the provider before applying the timeout: a deployment READY at minute 21 becomes ready, not error", async () => {
+    const { store, venue } = await makeDemo();
+    const deployer: Deployer = {
+      provider: "fake",
+      createSite: async () => ({ projectId: "p", deploymentId: "d" }),
+      status: async () => ({ state: "ready", url: "https://late.example.test", error: null }),
+      redeploy: async () => ({ deploymentId: "d2" }),
+      deleteSite: async () => {},
+    };
+    const m = new FakeMessenger();
+    await startDeploy({ store, deployer, feedUrlFor, now: () => T0 }, venue.id);
+    const minute21 = new Date(T0.getTime() + 21 * 60_000);
+    expect(await pollDeployments({ store, deployer, messenger: m, now: () => minute21 })).toEqual({ ready: [venue.id], failed: [] });
+    expect((await store.getVenue(venue.id)).deploy).toMatchObject({ status: "ready", url: "https://late.example.test", error: null });
+    expect(m.sent.map((x) => x.text)).toEqual([expect.stringMatching(/^🎉/)]);
+  });
+
+  it("notifies once when two pollers see the same result, and never overwrites a newer deployment", async () => {
+    const { store, venue } = await makeDemo();
+    const deployer: Deployer = {
+      provider: "fake",
+      createSite: async () => ({ projectId: "p", deploymentId: "d1" }),
+      status: async () => ({ state: "ready", url: "https://agala.example.test", error: null }),
+      redeploy: async () => ({ deploymentId: "d2" }),
+      deleteSite: async () => {},
+    };
+    const m = new FakeMessenger();
+    await startDeploy({ store, deployer, feedUrlFor, now: () => T0 }, venue.id);
+    const d = { store, deployer, messenger: m, now: () => T0 };
+    const [a, b] = await Promise.all([pollDeployments(d), pollDeployments(d)]);
+    expect([...a.ready, ...b.ready]).toEqual([venue.id]);
+    expect(m.sent).toHaveLength(1);
+    // a poll that read deployment d1 must not land on d2 (a template switch that started in between)
+    const switched = { ...(await store.getVenue(venue.id)).deploy!, deployment_id: "d2", status: "building" as const, template: "lumen" as const };
+    const stale: Deployer = { ...deployer, status: async () => { await store.setDeploy(venue.id, switched); return { state: "error", url: null, error: "old build failed" }; } };
+    await store.setDeploy(venue.id, { ...switched, deployment_id: "d1" });
+    expect(await pollDeployments({ store, deployer: stale, messenger: m, now: () => T0 })).toEqual({ ready: [], failed: [] });
+    expect((await store.getVenue(venue.id)).deploy).toEqual(switched);
+    expect(m.sent).toHaveLength(1);
+  });
+
+  it("says the new design is live after a redeploy (the record had a URL from an earlier ready deploy)", async () => {
+    const { store, venue } = await makeDemo();
+    await store.upsertMember({ venue_id: venue.id, tg_chat_id: 1003, role: "owner", lang: "en" });
+    const deployer: Deployer = {
+      provider: "fake",
+      createSite: async () => ({ projectId: "p", deploymentId: "d1" }),
+      status: async () => ({ state: "ready", url: "https://agala.example.test", error: null }),
+      redeploy: async () => ({ deploymentId: "d2" }),
+      deleteSite: async () => {},
+    };
+    await store.setDeploy(venue.id, { provider: "fake", project_id: "p", deployment_id: "d2", url: "https://agala.example.test", status: "building", error: null, template: "lumen", updated_at: T0.toISOString() });
+    const m = new FakeMessenger();
+    expect(await pollDeployments({ store, deployer, messenger: m, now: () => T0 })).toEqual({ ready: [venue.id], failed: [] });
+    expect(m.sent.map((x) => [x.chatId, x.text])).toEqual([
+      [1001, "✅ Новият дизайн е онлайн: https://agala.example.test"],
+      [1003, "✅ The new design is live: https://agala.example.test"],
+    ]);
+  });
+
   it("limits itself to one venue when asked, and to POLL_MAX venues per run", async () => {
     const { store, venue } = await makeDemo();
     const other = await store.createVenue({ slug: "other", name: "Other" });
@@ -198,5 +258,36 @@ describe("pollDeployments", () => {
     const polled = [...deployer.deployments.values()].filter((x) => x.polls > 0).length;
     await pollDeployments({ store, deployer, messenger: null, now: () => T0 });
     expect([...deployer.deployments.values()].filter((x) => x.polls > 0).length - polled).toBe(POLL_MAX);
+  });
+});
+
+describe("watchDeploy", () => {
+  it("polls every WATCH_INTERVAL_MS until the deploy settles, without an open tab", async () => {
+    const { store, venue } = await makeDemo();
+    const deployer = new FakeDeployer();
+    const m = new FakeMessenger();
+    await startDeploy({ store, deployer, feedUrlFor, now: () => T0 }, venue.id);
+    const sleeps: number[] = [];
+    await watchDeploy({ store, deployer, messenger: m, now: () => T0, sleep: async (ms) => void sleeps.push(ms) }, venue.id);
+    expect(sleeps).toEqual([WATCH_INTERVAL_MS, WATCH_INTERVAL_MS]); // the fake is ready on its second status() call
+    expect((await store.getVenue(venue.id)).deploy?.status).toBe("ready");
+    expect(m.sent).toHaveLength(1);
+  });
+
+  it("gives up after WATCH_MAX_MS (the cron and the page nudges take over) and never throws", async () => {
+    const { store, venue } = await makeDemo();
+    const slow: Deployer = {
+      provider: "fake",
+      createSite: async () => ({ projectId: "p", deploymentId: "d" }),
+      status: async () => ({ state: "building", url: null, error: null }),
+      redeploy: async () => ({ deploymentId: "d2" }),
+      deleteSite: async () => {},
+    };
+    await startDeploy({ store, deployer: slow, feedUrlFor, now: () => T0 }, venue.id);
+    const sleeps: number[] = [];
+    await watchDeploy({ store, deployer: slow, messenger: null, now: () => T0, sleep: async (ms) => void sleeps.push(ms) }, venue.id);
+    expect(sleeps).toHaveLength(Math.floor(WATCH_MAX_MS / WATCH_INTERVAL_MS));
+    expect((await store.getVenue(venue.id)).deploy?.status).toBe("building");
+    await expect(watchDeploy({ store, deployer: slow, messenger: null, now: () => T0, sleep: async () => {} }, "00000000-0000-0000-0000-000000000000")).resolves.toBeUndefined();
   });
 });

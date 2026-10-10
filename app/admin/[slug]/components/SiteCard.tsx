@@ -1,21 +1,23 @@
 "use client";
-import { useState, type FormEvent } from "react";
+import { useEffect, useState, type FormEvent } from "react";
+import { startTickNudge } from "@/app/components/tickNudge";
 import { TEMPLATE_IDS, type TemplateId } from "@/src/domain/types";
 import { useLang } from "@/src/i18n";
 import type { MessageKey } from "@/src/i18n/dicts";
 import type { AdminOverview } from "@/src/server/admin";
 import { formatDateTime } from "@/src/time";
 import { Chip, Section } from "./bits";
-import type { Post } from "./useAdminOverview";
+import type { Post, Refresh } from "./useAdminOverview";
 
 const isLocalized = (d: unknown): d is { bg: string; en: string } =>
   typeof d === "object" && d !== null && typeof (d as { bg?: unknown }).bg === "string" && typeof (d as { en?: unknown }).en === "string";
 
 /**
  * "Your site": where it lives, whether it is live, which template it wears, and the switch.
- * Changing the template redeploys a deployed site; while a deploy is in flight the switch waits (the 3 s poll re-enables it).
+ * Changing the template redeploys a deployed site; while a deploy is in flight the switch waits (the 3 s poll re-enables it)
+ * and the card nudges the tick every 30 s so the deploy is polled promptly.
  */
-export function SiteCard({ overview: o, post }: { overview: AdminOverview; post: Post }) {
+export function SiteCard({ overview: o, post, adminKey = "", refresh }: { overview: AdminOverview; post: Post; adminKey?: string; refresh?: Refresh }) {
   const { lang, t } = useLang();
   const [template, setTemplate] = useState<TemplateId>(o.template);
   const [busy, setBusy] = useState(false);
@@ -24,6 +26,11 @@ export function SiteCard({ overview: o, post }: { overview: AdminOverview; post:
   const d = o.deploy;
   const publishing = d?.status === "pending" || d?.status === "building";
   const unchanged = template === o.template;
+
+  useEffect(() => {
+    if (!publishing || !adminKey) return;
+    return startTickNudge({ adminKey, onNudged: () => void refresh?.() });
+  }, [publishing, adminKey, refresh]);
 
   async function change(e: FormEvent) {
     e.preventDefault();
