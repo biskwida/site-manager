@@ -1,10 +1,5 @@
 // src/bot/media.ts
-import type { Bot, Context } from "grammy";
 import type { ImageInput } from "../agent/run";
-import { detectLang } from "../domain/format";
-import type { BotDeps } from "./bot";
-import { requireMember } from "./bot";
-import { copy } from "./copy";
 
 export const MAX_IMAGE_BYTES = 5 * 1024 * 1024;
 
@@ -32,75 +27,4 @@ export function imageMediaType(contentType: string, filePath: string): ImageInpu
   if (ext === "gif") return "image/gif";
   if (ext === "jpg" || ext === "jpeg" || ext === undefined || !filePath.includes(".")) return "image/jpeg";
   return null;
-}
-
-function toBase64(bytes: Uint8Array): string {
-  return Buffer.from(bytes).toString("base64");
-}
-
-export function registerMediaHandlers(bot: Bot, d: BotDeps): void {
-  const handleImage = async (ctx: Context, fileId: string, caption: string | undefined) => {
-    const member = await requireMember(d, ctx);
-    if (!member) return;
-    const lang = detectLang(caption ?? "") ?? member.lang;
-    const c = copy(lang);
-    let media_type: ImageInput["media_type"] | null;
-    let bytes: Uint8Array;
-    try {
-      const file = await ctx.api.getFile(fileId);
-      if (!file.file_path) throw new Error("no file_path");
-      const dl = await d.download(file.file_path);
-      bytes = dl.bytes;
-      media_type = imageMediaType(dl.contentType, file.file_path);
-    } catch (e) {
-      const msg = e instanceof Error ? e.message : String(e);
-      console.error(`[bot] image download failed: ${msg}`);
-      await ctx.reply(/too large/.test(msg) ? c.photoTooBig : c.photoFailed);
-      return;
-    }
-    if (!media_type) {
-      await ctx.reply(c.photoFailed);
-      return;
-    }
-    const media = await d.store.saveMedia(member.venue_id, bytes, media_type);
-    d.startRun({ venueId: member.venue_id, chatRef: member.chat_ref, member: { ...member, lang }, text: caption ?? "", source: "photo", image: { data: toBase64(bytes), media_type }, mediaId: media.id });
-    await d.messenger.typing(member.chat_ref);
-  };
-
-  bot.on("message:photo", (ctx) => handleImage(ctx, ctx.message.photo.at(-1)!.file_id, ctx.message.caption));
-  bot.on("message:document", async (ctx) => {
-    const doc = ctx.message.document;
-    if (!doc.mime_type?.startsWith("image/")) return;
-    await handleImage(ctx, doc.file_id, ctx.message.caption);
-  });
-
-  const handleVoice = async (ctx: Context, fileId: string) => {
-    const member = await requireMember(d, ctx);
-    if (!member) return;
-    const c = copy(member.lang);
-    if (!d.transcribe) {
-      await ctx.reply(c.voiceUnavailable);
-      return;
-    }
-    let text: string;
-    try {
-      const file = await ctx.api.getFile(fileId);
-      if (!file.file_path) throw new Error("no file_path");
-      const dl = await d.download(file.file_path);
-      text = (await d.transcribe(dl.bytes, member.lang)).trim();
-    } catch (e) {
-      console.error(`[bot] voice failed: ${e instanceof Error ? e.message : String(e)}`);
-      await ctx.reply(c.voiceFailed);
-      return;
-    }
-    if (!text) {
-      await ctx.reply(c.voiceFailed);
-      return;
-    }
-    const lang = detectLang(text) ?? member.lang;
-    d.startRun({ venueId: member.venue_id, chatRef: member.chat_ref, member: { ...member, lang }, text, source: "voice" });
-    await ctx.reply(copy(lang).heard(text)).catch(() => undefined);
-  };
-  bot.on("message:voice", (ctx) => handleVoice(ctx, ctx.message.voice.file_id));
-  bot.on("message:audio", (ctx) => handleVoice(ctx, ctx.message.audio.file_id));
 }

@@ -3,13 +3,12 @@ import { Bot, type Context } from "grammy";
 import type { UserFromGetMe } from "grammy/types";
 import type { ImageInput } from "../agent/run";
 import { makeRef } from "../channels/ref";
-import { detectLang } from "../domain/format";
-import type { Lang, Member } from "../domain/types";
+import type { Member } from "../domain/types";
 import type { Store } from "../store/types";
-import { handleDecision, parseCallback } from "./approvals";
 import { copy, langFromCode } from "./copy";
-import { registerMediaHandlers } from "./media";
+import { handleInbound, type InboundMedia } from "./inbound";
 import type { Messenger } from "./messenger";
+import type { Transcriber } from "./voice";
 
 export interface RunRequest {
   venueId: string;
@@ -30,7 +29,7 @@ export interface BotDeps {
   /** Schedules the agent turn (after() on Vercel, a floating promise in dev-bot). Must not throw. */
   startRun: (r: RunRequest) => void;
   /** null when STT is not configured. */
-  transcribe: ((bytes: Uint8Array, lang: Lang) => Promise<string>) | null;
+  transcribe: Transcriber | null;
   /** Downloads a Telegram file by file_path; the URL (with the bot token) stays inside. */
   download: (filePath: string) => Promise<{ bytes: Uint8Array; contentType: string }>;
   /** Tests pass this to skip getMe. */
@@ -47,105 +46,35 @@ export function publicUrl(baseUrl: string, slug: string): string {
   return `${baseUrl}/${slug}`;
 }
 
-/** Resolves the member for a chat, or replies with the no-access hint and returns null. */
-export async function requireMember(d: BotDeps, ctx: Context): Promise<Member | null> {
-  if (ctx.chat === undefined) return null;
-  const member = await d.store.findMember(makeRef("tg", ctx.chat.id));
-  if (member) return member;
-  await ctx.reply(copy(langFromCode(ctx.from?.language_code)).noAccess);
-  return null;
-}
-
 export function createBot(d: BotDeps): Bot {
   const bot = new Bot(d.token, d.botInfo ? { botInfo: d.botInfo } : undefined);
-
-  bot.command("start", async (ctx) => {
-    const chatRef = makeRef("tg", ctx.chat.id);
-    const uiLang = langFromCode(ctx.from?.language_code);
-    const existing = await d.store.findMember(chatRef);
-    if (existing) {
-      const venue = await d.store.getVenue(existing.venue_id);
-      const c = copy(existing.lang);
-      if (existing.role === "owner") await ctx.reply(c.welcomeBack(venue.name, adminUrl(d.baseUrl, venue.slug, await d.store.getAdminToken(venue.id))));
-      else await ctx.reply(c.welcomeStaff(venue.name, publicUrl(d.baseUrl, venue.slug)));
-      return;
-    }
-    const code = (ctx.match ?? "").trim().toUpperCase();
-    if (!code) {
-      await ctx.reply(copy(uiLang).noAccess);
-      return;
-    }
-    const member = await d.store.redeemInvite(code, chatRef, uiLang, d.now().toISOString());
-    if (!member) {
-      await ctx.reply(copy(uiLang).badCode);
-      return;
-    }
-    const venue = await d.store.getVenue(member.venue_id);
-    const c = copy(member.lang);
-    if (member.role === "owner") await ctx.reply(c.welcome(venue.name, adminUrl(d.baseUrl, venue.slug, await d.store.getAdminToken(venue.id)), publicUrl(d.baseUrl, venue.slug)));
-    else await ctx.reply(c.welcomeStaff(venue.name, publicUrl(d.baseUrl, venue.slug)));
+  // Translates Bot API updates into InboundMessage; every behaviour lives in handleInbound.
+  const ref = (ctx: Context) => makeRef("tg", ctx.chat!.id);
+  const hint = (ctx: Context) => langFromCode(ctx.from?.language_code);
+  const tgMedia = (ctx: Context, fileId: string): InboundMedia => ({
+    download: async () => {
+      const file = await ctx.api.getFile(fileId);
+      if (!file.file_path) throw new Error("no file_path");
+      const dl = await d.download(file.file_path);
+      return { ...dl, name: file.file_path };
+    },
   });
 
-  bot.command("lang", async (ctx) => {
-    const member = await requireMember(d, ctx);
-    if (!member) return;
-    const arg = (ctx.match ?? "").trim().toLowerCase();
-    if (arg !== "bg" && arg !== "en") {
-      await ctx.reply(copy(member.lang).langUsage);
-      return;
-    }
-    await d.store.setMemberLang(member.venue_id, member.chat_ref, arg);
-    await ctx.reply(copy(arg).langSet);
+  bot.on("message:text", (ctx) => handleInbound(d, { chatRef: ref(ctx), kind: "text", text: ctx.message.text, langHint: hint(ctx), messageRef: String(ctx.message.message_id) }));
+  bot.on("message:photo", (ctx) => handleInbound(d, { chatRef: ref(ctx), kind: "photo", text: ctx.message.caption, langHint: hint(ctx), media: tgMedia(ctx, ctx.message.photo.at(-1)!.file_id) }));
+  bot.on("message:document", async (ctx) => {
+    const doc = ctx.message.document;
+    if (!doc.mime_type?.startsWith("image/")) return;
+    await handleInbound(d, { chatRef: ref(ctx), kind: "photo", text: ctx.message.caption, langHint: hint(ctx), media: tgMedia(ctx, doc.file_id) });
   });
-
-  bot.command("help", async (ctx) => {
-    const member = await requireMember(d, ctx);
-    if (member) await ctx.reply(copy(member.lang).help);
-  });
-
-  bot.command("menu", async (ctx) => {
-    const member = await requireMember(d, ctx);
-    if (!member) return;
-    const venue = await d.store.getVenue(member.venue_id);
-    const admin = member.role === "owner" ? adminUrl(d.baseUrl, venue.slug, await d.store.getAdminToken(venue.id)) : null;
-    await ctx.reply(copy(member.lang).menu(publicUrl(d.baseUrl, venue.slug), admin));
-  });
-
-  bot.command("undo", async (ctx) => {
-    const member = await requireMember(d, ctx);
-    if (!member) return;
-    const lang = detectLang(ctx.message?.text ?? "") ?? member.lang;
-    d.startRun({ venueId: member.venue_id, chatRef: member.chat_ref, member: { ...member, lang }, text: "Undo the last change.", source: "text" });
-    await d.messenger.typing(member.chat_ref);
-  });
-
-  bot.on("message:text", async (ctx) => {
-    if (ctx.message.text.startsWith("/")) return; // unknown command
-    const member = await requireMember(d, ctx);
-    if (!member) return;
-    // Start first: a failed acknowledgement must not lose the message.
-    const lang = detectLang(ctx.message.text) ?? member.lang;
-    d.startRun({ venueId: member.venue_id, chatRef: member.chat_ref, member: { ...member, lang }, text: ctx.message.text, source: "text" });
-    await d.messenger.typing(member.chat_ref);
-  });
-
+  bot.on("message:voice", (ctx) => handleInbound(d, { chatRef: ref(ctx), kind: "voice", langHint: hint(ctx), media: tgMedia(ctx, ctx.message.voice.file_id) }));
+  bot.on("message:audio", (ctx) => handleInbound(d, { chatRef: ref(ctx), kind: "voice", langHint: hint(ctx), media: tgMedia(ctx, ctx.message.audio.file_id) }));
   bot.on("callback_query:data", async (ctx) => {
-    const parsed = parseCallback(ctx.callbackQuery.data);
-    if (!parsed || ctx.chat === undefined) {
-      await ctx.answerCallbackQuery().catch(() => undefined);
-      return;
-    }
-    // Answer first so the client stops spinning, then do the work, then conclude the proposal.
-    await ctx.answerCallbackQuery().catch(() => undefined);
-    const chatRef = makeRef("tg", ctx.chat.id);
-    const r = await handleDecision({ store: d.store, messenger: d.messenger, now: d.now }, chatRef, parsed.decision, parsed.setId);
+    await ctx.answerCallbackQuery().catch(() => undefined); // stop the client's spinner first
+    if (ctx.chat === undefined) return;
     const messageId = ctx.callbackQuery.message?.message_id;
-    // Edits the message and removes the buttons; best-effort, never throws.
-    if (r.edit) await d.messenger.conclude(chatRef, messageId !== undefined ? String(messageId) : null, r.edit.full, r.edit.short);
-    if (r.reply) await ctx.reply(r.reply);
+    await handleInbound(d, { chatRef: ref(ctx), kind: "button", text: ctx.callbackQuery.data, langHint: hint(ctx), messageRef: messageId !== undefined ? String(messageId) : undefined });
   });
-
-  registerMediaHandlers(bot, d);
 
   bot.catch(async (err) => {
     console.error("bot error:", err.error instanceof Error ? err.error.message : err.error);

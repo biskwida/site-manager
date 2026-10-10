@@ -1,6 +1,7 @@
 // test/bot-media.test.ts
 import { describe, expect, it } from "vitest";
 import { createBot, type BotDeps, type RunRequest } from "@/src/bot/bot";
+import { TelegramMessenger } from "@/src/bot/messenger";
 import { FakeMessenger, makeDemo } from "./helpers";
 import { BOT_INFO, captureApi, photoUpdate, voiceUpdate } from "./tg";
 
@@ -14,6 +15,7 @@ async function setup(over: Partial<BotDeps> = {}) {
     startRun: (r) => runs.push(r), transcribe: null, download: async () => ({ bytes: new Uint8Array([9, 9]), contentType: "image/jpeg" }), botInfo: BOT_INFO, ...over,
   };
   const bot = createBot(deps);
+  deps.messenger = new TelegramMessenger(bot.api); // as in src/server/deps.ts
   return { ...demo, runs, bot, api: captureApi(bot) };
 }
 
