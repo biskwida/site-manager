@@ -2210,8 +2210,13 @@ export class InMemoryStore implements Store {
   sets = new Map<string, ChangeSet>();
   conversations = new Map<string, Conversation>();
   files = new Map<string, Uint8Array>();
-  /** Fixed clock for created_at; tests may override. */
-  clock: () => string = () => new Date().toISOString();
+  private lastTick = 0;
+  /** Strictly increasing clock for created_at (so newest-first ordering is stable); tests may override. */
+  clock: () => string = () => {
+    const t = Math.max(Date.now(), this.lastTick + 1);
+    this.lastTick = t;
+    return new Date(t).toISOString();
+  };
 
   private site(id: string): SiteState {
     const s = this.sites.get(id);
@@ -5138,8 +5143,10 @@ describe("bot", () => {
     const edit = api.calls.find((c) => c.method === "editMessageText")!.payload;
     expect(edit).toMatchObject({ chat_id: 1001, message_id: 42, text: "• Капучино: 2,90 € → 3,20 €\n\n✅ Приложено" });
     expect((await store.getChangeSet(cs.id)).status).toBe("applied");
-    await bot.handleUpdate(callbackUpdate(1001, `cs:change:${cs.id}`, 42));
-    expect(api.texts().at(-1)).toBe("Вече е приложено.".length ? expect.any(String) : "");
+    await bot.handleUpdate(callbackUpdate(1001, `cs:apply:${cs.id}`, 42));
+    const edits = api.calls.filter((c) => c.method === "editMessageText");
+    expect(edits).toHaveLength(2);
+    expect(edits[1].payload.text).toBe("• Капучино: 2,90 € → 3,20 €\n\nВече е приложено.");
   });
   it("sends the change prompt on ✏️", async () => {
     const { bot, api, store, venue } = await setup();
@@ -5310,7 +5317,7 @@ export function createBot(d: BotDeps): Bot {
 export function registerMediaHandlers(_bot: Bot, _d: BotDeps): void {}
 ```
 
-- [ ] **Step 8: Run** `npx vitest run test/bot.test.ts` → PASS. If grammY's `handleUpdate` complains about `botInfo`, pass it exactly as `BOT_INFO`. In the fourth test replace the odd last assertion with `expect(api.calls.filter((c) => c.method === "editMessageText")).toHaveLength(2)` (the second tap edits with the status line) — the intent is "second decision reports the status".
+- [ ] **Step 8: Run** `npx vitest run test/bot.test.ts` → PASS. If grammY's `handleUpdate` complains about `botInfo`, pass it exactly as `BOT_INFO`.
 
 - [ ] **Step 9: Commit**
 
