@@ -33,4 +33,8 @@ describe("loadConfig", () => {
     expect(loadConfig({ ...full, VERCEL_TOKEN: "v", VERCEL_TEAM_ID: "team_1", RATE_SALT: "s", MAX_SITES_PER_DAY: "7", TELEGRAM_BOT_USERNAME: "@site_manager_bot" })).toMatchObject({ vercelToken: "v", vercelTeamId: "team_1", rateSalt: "s", maxSitesPerDay: 7, telegramBotUsername: "site_manager_bot" });
     expect(() => loadConfig({ ...full, MAX_SITES_PER_DAY: "0" })).toThrow(/MAX_SITES_PER_DAY/);
   });
+  it("reads DESTINATION_SECRET_KEY as optional", () => {
+    expect(loadConfig(full).destinationSecretKey).toBeNull();
+    expect(loadConfig({ ...full, DESTINATION_SECRET_KEY: "ab".repeat(32) }).destinationSecretKey).toBe("ab".repeat(32));
+  });
 });

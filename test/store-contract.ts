@@ -437,5 +437,40 @@ export function storeContract(name: string, make: () => Promise<Store>, storageH
       expect(await s.bumpRateLimit(`${key}-other`, hour, 1, NOW)).toBe(true); // keys are independent
       expect(await s.bumpRateLimit(`${key}-other`, hour, 1, NOW)).toBe(false);
     });
+
+    it("stores one destination per kind with secrets kept apart, and syncs with due ordering", async () => {
+      const s = await make();
+      const v = await s.createVenue({ slug: "t-dest", name: "Dest" });
+      const d1 = await s.upsertDestination({ venue_id: v.id, kind: "wordpress", config: { site_url: "https://a.example" }, secrets: "enc-1" });
+      expect(d1).toMatchObject({ venue_id: v.id, kind: "wordpress", status: "connected", last_error: null, config: { site_url: "https://a.example" } });
+      expect(d1).not.toHaveProperty("secrets");
+      const d2 = await s.upsertDestination({ venue_id: v.id, kind: "wordpress", config: { site_url: "https://b.example" }, secrets: "enc-2" });
+      expect(d2.id).toBe(d1.id);
+      expect(await s.getDestination(v.id, "wordpress")).toMatchObject({ id: d1.id, secrets: "enc-2", config: { site_url: "https://b.example" }, status: "connected" });
+      expect(await s.getDestination(v.id, "google")).toBeNull();
+      const listed = await s.listDestinations(v.id);
+      expect(listed.map((d) => d.kind)).toEqual(["wordpress"]);
+      expect(listed[0]).not.toHaveProperty("secrets");
+      await s.updateDestination(d1.id, { status: "error", last_error: "boom" });
+      expect(await s.getDestination(v.id, "wordpress")).toMatchObject({ status: "error", last_error: "boom" });
+
+      const cs = await s.createChangeSet({ venue_id: v.id, chat_id: null, summary_bg: "x", summary_en: "x", preview_bg: "", preview_en: "", source: "text", status: "proposed", changes: [{ position: 0, op: "wp_edit_page", entity: "wp_page", entity_id: "7", before: { title: "a" }, after: { title: "b" } }] });
+      expect(await s.applyChangeSet(cs.id, NOW)).toBe("applied"); // wp_* rows are no-ops for the store
+      expect((await s.getChangeSet(cs.id)).changes[0]).toMatchObject({ entity: "wp_page", op: "wp_edit_page", after: { title: "b" } });
+
+      const y1 = await s.createSync({ venue_id: v.id, destination_id: d1.id, change_set_id: cs.id, payload: { kind: "wordpress" }, next_at: "2026-10-09T09:05:00.000Z" });
+      const y2 = await s.createSync({ venue_id: v.id, destination_id: d1.id, change_set_id: cs.id, payload: { kind: "wordpress" }, next_at: "2026-10-09T09:00:00.000Z" });
+      expect(y1).toMatchObject({ status: "pending", attempts: 0, last_error: null, result: null, payload: { kind: "wordpress" } });
+      expect((await s.listSyncs({ venueId: v.id, status: ["pending"], dueBefore: "2026-10-09T09:01:00.000Z" })).map((x) => x.id)).toEqual([y2.id]);
+      expect((await s.listSyncs({ changeSetId: cs.id })).map((x) => x.id)).toEqual([y1.id, y2.id]);
+      await s.updateSync(y2.id, { status: "done", attempts: 1, result: { pushed: 1 }, updated_at: LATER });
+      expect(await s.getSync(y2.id)).toMatchObject({ status: "done", attempts: 1, result: { pushed: 1 }, updated_at: LATER });
+      expect((await s.listSyncs({ venueId: v.id, status: ["pending"] })).map((x) => x.id)).toEqual([y1.id]);
+      expect((await s.listSyncs({ venueId: v.id, limit: 1 })).map((x) => x.id)).toEqual([y1.id]);
+
+      await s.deleteDestination(d1.id);
+      expect(await s.getDestination(v.id, "wordpress")).toBeNull();
+      expect(await s.listSyncs({ venueId: v.id })).toEqual([]);
+    });
   });
 }

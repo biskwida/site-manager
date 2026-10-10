@@ -1,0 +1,14 @@
+{
+  "$schema": "https://schemas.wp.org/trunk/block.json",
+  "apiVersion": 3,
+  "name": "site-manager/announcements",
+  "title": "Site Manager: Announcements",
+  "category": "widgets",
+  "icon": "megaphone",
+  "description": "Current announcements; hidden when there are none.",
+  "keywords": ["announcements", "обяви", "новини", "site manager"],
+  "textdomain": "site-manager",
+  "attributes": { "lang": { "type": "string", "default": "auto", "enum": ["auto", "bg", "en"] } },
+  "supports": { "html": false, "align": ["wide", "full"] },
+  "editorScript": "site-manager-blocks"
+}

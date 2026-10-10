@@ -1,8 +1,9 @@
 // src/store/supabase.ts
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
+import { isWpEntity, type WpEntity } from "../domain/types";
 import type { Announcement, BusinessType, Category, Change, ChangeSet, Conversation, DeployInfo, DeployStatus, Holiday, Item, Lang, Media, Member, Role, SiteState, SiteText, SiteTextKey, TemplateId, Venue, VenueStatus } from "../domain/types";
 import type { WizardDraft } from "../wizard/schema";
-import { DEFAULT_HOURS, extensionFor, newInviteCode, newToken, PUBLISH_CLAIM_TTL_MS, type ChangeSetPatch, type ExpiredTimer, type NewCategory, type NewChangeSet, type NewItem, type NewVenue, type Store, type VenuePatch } from "./types";
+import { DEFAULT_HOURS, extensionFor, newInviteCode, newToken, PUBLISH_CLAIM_TTL_MS, type ChangeSetPatch, type ExpiredTimer, type NewCategory, type NewChangeSet, type NewItem, type NewVenue, type Store, type VenuePatch, type Destination, type DestinationKind, type DestinationPatch, type DestinationSync, type DestinationWithSecrets, type NewDestination, type NewSync, type SyncPatch, type SyncStatus } from "./types";
 
 type Row = Record<string, unknown>;
 type DbError = { message: string; code?: string } | null;
@@ -124,7 +125,7 @@ const SET_SELECT = "*, changes(*)";
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 /** A venue filter that is not a uuid can match nothing (and Postgres would reject it). */
 const badVenue = (venueId?: string) => Boolean(venueId) && !UUID.test(venueId as string);
-const TABLE: Record<Change["entity"], string> = { venue: "venues", category: "categories", item: "items", holiday: "holidays", announcement: "announcements", media: "media", site_text: "site_texts" };
+const TABLE: Record<Exclude<Change["entity"], WpEntity>, string> = { venue: "venues", category: "categories", item: "items", holiday: "holidays", announcement: "announcements", media: "media", site_text: "site_texts" };
 
 export class SupabaseStore implements Store {
   private db: SupabaseClient;
@@ -404,6 +405,7 @@ export class SupabaseStore implements Store {
   }
 
   private async writeEntity(venueId: string, c: Change) {
+    if (isWpEntity(c.entity)) return; // lives on the owner's WordPress site; the destination push writes it
     const table = TABLE[c.entity];
     if (c.entity === "site_text") {
       if (c.after === null) {
@@ -470,4 +472,94 @@ export class SupabaseStore implements Store {
     if (error) throw new Error(`bumpRateLimit: ${error.message}`);
     return data === true;
   }
+
+  // --- Destinations (integrations track, appended 2026-10-10) ---
+  private withoutSecrets(d: DestinationWithSecrets): Destination {
+    const { secrets: _secrets, ...rest } = d;
+    void _secrets;
+    return rest;
+  }
+  async upsertDestination(d: NewDestination): Promise<Destination> {
+    const row = await must<Row>(
+      this.db.from("venue_destinations")
+        .upsert({ venue_id: d.venue_id, kind: d.kind, config: d.config, secrets: d.secrets, status: d.status ?? "connected", last_error: null, updated_at: new Date().toISOString() }, { onConflict: "venue_id,kind" })
+        .select("*").single(),
+      "upsertDestination",
+    );
+    return this.withoutSecrets(toDestination(row));
+  }
+  async getDestination(venueId: string, kind: DestinationKind) {
+    if (badVenue(venueId)) return null;
+    const { data, error } = await this.db.from("venue_destinations").select("*").eq("venue_id", venueId).eq("kind", kind).maybeSingle();
+    if (error) throw new Error(`getDestination: ${error.message}`);
+    return data ? toDestination(data) : null;
+  }
+  async listDestinations(venueId: string) {
+    if (badVenue(venueId)) return [];
+    const rows = await must(this.db.from("venue_destinations").select("*").eq("venue_id", venueId).order("created_at"), "listDestinations");
+    return rows.map((r) => this.withoutSecrets(toDestination(r)));
+  }
+  async updateDestination(id: string, patch: DestinationPatch) {
+    const row: Row = { updated_at: new Date().toISOString() };
+    if (patch.status !== undefined) row.status = patch.status;
+    if (patch.last_error !== undefined) row.last_error = patch.last_error;
+    if (patch.config !== undefined) row.config = patch.config;
+    await mustRows(this.db.from("venue_destinations").update(row).eq("id", id).select("id"), `updateDestination ${id}`);
+  }
+  async deleteDestination(id: string) {
+    const { error } = await this.db.from("venue_destinations").delete().eq("id", id);
+    if (error) throw new Error(`deleteDestination ${id}: ${error.message}`);
+  }
+  async createSync(s: NewSync): Promise<DestinationSync> {
+    return toSync(await must(this.db.from("destination_syncs").insert({ venue_id: s.venue_id, destination_id: s.destination_id, change_set_id: s.change_set_id, payload: s.payload, next_at: s.next_at }).select("*").single(), "createSync"));
+  }
+  async getSync(id: string) {
+    return toSync(await must(this.db.from("destination_syncs").select("*").eq("id", id).single(), `getSync ${id}`));
+  }
+  async listSyncs(opts: { venueId?: string; changeSetId?: string; status?: SyncStatus[]; dueBefore?: string; limit?: number }) {
+    if (badVenue(opts.venueId)) return [];
+    let q = this.db.from("destination_syncs").select("*").order("created_at").order("id");
+    if (opts.venueId) q = q.eq("venue_id", opts.venueId);
+    if (opts.changeSetId) q = q.eq("change_set_id", opts.changeSetId);
+    if (opts.status) q = q.in("status", opts.status);
+    if (opts.dueBefore) q = q.lte("next_at", opts.dueBefore);
+    if (opts.limit) q = q.limit(opts.limit);
+    return (await must(q, "listSyncs")).map(toSync);
+  }
+  async updateSync(id: string, patch: SyncPatch) {
+    const row: Row = { updated_at: patch.updated_at ?? new Date().toISOString() };
+    for (const k of ["status", "attempts", "next_at", "last_error", "result"] as const) if (patch[k] !== undefined) row[k] = patch[k];
+    await mustRows(this.db.from("destination_syncs").update(row).eq("id", id).select("id"), `updateSync ${id}`);
+  }
+}
+
+// --- Destinations (integrations track, appended 2026-10-10) ---
+export function toDestination(r: Row): DestinationWithSecrets {
+  return {
+    id: r.id as string,
+    venue_id: r.venue_id as string,
+    kind: r.kind as DestinationKind,
+    config: (r.config as Record<string, unknown>) ?? {},
+    secrets: str(r.secrets),
+    status: (r.status as Destination["status"]) ?? "connected",
+    last_error: strOrNull(r.last_error),
+    created_at: iso(r.created_at),
+    updated_at: iso(r.updated_at),
+  };
+}
+export function toSync(r: Row): DestinationSync {
+  return {
+    id: r.id as string,
+    venue_id: r.venue_id as string,
+    destination_id: r.destination_id as string,
+    change_set_id: r.change_set_id as string,
+    status: r.status as SyncStatus,
+    attempts: num(r.attempts),
+    next_at: iso(r.next_at),
+    last_error: strOrNull(r.last_error),
+    payload: (r.payload as Record<string, unknown>) ?? {},
+    result: (r.result as Record<string, unknown> | null) ?? null,
+    created_at: iso(r.created_at),
+    updated_at: iso(r.updated_at),
+  };
 }
