@@ -64,4 +64,5 @@ Add `lang="bg"` or `lang="en"` to force the language; the default is the venue's
 - Menu items are recreated on every menu change, so item CSS classes and link targets are lost.
 - Page previews use `?sm_preview=<key>`; themes that do not call `wp_body_open()` show the pending content without the yellow banner.
 - WooCommerce variations are not supported; simple products only.
+- Retries of a failed push (the site was down) run only with the tick: on the owner's next message to the bot and at the daily cron (03:00 UTC), or every 5 minutes with `supabase/cron.sql` or a Pro cron. "Will retry" can therefore mean hours; after five failed attempts the dashboard card shows the error.
 - Pushes to one site run strictly in order: a set that failed (site down) is retried before any newer set or undo is pushed, so the last approved change wins. A manual WordPress edit made between a proposal and a late retry of that proposal is overwritten by the retry.
