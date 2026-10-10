@@ -1,0 +1,14 @@
+{
+  "$schema": "https://schemas.wp.org/trunk/block.json",
+  "apiVersion": 3,
+  "name": "site-manager/menu",
+  "title": "Site Manager: Menu",
+  "category": "widgets",
+  "icon": "food",
+  "description": "The live menu from Site Manager: categories, prices, allergens and sold-out marks.",
+  "keywords": ["menu", "меню", "site manager"],
+  "textdomain": "site-manager",
+  "attributes": { "lang": { "type": "string", "default": "auto", "enum": ["auto", "bg", "en"] } },
+  "supports": { "html": false, "align": ["wide", "full"] },
+  "editorScript": "site-manager-blocks"
+}

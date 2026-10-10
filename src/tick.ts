@@ -1,5 +1,6 @@
 // src/tick.ts
 import type { Messenger } from "./bot/messenger";
+import { runPendingSyncs, type SyncDeps } from "./destinations/sync";
 import { pollDeployments } from "./deploy/run";
 import type { Deployer } from "./deploy/types";
 import { planChange } from "./domain/changes";
@@ -14,6 +15,8 @@ export interface TickDeps {
   now: Date;
   /** Restrict to one venue (the per-webhook tick). */
   venueId?: string;
+  /** Destination pushes to retry (src/destinations/sync.ts); null/undefined = skip. */
+  sync?: SyncDeps | null;
   /** When set, in-flight deployments are polled (pollDeployments). */
   deployer?: Deployer | null;
 }
@@ -27,6 +30,8 @@ export interface TickReport {
   deployFailed: string[];
   /** Draft venue ids deleted this tick. */
   cleaned: string[];
+  /** Destination sync rows pushed by this tick. */
+  pushed?: string[];
 }
 
 const HOUR = 3_600_000;
@@ -112,6 +117,16 @@ export async function runTick(d: TickDeps): Promise<TickReport> {
 
   // 6. Abandoned wizard drafts.
   report.cleaned = await cleanupDrafts({ store: d.store, now: d.now, venueId: d.venueId });
+
+  // 7. Destination pushes that failed earlier (WordPress etc.), with backoff.
+  if (d.sync) {
+    try {
+      const r = await runPendingSyncs(d.sync, { venueId: d.venueId, now: d.now });
+      report.pushed = r.done;
+    } catch (e) {
+      console.error("[tick] destination syncs failed:", e instanceof Error ? e.message : e);
+    }
+  }
   return report;
 }
 

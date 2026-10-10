@@ -1,0 +1,140 @@
+msgid ""
+msgstr ""
+"Project-Id-Version: Site Manager 0.1.0\n"
+"Language: bg_BG\n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=UTF-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+"Plural-Forms: nplurals=2; plural=(n != 1);\n"
+"X-Domain: site-manager\n"
+
+msgid "Settings"
+msgstr "Настройки"
+
+msgid "Site Manager"
+msgstr "Site Manager"
+
+msgid "Your venue in Site Manager"
+msgstr "Вашето заведение в Site Manager"
+
+msgid "Copy both values from your Site Manager dashboard (the \"WordPress\" card)."
+msgstr "Копирайте двете стойности от таблото на Site Manager (картата „WordPress“)."
+
+msgid "Site Manager address"
+msgstr "Адрес на Site Manager"
+
+msgid "Venue code"
+msgstr "Код на заведението"
+
+msgid "Refresh every (seconds)"
+msgstr "Обновяване на всеки (секунди)"
+
+msgid "Language of the blocks"
+msgstr "Език на блоковете"
+
+msgid "Venue default"
+msgstr "По подразбиране за заведението"
+
+msgid "Each shortcode or block can override this with lang=\"bg\" or lang=\"en\"."
+msgstr "Всеки шорткод или блок може да го смени с lang=\"bg\" или lang=\"en\"."
+
+msgid "You are not allowed to do that."
+msgstr "Нямате права за това действие."
+
+msgid "Connected: %s (%d menu items)."
+msgstr "Свързано: %s (%d артикула в менюто)."
+
+msgid "Check connection"
+msgstr "Провери връзката"
+
+msgid "Shortcodes and blocks"
+msgstr "Шорткодове и блокове"
+
+msgid "Add a \"Site Manager\" block in the editor, or paste a shortcode anywhere:"
+msgstr "Добавете блок „Site Manager“ в редактора или поставете шорткод където пожелаете:"
+
+msgid "the full menu with prices, allergens and sold-out marks"
+msgstr "цялото меню с цени, алергени и отбелязани изчерпани продукти"
+
+msgid "today's specials"
+msgstr "днешните специални предложения"
+
+msgid "open-now status, opening hours, upcoming closures and contact"
+msgstr "отворено ли е сега, работно време, предстоящи почивни дни и контакти"
+
+msgid "current announcements"
+msgstr "текущите съобщения"
+
+msgid "the photo gallery"
+msgstr "галерията със снимки"
+
+msgid "one text: welcome, footer_note, tagline, about, address, phone, instagram or name"
+msgstr "един текст: welcome, footer_note, tagline, about, address, phone, instagram или name"
+
+msgid "Add lang=\"bg\" or lang=\"en\" to any of them to force the language."
+msgstr "Добавете lang=\"bg\" или lang=\"en\" към всеки от тях, за да зададете езика."
+
+msgid "Site Manager is not configured yet: set the address and the venue code under Settings → Site Manager."
+msgstr "Site Manager още не е настроен: въведете адреса и кода на заведението в Настройки → Site Manager."
+
+msgid "Site Manager did not answer: %s"
+msgstr "Site Manager не отговори: %s"
+
+msgid "Site Manager has no venue with the code \"%s\"."
+msgstr "В Site Manager няма заведение с код „%s“."
+
+msgid "Site Manager answered with an unexpected response (HTTP %d)."
+msgstr "Site Manager отговори неочаквано (HTTP %d)."
+
+msgid "Site Manager could not render this block."
+msgstr "Site Manager не успя да покаже този блок."
+
+msgid "Nothing to show right now; the block is hidden on the site."
+msgstr "Няма какво да се покаже в момента; блокът не се вижда на сайта."
+
+msgid "Language"
+msgstr "Език"
+
+msgid "Text"
+msgstr "Текст"
+
+# Settings page: connect box and the API log (Task 10)
+
+msgid "Let the Site Manager agent edit this site"
+msgstr "Позволете на агента на Site Manager да редактира този сайт"
+
+msgid "Connected to venue \"%1$s\" since %2$s, acting as %3$s (token %4$s…)."
+msgstr "Свързано със заведение „%1$s“ от %2$s, като потребител %3$s (токен %4$s…)."
+
+msgid "Disconnect"
+msgstr "Прекъсни връзката"
+
+msgid "Generate a one-time code, then send the line below to the Site Manager bot in Telegram. The code is valid for 15 minutes. Nothing changes on this site until you approve each edit in Telegram."
+msgstr "Генерирайте еднократен код и изпратете реда по-долу на бота на Site Manager в Telegram. Кодът важи 15 минути. Нищо на този сайт не се променя, докато не одобрите всяка редакция в Telegram."
+
+msgid "Copy"
+msgstr "Копирай"
+
+msgid "Expires at %s."
+msgstr "Изтича в %s."
+
+msgid "Generate code"
+msgstr "Генерирай код"
+
+msgid "Recent API calls"
+msgstr "Последни API заявки"
+
+msgid "None yet."
+msgstr "Още няма."
+
+msgid "When"
+msgstr "Кога"
+
+msgid "Call"
+msgstr "Заявка"
+
+msgid "Status"
+msgstr "Статус"
+
+msgid "Disconnected. The blocks keep working; the agent can no longer edit this site."
+msgstr "Връзката е прекъсната. Блоковете продължават да работят; агентът вече не може да редактира този сайт."

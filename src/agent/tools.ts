@@ -2,6 +2,7 @@
 import { betaZodTool } from "@anthropic-ai/sdk/helpers/beta/zod";
 import { z } from "zod";
 import type { Messenger } from "../bot/messenger";
+import type { WordPressClient } from "../destinations/wordpress-client";
 import { allergenName, allergenWarnings, suggestAllergens } from "../domain/allergens";
 import { invertChanges, isIso, planChanges, type PlanContext } from "../domain/changes";
 import { isSoldOut, visibleItems } from "../domain/effective";
@@ -13,6 +14,7 @@ import type { ChangeOp, ChangeSet, ChangeSource, Lang, Member, SiteState } from 
 import type { Store } from "../store/types";
 import { formatDateTime, nowText } from "../time";
 import { BulkSchema, CancelSchema, CheckAllergensSchema, ListSchema, ProposeSchema, ScheduleSchema, UndoSchema, type ChangeInput } from "./tool-schemas";
+import { wpTools } from "./wp-tools";
 
 export interface AgentDeps {
   store: Store;
@@ -27,6 +29,8 @@ export interface AgentDeps {
   correctionFor?: string | null;
   /** How this turn arrived; recorded on the change set. Default "text". */
   source?: ChangeSource;
+  /** The venue's WordPress site, when connected (Task 6 registers the wp_* tools). */
+  wordpress?: WordPressClient | null;
 }
 
 const STAFF_OPS = new Set<ChangeOp["op"]>(["set_sold_out", "add_item"]);
@@ -250,7 +254,8 @@ export function makeTools(d: AgentDeps) {
   });
 
   // Task 11 appends schedule_changes, propose_bulk_price_change, check_allergens, undo here.
-  return [getSite, getMenu, proposeChanges, cancelChangeSet, listChanges, ...extraTools(d, { attempt, site, ctx, previews, mine, propose, getSet, ensureNoPending, lang })];
+  const kit: ToolKit = { attempt, site, ctx, previews, mine, propose, getSet, ensureNoPending, lang };
+  return [getSite, getMenu, proposeChanges, cancelChangeSet, listChanges, ...extraTools(d, kit), ...wpTools(d, kit)];
 }
 
 /** What the shared helpers of makeTools expose to the second group of tools. */

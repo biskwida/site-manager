@@ -187,3 +187,71 @@ export function newInviteCode(): string {
 export function extensionFor(contentType: string): string {
   return { "image/jpeg": "jpg", "image/png": "png", "image/webp": "webp", "image/gif": "gif" }[contentType] ?? "bin";
 }
+
+// --- Destinations (integrations track, appended 2026-10-10) ---
+export type DestinationKind = "wordpress" | "google" | "github";
+export type DestinationStatus = "connected" | "error" | "disconnected";
+export interface Destination {
+  id: string;
+  venue_id: string;
+  kind: DestinationKind;
+  /** Non-secret settings (site URL, site name, versions, connected_at…). */
+  config: Record<string, unknown>;
+  status: DestinationStatus;
+  last_error: string | null;
+  created_at: string;
+  updated_at: string;
+}
+/** Only getDestination returns the encrypted secrets blob (base64 ciphertext); never put it on Destination. */
+export interface DestinationWithSecrets extends Destination {
+  secrets: string;
+}
+export interface NewDestination {
+  venue_id: string;
+  kind: DestinationKind;
+  config: Record<string, unknown>;
+  secrets: string;
+  status?: DestinationStatus;
+}
+export type DestinationPatch = Partial<Pick<Destination, "status" | "last_error" | "config">>;
+
+export type SyncStatus = "pending" | "done" | "failed";
+export interface DestinationSync {
+  id: string;
+  venue_id: string;
+  destination_id: string;
+  change_set_id: string;
+  status: SyncStatus;
+  attempts: number;
+  /** Earliest instant the next attempt may run (ISO). */
+  next_at: string;
+  last_error: string | null;
+  payload: Record<string, unknown>;
+  result: Record<string, unknown> | null;
+  created_at: string;
+  updated_at: string;
+}
+export interface NewSync {
+  venue_id: string;
+  destination_id: string;
+  change_set_id: string;
+  payload: Record<string, unknown>;
+  next_at: string;
+}
+export type SyncPatch = Partial<Pick<DestinationSync, "status" | "attempts" | "next_at" | "last_error" | "result" | "updated_at">>;
+
+// Declaration merging: the Store interface above gains the destination methods.
+export interface Store {
+  /** One destination per (venue, kind): replaces config, secrets and status of an existing row, keeping its id. */
+  upsertDestination(d: NewDestination): Promise<Destination>;
+  getDestination(venueId: string, kind: DestinationKind): Promise<DestinationWithSecrets | null>;
+  listDestinations(venueId: string): Promise<Destination[]>;
+  updateDestination(id: string, patch: DestinationPatch): Promise<void>;
+  /** Deletes the destination and its sync rows. */
+  deleteDestination(id: string): Promise<void>;
+  createSync(s: NewSync): Promise<DestinationSync>;
+  getSync(id: string): Promise<DestinationSync>;
+  /** Oldest first (created_at). `dueBefore` keeps rows with next_at <= dueBefore. */
+  listSyncs(opts: { venueId?: string; changeSetId?: string; status?: SyncStatus[]; dueBefore?: string; limit?: number }): Promise<DestinationSync[]>;
+  updateSync(id: string, patch: SyncPatch): Promise<void>;
+}

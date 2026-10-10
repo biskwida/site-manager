@@ -1,5 +1,5 @@
 // scripts/db-apply.mts
-// Applies supabase/schema.sql and policies.sql to SUPABASE_DB_URL. Idempotent.
+// Applies supabase/schema.sql, policies.sql, schema-integrations.sql and policies-integrations.sql to SUPABASE_DB_URL. Idempotent.
 import { readFile } from "node:fs/promises";
 import pg from "pg";
 
@@ -9,7 +9,7 @@ if (!url) throw new Error("Missing SUPABASE_DB_URL (Supabase → Settings → Da
 const client = new pg.Client({ connectionString: url, ssl: { rejectUnauthorized: false } });
 await client.connect();
 try {
-  for (const file of ["schema.sql", "policies.sql"]) {
+  for (const file of ["schema.sql", "policies.sql", "schema-integrations.sql", "policies-integrations.sql"]) {
     const sql = await readFile(new URL(`../supabase/${file}`, import.meta.url), "utf8");
     await client.query(sql);
     console.log(`applied ${file}`);

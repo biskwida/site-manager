@@ -18,6 +18,10 @@ import { InMemoryStore } from "../store/memory";
 import { SupabaseStore } from "../store/supabase";
 import type { Store } from "../store/types";
 import { runTick } from "../tick";
+import { resolveSecretKey } from "../destinations/secrets";
+import { withDestinationSync } from "../destinations/store-hook";
+import type { SyncDeps } from "../destinations/sync";
+import { connectWordPress, wordPressClientFor } from "../destinations/connect";
 
 export interface ServerDeps {
   config: Config;
@@ -27,6 +31,10 @@ export interface ServerDeps {
   /** Per-venue tick, then the agent turn. Logs and swallows errors. */
   handleRun: (r: RunRequest) => Promise<void>;
   isMemory: boolean;
+  /** Key for destination secrets; null = integrations are off (production without DESTINATION_SECRET_KEY). */
+  destinationSecretKey: Buffer | null;
+  /** Destination sync deps for the tick; null when integrations are off. */
+  sync: SyncDeps | null;
   /**
    * FakeDeployer in memory mode; VercelDeployer when VERCEL_TOKEN is set; null otherwise (production without a token):
    * no venue projects are created and every site is served from the hosted /<slug>.
@@ -74,6 +82,10 @@ export async function makeServerDeps(o: DepsOptions): Promise<ServerDeps> {
     }
   }
   const s = store;
+  const destinationSecretKey = resolveSecretKey(config.destinationSecretKey, isMemory, log);
+  const sync: SyncDeps | null = destinationSecretKey ? { store: s, secretKey: destinationSecretKey, log } : null;
+  // Every apply (bot button, dashboard, tick, agent) goes through store2 so wp_* rows reach the site right after the apply.
+  const store2: Store = sync ? withDestinationSync(s, sync) : s;
   const transcribe =
     o.transcribe !== undefined ? o.transcribe : config.sttApiKey ? makeTranscriber({ apiKey: config.sttApiKey, baseUrl: config.sttBaseUrl, model: config.sttModel }) : null;
   // The fake deployer is for offline mode only: in production it would hand owners https://<slug>.example.test.
@@ -99,13 +111,14 @@ export async function makeServerDeps(o: DepsOptions): Promise<ServerDeps> {
   // createBot's handlers read `d.messenger` at call time, so the messenger (which needs bot.api) is set on this same object below.
   const botDeps: BotDeps = {
     token: config.telegramToken || "memory-mode-no-token",
-    store: s,
+    store: store2,
     messenger: undefined as unknown as Messenger,
     baseUrl: config.publicBaseUrl,
     now: () => new Date(),
     startRun: (r) => o.defer(() => handleRun(r)),
     transcribe,
     download: (filePath) => downloadTelegramFile(config.telegramToken, filePath),
+    connect: sync ? (venueId, siteUrl, code) => connectWordPress({ store: s, secretKey: destinationSecretKey, allowLocal: isMemory }, venueId, siteUrl, code) : undefined,
     // Without a deployer the hosted /<slug> is the site: nothing to publish, so no hook (and no "publishing" line).
     onOwnerJoined: deployer ? startDeploy : undefined,
   };
@@ -115,13 +128,14 @@ export async function makeServerDeps(o: DepsOptions): Promise<ServerDeps> {
 
   async function handleRun(r: RunRequest): Promise<void> {
     try {
-      await runTick({ store: s, messenger, now: new Date(), venueId: r.venueId, deployer });
+      await runTick({ store: store2, messenger, now: new Date(), venueId: r.venueId, deployer, sync });
     } catch (e) {
       console.error("[tick] per-webhook tick failed:", e instanceof Error ? e.message : e);
     }
+    const wp = sync ? await wordPressClientFor({ store: s, secretKey: destinationSecretKey }, r.venueId).catch(() => null) : null;
     try {
       await runTurn(
-        { store: s, venueId: r.venueId, chatId: r.chatId, member: r.member, messenger, now: () => new Date(), baseUrl: config.publicBaseUrl },
+        { store: store2, venueId: r.venueId, chatId: r.chatId, member: r.member, messenger, now: () => new Date(), baseUrl: config.publicBaseUrl, wordpress: wp?.client ?? null },
         { text: r.text, source: r.source, image: r.image, mediaId: r.mediaId },
         { model: config.agentModel, effort: config.agentEffort, apiKey: config.anthropicApiKey || undefined },
         o.client,
@@ -131,7 +145,7 @@ export async function makeServerDeps(o: DepsOptions): Promise<ServerDeps> {
     }
   }
 
-  return { config, store: s, messenger, bot, handleRun, isMemory, deployer, startDeploy, watchDeploy, anthropic };
+  return { config, store: store2, messenger, bot, handleRun, isMemory, deployer, startDeploy, watchDeploy, anthropic, destinationSecretKey, sync };
 }
 
 // On globalThis, not a module variable: `next dev` (HMR, separate route bundles) then shares one in-memory store between pages and API routes.

@@ -1,0 +1,17 @@
+{
+  "$schema": "https://schemas.wp.org/trunk/block.json",
+  "apiVersion": 3,
+  "name": "site-manager/text",
+  "title": "Site Manager: Text",
+  "category": "widgets",
+  "icon": "editor-quote",
+  "description": "One text managed from Telegram: welcome, footer note, tagline, about, address, phone, Instagram or the venue name.",
+  "keywords": ["text", "текст", "site manager"],
+  "textdomain": "site-manager",
+  "attributes": {
+    "lang": { "type": "string", "default": "auto", "enum": ["auto", "bg", "en"] },
+    "key": { "type": "string", "default": "welcome" }
+  },
+  "supports": { "html": false },
+  "editorScript": "site-manager-blocks"
+}
