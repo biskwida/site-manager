@@ -1,6 +1,6 @@
 // src/server/deps.ts
 // Server-only: holds the service-role Supabase key and the bot token. Never import from client components.
-import type Anthropic from "@anthropic-ai/sdk";
+import Anthropic from "@anthropic-ai/sdk";
 import type { Bot } from "grammy";
 import { runTurn } from "../agent/run";
 import { createBot, type BotDeps, type RunRequest } from "../bot/bot";
@@ -31,6 +31,8 @@ export interface ServerDeps {
   deployer: Deployer;
   /** Deferred: creates the venue's site (no-op when it is not live or already has one). */
   startDeploy: (venueId: string) => void;
+  /** Shared Anthropic client for the wizard AI routes; null without ANTHROPIC_API_KEY (offline mode). Tests inject `client`. */
+  anthropic: Anthropic | null;
 }
 
 export interface DepsOptions {
@@ -49,6 +51,7 @@ export async function makeServerDeps(o: DepsOptions): Promise<ServerDeps> {
   const isMemory = env.SITE_MANAGER_STORE === "memory";
   const config = loadConfig(env, { lenient: isMemory });
   const log = o.log ?? ((s: string) => console.log(s));
+  const anthropic = o.client ?? (config.anthropicApiKey ? new Anthropic({ apiKey: config.anthropicApiKey }) : null);
 
   let store = o.store;
   if (!store) {
@@ -105,7 +108,7 @@ export async function makeServerDeps(o: DepsOptions): Promise<ServerDeps> {
     }
   }
 
-  return { config, store: s, messenger, bot, handleRun, isMemory, deployer, startDeploy };
+  return { config, store: s, messenger, bot, handleRun, isMemory, deployer, startDeploy, anthropic };
 }
 
 // On globalThis, not a module variable: `next dev` (HMR, separate route bundles) then shares one in-memory store between pages and API routes.

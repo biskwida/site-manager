@@ -20,6 +20,12 @@ const HEX = /^#[0-9a-fA-F]{6}$/;
 export const WIZARD_MAX_IMAGE_BYTES = 4 * 1024 * 1024;
 
 /**
+ * R25 (amended): menu extraction accepts at most 3 MB of decoded file bytes per request, all files together, which is
+ * about 4 MB of base64 JSON and stays under Vercel's 4.5 MB request body limit. The client downscales to fit.
+ */
+export const EXTRACT_MAX_TOTAL_BYTES = 3 * 1024 * 1024;
+
+/**
  * Copy of `def.accentDefault` from src/templates/<id>/index.ts, kept here so server code never imports next/font.
  * test/wizard-schema.test.ts asserts the two stay equal.
  */

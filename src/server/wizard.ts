@@ -16,7 +16,7 @@ import { bothLangs, DRAFT_SLUG_PREFIX, emptyDraft, slugError, WIZARD_MAX_IMAGE_B
 import { readDraftFromRequest, serializeDraftCookie } from "./draft-cookie";
 import { newDraftToken, sha256Hex } from "./hash";
 
-/** Error codes the wizard client can branch on. Later tasks add members (e.g. the AI routes). */
+/** Error codes the wizard client can branch on. The last four come from the Claude-backed routes (src/server/wizard-ai.ts). */
 export type WizardErrorCode =
   | "bad_request"
   | "invalid"
@@ -27,7 +27,15 @@ export type WizardErrorCode =
   | "rate_limited"
   | "too_large"
   | "too_many"
-  | "unsupported_type";
+  | "unsupported_type"
+  /** 503: no ANTHROPIC_API_KEY on this server (offline mode); the UI hides the AI buttons. */
+  | "ai_unavailable"
+  /** 422: the model refused the files or facts. */
+  | "refused"
+  /** 502: the model call failed or returned nothing usable; try again. */
+  | "ai_error"
+  /** 429: this draft's hourly or the server's daily number of AI requests is used up. */
+  | "ai_rate_limited";
 
 /** Every wizard failure the client can show: a code, both languages, an HTTP status and optional field errors. */
 export class WizardError extends Error {
@@ -63,7 +71,7 @@ export function wizardErrorResponse(e: unknown): Response {
 
 const INVALID = (errors: PublishError[] = []) => new WizardError("invalid", 400, "Някои полета не са попълнени правилно.", "Some fields are not filled in correctly.", errors);
 const SLUG_TAKEN = () => new WizardError("slug_taken", 409, "Този адрес вече е зает. Изберете друг.", "This address is already taken. Choose another.");
-const ALREADY_PUBLISHED = (slug: string) => new WizardError("already_published", 409, "Сайтът вече е създаден.", "This site has already been created.", [], { slug });
+export const ALREADY_PUBLISHED = (slug: string) => new WizardError("already_published", 409, "Сайтът вече е създаден.", "This site has already been created.", [], { slug });
 
 export function rateLimitKeys(ipHash: string): { ip: string; global: string } {
   return { ip: `new:ip:${ipHash}`, global: "new:global" };
