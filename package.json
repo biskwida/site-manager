@@ -25,7 +25,9 @@
     "wp:i18n": "tsx scripts/wp-plugin-i18n.mts",
     "wp:zip": "tsx scripts/wp-plugin-zip.mts",
     "wp:smoke": "tsx --env-file-if-exists=.env.local scripts/wp-smoke.mts",
-    "wp:live": "tsx scripts/wp-live-check.mts"
+    "wp:live": "tsx scripts/wp-live-check.mts",
+    "test:templates": "tsx scripts/template-build.mts",
+    "site:delete": "tsx --env-file-if-exists=.env.local scripts/site-delete.mts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "0.133.0",

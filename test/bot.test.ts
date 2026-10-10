@@ -44,6 +44,68 @@ describe("bot", () => {
     expect(api.texts()[0]).not.toContain("/admin/");
     expect(await store.findMember(2001)).toMatchObject({ role: "staff", lang: "en" });
   });
+  it("calls onOwnerJoined after an owner redeem (not staff) and announces publishing when the venue has no site yet", async () => {
+    const { bot, api, store, venue, deps } = await setup();
+    const joined: string[] = [];
+    deps.onOwnerJoined = (id) => joined.push(id);
+    const staffCode = await store.createInvite(venue.id, "staff", "2026-10-10T00:00:00.000Z");
+    await bot.handleUpdate(textUpdate(3001, `/start ${staffCode}`, "en"));
+    expect(joined).toEqual([]);
+    const ownerCode = await store.createInvite(venue.id, "owner", "2026-10-10T00:00:00.000Z");
+    await bot.handleUpdate(textUpdate(3002, `/start ${ownerCode}`, "bg"));
+    expect(joined).toEqual([venue.id]);
+    expect(api.texts().at(-2)).toMatch(/^Свързахте се като собственик/);
+    expect(api.texts().at(-1)).toBe("Сайтът ви се публикува. Ще ви пиша, когато е готов (обикновено до 2–3 минути).");
+    await store.setDeploy(venue.id, { provider: "fake", project_id: "p", deployment_id: "d", url: "https://agala.example.test", status: "ready", error: null, template: "classic", updated_at: "2026-10-09T09:00:00.000Z" });
+    const code2 = await store.createInvite(venue.id, "owner", "2026-10-10T00:00:00.000Z");
+    await bot.handleUpdate(textUpdate(3003, `/start ${code2}`, "en"));
+    expect(joined).toEqual([venue.id, venue.id]);
+    expect(api.texts().at(-1)).toMatch(/^You are linked as the owner/); // site exists: no publishing line
+    // a throwing hook never breaks the welcome
+    deps.onOwnerJoined = () => {
+      throw new Error("boom");
+    };
+    const code3 = await store.createInvite(venue.id, "owner", "2026-10-10T00:00:00.000Z");
+    await bot.handleUpdate(textUpdate(3004, `/start ${code3}`, "en"));
+    expect(await store.findMember(3004)).toMatchObject({ role: "owner" });
+    expect(api.texts().at(-1)).toMatch(/^You are linked as the owner/);
+  });
+  it("a linked chat can redeem a code for another venue: it moves there and the owner-join path runs", async () => {
+    const { bot, api, store, venue, deps } = await setup();
+    const joined: string[] = [];
+    deps.onOwnerJoined = (id) => joined.push(id);
+    const other = await store.createVenue({ slug: "bar", name: "Бар Нощ" });
+    const code = await store.createInvite(other.id, "owner", "2026-10-10T00:00:00.000Z");
+    await bot.handleUpdate(textUpdate(1001, `/start ${code}`, "bg")); // 1001 is the demo venue's owner
+    expect(api.texts()[0]).toBe("Вече управлявате Бар Нощ.");
+    expect(api.texts()[1]).toMatch(/^Свързахте се като собственик на Бар Нощ/);
+    expect(api.texts()[2]).toMatch(/^Сайтът ви се публикува/);
+    expect(joined).toEqual([other.id]);
+    expect(await store.findMember(1001)).toMatchObject({ venue_id: other.id, role: "owner" });
+    expect((await store.listMembers(venue.id)).map((m) => m.tg_chat_id)).not.toContain(1001);
+    // English
+    const third = await store.createVenue({ slug: "cafe3", name: "Third" });
+    await bot.handleUpdate(textUpdate(1002, `/start ${await store.createInvite(third.id, "owner", "2026-10-10T00:00:00.000Z")}`, "en"));
+    expect(api.texts()[3]).toBe("You now manage Third.");
+  });
+  it("an owner who taps a staff code for their own venue stays owner", async () => {
+    const { bot, store, venue } = await setup();
+    const staffCode = await store.createInvite(venue.id, "staff", "2026-10-20T00:00:00.000Z");
+    await bot.handleUpdate(textUpdate(1001, `/start ${staffCode}`, "bg")); // 1001 is the demo venue's owner
+    expect(await store.findMember(1001)).toMatchObject({ venue_id: venue.id, role: "owner" });
+  });
+
+  it("a linked chat with no code or an invalid code gets the welcome-back, not the bad-code reply", async () => {
+    const { bot, api, store, venue } = await setup();
+    const token = await store.getAdminToken(venue.id);
+    await bot.handleUpdate(textUpdate(1001, "/start", "bg"));
+    await bot.handleUpdate(textUpdate(1001, "/start WRONGCOD", "bg"));
+    expect(api.texts()).toEqual([
+      `Вече сте свързани с Кафене „Ъгъла“. Табло: https://site.example/admin/agala?key=${token}`,
+      `Вече сте свързани с Кафене „Ъгъла“. Табло: https://site.example/admin/agala?key=${token}`,
+    ]);
+    expect(await store.findMember(1001)).toMatchObject({ venue_id: venue.id });
+  });
   it("handles /lang, /help, /menu and /undo", async () => {
     const { bot, api, runs, store } = await setup();
     await bot.handleUpdate(textUpdate(1001, "/lang en"));

@@ -1,5 +1,7 @@
 // test/server-tick.test.ts
 import { describe, expect, it } from "vitest";
+import { FakeDeployer } from "@/src/deploy/fake";
+import { startDeploy } from "@/src/deploy/run";
 import { handleTickRequest } from "@/src/server/tick";
 import { FakeMessenger, makeDemo } from "./helpers";
 
@@ -22,5 +24,23 @@ describe("handleTickRequest", () => {
     expect(await all.json()).toMatchObject({ applied: [b.id] });
     const hdr = await handleTickRequest(new Request("http://x/api/tick", { headers: { "x-tick-secret": "tick" } }), deps, T0);
     expect(hdr.status).toBe(200);
+  });
+
+  it("polls the venue's deployment on an admin-key tick when a deployer is wired", async () => {
+    const demo = await makeDemo();
+    const other = await demo.store.createVenue({ slug: "other", name: "Other" });
+    const deployer = new FakeDeployer();
+    const feedUrlFor = (s: string) => `https://sm.example/api/site/${s}`;
+    await startDeploy({ store: demo.store, deployer, feedUrlFor, now: () => T0 }, demo.venue.id);
+    await startDeploy({ store: demo.store, deployer, feedUrlFor, now: () => T0 }, other.id);
+    const deps = { config: { tickSecret: "tick" }, store: demo.store, messenger: new FakeMessenger(), deployer };
+    const key = await demo.store.getAdminToken(demo.venue.id);
+    expect(await (await handleTickRequest(new Request(`http://x/api/tick?key=${key}`), deps, T0)).json()).toMatchObject({ ok: true, deployed: [], deployFailed: [], cleaned: [] });
+    expect(await (await handleTickRequest(new Request(`http://x/api/tick?key=${key}`), deps, T0)).json()).toMatchObject({ deployed: [demo.venue.id] });
+    expect((await demo.store.getVenue(demo.venue.id)).deploy).toMatchObject({ status: "ready", url: "https://agala.example.test" });
+    expect((await demo.store.getVenue(other.id)).deploy?.status).toBe("building"); // scoped to the key's venue
+    const noDeployer = { config: { tickSecret: "tick" }, store: demo.store, messenger: new FakeMessenger() };
+    expect(await (await handleTickRequest(new Request("http://x/api/tick", { headers: { "x-tick-secret": "tick" } }), noDeployer, T0)).json()).toMatchObject({ deployed: [], deployFailed: [], cleaned: [] });
+    expect((await demo.store.getVenue(other.id)).deploy?.status).toBe("building");
   });
 });

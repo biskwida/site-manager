@@ -13,6 +13,7 @@ const BG = {
   welcomeStaff: (name: string, publicUrl: string) =>
     `Свързахте се като персонал на ${name}. Можете да отбелязвате изчерпани продукти и да добавяте днешните предложения.\n\nСайт: ${publicUrl}`,
   welcomeBack: (name: string, adminUrl: string) => `Вече сте свързани с ${name}. Табло: ${adminUrl}`,
+  switched: (name: string) => `Вече управлявате ${name}.`,
   help: "Пишете какво искате да промените, на български или английски. Примери:\n• „Капучиното става 3,20“\n• „Баницата свърши“\n• „Добави шопска салата 7,50“\n• „Затворени сме на 24 и 25 декември“\n• снимка на дъската с предложенията\n• снимка с текст „това е новата корица“\n\nКоманди: /menu – линкове към сайта, /lang bg|en – език, /undo – връща последната промяна.",
   langSet: "Езикът е български.",
   langUsage: "Използвайте /lang bg или /lang en.",
@@ -42,6 +43,10 @@ const BG = {
   connectUnavailable: "Свързването на сайтове не е включено на този сървър.",
   connectOk: (name: string, url: string) => `✅ Свързах WordPress сайта „${name}“ (${url}). Вече мога да редактирам страниците, снимките и менютата му; всяка промяна първо ще ви покажа за одобрение.`,
   connectFailed: (reason: string) => `Не успях да свържа сайта. ${reason}`,
+  publishing: "Сайтът ви се публикува. Ще ви пиша, когато е готов (обикновено до 2–3 минути).",
+  siteLive: (name: string, url: string) => `🎉 Сайтът на ${name} е готов: ${url}\n\nОт тук нататък промените от този чат се появяват на него за секунди.`,
+  designLive: (url: string) => `✅ Новият дизайн е онлайн: ${url}`,
+  siteFailed: (name: string) => `Публикуването на сайта на ${name} не успя. Отворете таблото и натиснете „Опитай пак“; дотогава сайтът ви остава достъпен на адреса от приветственото съобщение.`,
 };
 
 const EN: typeof BG = {
@@ -51,6 +56,7 @@ const EN: typeof BG = {
     `You are linked as the owner of ${name}.\n\nHow it works:\n1. Type or send a voice note: “Cappuccino is 3.20 now”, “Banitsa is sold out”, “We're closed on 24 December”.\n2. You get a preview and confirm it with ✅.\n3. The site updates right away; /undo reverts the last change.\n\nSite: ${publicUrl}\nDashboard (keep this link, it is your key): ${adminUrl}`,
   welcomeStaff: (name, publicUrl) => `You are linked as staff of ${name}. You can mark items sold out and add today's specials.\n\nSite: ${publicUrl}`,
   welcomeBack: (name, adminUrl) => `You are already linked to ${name}. Dashboard: ${adminUrl}`,
+  switched: (name) => `You now manage ${name}.`,
   help: "Tell me what to change, in English or Bulgarian. Examples:\n• “Cappuccino is 3.20 now”\n• “Banitsa is sold out”\n• “Add shopska salad 7.50”\n• “We're closed on 24 and 25 December”\n• a photo of the specials board\n• a photo captioned “this is the new cover”\n\nCommands: /menu – site links, /lang bg|en – language, /undo – reverts the last change.",
   langSet: "Language set to English.",
   langUsage: "Use /lang bg or /lang en.",
@@ -80,6 +86,10 @@ const EN: typeof BG = {
   connectUnavailable: "Connecting sites is not enabled on this server.",
   connectOk: (name, url) => `✅ Connected the WordPress site “${name}” (${url}). I can now edit its pages, photos and menus; every change is shown to you for approval first.`,
   connectFailed: (reason) => `I could not connect the site. ${reason}`,
+  publishing: "Your site is being published. I'll message you when it's live (usually within 2–3 minutes).",
+  siteLive: (name, url) => `🎉 ${name}'s site is live: ${url}\n\nFrom now on, changes from this chat show up there within seconds.`,
+  designLive: (url) => `✅ The new design is live: ${url}`,
+  siteFailed: (name) => `Publishing ${name}'s site failed. Open the dashboard and press Try again; until then your site stays available at the address from the welcome message.`,
 };
 
 export function copy(lang: Lang) {

@@ -1,6 +1,6 @@
 // src/server/site.ts
 import { applyChanges } from "../domain/changes";
-import type { DraftInfo, SiteState } from "../domain/types";
+import type { DraftInfo, SiteState, Venue } from "../domain/types";
 import type { Store } from "../store/types";
 import { sha256Hex } from "./hash";
 
@@ -47,4 +47,16 @@ export async function loadSite(store: Store, slug: string, opts: LoadSiteOptions
     }
   }
   return { state, draft };
+}
+
+/** The venue as the public feed sends it: no deploy record (provider ids, build errors) and no wizard draft. */
+export type PublicVenue = Omit<Venue, "deploy" | "wizard_draft">;
+export type PublicSiteState = Omit<SiteState, "venue"> & { venue: PublicVenue };
+
+/** For GET /api/site/[slug]: everything templates and outside readers (Coffique) use, minus the owner-only venue fields. */
+export function publicSiteState(state: SiteState): PublicSiteState {
+  const { deploy, wizard_draft, ...venue } = state.venue;
+  void deploy;
+  void wizard_draft;
+  return { ...state, venue };
 }

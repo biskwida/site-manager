@@ -29,6 +29,8 @@ alter table public.venues add column if not exists status text not null default 
 alter table public.venues add column if not exists deploy jsonb;
 alter table public.venues add column if not exists wizard_draft jsonb;
 alter table public.venues add column if not exists draft_token_hash text;
+-- claimPublish: set while a publish of this draft runs (one conditional UPDATE), so two publishes cannot both run; stale after 5 minutes.
+alter table public.venues add column if not exists publishing_at timestamptz;
 alter table public.venues drop constraint if exists venues_template_check;
 alter table public.venues add constraint venues_template_check check (template in ('classic', 'nocturne', 'lumen'));
 alter table public.venues drop constraint if exists venues_business_type_check;
@@ -44,7 +46,7 @@ create table if not exists public.rate_limits (
   window_start timestamptz not null
 );
 
--- Atomic sliding-window counter; true when the call is allowed (count after increment <= p_max). Service role only (see policies.sql).
+-- Atomic fixed-window counter; true when the call is allowed (count after increment <= p_max). Service role only (see policies.sql).
 create or replace function public.bump_rate_limit(p_key text, p_window_ms int, p_max int, p_now timestamptz) returns boolean language sql as $$
   with up as (
     insert into public.rate_limits as r (key, count, window_start) values (p_key, 1, p_now)

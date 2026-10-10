@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import { cookies } from "next/headers";
 import { after } from "next/server";
 import { getServerDeps } from "@/src/server/deps";
 import { loadSite } from "@/src/server/site";
@@ -6,10 +7,12 @@ import { loadSite } from "@/src/server/site";
 type Search = Record<string, string | string[] | undefined>;
 const one = (v: string | string[] | undefined) => (Array.isArray(v) ? v[0] : v) ?? null;
 
-/** Shared by the home and menu pages: the live site, or the draft preview when `?draft=&key=` is valid for this venue. */
+/** Shared by the home and menu pages: the live site, the draft preview when `?draft=&key=` is valid for this venue, or a wizard draft when the sm_draft cookie matches. */
 export async function loadPage(slug: string, sp: Search) {
   const deps = await getServerDeps((fn) => after(fn));
-  return loadSite(deps.store, slug, { draftId: one(sp.draft), key: one(sp.key) });
+  const cookie = (await cookies()).get("sm_draft")?.value ?? null;
+  const draftToken = cookie && cookie.includes(".") ? cookie.slice(cookie.indexOf(".") + 1) : null;
+  return loadSite(deps.store, slug, { draftId: one(sp.draft), key: one(sp.key), draftToken });
 }
 
 export async function pageMetadata(slug: string, sp: Search): Promise<Metadata> {

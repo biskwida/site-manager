@@ -1,8 +1,11 @@
 // src/store/types.ts
 import type {
-  BusinessType, Category, Change, ChangeSet, ChangeSetStatus, ChangeSource, Conversation, DeployInfo, Item, Lang, Media, Member, Role, SiteState, SiteTextKey, TemplateId, Venue, VenueStatus, WeekHours,
+  BusinessType, Category, Change, ChangeSet, ChangeSetStatus, ChangeSource, Conversation, DeployInfo, DeployStatus, Item, Lang, Media, Member, Role, SiteState, SiteTextKey, TemplateId, Venue, VenueStatus, WeekHours,
 } from "../domain/types";
 import type { WizardDraft } from "../wizard/schema";
+
+/** How long a publish claim (claimPublish) blocks a second publish of the same draft; a publish that died keeps nobody out for longer. */
+export const PUBLISH_CLAIM_TTL_MS = 5 * 60_000;
 
 export const DEFAULT_HOURS: WeekHours = {
   mon: { open: "08:00", close: "18:00" },
@@ -88,11 +91,30 @@ export interface Store {
   /** Throws on an unknown id or a slug that another venue already has. Keys set to undefined are ignored. */
   updateVenue(id: string, patch: VenuePatch): Promise<Venue>;
   setDeploy(id: string, deploy: DeployInfo | null): Promise<void>;
+  /**
+   * Conditional deploy write: sets `deploy = next` only while the current deploy status is one of `whenStatusIn`
+   * (`null` = no deploy yet) and, when `whenDeploymentId` is given, the current deploy.deployment_id equals it.
+   * One atomic update; true when the row changed, false when another request got there first (or the venue is unknown).
+   * Deploy starts and template switches claim through this so two requests never both deploy; deploy polls claim their
+   * ready/error result with the deployment id they polled, so a result never lands on a newer deployment.
+   */
+  claimDeploy(id: string, next: DeployInfo, opts: { whenStatusIn: (DeployStatus | null)[]; whenDeploymentId?: string }): Promise<boolean>;
+  /**
+   * Marks a draft as "publishing now" (`now` ISO, defaults to the clock) only if its status is still `draft` and no other
+   * publish claimed it in the last PUBLISH_CLAIM_TTL_MS (a crashed publish releases itself). True when this call won the claim.
+   */
+  claimPublish(id: string, now?: string): Promise<boolean>;
+  /** Drops a publish claim so a failed publish can be retried at once (a successful one ends with status live, where the claim is moot). */
+  releasePublish(id: string): Promise<void>;
   /** Stores the sha256 of the wizard's draft token (null clears it). */
   setDraftToken(id: string, tokenHash: string | null): Promise<void>;
   findVenueByDraftToken(tokenHash: string): Promise<Venue | null>;
-  /** Deletes the venue and everything that hangs off it: content, members, invites, tokens, change sets, media rows (storage objects stay). */
-  deleteVenue(id: string): Promise<void>;
+  /**
+   * Deletes the venue and everything that hangs off it: content, members, invites, tokens, change sets, media rows.
+   * Storage objects stay unless `withStorage` (abandoned wizard drafts): then every object under `<id>/` in the media
+   * bucket is removed first, so a failed storage call leaves the rows for the next attempt.
+   */
+  deleteVenue(id: string, opts?: { withStorage?: boolean }): Promise<void>;
   /** Everything for one venue, including inactive items (the site filters with domain/effective). */
   getSite(venueId: string): Promise<SiteState>;
   insertCategory(c: NewCategory): Promise<Category>;
@@ -100,6 +122,8 @@ export interface Store {
   setSiteText(venueId: string, key: SiteTextKey, text_bg: string, text_en: string): Promise<void>;
   /** Deletes the venue's menu, texts, holidays, announcements, media rows and change sets (demo reset). Members, invites and tokens stay. */
   clearVenueContent(venueId: string): Promise<void>;
+  /** Deletes the venue's items, categories and site texts only (a retried wizard publish starts its menu again). Media, change sets and venue fields stay. */
+  clearMenu(venueId: string): Promise<void>;
 
   // members and access
   findMember(chatId: number): Promise<Member | null>;
@@ -107,6 +131,8 @@ export interface Store {
   upsertMember(m: Omit<Member, "created_at">): Promise<Member>;
   setMemberLang(venueId: string, chatId: number, lang: Lang): Promise<void>;
   createInvite(venueId: string, role: Role, expiresAt: string): Promise<string>;
+  /** The open invite (unused, expires after `now`) for this venue and role that expires last; null when there is none. */
+  findOpenInvite(venueId: string, role: Role, now: string): Promise<string | null>;
   /** Links the chat and marks the code used; null when the code is unknown, used or expired. */
   redeemInvite(code: string, chatId: number, lang: Lang, now: string): Promise<Member | null>;
   /** Creates the token on first call. */
@@ -144,7 +170,7 @@ export interface Store {
   setConversation(venueId: string, chatId: number, c: Conversation): Promise<void>;
 
   // rate limits
-  /** Sliding window counter. Returns true when the call is allowed (count after increment <= max). */
+  /** Fixed window counter (the window restarts at the first call after it elapses). Returns true when the call is allowed (count after increment <= max). */
   bumpRateLimit(key: string, windowMs: number, max: number, now: string): Promise<boolean>;
 }
 

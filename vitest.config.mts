@@ -4,6 +4,7 @@ export default defineConfig({
   test: {
     include: ["test/**/*.test.{ts,tsx}"],
     environment: "node",
+    setupFiles: ["./test/setup.ts"],
   },
   resolve: {
     alias: { "@": new URL("./", import.meta.url).pathname },

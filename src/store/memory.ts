@@ -1,7 +1,7 @@
 // src/store/memory.ts
 import { applyChanges } from "../domain/changes";
-import type { Category, ChangeSet, Conversation, DeployInfo, Item, Lang, Media, Member, Role, SiteState, SiteTextKey, Venue, VenueStatus } from "../domain/types";
-import { DEFAULT_HOURS, extensionFor, newInviteCode, newToken, type ChangeSetPatch, type ExpiredTimer, type NewCategory, type NewChangeSet, type NewItem, type NewVenue, type Store, type VenuePatch, type Destination, type DestinationKind, type DestinationPatch, type DestinationSync, type DestinationWithSecrets, type NewDestination, type NewSync, type SyncPatch, type SyncStatus } from "./types";
+import type { Category, ChangeSet, Conversation, DeployInfo, DeployStatus, Item, Lang, Media, Member, Role, SiteState, SiteTextKey, Venue, VenueStatus } from "../domain/types";
+import { DEFAULT_HOURS, extensionFor, newInviteCode, newToken, PUBLISH_CLAIM_TTL_MS, type ChangeSetPatch, type ExpiredTimer, type NewCategory, type NewChangeSet, type NewItem, type NewVenue, type Store, type VenuePatch, type Destination, type DestinationKind, type DestinationPatch, type DestinationSync, type DestinationWithSecrets, type NewDestination, type NewSync, type SyncPatch, type SyncStatus } from "./types";
 
 const clone = <T>(v: T): T => structuredClone(v);
 
@@ -22,6 +22,7 @@ export class InMemoryStore implements Store {
   conversations = new Map<string, Conversation>();
   files = new Map<string, Uint8Array>();
   draftTokens = new Map<string, string>(); // venue id -> sha256 of the draft token
+  publishing = new Map<string, string>(); // venue id -> ISO time of the last publish claim
   rateLimits = new Map<string, { count: number; window_start: number }>();
   private lastTick = 0;
   /** Strictly increasing clock for created_at (so newest-first ordering is stable); tests may override. */
@@ -90,6 +91,24 @@ export class InMemoryStore implements Store {
   async setDeploy(id: string, deploy: DeployInfo | null) {
     this.site(id).venue.deploy = deploy ? clone(deploy) : null;
   }
+  async claimDeploy(id: string, next: DeployInfo, opts: { whenStatusIn: (DeployStatus | null)[]; whenDeploymentId?: string }) {
+    const s = this.sites.get(id);
+    if (!s || !opts.whenStatusIn.includes(s.venue.deploy?.status ?? null)) return false;
+    if (opts.whenDeploymentId !== undefined && s.venue.deploy?.deployment_id !== opts.whenDeploymentId) return false;
+    s.venue.deploy = clone(next);
+    return true;
+  }
+  async claimPublish(id: string, now = this.clock()) {
+    const s = this.sites.get(id);
+    if (!s || s.venue.status !== "draft") return false;
+    const prev = this.publishing.get(id);
+    if (prev && Date.parse(now) - Date.parse(prev) < PUBLISH_CLAIM_TTL_MS) return false;
+    this.publishing.set(id, now);
+    return true;
+  }
+  async releasePublish(id: string) {
+    this.publishing.delete(id);
+  }
   async setDraftToken(id: string, tokenHash: string | null) {
     this.site(id);
     if (tokenHash === null) this.draftTokens.delete(id);
@@ -99,16 +118,17 @@ export class InMemoryStore implements Store {
     for (const [venueId, h] of this.draftTokens) if (h === tokenHash && this.sites.has(venueId)) return this.getVenue(venueId);
     return null;
   }
-  async deleteVenue(id: string) {
+  async deleteVenue(id: string, opts: { withStorage?: boolean } = {}) {
+    if (opts.withStorage) for (const path of [...this.files.keys()]) if (path.startsWith(`${id}/`)) this.files.delete(path);
     if (!this.sites.has(id)) return;
     this.sites.delete(id);
     this.draftTokens.delete(id);
+    this.publishing.delete(id);
     this.tokens.delete(id);
     for (const [chatId, m] of this.members) if (m.venue_id === id) this.members.delete(chatId);
     for (const [code, inv] of this.invites) if (inv.venue_id === id) this.invites.delete(code);
     for (const [setId, cs] of this.sets) if (cs.venue_id === id) this.sets.delete(setId);
     for (const key of [...this.conversations.keys()]) if (key.startsWith(`${id}:`)) this.conversations.delete(key);
-    for (const path of [...this.files.keys()]) if (path.startsWith(`${id}/`)) this.files.delete(path);
     for (const [did, d] of this.destinations) if (d.venue_id === id) this.destinations.delete(did);
     for (const [sid, s] of this.syncs) if (s.venue_id === id) this.syncs.delete(sid);
   }
@@ -150,6 +170,12 @@ export class InMemoryStore implements Store {
     if (existing) Object.assign(existing, { text_bg, text_en });
     else s.texts.push({ venue_id: venueId, key, text_bg, text_en });
   }
+  async clearMenu(venueId: string) {
+    const s = this.site(venueId);
+    s.items = [];
+    s.categories = [];
+    s.texts = [];
+  }
   async clearVenueContent(venueId: string) {
     const s = this.site(venueId);
     s.categories = [];
@@ -185,6 +211,11 @@ export class InMemoryStore implements Store {
     const code = newInviteCode();
     this.invites.set(code, { code, venue_id: venueId, role, expires_at: expiresAt, used_at: null });
     return code;
+  }
+  async findOpenInvite(venueId: string, role: Role, now: string) {
+    const open = [...this.invites.values()].filter((i) => i.venue_id === venueId && i.role === role && i.used_at === null && Date.parse(i.expires_at) > Date.parse(now));
+    open.sort((a, b) => b.expires_at.localeCompare(a.expires_at));
+    return open[0]?.code ?? null;
   }
   async redeemInvite(code: string, chatId: number, lang: Lang, now: string) {
     const inv = this.invites.get(code);
@@ -331,6 +362,7 @@ export class InMemoryStore implements Store {
 
   async bumpRateLimit(key: string, windowMs: number, max: number, now: string) {
     const t = Date.parse(now);
+    if (Number.isNaN(t)) throw new Error(`bumpRateLimit: invalid time ${now}`);
     const cur = this.rateLimits.get(key);
     const row = cur && cur.window_start + windowMs > t ? { count: cur.count + 1, window_start: cur.window_start } : { count: 1, window_start: t };
     this.rateLimits.set(key, row);

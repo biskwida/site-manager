@@ -2,7 +2,7 @@
 import { describe, expect, it } from "vitest";
 import { planChanges } from "@/src/domain/changes";
 import { newDraftToken, sha256Hex } from "@/src/server/hash";
-import { loadSite } from "@/src/server/site";
+import { loadSite, publicSiteState } from "@/src/server/site";
 import { makeDemo } from "./helpers";
 
 describe("loadSite", () => {
@@ -46,5 +46,22 @@ describe("loadSite", () => {
     const cs = await store.createChangeSet({ venue_id: venue.id, chat_id: 1001, summary_bg: "x", summary_en: "x", preview_bg: "p", preview_en: "p", source: "text", status: "proposed", changes: [] });
     const key = await store.getAdminToken(venue.id);
     expect((await loadSite(store, "agala", { draftId: cs.id, key }))?.draft).toMatchObject({ id: cs.id, key });
+  });
+});
+
+describe("publicSiteState", () => {
+  it("strips the deploy record and the wizard draft from the public feed, keeping everything templates read", async () => {
+    const { store, venue } = await makeDemo();
+    await store.setDeploy(venue.id, { provider: "vercel", project_id: "prj_secret", deployment_id: "dpl_1", url: "https://x.vercel.app", status: "error", error: "Build failed at /vercel/path0", template: "classic", updated_at: "2026-10-10T09:00:00.000Z" });
+    const state = await store.getSite(venue.id);
+    const pub = publicSiteState(state);
+    expect("deploy" in pub.venue).toBe(false);
+    expect("wizard_draft" in pub.venue).toBe(false);
+    expect(JSON.stringify(pub)).not.toContain("prj_secret");
+    const { deploy: _d, wizard_draft: _w, ...rest } = state.venue;
+    void _d;
+    void _w;
+    expect(pub).toEqual({ ...state, venue: rest });
+    expect(state.venue.deploy).not.toBeNull(); // the input is not mutated
   });
 });

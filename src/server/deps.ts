@@ -1,6 +1,6 @@
 // src/server/deps.ts
 // Server-only: holds the service-role Supabase key and the bot token. Never import from client components.
-import type Anthropic from "@anthropic-ai/sdk";
+import Anthropic from "@anthropic-ai/sdk";
 import type { Bot } from "grammy";
 import { runTurn } from "../agent/run";
 import { createBot, type BotDeps, type RunRequest } from "../bot/bot";
@@ -8,6 +8,11 @@ import { downloadTelegramFile } from "../bot/media";
 import { TelegramMessenger, type Messenger } from "../bot/messenger";
 import { makeTranscriber, type Transcriber } from "../bot/voice";
 import { loadConfig, type Config } from "../config";
+import { FakeDeployer } from "../deploy/fake";
+import { buildFiles } from "../deploy/manifest";
+import { startDeploy as runStartDeploy, watchDeploy as runWatchDeploy } from "../deploy/run";
+import type { Deployer } from "../deploy/types";
+import { VercelDeployer } from "../deploy/vercel";
 import { seedDemo } from "../seed/demo";
 import { InMemoryStore } from "../store/memory";
 import { SupabaseStore } from "../store/supabase";
@@ -30,6 +35,17 @@ export interface ServerDeps {
   destinationSecretKey: Buffer | null;
   /** Destination sync deps for the tick; null when integrations are off. */
   sync: SyncDeps | null;
+  /**
+   * FakeDeployer in memory mode; VercelDeployer when VERCEL_TOKEN is set; null otherwise (production without a token):
+   * no venue projects are created and every site is served from the hosted /<slug>.
+   */
+  deployer: Deployer | null;
+  /** Deferred: creates the venue's site (no-op when it is not live or already has one, or without a deployer), then watches it. */
+  startDeploy: (venueId: string) => void;
+  /** Deferred: polls the venue's in-flight deployment every 10 s for up to 240 s (after a template switch); no-op without a deployer. */
+  watchDeploy: (venueId: string) => void;
+  /** Shared Anthropic client for the wizard AI routes; null without ANTHROPIC_API_KEY (offline mode). Tests inject `client`. */
+  anthropic: Anthropic | null;
 }
 
 export interface DepsOptions {
@@ -40,6 +56,9 @@ export interface DepsOptions {
   transcribe?: Transcriber | null;
   client?: Anthropic;
   log?: (line: string) => void;
+  deployer?: Deployer;
+  /** watchDeploy's wait between polls; tests pass a no-op. */
+  sleep?: (ms: number) => Promise<void>;
 }
 
 export async function makeServerDeps(o: DepsOptions): Promise<ServerDeps> {
@@ -47,6 +66,7 @@ export async function makeServerDeps(o: DepsOptions): Promise<ServerDeps> {
   const isMemory = env.SITE_MANAGER_STORE === "memory";
   const config = loadConfig(env, { lenient: isMemory });
   const log = o.log ?? ((s: string) => console.log(s));
+  const anthropic = o.client ?? (config.anthropicApiKey ? new Anthropic({ apiKey: config.anthropicApiKey }) : null);
 
   let store = o.store;
   if (!store) {
@@ -68,6 +88,25 @@ export async function makeServerDeps(o: DepsOptions): Promise<ServerDeps> {
   const store2: Store = sync ? withDestinationSync(s, sync) : s;
   const transcribe =
     o.transcribe !== undefined ? o.transcribe : config.sttApiKey ? makeTranscriber({ apiKey: config.sttApiKey, baseUrl: config.sttBaseUrl, model: config.sttModel }) : null;
+  // The fake deployer is for offline mode only: in production it would hand owners https://<slug>.example.test.
+  const deployer: Deployer | null =
+    o.deployer ??
+    (isMemory ? new FakeDeployer() : config.vercelToken ? new VercelDeployer({ token: config.vercelToken, teamId: config.vercelTeamId, files: (id) => buildFiles(id), log }) : null);
+  if (deployer?.provider === "fake") log("[deploy] fake deployer (memory store): sites get https://<slug>.example.test");
+  if (!deployer) log("[deploy] no VERCEL_TOKEN: no venue deployments; sites are served from the hosted /<slug>");
+  const feedUrlFor = (slug: string) => `${config.publicBaseUrl}/api/site/${encodeURIComponent(slug)}`;
+  // The messenger is created below (it needs bot.api); these closures read it when they run, after this function returned.
+  const watch = (dep: Deployer, venueId: string) => runWatchDeploy({ store: s, deployer: dep, messenger, now: () => new Date(), sleep: o.sleep, log }, venueId);
+  const startDeploy = (venueId: string) => {
+    if (deployer)
+      o.defer(async () => {
+        await runStartDeploy({ store: s, deployer, feedUrlFor, now: () => new Date(), log }, venueId);
+        await watch(deployer, venueId);
+      });
+  };
+  const watchDeploy = (venueId: string) => {
+    if (deployer) o.defer(() => watch(deployer, venueId));
+  };
 
   // createBot's handlers read `d.messenger` at call time, so the messenger (which needs bot.api) is set on this same object below.
   const botDeps: BotDeps = {
@@ -80,14 +119,16 @@ export async function makeServerDeps(o: DepsOptions): Promise<ServerDeps> {
     transcribe,
     download: (filePath) => downloadTelegramFile(config.telegramToken, filePath),
     connect: sync ? (venueId, siteUrl, code) => connectWordPress({ store: s, secretKey: destinationSecretKey, allowLocal: isMemory }, venueId, siteUrl, code) : undefined,
+    // Without a deployer the hosted /<slug> is the site: nothing to publish, so no hook (and no "publishing" line).
+    onOwnerJoined: deployer ? startDeploy : undefined,
   };
   const bot = createBot(botDeps);
-  const messenger = new TelegramMessenger(bot.api);
+  const messenger: Messenger = new TelegramMessenger(bot.api);
   botDeps.messenger = messenger;
 
   async function handleRun(r: RunRequest): Promise<void> {
     try {
-      await runTick({ store: store2, messenger, now: new Date(), venueId: r.venueId, sync });
+      await runTick({ store: store2, messenger, now: new Date(), venueId: r.venueId, deployer, sync });
     } catch (e) {
       console.error("[tick] per-webhook tick failed:", e instanceof Error ? e.message : e);
     }
@@ -104,7 +145,7 @@ export async function makeServerDeps(o: DepsOptions): Promise<ServerDeps> {
     }
   }
 
-  return { config, store: store2, messenger, bot, handleRun, isMemory, destinationSecretKey, sync };
+  return { config, store: store2, messenger, bot, handleRun, isMemory, deployer, startDeploy, watchDeploy, anthropic, destinationSecretKey, sync };
 }
 
 // On globalThis, not a module variable: `next dev` (HMR, separate route bundles) then shares one in-memory store between pages and API routes.

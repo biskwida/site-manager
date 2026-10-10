@@ -1,0 +1,224 @@
+/* src/templates/nocturne/styles.css
+   Nocturne: dark, cinematic, for bars and evening venues. Tokens live on the wrapper only, so the main app's cream theme is untouched.
+   Neutrals are tinted toward the brass accent hue (OKLCH hue 75-85); nothing is pure black or white.
+   Self-contained: everything the template needs (cover images, sr-only text, layout) is here, so the standalone shell ships it as is.
+   Motion: transform/opacity only, 150-350 ms, one spring-like curve; everything off under prefers-reduced-motion. */
+.tpl-nocturne {
+  --n-bg: oklch(0.16 0.012 75);        /* #100d08 */
+  --n-bg-2: oklch(0.21 0.014 75);      /* #1c1711 */
+  --n-ink: oklch(0.93 0.012 85);       /* #ebe7df, 15.7:1 on --n-bg */
+  --n-ink-soft: oklch(0.74 0.015 85);  /* #afaaa0, 8.4:1 on --n-bg, 7.7:1 on --n-bg-2 */
+  --n-line: color-mix(in oklab, var(--n-ink) 12%, transparent);
+  --n-line-strong: color-mix(in oklab, var(--n-ink) 34%, transparent);
+  --n-accent: var(--accent, #d9a05b);
+  /* Accent as text/fill: lift lightness so a dark owner-picked accent still reads on near-black.
+     Browsers without relative colour syntax keep the plain accent (first declaration). */
+  --n-accent-text: var(--n-accent);
+  --n-accent-text: oklch(from var(--n-accent) max(l, 0.78) min(c, 0.14) h);
+  --n-ease: cubic-bezier(0.22, 1, 0.36, 1);
+  --n-radius: 1.25rem;
+  --n-gutter: 1rem;
+  --n-wrap: 44rem;   /* the page column on phones and tablets */
+  --n-board: 44rem;  /* the menu board never grows past ~72ch */
+  color-scheme: dark;
+  background: var(--n-bg);
+  color: var(--n-ink);
+  font-family: var(--font-body), ui-sans-serif, system-ui, sans-serif;
+  font-size: 1rem;
+  line-height: 1.55;
+  min-height: 100dvh;
+  display: flex;
+  flex-direction: column;
+  overflow-x: clip;
+  isolation: isolate;
+  -webkit-font-smoothing: antialiased;
+}
+@media (min-width: 640px) { .tpl-nocturne { --n-gutter: 1.5rem; } }
+/* Laptop: the hero, the Visit grid and the strips use the width; the menu board keeps its reading measure. */
+@media (min-width: 1024px) { .tpl-nocturne { --n-gutter: 2.5rem; --n-wrap: 72rem; } }
+.tpl-nocturne h1, .tpl-nocturne h2, .tpl-nocturne h3, .tpl-nocturne h4, .tpl-nocturne .n-display {
+  font-family: var(--font-display), ui-sans-serif, system-ui, sans-serif;
+  font-variation-settings: normal;
+}
+.tpl-nocturne a, .tpl-nocturne button { -webkit-tap-highlight-color: transparent; }
+/* next/image `fill` positions the img; this crops it to the box. */
+.n-cover { object-fit: cover; }
+/* Visually hidden, still read by screen readers. */
+.n-sr { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }
+.n-nowrap { white-space: nowrap; }
+
+/* Film grain: fixed SVG noise at low opacity above everything, never intercepts input. */
+.n-grain {
+  position: fixed; inset: 0; z-index: 1; pointer-events: none; opacity: 0.06; mix-blend-mode: soft-light;
+  background-size: 180px 180px;
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='180' height='180'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' stitchTiles='stitch'/><feColorMatrix values='0 0 0 0 1 0 0 0 0 1 0 0 0 0 1 0 0 0 0.6 0'/></filter><rect width='100%25' height='100%25' filter='url(%23n)'/></svg>");
+}
+
+/* Layout */
+.n-wrap { width: 100%; max-width: var(--n-wrap); margin-inline: auto; padding-inline: var(--n-gutter); }
+.n-board { max-width: var(--n-board); }
+.n-main { flex: 1; padding-top: 1.5rem; padding-bottom: 5rem; }
+.n-section { scroll-margin-top: 4.5rem; }
+.n-soft { color: var(--n-ink-soft); }
+.n-eyebrow { font-size: 0.75rem; font-weight: 700; letter-spacing: 0.14em; text-transform: uppercase; color: var(--n-accent-text); }
+.n-h2 { font-size: 1.375rem; font-weight: 700; line-height: 1.2; letter-spacing: -0.01em; text-wrap: balance; }
+.n-h3 { font-size: 0.9375rem; font-weight: 700; line-height: 1.3; }
+.n-prose { max-width: 62ch; }
+.n-divide > * + * { border-top: 1px solid var(--n-line); }
+.n-card { position: relative; background: var(--n-bg-2); border: 1px solid var(--n-line); border-radius: var(--n-radius); }
+.n-pill { display: inline-block; border-radius: 999px; padding: 0.375rem 0.75rem; font-size: 0.875rem; font-weight: 600; line-height: 1.4; background: color-mix(in oklab, var(--n-accent) 18%, var(--n-bg-2)); color: var(--n-ink); }
+.n-badge { display: inline-block; border-radius: 999px; padding: 0.125rem 0.625rem; font-size: 0.75rem; font-weight: 700; line-height: 1.5; border: 1px solid var(--n-line-strong); color: var(--n-ink-soft); }
+.n-tag { display: inline-flex; min-width: 1.5rem; justify-content: center; border-radius: 0.375rem; padding: 0.125rem 0.375rem; font-size: 0.75rem; font-weight: 600; background: var(--n-bg-2); color: var(--n-ink-soft); }
+
+/* Status: the one semantic dot on the page (open / opens later / closed). */
+.n-dot { display: inline-block; width: 0.625rem; height: 0.625rem; border-radius: 999px; flex: none; }
+.n-dot-open { background: #7ed6a2; }
+.n-dot-opens_later { background: #f0c66a; }
+.n-dot-closed { background: #e27a6a; }
+
+/* Hero: the cover and veil are absolutely positioned, so no overflow clip is needed and the Tonight card may hang below the edge. */
+.n-hero { position: relative; isolation: isolate; display: flex; flex-direction: column; }
+/* A photo earns the full-bleed height; without one the hero is as tall as its text, so "open now?" stays above the fold. */
+.n-hero-home.has-cover { min-height: 78svh; }
+.n-hero-menu.has-cover { min-height: 38svh; }
+.n-cover-fallback { position: absolute; inset: 0; background: radial-gradient(120% 80% at 80% 0%, color-mix(in oklab, var(--n-accent) 24%, var(--n-bg)), var(--n-bg) 72%); }
+.n-veil { position: absolute; inset: 0; background: linear-gradient(to top, color-mix(in oklab, var(--n-bg) 94%, transparent) 0%, color-mix(in oklab, var(--n-bg) 56%, transparent) 48%, color-mix(in oklab, var(--n-bg) 22%, transparent) 100%); }
+.n-hero-inner { position: relative; display: flex; flex: 1; flex-direction: column; padding-top: 1rem; }
+.n-topbar { display: flex; align-items: center; justify-content: space-between; gap: 0.75rem; }
+.n-nav { display: flex; gap: 0.25rem; }
+.n-navlink { display: inline-flex; align-items: center; min-height: 44px; padding-inline: 0.875rem; border-radius: 999px; font-size: 0.875rem; font-weight: 700; color: var(--n-ink); transition: background-color 200ms var(--n-ease), color 200ms var(--n-ease); }
+.n-navlink.is-current { background: var(--n-ink); color: var(--n-bg); }
+/* Title block and the Tonight card: stacked on a phone, side by side from 1024 px. */
+.n-hero-grid { margin-top: auto; display: grid; grid-template-columns: minmax(0, 1fr); gap: 2rem; padding-top: 3.5rem; }
+.n-hero-body { display: flex; flex-direction: column; align-items: flex-start; }
+.n-logo { position: relative; display: block; width: 3.5rem; height: 3.5rem; margin-bottom: 1.25rem; overflow: hidden; border-radius: 999px; box-shadow: 0 0 0 1px var(--n-line-strong); }
+.n-title { font-size: clamp(2.25rem, 8.5vw, 5rem); font-weight: 800; line-height: 0.98; letter-spacing: -0.02em; text-transform: uppercase; text-wrap: balance; overflow-wrap: anywhere; }
+.n-tagline { margin-top: 1rem; max-width: 36rem; font-size: 1.125rem; line-height: 1.5; color: var(--n-ink-soft); }
+.n-welcome { margin-top: 0.75rem; max-width: 36rem; }
+.n-hero-cta { margin-top: 1.75rem; }
+.n-tonight { margin-bottom: -1.5rem; padding: 1rem; }
+@media (min-width: 640px) { .n-tonight { padding: 1.25rem; } }
+@media (min-width: 1024px) {
+  .n-hero-grid { grid-template-columns: minmax(0, 1fr) 24rem; align-items: end; gap: 3rem; padding-top: 5rem; }
+  /* The title column is only ~512 px at 1024 px (24rem aside + gaps); 6vw keeps a nine-letter word on one line there. */
+  .n-title { font-size: clamp(2.25rem, 6vw, 7.5rem); }
+  .n-logo { width: 4.5rem; height: 4.5rem; }
+  .n-tagline { font-size: 1.25rem; }
+}
+@media (min-width: 1200px) { .n-title { font-size: clamp(2.25rem, 7vw, 5rem); } } /* The title column is capped at 640 px by --n-wrap (72rem); 5rem keeps a nine-letter word (~7.9em) on one line. */
+.n-status { display: flex; align-items: center; gap: 0.625rem; margin-top: 0.5rem; font-size: 1.125rem; font-weight: 600; line-height: 1.4; text-wrap: pretty; }
+.n-note { margin-top: 0.25rem; padding-left: 1.25rem; color: var(--n-ink-soft); }
+.n-news { display: flex; flex-wrap: wrap; gap: 0.5rem; margin-top: 0.75rem; }
+
+/* Language toggle (shared component) restyled for the dark surface. No transition: the client may flip the language right
+   after hydration, and an animated swap would leave both buttons mid-grey and unreadable for 200 ms on every load. */
+.tpl-nocturne .n-lang { padding: 2px; background: color-mix(in oklab, var(--n-ink) 10%, transparent); box-shadow: none; }
+.tpl-nocturne .n-lang button { min-height: 44px; min-width: 2.75rem; color: var(--n-ink); background: transparent; box-shadow: inset 0 0 0 1px var(--n-line-strong); transition: none; }
+.tpl-nocturne .n-lang button[aria-pressed="true"] { background: var(--n-ink); color: var(--n-bg); box-shadow: none; }
+
+/* Passive draft note (the page renders the real Apply/Reject banner outside the template). */
+.n-draft { background: var(--n-bg-2); color: var(--n-ink-soft); font-size: 0.875rem; }
+.n-draft-inner { display: flex; flex-wrap: wrap; align-items: center; gap: 0.5rem 0.75rem; padding-block: 0.75rem; }
+.n-draft-badge { border-radius: 999px; padding: 0.125rem 0.625rem; font-size: 0.6875rem; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; background: var(--n-accent-text); color: var(--n-bg); }
+
+/* Buttons: 44 px minimum, press feedback on transform only. */
+.n-btn { min-height: 44px; display: inline-flex; align-items: center; justify-content: center; gap: 0.5rem; padding-inline: 1.25rem; border-radius: 999px; font-weight: 700; font-size: 0.9375rem; line-height: 1.2; text-align: center; transition: transform 160ms var(--n-ease), background-color 200ms var(--n-ease), border-color 200ms var(--n-ease); }
+.n-btn:active { transform: scale(0.97); }
+.n-btn-accent { background: var(--n-accent-text); color: var(--n-bg); }
+.n-btn-ghost { border: 1px solid var(--n-line-strong); color: var(--n-ink); }
+
+/* Menu rows: name, dotted leader, large display price (the bar-menu board). */
+.n-row { position: relative; isolation: isolate; padding-block: 1rem; }
+.n-row-inner { display: flex; align-items: flex-start; gap: 1rem; }
+.n-thumb { position: relative; width: 5rem; height: 5rem; flex: none; overflow: hidden; border-radius: 0.75rem; }
+.n-row-text { min-width: 0; flex: 1; }
+.n-row-head { display: flex; align-items: baseline; gap: 0.625rem; }
+.n-name { min-width: 0; font-size: 1.0625rem; font-weight: 600; line-height: 1.35; overflow-wrap: anywhere; }
+.n-name.is-sold { color: var(--n-ink-soft); }
+/* Empty flex item: its synthesized baseline is its bottom edge, so the dots sit on the price baseline even when the name wraps. */
+.n-lead { flex: 1 1 1rem; min-width: 1rem; height: 0; border-bottom: 2px dotted var(--n-line-strong); }
+.n-price { font-family: var(--font-display), ui-sans-serif, system-ui, sans-serif; font-size: 1.125rem; font-weight: 700; font-variant-numeric: tabular-nums; white-space: nowrap; color: var(--n-accent-text); }
+.n-price.is-sold { text-decoration: line-through; color: var(--n-ink-soft); }
+.n-desc { margin-top: 0.25rem; font-size: 0.875rem; line-height: 1.5; color: var(--n-ink-soft); }
+.n-meta { display: flex; flex-wrap: wrap; align-items: center; gap: 0.375rem; margin-top: 0.5rem; }
+.n-cat { margin-top: 2.5rem; }
+.n-cat:first-of-type { margin-top: 1rem; }
+.n-cat-h { padding-bottom: 0.75rem; border-bottom: 1px solid var(--n-line); }
+.n-legend { margin-top: 3rem; padding-top: 1.25rem; border-top: 1px solid var(--n-line); }
+.n-legend dl { display: grid; grid-template-columns: 1fr; gap: 0.25rem 1.5rem; margin-top: 0.75rem; font-size: 0.875rem; }
+@media (min-width: 640px) { .n-legend dl { grid-template-columns: 1fr 1fr; } }
+.n-legend dl > div { display: flex; gap: 0.5rem; }
+.n-legend dt { min-width: 1.5rem; font-weight: 700; font-variant-numeric: tabular-nums; }
+.n-legend dd { color: var(--n-ink-soft); }
+
+/* Category jump bar: sticky, scrolls sideways inside itself (no page overflow). A solid band; the fade below it is a blurred
+   box-shadow in the page colour, which is drawn outside the box and so is neither clipped by the scroller's own overflow nor
+   counted in its scrollHeight (a pseudo-element inside it was both, and added a hidden 12 px vertical scroll). */
+.n-jump { position: sticky; top: 0; z-index: 2; display: flex; gap: 0.5rem; overflow-x: auto; overscroll-behavior-x: contain; scrollbar-width: none; padding-block: 0.75rem; margin-inline: calc(-1 * var(--n-gutter)); padding-inline: var(--n-gutter); background: var(--n-bg); box-shadow: 0 0.5rem 0.75rem var(--n-bg); }
+.n-jump::-webkit-scrollbar { display: none; }
+.n-chip { flex: none; min-height: 44px; display: inline-flex; align-items: center; padding-inline: 1rem; border-radius: 999px; border: 1px solid var(--n-line-strong); color: var(--n-ink-soft); font-size: 0.875rem; font-weight: 600; white-space: nowrap; transition: color 200ms var(--n-ease), border-color 200ms var(--n-ease), transform 160ms var(--n-ease); }
+.n-chip:focus-visible { color: var(--n-ink); border-color: var(--n-ink-soft); }
+.n-chip:active { transform: scale(0.97); }
+
+/* Horizontal snap strips for specials and the gallery. */
+.n-strip { display: flex; gap: 0.75rem; overflow-x: auto; overscroll-behavior-x: contain; scroll-snap-type: x mandatory; margin-inline: calc(-1 * var(--n-gutter)); padding-inline: var(--n-gutter); padding-bottom: 0.5rem; scrollbar-width: none; }
+.n-strip::-webkit-scrollbar { display: none; }
+.n-strip > * { scroll-snap-align: start; flex: 0 0 78%; }
+@media (min-width: 640px) { .n-strip > * { flex-basis: 46%; } }
+@media (min-width: 1024px) { .n-strip > * { flex-basis: 22rem; } }
+.n-special { overflow: hidden; isolation: isolate; }
+.n-special-img { position: relative; aspect-ratio: 4 / 3; }
+.n-special-body { padding: 1rem; }
+.n-photo { position: relative; aspect-ratio: 4 / 5; overflow: hidden; border-radius: var(--n-radius); }
+
+/* Visit: hours and contact side by side on wide screens, no boxes. */
+.n-visit-grid { display: grid; gap: 2rem; margin-top: 1.5rem; padding-top: 1.5rem; border-top: 1px solid var(--n-line); }
+@media (min-width: 640px) { .n-visit-grid { grid-template-columns: 1fr 1fr; gap: 2.5rem; } }
+@media (min-width: 1024px) { .n-visit-grid { grid-template-columns: minmax(0, 24rem) minmax(0, 1fr); gap: 4rem; } }
+.n-hours { width: 100%; margin-top: 0.75rem; font-size: 0.9375rem; border-collapse: collapse; }
+.n-hours th, .n-hours td { padding-block: 0.375rem; font-weight: inherit; }
+.n-hours th { text-align: left; padding-right: 1rem; text-transform: capitalize; }
+.n-hours td { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.n-hours tr { color: var(--n-ink-soft); }
+.n-hours tr[aria-current="date"] { color: var(--n-ink); font-weight: 700; }
+.n-holidays { margin-top: 1rem; padding-top: 0.75rem; border-top: 1px solid var(--n-line); }
+.n-holidays ul { margin-top: 0.25rem; font-size: 0.875rem; color: var(--n-ink-soft); }
+.n-holidays li + li { margin-top: 0.25rem; }
+.n-holidays b { font-weight: 700; font-variant-numeric: tabular-nums; color: var(--n-ink); }
+.n-address { margin-top: 0.75rem; }
+.n-actions { display: flex; flex-wrap: wrap; gap: 0.5rem; margin-top: 1rem; }
+
+/* Footer */
+.n-footer { border-top: 1px solid var(--n-line); background: var(--n-bg-2); }
+.n-footer-inner { display: flex; flex-direction: column; gap: 0.75rem; padding-block: 2rem; font-size: 0.875rem; }
+@media (min-width: 640px) { .n-footer-inner { flex-direction: row; align-items: center; justify-content: space-between; } }
+.n-powered { display: inline-flex; min-height: 44px; align-items: center; color: var(--n-ink-soft); text-decoration: underline; text-underline-offset: 4px; text-decoration-color: var(--n-line-strong); }
+
+/* Skip link */
+.n-skip { position: absolute; left: var(--n-gutter); top: -100%; z-index: 20; padding: 0.75rem 1rem; border-radius: 999px; background: var(--n-ink); color: var(--n-bg); font-weight: 700; }
+.n-skip:focus-visible { top: 1rem; }
+
+/* Hover states only where a pointer exists (touch would latch them). */
+@media (hover: hover) {
+  .n-navlink:not(.is-current):hover { background: color-mix(in oklab, var(--n-ink) 10%, transparent); }
+  .tpl-nocturne .n-lang button:not([aria-pressed="true"]):hover { background: color-mix(in oklab, var(--n-ink) 10%, transparent); }
+  .n-btn-accent:hover { background: color-mix(in oklab, var(--n-accent-text) 90%, var(--n-ink)); }
+  .n-btn-ghost:hover { border-color: var(--n-ink-soft); }
+  .n-chip:hover { color: var(--n-ink); border-color: var(--n-ink-soft); }
+  .n-powered:hover { color: var(--n-ink); }
+}
+
+/* Motion: one orchestrated hero entrance, the change flash, press feedback. */
+.n-rise { animation: n-rise 320ms var(--n-ease) both; }
+@keyframes n-rise { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
+.n-flash { position: absolute; inset: 0; z-index: -1; pointer-events: none; border-radius: inherit; background: color-mix(in oklab, var(--n-accent) 22%, transparent); animation: n-flash 2.2s ease-out both; }
+@keyframes n-flash { 0%, 65% { opacity: 1; } 100% { opacity: 0; } }
+.tpl-nocturne :focus-visible { outline: 3px solid var(--n-accent-text); outline-offset: 3px; }
+@media (prefers-reduced-motion: reduce) {
+  .tpl-nocturne *, .tpl-nocturne *::before, .tpl-nocturne *::after { animation: none !important; transition: none !important; scroll-behavior: auto !important; }
+  /* The flash must still reach its final frame (opacity 0): `useLiveSite` never clears `changed`, so `animation: none` would leave
+     a permanent accent wash on every row that ever changed. A 1 ms run with `both` fill lands on the end state at once.
+     test/template-nocturne.test.ts asserts this rule stays inside the reduced-motion block. */
+  .tpl-nocturne .n-flash { animation: n-flash 1ms linear both !important; }
+  .n-strip { scroll-snap-type: none; }
+}

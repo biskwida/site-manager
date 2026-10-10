@@ -16,6 +16,33 @@
   --animate-flash: flash 2.2s ease-out both;
   --animate-line-in: line-in 700ms cubic-bezier(0.2, 0.7, 0.2, 1) both;
 
+  /* Site Manager brand (wizard, dashboard): one hue in OKLCH (petrol, h 205), every neutral tinted toward it. */
+  --color-brand: oklch(0.46 0.085 205);
+  --color-brand-strong: oklch(0.39 0.085 205);
+  --color-brand-soft: oklch(0.94 0.025 205);
+  --color-canvas: oklch(0.982 0.005 205);
+  --color-panel: oklch(0.996 0.003 205);
+  --color-sunken: oklch(0.955 0.008 205);
+  --color-fg: oklch(0.23 0.025 215);
+  --color-fg-soft: oklch(0.46 0.025 215);
+  --color-line: oklch(0.875 0.012 205);
+  --color-line-strong: oklch(0.74 0.02 205);
+  --color-danger: oklch(0.49 0.16 28);
+  --color-danger-soft: oklch(0.955 0.03 28);
+  --color-note: oklch(0.42 0.1 70);
+  --color-note-soft: oklch(0.955 0.04 85);
+  --font-brand: var(--font-sofia-sans), ui-sans-serif, system-ui, sans-serif;
+  --font-brand-display: var(--font-commissioner), ui-sans-serif, system-ui, sans-serif;
+  --ease-out-quart: cubic-bezier(0.23, 1, 0.32, 1);
+  --ease-sheet: cubic-bezier(0.32, 0.72, 0, 1);
+  --animate-step-in: step-in 220ms cubic-bezier(0.23, 1, 0.32, 1) both;
+  --animate-sheet-up: sheet-up 320ms cubic-bezier(0.32, 0.72, 0, 1) both;
+  --animate-fade-in: fade-in 180ms ease-out both;
+
+  @keyframes step-in { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
+  @keyframes sheet-up { from { transform: translateY(100%); } to { transform: none; } }
+  @keyframes fade-in { from { opacity: 0; } to { opacity: 1; } }
+
   @keyframes rise { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: none; } }
   /* Held for ~1.5 s, then fades: readable as "this just changed" from the back of a room. */
   @keyframes flash { 0%, 65% { opacity: 1; } 100% { opacity: 0; } }
@@ -37,6 +64,21 @@ body::before { content: ""; position: fixed; inset: 0; z-index: -1; pointer-even
   background-image: radial-gradient(1200px 600px at 85% -10%, color-mix(in oklab, var(--accent, #2f6b4f) 9%, transparent), transparent 60%),
     radial-gradient(900px 500px at -10% 110%, rgb(183 121 31 / 0.06), transparent 60%); }
 :focus-visible { outline: 3px solid var(--accent, #2f6b4f); outline-offset: 3px; }
+/* Wizard text fields draw their own focus ring on the field shell; the global outline would double it. */
+.sm-field:focus-visible { outline: none; }
+/* Wizard chrome: brand tokens and faces. Template previews live in their own iframe documents (FrameDoc), so nothing here reaches them. */
+.sm-brand { background: var(--color-canvas); color: var(--color-fg); font-family: var(--font-brand); --font-display: var(--font-brand-display); --accent: var(--color-brand); }
+.sm-brand :where(h1, h2, h3) { font-family: var(--font-brand-display); font-variation-settings: "FLAR" 55; letter-spacing: -0.015em; }
+.sm-brand .font-brand-display { font-variation-settings: "FLAR" 55; }
+body:has(.sm-brand)::before { background-image: radial-gradient(1100px 520px at 90% -10%, oklch(0.46 0.085 205 / 0.07), transparent 60%); }
+/* Horizontal step strip on phones: scrolls, no visible bar. */
+.sm-scroll-x { overflow-x: auto; scrollbar-width: none; -webkit-overflow-scrolling: touch; }
+.sm-scroll-x::-webkit-scrollbar { display: none; }
+/* The phone layout has a fixed bottom bar (Preview); scrollIntoView and anchor jumps must land above it. */
+@media (max-width: 1023px) { html:has(.sm-bottom-bar) { scroll-padding-bottom: 6rem; } }
+.sm-sheet { animation: var(--animate-sheet-up); }
+.sm-step { animation: var(--animate-step-in); }
+
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation-duration: 1ms !important; animation-delay: 0ms !important; animation-iteration-count: 1 !important; transition-duration: 1ms !important; }
 }

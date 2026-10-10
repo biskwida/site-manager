@@ -1,8 +1,9 @@
 import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 import { LangProvider } from "@/src/i18n";
+import { getTemplate } from "@/src/templates";
+import { DraftBanner } from "./components/DraftBanner";
 import { loadPage, pageMetadata } from "./load";
-import { SiteView } from "./components/SiteView";
 
 export const dynamic = "force-dynamic";
 
@@ -14,10 +15,14 @@ export default async function Page(props: PageProps<"/[slug]">) {
   const { slug } = await props.params;
   const site = await loadPage(slug, await props.searchParams);
   if (!site) notFound();
+  const { Component } = getTemplate(site.state.venue.template);
+  // eslint-disable-next-line react-hooks/purity -- a server component renders once per request; this is the request time templates tick from
+  const now = Date.now();
   return (
     <LangProvider defaultLang={site.state.venue.default_lang}>
+      {site.draft && <DraftBanner draft={site.draft} slug={slug} />}
       {/* keyed so leaving a draft preview (Apply/Reject → router.replace) remounts with the live state instead of keeping the draft */}
-      <SiteView key={site.draft?.id ?? "live"} state={site.state} slug={slug} page="home" draft={site.draft} live={site.draft === null} />
+      <Component key={site.draft?.id ?? "live"} state={site.state} now={now} slug={slug} page="home" draft={site.draft} live={site.draft === null} feedUrl={`/api/site/${encodeURIComponent(slug)}`} />
     </LangProvider>
   );
 }

@@ -1,9 +1,9 @@
 // src/store/supabase.ts
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import { isWpEntity, type WpEntity } from "../domain/types";
-import type { Announcement, BusinessType, Category, Change, ChangeSet, Conversation, DeployInfo, Holiday, Item, Lang, Media, Member, Role, SiteState, SiteText, SiteTextKey, TemplateId, Venue, VenueStatus } from "../domain/types";
+import type { Announcement, BusinessType, Category, Change, ChangeSet, Conversation, DeployInfo, DeployStatus, Holiday, Item, Lang, Media, Member, Role, SiteState, SiteText, SiteTextKey, TemplateId, Venue, VenueStatus } from "../domain/types";
 import type { WizardDraft } from "../wizard/schema";
-import { DEFAULT_HOURS, extensionFor, newInviteCode, newToken, type ChangeSetPatch, type ExpiredTimer, type NewCategory, type NewChangeSet, type NewItem, type NewVenue, type Store, type VenuePatch, type Destination, type DestinationKind, type DestinationPatch, type DestinationSync, type DestinationWithSecrets, type NewDestination, type NewSync, type SyncPatch, type SyncStatus } from "./types";
+import { DEFAULT_HOURS, extensionFor, newInviteCode, newToken, PUBLISH_CLAIM_TTL_MS, type ChangeSetPatch, type ExpiredTimer, type NewCategory, type NewChangeSet, type NewItem, type NewVenue, type Store, type VenuePatch, type Destination, type DestinationKind, type DestinationPatch, type DestinationSync, type DestinationWithSecrets, type NewDestination, type NewSync, type SyncPatch, type SyncStatus } from "./types";
 
 type Row = Record<string, unknown>;
 type DbError = { message: string; code?: string } | null;
@@ -182,6 +182,31 @@ export class SupabaseStore implements Store {
   async setDeploy(id: string, deploy: DeployInfo | null) {
     await mustRows(this.db.from("venues").update({ deploy }).eq("id", id).select("id"), `setDeploy ${id}`);
   }
+  async claimDeploy(id: string, next: DeployInfo, opts: { whenStatusIn: (DeployStatus | null)[]; whenDeploymentId?: string }) {
+    if (badVenue(id)) return false;
+    // One conditional UPDATE: the row filter is the claim, so two concurrent callers cannot both see the old status.
+    const statuses = opts.whenStatusIn.filter((s): s is DeployStatus => s !== null);
+    const parts = [...(opts.whenStatusIn.includes(null) ? ["deploy.is.null"] : []), ...(statuses.length ? [`deploy->>status.in.(${statuses.join(",")})`] : [])];
+    if (parts.length === 0) return false;
+    let q = this.db.from("venues").update({ deploy: next }).eq("id", id).or(parts.join(","));
+    // ->> yields text; a deploy record always carries deployment_id (possibly ""), so eq("") matches a create still in flight.
+    if (opts.whenDeploymentId !== undefined) q = q.eq("deploy->>deployment_id", opts.whenDeploymentId);
+    const { data, error } = await q.select("id");
+    if (error) throw new Error(`claimDeploy ${id}: ${error.message}`);
+    return (data?.length ?? 0) === 1;
+  }
+  async claimPublish(id: string, now = new Date().toISOString()) {
+    if (badVenue(id)) return false;
+    const stale = new Date(Date.parse(now) - PUBLISH_CLAIM_TTL_MS).toISOString();
+    const { data, error } = await this.db.from("venues").update({ publishing_at: now }).eq("id", id).eq("status", "draft").or(`publishing_at.is.null,publishing_at.lt.${stale}`).select("id");
+    if (error) throw new Error(`claimPublish ${id}: ${error.message}`);
+    return (data?.length ?? 0) === 1;
+  }
+  async releasePublish(id: string) {
+    if (badVenue(id)) return;
+    const { error } = await this.db.from("venues").update({ publishing_at: null }).eq("id", id);
+    if (error) throw new Error(`releasePublish ${id}: ${error.message}`);
+  }
   async setDraftToken(id: string, tokenHash: string | null) {
     await mustRows(this.db.from("venues").update({ draft_token_hash: tokenHash }).eq("id", id).select("id"), `setDraftToken ${id}`);
   }
@@ -190,12 +215,24 @@ export class SupabaseStore implements Store {
     if (error) throw new Error(`findVenueByDraftToken: ${error.message}`);
     return data ? this.venue(data) : null;
   }
-  async deleteVenue(id: string) {
+  async deleteVenue(id: string, opts: { withStorage?: boolean } = {}) {
     if (badVenue(id)) return;
+    if (opts.withStorage) await this.removeVenueObjects(id);
     const { error } = await this.db.from("venues").delete().eq("id", id);
     if (error) throw new Error(`deleteVenue ${id}: ${error.message}`);
   }
-  async getSite(venueId: string): Promise<SiteState> {
+  /** Removes every object under `<venueId>/` in the media bucket (saveMedia's layout), page by page. */
+  private async removeVenueObjects(venueId: string) {
+    for (let round = 0; round < 50; round++) {
+      const { data, error } = await this.db.storage.from("media").list(venueId, { limit: 100 });
+      if (error) throw new Error(`deleteVenue storage list ${venueId}: ${error.message}`);
+      const paths = (data ?? []).filter((o) => o.id !== null).map((o) => `${venueId}/${o.name}`);
+      if (paths.length === 0) return;
+      const { error: removeError } = await this.db.storage.from("media").remove(paths);
+      if (removeError) throw new Error(`deleteVenue storage remove ${venueId}: ${removeError.message}`);
+    }
+  }
+    async getSite(venueId: string): Promise<SiteState> {
     const [venue, categories, items, holidays, announcements, media, texts] = await Promise.all([
       this.getVenue(venueId),
       must(this.db.from("categories").select("*").eq("venue_id", venueId).order("position"), "categories"),
@@ -215,6 +252,12 @@ export class SupabaseStore implements Store {
   }
   async setSiteText(venueId: string, key: SiteTextKey, text_bg: string, text_en: string) {
     await must(this.db.from("site_texts").upsert({ venue_id: venueId, key, text_bg, text_en }, { onConflict: "venue_id,key" }).select("key"), "setSiteText");
+  }
+  async clearMenu(venueId: string) {
+    for (const t of ["items", "categories", "site_texts"]) {
+      const { error } = await this.db.from(t).delete().eq("venue_id", venueId);
+      if (error) throw new Error(`clearMenu ${t}: ${error.message}`);
+    }
   }
   async clearVenueContent(venueId: string) {
     for (const t of ["change_sets", "conversations", "items", "categories", "holidays", "announcements", "site_texts"]) {
@@ -253,6 +296,12 @@ export class SupabaseStore implements Store {
     const code = newInviteCode();
     await must(this.db.from("venue_invites").insert({ code, venue_id: venueId, role, expires_at: expiresAt }).select("code"), "createInvite");
     return code;
+  }
+  async findOpenInvite(venueId: string, role: Role, now: string) {
+    if (badVenue(venueId)) return null;
+    const { data, error } = await this.db.from("venue_invites").select("code").eq("venue_id", venueId).eq("role", role).is("used_at", null).gt("expires_at", now).order("expires_at", { ascending: false }).limit(1).maybeSingle();
+    if (error) throw new Error(`findOpenInvite: ${error.message}`);
+    return data ? (data.code as string) : null;
   }
   async redeemInvite(code: string, chatId: number, lang: Lang, now: string) {
     const rows = await must(

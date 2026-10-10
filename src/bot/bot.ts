@@ -37,6 +37,8 @@ export interface BotDeps {
   botInfo?: UserFromGetMe;
   /** Connects the venue to its WordPress site (src/destinations/connect.ts); undefined = the feature is off. */
   connect?: (venueId: string, siteUrl: string, code: string) => Promise<ConnectResult>;
+  /** Called after a successful owner redeem; deps wire it to startDeploy (which is a no-op when a site already exists). Must not throw. */
+  onOwnerJoined?: (venueId: string) => void;
 }
 
 const INVITE_TTL_MS = 7 * 24 * 3_600_000;
@@ -66,27 +68,38 @@ export function createBot(d: BotDeps): Bot {
     const chatId = ctx.chat.id;
     const uiLang = langFromCode(ctx.from?.language_code);
     const existing = await d.store.findMember(chatId);
-    if (existing) {
-      const venue = await d.store.getVenue(existing.venue_id);
-      const c = copy(existing.lang);
-      if (existing.role === "owner") await ctx.reply(c.welcomeBack(venue.name, adminUrl(d.baseUrl, venue.slug, await d.store.getAdminToken(venue.id))));
-      else await ctx.reply(c.welcomeStaff(venue.name, publicUrl(d.baseUrl, venue.slug)));
-      return;
-    }
     const code = (ctx.match ?? "").trim().toUpperCase();
-    if (!code) {
-      await ctx.reply(copy(uiLang).noAccess);
-      return;
+    // A code is tried first, even from a linked chat: the owner may be setting up another venue (the demo phone, a second
+    // café). redeemInvite moves the chat to the code's venue. Only without a usable code does a linked chat get welcome-back.
+    const member = code ? await d.store.redeemInvite(code, chatId, uiLang, d.now().toISOString()) : null;
+    // An owner tapping a staff code for their own venue must not demote themselves (the code is still used up).
+    if (member && existing && existing.venue_id === member.venue_id && existing.role === "owner" && member.role !== "owner") {
+      Object.assign(member, await d.store.upsertMember({ venue_id: existing.venue_id, tg_chat_id: chatId, role: "owner", lang: existing.lang }));
     }
-    const member = await d.store.redeemInvite(code, chatId, uiLang, d.now().toISOString());
     if (!member) {
-      await ctx.reply(copy(uiLang).badCode);
+      if (existing) {
+        const venue = await d.store.getVenue(existing.venue_id);
+        const c = copy(existing.lang);
+        if (existing.role === "owner") await ctx.reply(c.welcomeBack(venue.name, adminUrl(d.baseUrl, venue.slug, await d.store.getAdminToken(venue.id))));
+        else await ctx.reply(c.welcomeStaff(venue.name, publicUrl(d.baseUrl, venue.slug)));
+      } else await ctx.reply(code ? copy(uiLang).badCode : copy(uiLang).noAccess);
       return;
     }
     const venue = await d.store.getVenue(member.venue_id);
     const c = copy(member.lang);
-    if (member.role === "owner") await ctx.reply(c.welcome(venue.name, adminUrl(d.baseUrl, venue.slug, await d.store.getAdminToken(venue.id)), publicUrl(d.baseUrl, venue.slug)));
-    else await ctx.reply(c.welcomeStaff(venue.name, publicUrl(d.baseUrl, venue.slug)));
+    if (existing && existing.venue_id !== member.venue_id) await ctx.reply(c.switched(venue.name));
+    if (member.role === "owner") {
+      await ctx.reply(c.welcome(venue.name, adminUrl(d.baseUrl, venue.slug, await d.store.getAdminToken(venue.id)), publicUrl(d.baseUrl, venue.slug)));
+      if (d.onOwnerJoined) {
+        // The first owner join is the human check that publishes the site; startDeploy ignores venues that already have one.
+        if (venue.status === "live" && venue.deploy === null) await ctx.reply(c.publishing);
+        try {
+          d.onOwnerJoined(venue.id);
+        } catch (e) {
+          console.error("[bot] onOwnerJoined failed:", e instanceof Error ? e.message : e);
+        }
+      }
+    } else await ctx.reply(c.welcomeStaff(venue.name, publicUrl(d.baseUrl, venue.slug)));
   });
 
   bot.command("lang", async (ctx) => {
