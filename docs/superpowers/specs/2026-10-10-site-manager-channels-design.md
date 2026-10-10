@@ -251,9 +251,14 @@ export class WhatsAppMessenger implements Messenger { constructor(o: { token: st
 // src/channels/router.ts
 export class ChannelRouter implements Messenger { constructor(o: { store: Store; now: () => Date; adapters: Partial<Record<Channel, Messenger>> }) }
 
-// src/server/meta.ts
-export type MediaFetch = (idOrUrl: string) => Promise<{ bytes: Uint8Array; contentType: string }>;
-export async function handleMetaRequest(req: Request, deps: { config: Config; botDeps: BotDeps; defer: (fn: () => Promise<void>) => void; waDownload: MediaFetch; fetchUrl: MediaFetch }): Promise<Response>;
+// src/channels/meta/graph.ts
+export type MediaFetch = (idOrUrl: string) => Promise<{ bytes: Uint8Array; contentType: string; name?: string }>;
+
+// src/server/meta.ts — imports MediaFetch from src/channels/meta/graph.ts
+export function verifySignature(rawBody: string, header: string | null, appSecret: string): boolean;
+export interface MetaServerDeps { config: Pick<Config, "metaAppSecret" | "metaVerifyToken">; botDeps: BotDeps; handleRun: (r: RunRequest) => Promise<void>; defer: (fn: () => Promise<void>) => void; waDownload: MediaFetch; fetchUrl: MediaFetch }
+export async function handleMetaRequest(req: Request, deps: MetaServerDeps): Promise<Response>;
+export function resetDedupe(): void;  // tests only
 
 // src/channels/links.ts
 export function startLinks(cfg: Pick<Config, "telegramBotUsername" | "messengerPageHandle" | "instagramUsername" | "whatsappNumber">, code: string): { telegram?: string; messenger?: string; instagram?: string; whatsapp?: string };
