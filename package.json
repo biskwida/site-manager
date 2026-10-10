@@ -16,6 +16,8 @@
     "venue:create": "tsx --env-file-if-exists=.env.local scripts/venue-create.mts",
     "bot:dev": "tsx --env-file-if-exists=.env.local scripts/dev-bot.mts",
     "telegram:set-webhook": "tsx --env-file-if-exists=.env.local scripts/set-webhook.mts",
+    "meta:setup": "tsx --env-file-if-exists=.env.local scripts/meta-setup.mts",
+    "meta:sim": "tsx --env-file-if-exists=.env.local scripts/meta-sim.mts",
     "demo:reset": "tsx --env-file-if-exists=.env.local scripts/demo-reset.mts",
     "smoke": "tsx --env-file-if-exists=.env.local scripts/smoke.mts",
     "e2e": "tsx scripts/e2e-offline.mts",
