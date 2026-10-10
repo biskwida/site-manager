@@ -57,6 +57,7 @@ Add `lang="bg"` or `lang="en"` to force the language; the default is the venue's
 | `npm run wp:i18n` | regenerates `languages/site-manager-bg_BG.l10n.php` and `.mo` from the `.po` |
 | `npm run wp:zip` | rebuilds `public/wp/site-manager.zip` (commit it) |
 | `npm run wp:smoke` | Docker WordPress + MySQL: install, render blocks from the production feed, handshake, preview, apply, undo, options, menus, rate limit, log; `-- --keep` leaves it running at http://localhost:8088; `-- --feed http://host.docker.internal:3000` uses `npm run dev:offline` as the feed. Host ports 8088 (WordPress) and 8080 (the photo served to WordPress; core's `wp_http_validate_url()` allows external hosts only on 80, 443 and 8080) must be free |
+| `npm run wp:live -- --site https://… --code …` | The same flow against a real, public WordPress site (real HTTPS, DNS, hosting and page caches): connect, menu block, preview link, apply, undo, tagline change and undo, disconnect. It changes only a page titled "Site Manager test" and the tagline, and undoes both. Prepare a throwaway site as described in the header of `scripts/wp-live-check.mts` |
 
 ## Known limitations (0.1.0)
 
