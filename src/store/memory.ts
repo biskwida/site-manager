@@ -148,6 +148,12 @@ export class InMemoryStore implements Store {
     if (existing) Object.assign(existing, { text_bg, text_en });
     else s.texts.push({ venue_id: venueId, key, text_bg, text_en });
   }
+  async clearMenu(venueId: string) {
+    const s = this.site(venueId);
+    s.items = [];
+    s.categories = [];
+    s.texts = [];
+  }
   async clearVenueContent(venueId: string) {
     const s = this.site(venueId);
     s.categories = [];

@@ -176,6 +176,87 @@ describe("createDraft → updateDraft → publishDraft", () => {
     expect((await store.getVenue(venue.id)).deploy).toBeNull();
   });
 
+  it("a failure while writing the menu leaves the draft intact, and a retry publishes exactly once", async () => {
+    const { store } = await makeDemo();
+    const { venue } = await createDraft(store, "classic", T0);
+    const g = await store.saveMedia(venue.id, new Uint8Array([7]), "image/png");
+    const patch = { name: "Повтори", slug: "povtori", gallery_media_ids: [g.id], texts: { welcome: { bg: "Здравейте", en: "Hello" }, footer_note: { bg: "", en: "" } }, categories: [
+      { key: "c1", name_bg: "Кафе", name_en: "Coffee", items: [{ key: "i1", name_bg: "Еспресо", name_en: "Espresso", desc_bg: "", desc_en: "", price_eur: 1.8, allergens: [], image_media_id: null }, { key: "i2", name_bg: "Лате", name_en: "Latte", desc_bg: "", desc_en: "", price_eur: 3, allergens: [7], image_media_id: null }] },
+      { key: "c2", name_bg: "Чай", name_en: "Tea", items: [{ key: "i3", name_bg: "Мента", name_en: "Mint", desc_bg: "", desc_en: "", price_eur: 2, allergens: [], image_media_id: null }] },
+    ] };
+    const draft = await updateDraft(store, venue, patch);
+    const realInsert = store.insertItem.bind(store);
+    let calls = 0;
+    store.insertItem = async (i) => {
+      if (++calls === 2) throw new Error("network blip");
+      return realInsert(i);
+    };
+    await expect(publishDraft(store, await store.getVenue(venue.id), T0)).rejects.toThrow("network blip");
+    const failed = await store.getVenue(venue.id);
+    expect(failed.status).toBe("draft");
+    expect(failed.wizard_draft).toEqual(draft);
+    expect(failed.slug).toBe("povtori"); // claimed transiently by step 1 (R20)
+    expect([...store.invites.values()].filter((i) => i.venue_id === venue.id)).toEqual([]);
+    expect(await store.listChangeSets(venue.id)).toEqual([]);
+
+    const r = await publishDraft(store, failed, T0);
+    expect(r.venue).toMatchObject({ status: "live", slug: "povtori", wizard_draft: null });
+    const site = await store.getSite(venue.id);
+    expect(site.categories.map((c) => [c.name_en, c.position])).toEqual([["Coffee", 0], ["Tea", 1]]);
+    expect(site.items.map((i) => [i.name_en, i.category_id === site.categories[i.name_en === "Mint" ? 1 : 0].id, i.position])).toEqual([["Espresso", true, 0], ["Latte", true, 1], ["Mint", true, 0]]);
+    expect(site.texts).toEqual([{ venue_id: venue.id, key: "welcome", text_bg: "Здравейте", text_en: "Hello" }]);
+    expect(site.media.find((m) => m.id === g.id)?.is_gallery).toBe(true);
+    expect(await store.listChangeSets(venue.id)).toHaveLength(1);
+    expect([...store.invites.values()].filter((i) => i.venue_id === venue.id)).toHaveLength(1);
+  });
+
+  it("a failure after the photos were applied is retried without a second change set", async () => {
+    const { store } = await makeDemo();
+    const { venue } = await createDraft(store, "classic", T0);
+    const logo = await store.saveMedia(venue.id, new Uint8Array([1]), "image/png");
+    const g1 = await store.saveMedia(venue.id, new Uint8Array([2]), "image/png");
+    const g2 = await store.saveMedia(venue.id, new Uint8Array([3]), "image/png");
+    await updateDraft(store, venue, { name: "Снимки", slug: "snimki", logo_media_id: logo.id, gallery_media_ids: [g2.id, g1.id], categories: [{ key: "c", name_bg: "Кафе", name_en: "", items: [{ key: "i", name_bg: "Чай", name_en: "", desc_bg: "", desc_en: "", price_eur: 2, allergens: [], image_media_id: null }] }] });
+    const realUpdate = store.updateVenue.bind(store);
+    let failOnce = true;
+    store.updateVenue = async (id, patch) => {
+      if (patch.status === "live" && failOnce) {
+        failOnce = false;
+        throw new Error("timeout");
+      }
+      return realUpdate(id, patch);
+    };
+    await expect(publishDraft(store, await store.getVenue(venue.id), T0)).rejects.toThrow("timeout");
+    expect((await store.getVenue(venue.id)).status).toBe("draft");
+    expect((await store.getVenue(venue.id)).logo_media_id).toBe(logo.id);
+    await publishDraft(store, await store.getVenue(venue.id), T0);
+    const site = await store.getSite(venue.id);
+    expect(site.items).toHaveLength(1);
+    expect(site.categories).toHaveLength(1);
+    expect(site.media.filter((m) => m.is_gallery).sort((a, b) => a.position - b.position).map((m) => m.id)).toEqual([g2.id, g1.id]);
+    const sets = await store.listChangeSets(venue.id);
+    expect(sets.map((c) => c.status)).toEqual(["applied"]);
+  });
+
+  it("retries createVenue only on a slug collision", async () => {
+    const { store } = await makeDemo();
+    const real = store.createVenue.bind(store);
+    let calls = 0;
+    store.createVenue = async () => {
+      calls++;
+      throw new Error("connection refused");
+    };
+    await expect(createDraft(store, "classic", T0)).rejects.toThrow("connection refused");
+    expect(calls).toBe(1);
+    calls = 0;
+    store.createVenue = async (v) => {
+      if (++calls === 1) throw new Error(`slug ${v.slug} already exists`);
+      return real(v);
+    };
+    await expect(createDraft(store, "classic", T0)).resolves.toMatchObject({ venue: { status: "draft" } });
+    expect(calls).toBe(2);
+  });
+
   it("refuses to publish when the slug was taken by a venue published in between", async () => {
     const { store } = await makeDemo();
     const a = await createDraft(store, "classic", T0);

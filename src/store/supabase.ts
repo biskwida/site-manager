@@ -215,6 +215,12 @@ export class SupabaseStore implements Store {
   async setSiteText(venueId: string, key: SiteTextKey, text_bg: string, text_en: string) {
     await must(this.db.from("site_texts").upsert({ venue_id: venueId, key, text_bg, text_en }, { onConflict: "venue_id,key" }).select("key"), "setSiteText");
   }
+  async clearMenu(venueId: string) {
+    for (const t of ["items", "categories", "site_texts"]) {
+      const { error } = await this.db.from(t).delete().eq("venue_id", venueId);
+      if (error) throw new Error(`clearMenu ${t}: ${error.message}`);
+    }
+  }
   async clearVenueContent(venueId: string) {
     for (const t of ["change_sets", "conversations", "items", "categories", "holidays", "announcements", "site_texts"]) {
       const { error } = await this.db.from(t).delete().eq("venue_id", venueId);

@@ -2,7 +2,7 @@
 // Pure functions over Store (tested on the memory store) plus the HTTP handlers the thin app/api/new routes call.
 // Never log the draft token or the cookie.
 import { adminUrl, INVITE_TTL_MS, publicUrl } from "../bot/bot";
-import { imageMediaType, MAX_IMAGE_BYTES } from "../bot/media";
+import { imageMediaType } from "../bot/media";
 import type { Messenger } from "../bot/messenger";
 import type { Config } from "../config";
 import { pollDeployments } from "../deploy/run";
@@ -12,7 +12,7 @@ import { renderPreview } from "../domain/preview";
 import { TEMPLATE_IDS, type ChangeOp, type TemplateId, type Venue } from "../domain/types";
 import { seedMenuFrom, type SeedCategory, type SeedItem, type SeedTexts } from "../seed/demo";
 import type { Store, VenuePatch } from "../store/types";
-import { bothLangs, DRAFT_SLUG_PREFIX, emptyDraft, slugError, validateForPublish, WizardPatchSchema, type PublishError, type WizardDraft } from "../wizard/schema";
+import { bothLangs, DRAFT_SLUG_PREFIX, emptyDraft, slugError, WIZARD_MAX_IMAGE_BYTES, validateForPublish, WizardPatchSchema, type PublishError, type WizardDraft } from "../wizard/schema";
 import { readDraftFromRequest, serializeDraftCookie } from "./draft-cookie";
 import { newDraftToken, sha256Hex } from "./hash";
 
@@ -81,7 +81,8 @@ export async function createDraft(store: Store, template: TemplateId, now: Date)
     try {
       venue = await store.createVenue({ slug: placeholderSlug(), name: "", template, business_type: "cafe", status: "draft", wizard_draft: emptyDraft(template) });
     } catch (e) {
-      if (attempt >= 2) throw e; // three placeholder collisions in a row is not a collision
+      // Only a placeholder collision is worth another random slug; anything else (store down, bad row) fails at once.
+      if (!(e instanceof Error && /slug/i.test(e.message)) || attempt >= 2) throw e;
     }
   }
   const token = newDraftToken();
@@ -121,9 +122,14 @@ export async function updateDraft(store: Store, venue: Venue, patch: Partial<Wiz
 }
 
 /**
- * Turns the draft into a live venue: final validation, venue fields and slug, menu and texts via seedMenuFrom, logo/cover/gallery
- * via one auto-applied change set, status live, wizard_draft null, an owner invite (INVITE_TTL_MS) and the admin token.
- * The draft token hash is kept (the done page and /status authenticate with the cookie). Does not start a deploy.
+ * Turns the draft into a live venue. Order matters: going live is the LAST write, so a failure at any earlier step leaves a
+ * draft (status draft, wizard_draft intact, no invite) that the owner can simply publish again.
+ *   1. venue fields and the final slug (the unique index claims the slug, so `slug_taken` surfaces before anything else is written);
+ *   2. menu and texts (cleared first, so a retry never duplicates rows), then logo/cover/gallery via one auto-applied change set
+ *      holding only what is not already in place;
+ *   3. status live, wizard_draft null;
+ *   4. owner invite (INVITE_TTL_MS) and the admin token.
+ * The draft token hash is kept (R10: the done page and /status authenticate with the cookie). Does not start a deploy.
  */
 export async function publishDraft(store: Store, venue: Venue, now: Date): Promise<{ venue: Venue; inviteCode: string; adminToken: string }> {
   if (venue.status !== "draft") throw ALREADY_PUBLISHED(venue.slug);
@@ -137,9 +143,12 @@ export async function publishDraft(store: Store, venue: Venue, now: Date): Promi
   const own = new Set((await store.getSite(venue.id)).media.map((m) => m.id));
   const mediaOrNull = (id: string | null) => (id && own.has(id) ? id : null);
 
+  // 1. Venue fields and slug, still a draft (anon RLS hides it). Between this step and step 3 the draft row holds its final slug
+  //    instead of `draft-<8hex>` (R20): another draft choosing the same slug gets `slug_taken` from the unique index at its own
+  //    publish until this one goes live or is cleaned up.
   const tagline = bothLangs(d.tagline_bg, d.tagline_en);
   const about = bothLangs(d.about_bg, d.about_en);
-  const patch: VenuePatch = {
+  const fields: VenuePatch = {
     slug: d.slug,
     name: d.name.trim(),
     tagline_bg: tagline.bg,
@@ -156,19 +165,20 @@ export async function publishDraft(store: Store, venue: Venue, now: Date): Promi
     theme: { accent: d.theme.accent.toLowerCase() },
     template: d.template,
     business_type: d.business_type,
-    status: "live",
-    wizard_draft: null,
   };
   let updated: Venue;
   try {
-    updated = await store.updateVenue(venue.id, patch);
+    updated = await store.updateVenue(venue.id, fields);
   } catch (e) {
     // A row with this slug exists that assertSlugFree let through (another draft mid-publish, or a race): the unique index decides.
     if (e instanceof Error && /slug/i.test(e.message)) throw SLUG_TAKEN();
     throw e;
   }
 
-  // Menu and texts through the shared seeder, so positions and ids come from the store exactly as for seeded venues.
+  // 2a. Menu and texts through the shared seeder, so positions and ids come from the store exactly as for seeded venues.
+  //     A draft has no menu rows of its own; any found here are left over from a failed publish and are replaced.
+  const before = await store.getSite(venue.id);
+  if (before.categories.length || before.items.length || before.texts.length) await store.clearMenu(venue.id);
   const cats: SeedCategory[] = d.categories.map((c) => {
     const n = bothLangs(c.name_bg, c.name_en);
     return { name_bg: n.bg, name_en: n.en };
@@ -183,15 +193,18 @@ export async function publishDraft(store: Store, venue: Venue, now: Date): Promi
   const filled = Object.fromEntries(Object.entries(texts).filter(([, t]) => t.bg || t.en)) as SeedTexts;
   await seedMenuFrom(store, venue.id, cats, items, filled);
 
-  // Logo, cover and gallery go through one auto-applied change set, so the log explains where the images came from.
+  // 2b. Logo, cover and gallery go through one auto-applied change set, so the log explains where the images came from.
+  //     A set left proposed by a failed attempt is expired; ops already in place (an earlier attempt applied them) are skipped.
+  for (const stale of await store.listChangeSets(venue.id, { status: ["proposed"] })) await store.expireChangeSet(stale.id, nowIso);
+  const site = await store.getSite(venue.id);
+  const inGallery = new Set(site.media.filter((m) => m.is_gallery).map((m) => m.id));
   const ops: ChangeOp[] = [];
   const logo = mediaOrNull(d.logo_media_id);
   const cover = mediaOrNull(d.cover_media_id);
-  if (logo) ops.push({ op: "set_logo_image", media_id: logo });
-  if (cover) ops.push({ op: "set_cover_image", media_id: cover });
-  for (const id of d.gallery_media_ids) if (own.has(id) && !ops.some((o) => o.op === "add_gallery_image" && o.media_id === id)) ops.push({ op: "add_gallery_image", media_id: id });
+  if (logo && site.venue.logo_media_id !== logo) ops.push({ op: "set_logo_image", media_id: logo });
+  if (cover && site.venue.cover_media_id !== cover) ops.push({ op: "set_cover_image", media_id: cover });
+  for (const id of d.gallery_media_ids) if (own.has(id) && !inGallery.has(id) && !ops.some((o) => o.op === "add_gallery_image" && o.media_id === id)) ops.push({ op: "add_gallery_image", media_id: id });
   if (ops.length) {
-    const site = await store.getSite(venue.id);
     const changes = planChanges(site, ops, { newId: () => crypto.randomUUID(), now: nowIso });
     const cs = await store.createChangeSet({
       venue_id: venue.id,
@@ -207,6 +220,10 @@ export async function publishDraft(store: Store, venue: Venue, now: Date): Promi
     await store.applyChangeSet(cs.id, nowIso);
   }
 
+  // 3. Live: the last write. From here on the venue is public and the wizard draft is gone.
+  await store.updateVenue(venue.id, { status: "live", wizard_draft: null });
+
+  // 4. Owner invite and admin token. A failure here leaves a live venue without a code; the done page issues a fresh invite.
   const inviteCode = await store.createInvite(venue.id, "owner", new Date(now.getTime() + INVITE_TTL_MS).toISOString());
   const adminToken = await store.getAdminToken(venue.id);
   return { venue: await store.getVenue(venue.id), inviteCode, adminToken };
@@ -283,7 +300,7 @@ export async function handlePutDraft(req: Request, d: WizardDeps, venue: Venue):
   }
 }
 
-const TOO_LARGE = () => new WizardError("too_large", 400, "Снимката е над 5 MB.", "The image is over 5 MB.");
+const TOO_LARGE = () => new WizardError("too_large", 400, "Снимката е над 4 MB.", "The image is over 4 MB.");
 const UNSUPPORTED = () => new WizardError("unsupported_type", 400, "Само снимки: JPEG, PNG, WebP или GIF.", "Images only: JPEG, PNG, WebP or GIF.");
 /** Multipart overhead allowed on top of the image when checking content-length before reading the body. */
 const FORM_OVERHEAD = 64 * 1024;
@@ -301,20 +318,21 @@ export function sniffImageType(b: Uint8Array): "image/jpeg" | "image/png" | "ima
 export async function handleMedia(req: Request, d: WizardDeps, venue: Venue): Promise<Response> {
   try {
     if (venue.status !== "draft") throw ALREADY_PUBLISHED(venue.slug);
+    // Cheap refusals first, before the body is read.
+    if ((await d.store.getSite(venue.id)).media.length >= MAX_DRAFT_MEDIA)
+      throw new WizardError("too_many", 400, `Една чернова може да има до ${MAX_DRAFT_MEDIA} снимки.`, `A draft can have up to ${MAX_DRAFT_MEDIA} images.`);
     const declared = Number(req.headers.get("content-length"));
-    if (Number.isFinite(declared) && declared > MAX_IMAGE_BYTES + FORM_OVERHEAD) throw TOO_LARGE();
+    if (Number.isFinite(declared) && declared > WIZARD_MAX_IMAGE_BYTES + FORM_OVERHEAD) throw TOO_LARGE();
     const form = await req.formData().catch(() => null);
     const file = form?.get("file");
     if (!(file instanceof File)) throw new WizardError("bad_request", 400, "Липсва файл.", "No file was sent.");
-    if (file.size > MAX_IMAGE_BYTES) throw TOO_LARGE();
+    if (file.size > WIZARD_MAX_IMAGE_BYTES) throw TOO_LARGE();
     if (!imageMediaType(file.type, file.name)) throw UNSUPPORTED();
     const bytes = new Uint8Array(await file.arrayBuffer());
     if (bytes.byteLength === 0) throw new WizardError("bad_request", 400, "Файлът е празен.", "The file is empty.");
     // The stored content type comes from the bytes, never from the client's label.
     const type = sniffImageType(bytes);
     if (!type) throw UNSUPPORTED();
-    if ((await d.store.getSite(venue.id)).media.length >= MAX_DRAFT_MEDIA)
-      throw new WizardError("too_many", 400, `Една чернова може да има до ${MAX_DRAFT_MEDIA} снимки.`, `A draft can have up to ${MAX_DRAFT_MEDIA} images.`);
     const media = await d.store.saveMedia(venue.id, bytes, type);
     return Response.json({ media }, { status: 201, headers: NO_STORE });
   } catch (e) {

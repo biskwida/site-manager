@@ -100,6 +100,8 @@ export interface Store {
   setSiteText(venueId: string, key: SiteTextKey, text_bg: string, text_en: string): Promise<void>;
   /** Deletes the venue's menu, texts, holidays, announcements, media rows and change sets (demo reset). Members, invites and tokens stay. */
   clearVenueContent(venueId: string): Promise<void>;
+  /** Deletes the venue's items, categories and site texts only (a retried wizard publish starts its menu again). Media, change sets and venue fields stay. */
+  clearMenu(venueId: string): Promise<void>;
 
   // members and access
   findMember(chatId: number): Promise<Member | null>;

@@ -4,7 +4,7 @@ import { TEMPLATE_IDS } from "@/src/domain/types";
 import { DEFAULT_HOURS } from "@/src/store/types";
 import { TEMPLATES } from "@/src/templates";
 import {
-  bothLangs, DRAFT_SLUG_PREFIX, emptyDraft, RESERVED_SLUGS, SLUG_RE, stepForPath, TEMPLATE_ACCENT_DEFAULTS, validateForPublish, WIZARD_STEPS, WizardDraftSchema, WizardPatchSchema,
+  bothLangs, DRAFT_SLUG_PREFIX, WIZARD_MAX_IMAGE_BYTES, emptyDraft, RESERVED_SLUGS, SLUG_RE, stepForPath, TEMPLATE_ACCENT_DEFAULTS, validateForPublish, WIZARD_STEPS, WizardDraftSchema, WizardPatchSchema,
 } from "@/src/wizard/schema";
 
 function full() {
@@ -87,6 +87,17 @@ describe("WizardDraftSchema / WizardPatchSchema", () => {
     expect(WizardPatchSchema.safeParse({ theme: { accent: "#A1b2C3" } }).success).toBe(true);
     expect(WizardPatchSchema.safeParse({ template: "shopify" }).success).toBe(false);
     expect(WizardPatchSchema.safeParse({ step: "menu" }).success).toBe(true);
+  });
+  it("accepts only http(s) map links (templates render them as hrefs)", () => {
+    expect(WizardPatchSchema.safeParse({ maps_url: "" }).success).toBe(true);
+    expect(WizardPatchSchema.safeParse({ maps_url: "https://maps.google.com/?q=1,2" }).success).toBe(true);
+    expect(WizardPatchSchema.safeParse({ maps_url: "http://maps.example/x" }).success).toBe(true);
+    expect(WizardPatchSchema.safeParse({ maps_url: "javascript:alert(1)" }).success).toBe(false);
+    expect(WizardPatchSchema.safeParse({ maps_url: "ftp://maps.example/x" }).success).toBe(false);
+    expect(WizardPatchSchema.safeParse({ maps_url: "data:text/html,hi" }).success).toBe(false);
+  });
+  it("caps wizard uploads at 4 MB (under Vercel's request body limit)", () => {
+    expect(WIZARD_MAX_IMAGE_BYTES).toBe(4 * 1024 * 1024);
   });
   it("strips unknown keys on PUT", () => {
     const r = WizardPatchSchema.safeParse({ name: "X", status: "live", deploy: {} });

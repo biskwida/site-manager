@@ -13,6 +13,11 @@ export const RESERVED_SLUGS = ["new", "admin", "api", "embed", "draft", "demo", 
 /** Placeholder slug of an unpublished draft: `draft-<8 hex>`. Never accepted as the final address. */
 export const DRAFT_SLUG_PREFIX = "draft-";
 const HEX = /^#[0-9a-fA-F]{6}$/;
+/**
+ * Largest image the wizard uploads (R25). Below Vercel's ~4.5 MB request body cap so the platform never answers first.
+ * The Telegram path keeps MAX_IMAGE_BYTES (5 MB) in src/bot/media.ts.
+ */
+export const WIZARD_MAX_IMAGE_BYTES = 4 * 1024 * 1024;
 
 /**
  * Copy of `def.accentDefault` from src/templates/<id>/index.ts, kept here so server code never imports next/font.
@@ -110,7 +115,7 @@ export const WizardDraftSchema = z.object({
   address: Short(200),
   phone: Short(40),
   instagram: Short(60),
-  maps_url: z.union([z.literal(""), z.string().url().max(500)]),
+  maps_url: z.union([z.literal(""), z.url({ protocol: /^https?$/ }).max(500)]), // rendered as an href: http(s) only
   hours: WeekHoursSchema,
   theme: z.object({ accent: z.string().regex(HEX) }),
   tagline_bg: Short(160),

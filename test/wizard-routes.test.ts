@@ -103,8 +103,8 @@ describe("GET/PUT /api/new/[id], media, publish, status", () => {
     pdfForm.append("file", new File([new Uint8Array([1])], "menu.pdf", { type: "application/pdf" }));
     expect((await handleMedia(new Request(`https://site.example/api/new/${id}/media`, { method: "POST", body: pdfForm }), deps, venue)).status).toBe(400);
     const bigForm = new FormData();
-    bigForm.append("file", new File([new Uint8Array(5 * 1024 * 1024 + 1)], "big.jpg", { type: "image/jpeg" }));
-    expect(await (await handleMedia(new Request(`https://site.example/api/new/${id}/media`, { method: "POST", body: bigForm }), deps, venue)).json()).toMatchObject({ error: { code: "too_large" } });
+    bigForm.append("file", new File([new Uint8Array(4 * 1024 * 1024 + 1)], "big.jpg", { type: "image/jpeg" }));
+    expect(await (await handleMedia(new Request(`https://site.example/api/new/${id}/media`, { method: "POST", body: bigForm }), deps, venue)).json()).toMatchObject({ error: { code: "too_large", bg: "Снимката е над 4 MB.", en: "The image is over 4 MB." } });
 
     const put = await handlePutDraft(json(`https://site.example/api/new/${id}`, { name: "Нощ", slug: "nosht", logo_media_id: media.id, categories: [{ key: "c", name_bg: "Коктейли", name_en: "Cocktails", items: [{ key: "i", name_bg: "Негрони", name_en: "Negroni", desc_bg: "", desc_en: "", price_eur: 9, allergens: [], image_media_id: null }] }] }, { method: "PUT" }), deps, venue);
     expect(put.status).toBe(200);
@@ -180,13 +180,16 @@ describe("media upload checks", () => {
   it("refuses a body whose declared length is over the limit before reading it", async () => {
     const { deps, store } = await setup();
     const { id } = await newDraft(deps);
-    const res = await handleMedia(new Request(`https://site.example/api/new/${id}/media`, { method: "POST", headers: { "content-length": String(6 * 1024 * 1024) }, body: "x" }), deps, await store.getVenue(id));
+    const res = await handleMedia(new Request(`https://site.example/api/new/${id}/media`, { method: "POST", headers: { "content-length": String(5 * 1024 * 1024) }, body: "x" }), deps, await store.getVenue(id));
     expect(await res.json()).toMatchObject({ error: { code: "too_large" } });
   });
   it("caps the number of uploads per draft", async () => {
     const { deps, store } = await setup();
     const { id } = await newDraft(deps);
     for (let i = 0; i < MAX_DRAFT_MEDIA; i++) await store.saveMedia(id, new Uint8Array([1]), "image/png");
+    // checked before the body is read: even a body that is not multipart gets too_many
+    const early = await handleMedia(new Request(`https://site.example/api/new/${id}/media`, { method: "POST", body: "not a form" }), deps, await store.getVenue(id));
+    expect(await early.json()).toMatchObject({ error: { code: "too_many" } });
     const f = new FormData();
     f.append("file", new File([new Uint8Array([137, 80, 78, 71])], "one-more.png", { type: "image/png" }));
     const res = await handleMedia(new Request(`https://site.example/api/new/${id}/media`, { method: "POST", body: f }), deps, await store.getVenue(id));

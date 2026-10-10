@@ -187,6 +187,24 @@ export function storeContract(name: string, make: () => Promise<Store>) {
       expect(await s.findMember(10)).not.toBeNull();
     });
 
+    it("clears only the menu and texts (media, venue fields and members stay)", async () => {
+      const s = await make();
+      const v = await s.createVenue({ slug: "t9m", name: "Test" });
+      const c = await s.insertCategory({ venue_id: v.id, name_bg: "Кафе", name_en: "Coffee", position: 0 });
+      await s.insertItem({ venue_id: v.id, category_id: c.id, name_bg: "x", name_en: "x", desc_bg: "", desc_en: "", price_eur: 1, allergens: [], position: 0 });
+      await s.setSiteText(v.id, "welcome", "Здравейте", "Hello");
+      const m = await s.saveMedia(v.id, new Uint8Array([1]), "image/png");
+      await s.upsertMember({ venue_id: v.id, tg_chat_id: 11, role: "owner", lang: "bg" });
+      await s.clearMenu(v.id);
+      const site = await s.getSite(v.id);
+      expect(site.items).toEqual([]);
+      expect(site.categories).toEqual([]);
+      expect(site.texts).toEqual([]);
+      expect(site.media.map((x) => x.id)).toEqual([m.id]);
+      expect(site.venue.name).toBe("Test");
+      expect(await s.findMember(11)).not.toBeNull();
+    });
+
     it("gives new venues the classic template, café type and live status, and accepts overrides", async () => {
       const s = await make();
       const v = await s.createVenue({ slug: "t10", name: "Test" });
