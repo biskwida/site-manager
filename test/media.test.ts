@@ -27,5 +27,8 @@ describe("imageMediaType", () => {
     expect(imageMediaType("application/octet-stream", "photos/x.webp")).toBe("image/webp");
     expect(imageMediaType("application/octet-stream", "photos/x")).toBe("image/jpeg");
     expect(imageMediaType("application/pdf", "doc.pdf")).toBeNull();
+    expect(imageMediaType("application/pdf", "x.jpg")).toBeNull();
+    expect(imageMediaType("", "photos/x.png")).toBe("image/png");
+    expect(imageMediaType("text/html", "x.jpeg")).toBeNull();
   });
 });

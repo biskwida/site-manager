@@ -17,11 +17,14 @@ export async function downloadTelegramFile(token: string, filePath: string, fetc
 }
 
 const IMAGE_TYPES: ImageInput["media_type"][] = ["image/jpeg", "image/png", "image/webp", "image/gif"];
+const UNINFORMATIVE_TYPES = ["", "application/octet-stream", "binary/octet-stream"];
 
 export function imageMediaType(contentType: string, filePath: string): ImageInput["media_type"] | null {
   const ct = contentType.split(";")[0].trim().toLowerCase();
   if ((IMAGE_TYPES as string[]).includes(ct)) return ct as ImageInput["media_type"];
   if (ct.startsWith("image/")) return "image/jpeg";
+  // Only an uninformative header lets the extension decide; a definite non-image type is refused.
+  if (!UNINFORMATIVE_TYPES.includes(ct)) return null;
   const ext = filePath.split(".").pop()?.toLowerCase();
   if (ext === "png") return "image/png";
   if (ext === "webp") return "image/webp";
