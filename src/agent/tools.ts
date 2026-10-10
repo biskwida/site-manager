@@ -2,15 +2,17 @@
 import { betaZodTool } from "@anthropic-ai/sdk/helpers/beta/zod";
 import { z } from "zod";
 import type { Messenger } from "../bot/messenger";
+import { allergenName, allergenWarnings, suggestAllergens } from "../domain/allergens";
 import { invertChanges, planChanges, type PlanContext } from "../domain/changes";
 import { isSoldOut, visibleItems } from "../domain/effective";
-import { itemName, tr } from "../domain/format";
+import { categoryName, tr } from "../domain/format";
 import { closingToday, nextOpening, todayStatus } from "../domain/hours";
 import { renderPreview } from "../domain/preview";
+import { bulkPrices } from "../domain/pricing";
 import type { ChangeOp, ChangeSet, ChangeSource, Lang, Member, SiteState } from "../domain/types";
 import type { Store } from "../store/types";
 import { formatDateTime, nowText } from "../time";
-import { CancelSchema, ListSchema, ProposeSchema, type ChangeInput } from "./tool-schemas";
+import { BulkSchema, CancelSchema, CheckAllergensSchema, ListSchema, ProposeSchema, ScheduleSchema, UndoSchema, type ChangeInput } from "./tool-schemas";
 
 export interface AgentDeps {
   store: Store;
@@ -246,7 +248,7 @@ export function makeTools(d: AgentDeps) {
   return [getSite, getMenu, proposeChanges, cancelChangeSet, listChanges, ...extraTools(d, { attempt, site, ctx, previews, mine, propose, getSet, ensureNoPending, lang })];
 }
 
-/** Hook for Task 11; returns [] until then. */
+/** What the shared helpers of makeTools expose to the second group of tools. */
 export interface ToolKit {
   attempt: (fn: () => Promise<unknown>) => Promise<string>;
   site: () => Promise<SiteState>;
@@ -258,7 +260,88 @@ export interface ToolKit {
   ensureNoPending: () => Promise<void>;
   lang: Lang;
 }
-function extraTools(_d: AgentDeps, _kit: ToolKit): ReturnType<typeof betaZodTool>[] {
-  return [];
+const ISO_WITH_OFFSET = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(:\d{2}(\.\d+)?)?(Z|[+-]\d{2}:?\d{2})$/i;
+
+function extraTools(d: AgentDeps, k: ToolKit) {
+  const scheduleChanges = betaZodTool({
+    name: "schedule_changes",
+    description: "Like propose_changes, but the set is applied at apply_at (ISO 8601 with offset, in the future) after the owner approves. The owner gets a reminder 24 h before. Use for holidays, seasonal prices, announcements that start later.",
+    inputSchema: ScheduleSchema,
+    run: (input) =>
+      k.attempt(async () => {
+        if (!ISO_WITH_OFFSET.test(input.apply_at) || Number.isNaN(Date.parse(input.apply_at))) throw new Error("apply_at must be an ISO 8601 datetime with offset, e.g. 2026-12-24T08:00:00+02:00.");
+        const applyAt = new Date(input.apply_at).toISOString();
+        if (Date.parse(applyAt) <= d.now().getTime()) throw new Error("apply_at must be in the future; for an immediate change use propose_changes.");
+        return k.propose(input, applyAt);
+      }),
+  });
+
+  const bulk = betaZodTool({
+    name: "propose_bulk_price_change",
+    description: "Change many prices at once by a percentage or a fixed amount, with rounding. The tool does the arithmetic and sends the owner a table preview. Filter by category_id and/or name_contains; no filter = every active item.",
+    inputSchema: BulkSchema,
+    run: (input) =>
+      k.attempt(async () => {
+        const s = await k.site();
+        const needle = input.name_contains?.toLowerCase();
+        const cat = input.category_id ? s.categories.find((c) => c.id === input.category_id) : undefined;
+        if (input.category_id && !cat) throw new Error(`category_id "${input.category_id}" not found; use an id from get_menu.`);
+        const targets = s.items.filter((i) => i.active && !i.is_special && (!cat || i.category_id === cat.id) && (!needle || i.name_bg.toLowerCase().includes(needle) || i.name_en.toLowerCase().includes(needle)));
+        if (targets.length === 0) throw new Error("No active items match that filter; check get_menu.");
+        const rows = bulkPrices(targets, { percent: input.percent, delta_eur: input.delta_eur, rounding: input.rounding });
+        const changed = rows.filter((r) => r.new_eur !== r.old_eur);
+        if (changed.length === 0) throw new Error("Every price would stay the same after rounding; choose a finer rounding or a bigger change.");
+        const amount = input.percent !== undefined ? `${input.percent > 0 ? "+" : ""}${input.percent} %` : `${(input.delta_eur as number) > 0 ? "+" : ""}${(input.delta_eur as number).toFixed(2)} €`;
+        const scope = cat ? { bg: ` (${categoryName(cat, "bg")})`, en: ` (${categoryName(cat, "en")})` } : needle ? { bg: ` („${input.name_contains}“)`, en: ` (“${input.name_contains}”)` } : { bg: "", en: "" };
+        const round = input.rounding === "none" ? { bg: "", en: "" } : { bg: `, закръглени до ${input.rounding} €`, en: `, rounded to €${input.rounding}` };
+        const summary_bg = input.summary_bg ?? `Цени ${amount}${scope.bg}${round.bg}`;
+        const summary_en = input.summary_en ?? `Prices ${amount}${scope.en}${round.en}`;
+        const result = (await k.propose({ summary_bg, summary_en, changes: changed.map((r) => ({ op: "set_price" as const, item_id: r.item_id, price_eur: r.new_eur })) }, null)) as Record<string, unknown>;
+        return { ...result, rows };
+      }),
+  });
+
+  const checkAllergens = betaZodTool({
+    name: "check_allergens",
+    description: "Keyword check of a dish name/description against the 14 EU allergens. Returns suggested codes and warnings for suggested-but-undeclared ones. Call it before add_item or a rename; mention warnings in your reply.",
+    inputSchema: CheckAllergensSchema,
+    run: (input) =>
+      k.attempt(async () => {
+        const text = `${input.name} ${input.desc ?? ""}`;
+        const warnings = allergenWarnings(input.declared, text).map((w) => ({ ...w, name_bg: allergenName(w.code, "bg"), name_en: allergenName(w.code, "en") }));
+        return { suggested: suggestAllergens(text), warnings, ok: warnings.length === 0, note: "Keyword-based and advisory: mention the warnings in the preview and let the owner decide." };
+      }),
+  });
+
+  const undo = betaZodTool({
+    name: "undo",
+    description: 'Propose reverting an applied change set ("last" = the most recent applied one that was not automatic). The owner approves with the buttons; the inverse is applied as a new set.',
+    inputSchema: UndoSchema,
+    run: (input) =>
+      k.attempt(async () => {
+        if (d.member.role !== "owner") throw new Error("undo is only the owner's decision; tell the owner.");
+        let target: ChangeSet | undefined;
+        if (input.change_set_id === "last") {
+          target = (await d.store.listChangeSets(d.venueId, { status: ["applied"], limit: 50 })).find((cs) => cs.source !== "auto");
+          if (!target) throw new Error("Nothing to undo: no applied change set yet.");
+        } else {
+          target = await k.getSet(input.change_set_id);
+          if (target.status !== "applied") throw new Error(`Change set is "${target.status}"; only applied sets can be undone. ${NEXT_STEP[target.status]}`);
+        }
+        await k.ensureNoPending();
+        const s = await k.site();
+        // Preview against the current state, so a reverted price reads "3,20 € → 2,90 €".
+        const changes = invertChanges(target.changes);
+        const p = k.previews(s, changes);
+        const cs = await d.store.createChangeSet({
+          venue_id: d.venueId, chat_id: d.chatId, summary_bg: `Отмяна: ${target.summary_bg}`, summary_en: `Undo: ${target.summary_en}`, ...p,
+          source: "undo", status: "proposed", undoes_id: target.id, changes,
+        });
+        const messageId = await d.messenger.sendProposal(d.chatId, proposalText(k.mine(p), k.lang, null, s.venue.tz), cs.id, k.lang);
+        if (messageId !== null) await d.store.updateChangeSet(cs.id, { tg_message_id: messageId });
+        return { change_set_id: cs.id, status: "proposed", undoes: target.id, preview: k.mine(p), next: "The owner decides with the buttons." };
+      }),
+  });
+
+  return [scheduleChanges, bulk, checkAllergens, undo];
 }
-export { itemName as _itemName, invertChanges as _invertChanges }; // re-exports used by Task 11; remove when extraTools is filled in
