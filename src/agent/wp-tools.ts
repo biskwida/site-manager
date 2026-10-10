@@ -4,7 +4,7 @@
 import { betaZodTool } from "@anthropic-ai/sdk/helpers/beta/zod";
 import { z } from "zod";
 import { WordPressApiError } from "../destinations/wordpress-client";
-import type { WpMenuItemInput, WpOptionKey, WpPageChangeRow, WpProductPatch } from "../destinations/wordpress-types";
+import type { WpMenuItemInput, WpOptionKey, WpPageChangeRow, WpPageFields, WpProductPatch } from "../destinations/wordpress-types";
 import { clip } from "../domain/wp-preview";
 import type { Change, Row } from "../domain/types";
 import { proposalText, type AgentDeps, type ToolKit } from "./tools";
@@ -114,6 +114,8 @@ export function wpTools(d: AgentDeps, k: ToolKit) {
     run: (input) =>
       k.attempt(async () => {
         requireOwner();
+        // Refuse before the plugin stores a pending preview, so a refused proposal leaves nothing behind on the site.
+        await k.ensureNoPending();
         const page = await api(() => wp.page(input.page_id));
         const { rows, placeholders } = await photoRows(input.photos ?? [], page, 0);
         const known = new Set((input.photos ?? []).map((p) => p.media_id));
@@ -121,13 +123,17 @@ export function wpTools(d: AgentDeps, k: ToolKit) {
           for (const m of text.matchAll(PLACEHOLDER)) if (!known.has(m[1])) throw new Error(`Placeholder for media_id "${m[1]}" is not in photos; add it there or remove the placeholder.`);
         }
         const preview = await api(() => wp.previewPage(input.page_id, { title: input.title, content: input.content, replacements: input.replacements, placeholders }));
-        const unchanged = rows.length === 0 && JSON.stringify(preview.before) === JSON.stringify(preview.after);
-        if (unchanged) throw new Error("Nothing would change on the page; check the replacements or the title.");
-        const before: WpPageChangeRow = { ...preview.before, page_title: page.title, page_url: page.url };
-        // Keep our placeholders in the stored `after` (the plugin's preview resolved them to our photo URLs for display only).
-        const afterContent = input.content !== undefined ? input.content : preview.after.content;
-        const after: WpPageChangeRow = { ...preview.after, content: afterContent, page_title: page.title, page_url: page.url, replacements: input.replacements ?? [], preview_url: preview.preview_url };
-        rows.push({ position: rows.length, op: "wp_edit_page", entity: "wp_page", entity_id: String(page.id), before: before as unknown as Row, after: after as unknown as Row });
+        // The plugin resolved our placeholders to our storage URLs for the preview only; the stored `after` keeps the
+        // tokens on every field, so the push substitutes the uploaded attachment after the wp_media rows ran.
+        const unresolve = (s: string | null) => (s === null ? s : Object.entries(placeholders).reduce((acc, [token, url]) => acc.split(url).join(token), s));
+        const afterFields: WpPageFields = { ...preview.after, title: unresolve(preview.after.title) as string, content: unresolve(preview.after.content) as string, elementor_data: unresolve(preview.after.elementor_data) };
+        const pageUnchanged = JSON.stringify(preview.before) === JSON.stringify(afterFields);
+        if (!pageUnchanged) {
+          const before: WpPageChangeRow = { ...preview.before, page_title: page.title, page_url: page.url };
+          const after: WpPageChangeRow = { ...afterFields, page_title: page.title, page_url: page.url, replacements: input.replacements ?? [], preview_url: preview.preview_url };
+          rows.push({ position: rows.length, op: "wp_edit_page", entity: "wp_page", entity_id: String(page.id), before: before as unknown as Row, after: after as unknown as Row });
+        }
+        if (rows.length === 0) throw new Error("Nothing would change on the page; check the replacements or the title.");
         return propose(input.summary_bg, input.summary_en, rows, { preview_url: preview.preview_url, pending_key: preview.pending_key });
       }),
   });
@@ -139,6 +145,7 @@ export function wpTools(d: AgentDeps, k: ToolKit) {
     run: (input) =>
       k.attempt(async () => {
         requireOwner();
+        if (input.as_featured === true && !input.page_id) throw new Error("as_featured needs page_id (the page that gets the featured image).");
         const page = input.page_id ? await api(() => wp.page(input.page_id as number)) : null;
         const { rows } = await photoRows([{ media_id: input.media_id, alt_bg: input.alt_bg, alt_en: input.alt_en, as_featured: input.as_featured }], page, 0);
         return propose(input.summary_bg, input.summary_en, rows);

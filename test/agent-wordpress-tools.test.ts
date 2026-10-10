@@ -93,8 +93,33 @@ describe("wp_edit_page", () => {
     expect(wp.pending.get(2)?.after.content).toContain(`src="${photo.public_url}"`); // preview shows our copy of the photo
     expect(String(cs.changes[1].after?.content)).toContain(`{{sm_media_url:${photo.id}}}`); // the push resolves it after the upload
     expect(r.preview).toContain("• WordPress: качва снимка „Коледна витрина“");
+    await store.updateChangeSet(cs.id, { status: "cancelled" }); // the pending check now runs before the placeholder check
     const unknown = await call(tools, "wp_edit_page", { summary_bg: "x", summary_en: "x", page_id: 2, content: "{{sm_media_url:nope}}", photos: [] });
     expect(unknown.error).toMatch(/nope/);
+  });
+  it("keeps placeholders in the stored row on every path, proposes photos alone when the page is unchanged, and refuses before previewing when a proposal is pending", async () => {
+    const { tools, store, photo, wp } = await setup();
+    const photos = [{ media_id: photo.id, alt_bg: "Витрина", alt_en: "Window" }];
+    // A replacement whose replace text carries a placeholder: the plugin's preview resolves it to our URL for display only.
+    const r = await call(tools, "wp_edit_page", { summary_bg: "Снимка в „За нас“", summary_en: "Photo on About", page_id: 2, replacements: [{ find: "every morning.", replace: `every morning.<img src="{{sm_media_url:${photo.id}}}">` }], photos });
+    expect(r.status).toBe("proposed");
+    const cs = await store.getChangeSet(r.change_set_id as string);
+    expect(cs.changes.map((c) => c.entity)).toEqual(["wp_media", "wp_page"]);
+    expect(String(cs.changes[1].after?.content)).toContain(`{{sm_media_url:${photo.id}}}`);
+    expect(String(cs.changes[1].after?.content)).not.toContain(photo.public_url);
+    expect(wp.pending.get(2)?.after.content).toContain(photo.public_url);
+    // Another proposal pending: refused before the plugin stores a preview for the page.
+    wp.pending.delete(2);
+    const refused = await call(tools, "wp_edit_page", { summary_bg: "x", summary_en: "x", page_id: 2, title: "Y" });
+    expect(refused.error).toMatch(/already waiting for a decision/);
+    expect(wp.pending.has(2)).toBe(false);
+    await store.updateChangeSet(cs.id, { status: "cancelled" });
+    // Photos with an unchanged page: only the upload rows, no no-op page row.
+    const only = await call(tools, "wp_edit_page", { summary_bg: "Снимка", summary_en: "Photo", page_id: 2, title: "About", photos });
+    expect(only.status).toBe("proposed");
+    const cs2 = await store.getChangeSet(only.change_set_id as string);
+    expect(cs2.changes.map((c) => [c.position, c.entity])).toEqual([[0, "wp_media"]]);
+    expect(only.preview).toBe("• WordPress: качва снимка „Витрина“");
   });
 });
 
@@ -107,6 +132,7 @@ describe("wp_upload_photo / wp_set_option / wp_edit_menu / wp_edit_product", () 
     expect(cs.changes[0]).toMatchObject({ op: "wp_upload_photo", entity: "wp_media", entity_id: photo.id, before: null, after: { page_id: 2, page_title: "About", as_featured: true, previous_featured: 55 } });
     expect(r.preview).toBe("• WordPress: качва снимка „Витрина“\n  като водеща снимка на страница „About“");
     expect(await call(tools, "wp_upload_photo", { summary_bg: "x", summary_en: "x", media_id: "nope", alt_bg: "a", alt_en: "a" })).toMatchObject({ error: expect.stringMatching(/media_id "nope" not found/) });
+    expect(await call(tools, "wp_upload_photo", { summary_bg: "x", summary_en: "x", media_id: photo.id, alt_bg: "a", alt_en: "a", as_featured: true })).toMatchObject({ error: "as_featured needs page_id (the page that gets the featured image)." });
   });
   it("proposes site title and a logo from a photo", async () => {
     const { tools, store, photo } = await setup();
