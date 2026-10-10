@@ -1,0 +1,56 @@
+<!doctype html>
+<html lang="bg">
+<head>
+<meta charset="utf-8">
+<title>Механа · телефон</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link href="https://fonts.googleapis.com/css2?family=Brygada+1918:wght@500;700&amp;family=Wix+Madefor+Text:wght@400;600;700&amp;display=swap&amp;subset=cyrillic" rel="stylesheet">
+<style>body{margin:0}a{color:#2B1B14}</style>
+</helmet>
+<div style="width: 390px; height: 844px; box-sizing: border-box; overflow: hidden; background: #F3EADB; color: #2B1B14; font-family: 'Wix Madefor Text', system-ui, sans-serif; font-size: 16px; line-height: 1.55; display: flex; flex-direction: column;">
+  <div style="background: {{wine}}; color: #F3EADB; padding: 0 16px 24px;">
+    <header style="min-height: 64px; display: flex; align-items: center; justify-content: space-between; gap: 8px;">
+      <span style="font-family: 'Brygada 1918', serif; font-weight: 700; font-size: 21px;">Механа „Чардака“</span>
+      <div style="display: flex; gap: 6px;">
+        <button type="button" aria-pressed="true" style="min-height: 44px; min-width: 44px; border-radius: 8px; border: 1px solid #F3EADB; background: #F3EADB; color: #5A1A17; font: 700 14px 'Wix Madefor Text', sans-serif;">БГ</button>
+        <button type="button" aria-pressed="false" style="min-height: 44px; min-width: 44px; border-radius: 8px; border: 1px solid #C98A80; background: transparent; color: #F3EADB; font: 700 14px 'Wix Madefor Text', sans-serif;">EN</button>
+      </div>
+    </header>
+    <h1 style="margin: 8px 0 12px; font-family: 'Brygada 1918', serif; font-weight: 500; font-size: 44px; line-height: 0.98;">Трапеза за цялото село.</h1>
+    <p style="margin: 0; display: inline-flex; align-items: center; gap: 8px; font-weight: 700;"><span style="width: 9px; height: 9px; border-radius: 50%; background: #9BD39B;" aria-hidden="true"></span>Отворено до 00:00</p>
+  </div>
+  <div aria-hidden="true" style="height: 20px; background-color: #F3EADB; background-image: linear-gradient(45deg, {{wine}} 25%, transparent 25%), linear-gradient(-45deg, {{wine}} 25%, transparent 25%), linear-gradient(45deg, transparent 75%, #C9902F 75%), linear-gradient(-45deg, transparent 75%, #C9902F 75%); background-size: 20px 20px;"></div>
+  <section aria-labelledby="ph-tonight" style="margin: 16px; border: 2px solid #2B1B14; border-radius: 4px; padding: 14px 16px;">
+    <h2 id="ph-tonight" style="margin: 0 0 4px; font-family: 'Brygada 1918', serif; font-weight: 700; font-size: 22px;">Тази вечер</h2>
+    <p style="margin: 0;"><strong>Жива музика от 20:00.</strong> Вътре има места.</p>
+  </section>
+  <section aria-labelledby="ph-dish" style="margin: 0 16px; background: #E7D8BD; border-radius: 4px; padding: 14px 16px;">
+    <h2 id="ph-dish" style="margin: 0; font-size: 13px; letter-spacing: 0.12em; text-transform: uppercase; color: #6B4A2F;">Ястие на деня</h2>
+    <p style="margin: 2px 0 0; font-family: 'Brygada 1918', serif; font-size: 22px; font-weight: 700;">Чомлек с телешко · 14,90 €</p>
+  </section>
+  <section aria-labelledby="ph-menu" style="margin: 16px 16px 0;">
+    <h2 id="ph-menu" style="margin: 0; display: flex; align-items: baseline; gap: 10px; font-family: 'Brygada 1918', serif; font-size: 24px; font-weight: 700;"><span style="font-size: 16px; color: {{wine}};">I</span>Мезета</h2>
+    <ul style="list-style: none; margin: 0; padding: 0;">
+      <li style="display: flex; justify-content: space-between; padding: 10px 0; border-top: 1px solid #CDB894;"><span>Шопска салата</span><strong>6,40 €</strong></li>
+      <li style="display: flex; justify-content: space-between; padding: 10px 0; border-top: 1px solid #CDB894;"><span>Пълнени чушки с боб</span><strong>7,20 €</strong></li>
+    </ul>
+  </section>
+  <nav aria-label="Действия" style="margin-top: auto; padding: 12px 16px; display: grid; grid-template-columns: 1fr 1fr; gap: 8px; background: #2B1B14;">
+    <a href="#menu" style="min-height: 52px; display: flex; align-items: center; justify-content: center; border-radius: 8px; border: 1px solid #CDB894; color: #F3EADB; text-decoration: none; font-weight: 700;">Цялото меню</a>
+    <a href="tel:+359877555010" style="min-height: 52px; display: flex; align-items: center; justify-content: center; border-radius: 8px; background: #C9902F; color: #2B1B14; text-decoration: none; font-weight: 700;">Резервирай</a>
+  </nav>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"wine":{"editor":"color","default":"#6E1F1B","options":["#6E1F1B","#2F5D46","#3B2F5C","#7A4A12"]},"$preview":{"width":390,"height":844}}'>
+class Component extends DCLogic {
+  renderVals() {
+    return { wine: this.props.wine ?? '#6E1F1B' };
+  }
+}
+</script>
+</body>
+</html>

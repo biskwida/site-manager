@@ -1,0 +1,49 @@
+<!doctype html>
+<html lang="bg">
+<head>
+<meta charset="utf-8">
+<title>Фурна · телефон</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link href="https://fonts.googleapis.com/css2?family=Yeseva+One&amp;family=Arsenal:wght@400;700&amp;display=swap&amp;subset=cyrillic" rel="stylesheet">
+<style>body{margin:0}a{color:#3A2A20}</style>
+</helmet>
+<div style="width: 390px; height: 844px; box-sizing: border-box; overflow: hidden; background: #F6EEDB; color: #3A2A20; font-family: 'Arsenal', Georgia, serif; font-size: 17px; line-height: 1.5; display: flex; flex-direction: column;">
+  <header style="padding: 16px; display: flex; align-items: center; justify-content: space-between; gap: 8px;">
+    <span style="font-family: 'Yeseva One', serif; font-size: 24px; line-height: 1;">Житен клас</span>
+    <div style="display: flex; gap: 6px;">
+      <button type="button" aria-pressed="true" style="min-height: 44px; min-width: 44px; border-radius: 999px; border: 1px solid #3A2A20; background: #3A2A20; color: #F6EEDB; font: 700 14px 'Arsenal', serif;">БГ</button>
+      <button type="button" aria-pressed="false" style="min-height: 44px; min-width: 44px; border-radius: 999px; border: 1px solid #C9B27E; background: transparent; color: #3A2A20; font: 700 14px 'Arsenal', serif;">EN</button>
+    </div>
+  </header>
+  <div style="padding: 4px 16px 0; display: flex; flex-direction: column; gap: 14px;">
+    <p style="margin: 0; display: inline-flex; align-items: center; gap: 8px; font-weight: 700; color: #2F6B3F;"><span style="width: 9px; height: 9px; border-radius: 50%; background: #2F6B3F;" aria-hidden="true"></span>Отворено до 19:00</p>
+    <h1 style="margin: 0; font-family: 'Yeseva One', serif; font-weight: 400; font-size: 46px; line-height: 0.98; color: {{accent}};">Хляб, който още пука.</h1>
+  </div>
+  <section aria-labelledby="ph-oven" style="margin: 20px 12px 0; background: #3A2A20; color: #F6EEDB; border-radius: 24px; padding: 18px 18px 8px;">
+    <h2 id="ph-oven" style="margin: 0 0 6px; font-family: 'Yeseva One', serif; font-weight: 400; font-size: 24px;">Днес от пещта</h2>
+    <ol style="list-style: none; margin: 0; padding: 0;">
+      <li style="display: grid; grid-template-columns: 52px 1fr auto; gap: 10px; padding: 10px 0; border-top: 1px solid #5A4433;"><span style="font-family: 'Yeseva One', serif; color: #EBD9A8;">06:30</span><span>Селски хляб на квас</span><strong>4,80 €</strong></li>
+      <li style="display: grid; grid-template-columns: 52px 1fr auto; gap: 10px; padding: 10px 0; border-top: 1px solid #5A4433;"><span style="font-family: 'Yeseva One', serif; color: #EBD9A8;">07:15</span><span><s style="color: #B9A27A;">Тиквеник</s> <span style="color: #E9967A; font-size: 15px;">свърши</span></span><strong style="color: #B9A27A;">2,60 €</strong></li>
+      <li style="display: grid; grid-template-columns: 52px 1fr auto; gap: 10px; padding: 10px 0; border-top: 1px solid #5A4433;"><span style="font-family: 'Yeseva One', serif; color: #EBD9A8;">10:30</span><span>Козунак <span style="color: #D9C59A; font-size: 15px;">след 40 мин.</span></span><strong>9,50 €</strong></li>
+    </ol>
+  </section>
+  <div style="margin: 16px 12px 0; padding: 14px 16px; border-radius: 18px; background: #EBD9A8; font-weight: 700;">В неделя печем само по поръчка: 0888 123 456</div>
+  <nav aria-label="Основна" style="margin-top: auto; padding: 12px; display: grid; grid-template-columns: 1fr 1fr; gap: 8px; border-top: 1px solid #DCC9A0; background: #F6EEDB;">
+    <a href="#menu" style="min-height: 52px; display: flex; align-items: center; justify-content: center; border-radius: 999px; background: {{accent}}; color: #FFF8EA; text-decoration: none; font-weight: 700;">Витрината</a>
+    <a href="tel:+359888123456" style="min-height: 52px; display: flex; align-items: center; justify-content: center; border-radius: 999px; border: 1px solid #3A2A20; text-decoration: none; font-weight: 700;">Обади се</a>
+  </nav>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"accent":{"editor":"color","default":"#B8432A","options":["#B8432A","#2F6B3F","#8A5A2B","#3A5A8C"]},"$preview":{"width":390,"height":844}}'>
+class Component extends DCLogic {
+  renderVals() {
+    return { accent: this.props.accent ?? '#B8432A' };
+  }
+}
+</script>
+</body>
+</html>

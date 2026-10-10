@@ -1,0 +1,180 @@
+<!doctype html>
+<html lang="bg">
+<head>
+<meta charset="utf-8">
+<title>Фурна · начална страница</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Yeseva+One&amp;family=Arsenal:ital,wght@0,400;0,700;1,400&amp;display=swap&amp;subset=cyrillic" rel="stylesheet">
+<style>
+body{margin:0;background:#F6EEDB}
+a{color:#3A2A20}a:hover{color:#B8432A}
+.fu-row{display:flex;flex-wrap:wrap;gap:48px}
+.fu-main{flex:1 1 520px;min-width:0}
+.fu-side{flex:1 1 340px;min-width:0}
+.fu-week{display:grid;grid-template-columns:repeat(7,minmax(0,1fr));gap:6px}
+@media (max-width:640px){.fu-week{grid-template-columns:repeat(4,minmax(0,1fr))}}
+</style>
+</helmet>
+<div style="background: #F6EEDB; color: #3A2A20; font-family: 'Arsenal', Georgia, serif; font-size: 18px; line-height: 1.55;">
+
+  <header style="max-width: 1180px; margin: 0 auto; padding: 24px clamp(16px, 4vw, 48px); display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 16px;">
+    <a href="#top" style="text-decoration: none; display: flex; align-items: baseline; gap: 10px; color: #3A2A20;">
+      <span style="font-family: 'Yeseva One', Georgia, serif; font-size: 30px; line-height: 1;">Житен клас</span>
+      <span style="font-size: 14px; letter-spacing: 0.08em; text-transform: uppercase; color: #7A5B3E;">фурна · кафе</span>
+    </a>
+    <nav aria-label="Основна" style="display: flex; align-items: center; gap: 8px;">
+      <a href="#top" style="min-height: 44px; display: inline-flex; align-items: center; padding: 0 16px; border-radius: 999px; background: #3A2A20; color: #F6EEDB; text-decoration: none; font-weight: 700;">Начало</a>
+      <a href="#menu" style="min-height: 44px; display: inline-flex; align-items: center; padding: 0 16px; border-radius: 999px; text-decoration: none; font-weight: 700;">Меню</a>
+      <span style="width: 1px; height: 24px; background: #D9C59A; margin: 0 6px;" aria-hidden="true"></span>
+      <button type="button" aria-pressed="true" style="min-height: 44px; min-width: 44px; border-radius: 999px; border: 1px solid #3A2A20; background: #3A2A20; color: #F6EEDB; font: 700 15px 'Arsenal', serif;">БГ</button>
+      <button type="button" aria-pressed="false" style="min-height: 44px; min-width: 44px; border-radius: 999px; border: 1px solid #C9B27E; background: transparent; color: #3A2A20; font: 700 15px 'Arsenal', serif;">EN</button>
+    </nav>
+  </header>
+
+  <section id="top" style="max-width: 1180px; margin: 0 auto; padding: clamp(24px, 5vw, 64px) clamp(16px, 4vw, 48px) 48px;">
+    <div class="fu-row" style="align-items: stretch;">
+      <div class="fu-main" style="display: flex; flex-direction: column; gap: 24px; justify-content: center;">
+        <p style="margin: 0; display: inline-flex; align-items: center; gap: 10px; font-weight: 700; color: #2F6B3F;">
+          <span style="width: 10px; height: 10px; border-radius: 50%; background: #2F6B3F;" aria-hidden="true"></span>
+          Отворено до 19:00 · пещта е топла от 5:30
+        </p>
+        <h1 style="margin: 0; font-family: 'Yeseva One', Georgia, serif; font-weight: 400; font-size: clamp(48px, 7vw, 92px); line-height: 0.98; letter-spacing: -0.01em; color: {{accent}};">Хляб, който<br>още пука.</h1>
+        <p style="margin: 0; max-width: 46ch; font-size: 21px; color: #5A4433;">Квас от 2014 г., брашно от мелница край Карлово и баница, която свършва до десет. Ела рано.</p>
+        <div style="display: flex; flex-wrap: wrap; gap: 12px;">
+          <a href="#menu" style="min-height: 52px; display: inline-flex; align-items: center; padding: 0 24px; border-radius: 999px; background: {{accent}}; color: #FFF8EA; text-decoration: none; font-weight: 700; font-size: 18px;">Виж какво има днес</a>
+          <a href="#visit" style="min-height: 52px; display: inline-flex; align-items: center; padding: 0 22px; border-radius: 999px; border: 1px solid #3A2A20; text-decoration: none; font-weight: 700;">Как да стигнеш</a>
+        </div>
+      </div>
+
+      <aside class="fu-side" aria-labelledby="oven-h" style="background: #3A2A20; color: #F6EEDB; border-radius: 28px; padding: 28px 28px 24px; display: flex; flex-direction: column; gap: 16px;">
+        <div style="display: flex; align-items: baseline; justify-content: space-between; gap: 12px;">
+          <h2 id="oven-h" style="margin: 0; font-family: 'Yeseva One', serif; font-weight: 400; font-size: 30px;">Днес от пещта</h2>
+          <span style="font-size: 14px; color: #D9C59A;">петък, 11 окт.</span>
+        </div>
+        <ol style="list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column;">
+          <li style="display: grid; grid-template-columns: 64px 1fr auto; gap: 12px; align-items: baseline; padding: 12px 0; border-top: 1px solid #5A4433;">
+            <span style="font-family: 'Yeseva One', serif; font-size: 22px; color: #EBD9A8;">06:30</span>
+            <span><strong>Селски хляб на квас</strong><br><span style="font-size: 15px; color: #D9C59A;">излезе преди 2 ч.</span></span>
+            <span style="font-weight: 700;">4,80 €</span>
+          </li>
+          <li style="display: grid; grid-template-columns: 64px 1fr auto; gap: 12px; align-items: baseline; padding: 12px 0; border-top: 1px solid #5A4433;">
+            <span style="font-family: 'Yeseva One', serif; font-size: 22px; color: #EBD9A8;">07:15</span>
+            <span><s style="color: #B9A27A;">Тиквеник със орехи</s><br><span style="font-size: 15px; color: #E9967A;">свърши · утре пак в 07:15</span></span>
+            <span style="font-weight: 700; color: #B9A27A;">2,60 €</span>
+          </li>
+          <li style="display: grid; grid-template-columns: 64px 1fr auto; gap: 12px; align-items: baseline; padding: 12px 0; border-top: 1px solid #5A4433;">
+            <span style="font-family: 'Yeseva One', serif; font-size: 22px; color: #EBD9A8;">10:30</span>
+            <span><strong>Козунак с портокалова кора</strong><br><span style="font-size: 15px; color: #D9C59A;">след 40 мин.</span></span>
+            <span style="font-weight: 700;">9,50 €</span>
+          </li>
+          <li style="display: grid; grid-template-columns: 64px 1fr auto; gap: 12px; align-items: baseline; padding: 12px 0; border-top: 1px solid #5A4433; border-bottom: 1px solid #5A4433;">
+            <span style="font-family: 'Yeseva One', serif; font-size: 22px; color: #EBD9A8;">15:00</span>
+            <span><strong>Втора тава кифли</strong><br><span style="font-size: 15px; color: #D9C59A;">следобедната тава</span></span>
+            <span style="font-weight: 700;">1,20 €</span>
+          </li>
+        </ol>
+        <p style="margin: 0; font-size: 15px; color: #D9C59A;">Обновява се, щом собственикът пише в Telegram.</p>
+      </aside>
+    </div>
+  </section>
+
+  <section aria-labelledby="note-h" style="background: #EBD9A8;">
+    <div style="max-width: 1180px; margin: 0 auto; padding: 20px clamp(16px, 4vw, 48px); display: flex; flex-wrap: wrap; align-items: center; gap: 12px 20px;">
+      <h2 id="note-h" style="margin: 0; font-size: 15px; letter-spacing: 0.12em; text-transform: uppercase; color: #7A5B3E;">Обява</h2>
+      <p style="margin: 0; font-size: 19px; font-weight: 700;">В неделя печем само по поръчка. Обади се до петък на 0888 123 456.</p>
+    </div>
+  </section>
+
+  <section id="menu" aria-labelledby="menu-h" style="max-width: 1180px; margin: 0 auto; padding: 72px clamp(16px, 4vw, 48px) 24px;">
+    <div style="display: flex; flex-wrap: wrap; align-items: end; justify-content: space-between; gap: 16px; margin-bottom: 32px;">
+      <h2 id="menu-h" style="margin: 0; font-family: 'Yeseva One', serif; font-weight: 400; font-size: clamp(40px, 5vw, 64px); line-height: 1;">Витрината</h2>
+      <nav aria-label="Категории" style="display: flex; flex-wrap: wrap; gap: 8px;">
+        <a href="#c-bread" style="min-height: 44px; display: inline-flex; align-items: center; padding: 0 16px; border-radius: 999px; background: #3A2A20; color: #F6EEDB; text-decoration: none; font-weight: 700;">Хляб</a>
+        <a href="#c-pastry" style="min-height: 44px; display: inline-flex; align-items: center; padding: 0 16px; border-radius: 999px; border: 1px solid #C9B27E; text-decoration: none; font-weight: 700;">Баници и кифли</a>
+        <a href="#c-coffee" style="min-height: 44px; display: inline-flex; align-items: center; padding: 0 16px; border-radius: 999px; border: 1px solid #C9B27E; text-decoration: none; font-weight: 700;">Кафе</a>
+      </nav>
+    </div>
+
+    <div class="fu-row" style="gap: 40px 64px;">
+      <div class="fu-main">
+        <h3 id="c-bread" style="margin: 0 0 8px; font-family: 'Yeseva One', serif; font-weight: 400; font-size: 30px; color: {{accent}};">Хляб</h3>
+        <ul style="list-style: none; margin: 0; padding: 0;">
+          <li style="display: flex; gap: 16px; justify-content: space-between; padding: 16px 0; border-bottom: 1px solid #DCC9A0;">
+            <span><strong style="font-size: 20px;">Селски на квас, 800 г</strong><br><span style="color: #6B5240;">Пълнозърнесто и бяло брашно, 36 ч. ферментация.</span><br><span style="font-size: 14px; color: #7A5B3E;">Алергени: 1 глутен</span></span>
+            <strong style="font-size: 20px; white-space: nowrap;">4,80 €</strong>
+          </li>
+          <li style="display: flex; gap: 16px; justify-content: space-between; padding: 16px 0; border-bottom: 1px solid #DCC9A0;">
+            <span><strong style="font-size: 20px;">Ръжен с кимион</strong><br><span style="color: #6B5240;">Плътен, леко кисел, издържа цяла седмица.</span><br><span style="font-size: 14px; color: #7A5B3E;">Алергени: 1 глутен</span></span>
+            <strong style="font-size: 20px; white-space: nowrap;">5,20 €</strong>
+          </li>
+          <li style="display: flex; gap: 16px; justify-content: space-between; padding: 16px 0; border-bottom: 1px solid #DCC9A0;">
+            <span><strong style="font-size: 20px;">Багета</strong><br><span style="color: #6B5240;">Тънка коричка, вади се на всеки два часа.</span><br><span style="font-size: 14px; color: #7A5B3E;">Алергени: 1 глутен</span></span>
+            <strong style="font-size: 20px; white-space: nowrap;">2,40 €</strong>
+          </li>
+        </ul>
+
+        <h3 id="c-pastry" style="margin: 40px 0 8px; font-family: 'Yeseva One', serif; font-weight: 400; font-size: 30px; color: {{accent}};">Баници и кифли</h3>
+        <ul style="list-style: none; margin: 0; padding: 0;">
+          <li style="display: flex; gap: 16px; justify-content: space-between; padding: 16px 0; border-bottom: 1px solid #DCC9A0;">
+            <span><strong style="font-size: 20px;">Баница със сирене</strong><br><span style="color: #6B5240;">Точена кора, краве сирене от Смолян.</span><br><span style="font-size: 14px; color: #7A5B3E;">Алергени: 1 глутен · 3 яйца · 7 мляко</span></span>
+            <strong style="font-size: 20px; white-space: nowrap;">2,90 €</strong>
+          </li>
+          <li style="display: flex; gap: 16px; justify-content: space-between; padding: 16px 0; border-bottom: 1px solid #DCC9A0;">
+            <span><strong style="font-size: 20px;">Кифла с мармалад</strong><br><span style="color: #6B5240;">Домашен мармалад от шипки.</span><br><span style="font-size: 14px; color: #7A5B3E;">Алергени: 1 глутен · 3 яйца · 7 мляко</span></span>
+            <strong style="font-size: 20px; white-space: nowrap;">1,20 €</strong>
+          </li>
+        </ul>
+      </div>
+
+      <div class="fu-side" style="display: flex; flex-direction: column; gap: 24px;">
+        <div style="aspect-ratio: 4 / 5; border-radius: 28px; background: repeating-linear-gradient(135deg, #E3CF9C 0 14px, #EBD9A8 14px 28px); display: grid; place-items: center; color: #7A5B3E; font-size: 15px; text-align: center; padding: 24px;">[Снимка: витрината сутрин]</div>
+        <h3 id="c-coffee" style="margin: 8px 0 0; font-family: 'Yeseva One', serif; font-weight: 400; font-size: 30px; color: {{accent}};">Кафе</h3>
+        <ul style="list-style: none; margin: 0; padding: 0;">
+          <li style="display: flex; justify-content: space-between; padding: 12px 0; border-bottom: 1px solid #DCC9A0;"><span>Еспресо</span><strong>1,60 €</strong></li>
+          <li style="display: flex; justify-content: space-between; padding: 12px 0; border-bottom: 1px solid #DCC9A0;"><span>Капучино</span><strong>2,60 €</strong></li>
+          <li style="display: flex; justify-content: space-between; padding: 12px 0; border-bottom: 1px solid #DCC9A0;"><span>Боза, 0,5 л</span><strong>1,40 €</strong></li>
+        </ul>
+      </div>
+    </div>
+  </section>
+
+  <section id="visit" aria-labelledby="visit-h" style="max-width: 1180px; margin: 0 auto; padding: 64px clamp(16px, 4vw, 48px);">
+    <h2 id="visit-h" style="margin: 0 0 24px; font-family: 'Yeseva One', serif; font-weight: 400; font-size: clamp(36px, 4vw, 52px);">Кога и къде</h2>
+    <div class="fu-week" role="list" aria-label="Работно време">
+      <div role="listitem" style="padding: 14px 12px; border-radius: 16px; background: #EFE3C4;"><div style="font-weight: 700;">Пон</div><div style="font-size: 15px;">06:00–19:00</div></div>
+      <div role="listitem" style="padding: 14px 12px; border-radius: 16px; background: #EFE3C4;"><div style="font-weight: 700;">Вт</div><div style="font-size: 15px;">06:00–19:00</div></div>
+      <div role="listitem" style="padding: 14px 12px; border-radius: 16px; background: #EFE3C4;"><div style="font-weight: 700;">Ср</div><div style="font-size: 15px;">06:00–19:00</div></div>
+      <div role="listitem" style="padding: 14px 12px; border-radius: 16px; background: #EFE3C4;"><div style="font-weight: 700;">Чет</div><div style="font-size: 15px;">06:00–19:00</div></div>
+      <div role="listitem" aria-current="date" style="padding: 14px 12px; border-radius: 16px; background: #3A2A20; color: #F6EEDB;"><div style="font-weight: 700;">Пет · днес</div><div style="font-size: 15px;">06:00–19:00</div></div>
+      <div role="listitem" style="padding: 14px 12px; border-radius: 16px; background: #EFE3C4;"><div style="font-weight: 700;">Съб</div><div style="font-size: 15px;">07:00–14:00</div></div>
+      <div role="listitem" style="padding: 14px 12px; border-radius: 16px; border: 1px dashed #C9B27E;"><div style="font-weight: 700;">Нед</div><div style="font-size: 15px;">по поръчка</div></div>
+    </div>
+    <div style="display: flex; flex-wrap: wrap; gap: 12px 32px; margin-top: 28px; font-size: 19px;">
+      <a href="#map">ул. „Цар Симеон“ 41, Пловдив</a>
+      <a href="tel:+359888123456">0888 123 456</a>
+      <a href="#instagram">@zhiten.klas</a>
+    </div>
+  </section>
+
+  <footer style="border-top: 1px solid #DCC9A0;">
+    <div style="max-width: 1180px; margin: 0 auto; padding: 24px clamp(16px, 4vw, 48px) 40px; display: flex; flex-wrap: wrap; justify-content: space-between; gap: 12px; font-size: 15px; color: #6B5240;">
+      <span>Пещта се пали в 5:30. Добре дошли.</span>
+      <a href="#sm" translate="no" style="color: #6B5240;">Сайт от Site Manager</a>
+    </div>
+  </footer>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"accent":{"editor":"color","default":"#B8432A","options":["#B8432A","#2F6B3F","#8A5A2B","#3A5A8C"]},"$preview":{"width":1280,"height":2240}}'>
+class Component extends DCLogic {
+  renderVals() {
+    return { accent: this.props.accent ?? '#B8432A' };
+  }
+}
+</script>
+</body>
+</html>
