@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { planChanges, type PlanContext } from "@/src/domain/changes";
+import { applyChanges, invertChanges, planChanges, type PlanContext } from "@/src/domain/changes";
 import { isLiveSpecial, isSoldOut, visibleItems } from "@/src/domain/effective";
 import { formatPrice } from "@/src/domain/format";
 import { renderPreview } from "@/src/domain/preview";
@@ -58,6 +58,47 @@ describe("renderPreview", () => {
     const s = state();
     const changes = planChanges(s, [{ op: "add_item", item: { category_id: "c-pastry", name_bg: "Супа топчета", name_en: "Meatball soup", desc_bg: "", desc_en: "", price_eur: 4.5, allergens: [1, 3], is_special: true, special_expires_at: "2026-10-09T15:00:00.000Z" } }], ctx());
     expect(renderPreview(s, changes, "bg", TZ)).toBe("• Специално днес (до 18:00): Супа топчета / Meatball soup — 4,50 €\n  Алергени: 1 (Глутен), 3 (Яйца)");
+  });
+  it("shows both languages of a bilingual text even when the new texts are identical", () => {
+    const s = state();
+    const changes = planChanges(s, [{ op: "set_text", key: "welcome", text_bg: "Hi", text_en: "Hi" }], ctx());
+    expect(renderPreview(s, changes, "en", TZ)).toBe("• Welcome text: “Welcome!” → “Hi”\n  BG: „Добре дошли!“ → „Hi“");
+    expect(renderPreview(s, changes, "bg", TZ)).toBe("• Приветствие: „Добре дошли!“ → „Hi“\n  EN: “Welcome!” → “Hi”");
+  });
+  it("renders the inverse of a set", () => {
+    const s = state();
+    const changes = planChanges(s, [
+      { op: "add_item", item: { category_id: "c-coffee", name_bg: "Лате", name_en: "Latte", desc_bg: "", desc_en: "", price_eur: 3.2, allergens: [7], is_special: false, special_expires_at: null } },
+      { op: "set_price", item_id: "i-cap", price_eur: 3.2 },
+      { op: "remove_item", item_id: "i-esp" },
+    ], ctx());
+    const applied = applyChanges(s, changes);
+    expect(renderPreview(applied, invertChanges(changes), "en", TZ)).toBe("• Restores Espresso\n• Cappuccino: €3.20 → €2.90\n• Removes Latte");
+    expect(renderPreview(applied, invertChanges(changes), "bg", TZ)).toBe("• Връща Еспресо\n• Капучино: 3,20 € → 2,90 €\n• Премахва Лате");
+  });
+  it("renders inverted holiday and announcement changes", () => {
+    const s = state({
+      holidays: [{ id: "h1", venue_id: "v1", date: "2026-12-31", note_bg: "Нова година", note_en: "New Year's Eve" }],
+      announcements: [{ id: "a1", venue_id: "v1", text_bg: "Стар текст", text_en: "Old text", expires_at: null, created_at: NOW }],
+    });
+    const changes = planChanges(s, [
+      { op: "add_holiday", date: "2026-12-24", note_bg: "Бъдни вечер", note_en: "Christmas Eve" },
+      { op: "add_announcement", text_bg: "Весели празници!", text_en: "Happy holidays!", expires_at: null },
+      { op: "remove_holiday", holiday_id: "h1" },
+      { op: "remove_announcement", announcement_id: "a1" },
+    ], ctx());
+    const applied = applyChanges(s, changes);
+    expect(renderPreview(applied, invertChanges(changes), "en", TZ)).toBe([
+      "• Announcement: “Old text” / „Стар текст“",
+      "• Holiday 31 Dec 2026: New Year's Eve / Нова година",
+      "• Removes the announcement “Happy holidays!”",
+      "• Removes the holiday on 24 Dec 2026",
+    ].join("\n"));
+  });
+  it("names the missing item instead of printing undefined", () => {
+    const s = state();
+    const changes = planChanges(s, [{ op: "set_price", item_id: "i-cap", price_eur: 3.2 }], ctx());
+    expect(() => renderPreview({ ...s, items: [] }, changes, "en", TZ)).toThrow("preview: item i-cap not found");
   });
   it("renders hours, holidays, announcements, texts, images and theme", () => {
     const s = state();
