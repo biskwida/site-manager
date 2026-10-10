@@ -11,7 +11,7 @@
 **Decisions made with the user (2026-10-10):**
 - New project, **not** under InstaPay. Folder: `/Users/tanyatopacharova/Projects/site-manager`. Public GitHub repo `biskwida/site-manager` (gh is logged in as `biskwida`). Working name "Site Manager".
 - **Vercel-deployable**: one Next.js app (App Router) holds the public sites, the owner dashboard, the Telegram webhook and the tick endpoint. Supabase holds data, realtime and images. No long-running Node process in production; long polling only for local development.
-- Telegram bot as the owner's interface. Text, voice notes (OpenAI transcription) and photos.
+- Telegram bot as the owner's interface. Text, voice notes (any OpenAI-compatible transcription API; Groq free tier by default) and photos.
 - Languages: the site, the dashboard and the bot all work in **English and Bulgarian**. Each owner picks their language; every piece of site text is stored in both languages, and the agent writes or translates the other one.
 - Models: `claude-opus-5-5`. Effort `medium` by default, `high` for turns with an image or a bulk/scheduled request. Configurable by env. Quality over cost.
 - Features: price and text edits; sold-out with auto-return; daily specials from a photo; opening hours and holidays; images (dish, cover, logo, gallery); new dish setup with allergen check and bilingual descriptions; bulk price changes with rounding preview; scheduled changes with a reminder; change log and undo; theme accent colour.
@@ -56,7 +56,7 @@ Per chat: the last 8 exchanges as plain text (owner said / agent replied / chang
 
 ### Voice
 
-`message:voice` / `message:audio` → `getFile` → download `.oga` → OpenAI `audio.transcriptions.create({ model: "whisper-1" (or the current replacement), language: owner's language })` → text. The bot echoes "🎤 Heard: “…”" / "🎤 Чух: „…“" before acting. Missing `OPENAI_API_KEY` → polite "please type it" reply.
+`message:voice` / `message:audio` → `getFile` → download `.oga` → speech-to-text through any **OpenAI-compatible transcription endpoint**, using the `openai` SDK with `baseURL = STT_BASE_URL`, `apiKey = STT_API_KEY`, `model = STT_MODEL`, `language = owner's language` → text. Default and recommended for the hackathon: **Groq's free tier** (`STT_BASE_URL=https://api.groq.com/openai/v1`, `STT_MODEL=whisper-large-v3`, key from console.groq.com; about 20 requests a minute and 2,000 a day on the free plan, check the console for current limits). OpenAI works with `STT_BASE_URL=https://api.openai.com/v1` and `STT_MODEL=whisper-1`. The bot echoes "🎤 Heard: “…”" / "🎤 Чух: „…“" before acting. Missing `STT_API_KEY` → polite "please type it" reply.
 
 ### Language
 
@@ -141,6 +141,7 @@ Model routing in `run.ts`: effort `medium` default; `high` when the turn carries
 - `/` — product landing in EN/BG: "Your café's website, managed by chat", how it works, a demo link to `/agala`. Brief; the sites are the product.
 - `/[slug]` — the café's home: cover, logo, name, tagline, today's status, announcements, specials today, about, highlights (a few items), hours, address with map link, phone, Instagram, gallery, footer. `/[slug]/menu` — full menu by category with images, prices, allergen codes, sold-out badges, EN/BG toggle. Client components subscribe to realtime and poll every 5 s; changed items flash briefly. Theme accent from `venues.theme`. Mobile-first (opened from a QR code).
 - `/admin/[slug]?key=TOKEN` — QR code, pending approvals (Apply/Reject), scheduled (Cancel), change log with before → after and Undo, sold-out list with return times, links. Polls `admin_overview` every 3 s. Invalid key → friendly page.
+- **Draft preview (added 2026-10-10 at the user's request):** every pending proposal on the dashboard has a "Preview on the site" link that opens `/[slug]?draft=<change_set_id>&key=TOKEN` (and `/[slug]/menu?draft=…&key=…`): the public pages render with the proposed changes applied on top of the live state, under a sticky "Draft preview, not live" banner with Apply / Reject buttons that call the same RPCs. Only a valid admin key renders a draft; without it the pages ignore `draft`. Accepting (on the phone or the dashboard) is what makes the draft live.
 - i18n: copy the donation repo's `web/src/lib/i18n.tsx` layer (provider, `t/tx`, toggle, URL `?lang=` and localStorage), adapted to Next (client component, `useSearchParams`). WCAG AA contrast floor; self-hosted fonts via `next/font` (Literata + Onest, Cyrillic subsets).
 
 ## Multi-tenant operations
@@ -173,7 +174,7 @@ site-manager/
   docs/superpowers/specs/2026-10-10-site-manager-design.md  docs/superpowers/plans/
 ```
 
-Env (`.env.local`, git-ignored; Vercel project env in production): `ANTHROPIC_API_KEY`, `AGENT_MODEL=claude-opus-5-5`, `AGENT_EFFORT=medium`, `TELEGRAM_BOT_TOKEN`, `TELEGRAM_WEBHOOK_SECRET`, `OPENAI_API_KEY`, `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY`, `SUPABASE_SERVICE_ROLE_KEY`, `SUPABASE_DB_URL` (scripts only), `PUBLIC_BASE_URL` (the deployment URL, used for admin links and QR), `TICK_SECRET`, `DEMO_VENUE_SLUG=agala`.
+Env (`.env.local`, git-ignored; Vercel project env in production): `ANTHROPIC_API_KEY`, `AGENT_MODEL=claude-opus-5-5`, `AGENT_EFFORT=medium`, `TELEGRAM_BOT_TOKEN`, `TELEGRAM_WEBHOOK_SECRET`, `STT_API_KEY`, `STT_BASE_URL`, `STT_MODEL`, `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY`, `SUPABASE_SERVICE_ROLE_KEY`, `SUPABASE_DB_URL` (scripts only), `PUBLIC_BASE_URL` (the deployment URL, used for admin links and QR), `TICK_SECRET`, `DEMO_VENUE_SLUG=agala`.
 
 Pinned versions confirmed on npm today: `next@16.4.0`, `react@19.3.0`, `react-dom@19.3.0`, `tailwindcss@4.3.3`, `@tailwindcss/postcss` (match 4.3.x), `@anthropic-ai/sdk@0.133.0`, `grammy@1.46.0`, `openai@7.32.0`, `@supabase/supabase-js@2.117.3`, `zod@4.6.5`, `pg@8.23.1`, `qrcode.react@4.2.0`, `typescript@7.0.2`, `vitest@5.0.3`, `tsx@4.23.15`. Check `next@16` App Router specifics (`after()` from `next/server`, `maxDuration` export, `next/font`) against the installed types rather than memory.
 
@@ -234,7 +235,7 @@ Bulk price change and scheduled changes are last within their days; everything e
 
 ## Known gaps to state honestly
 
-Only the venue's own site is managed (no delivery apps, no Google). Voice uses a third-party transcription service. Allergen detection is keyword-based and advisory. The demo venue is fictional. Payments and billing for selling the service are out of scope.
+Only the venue's own site is managed (no delivery apps, no Google). Voice uses a third-party transcription service (Groq or OpenAI). Allergen detection is keyword-based and advisory. The demo venue is fictional. Payments and billing for selling the service are out of scope.
 
 ## What to copy from the donation project (and nothing else)
 
