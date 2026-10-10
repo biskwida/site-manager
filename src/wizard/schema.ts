@@ -178,14 +178,21 @@ export function bothLangs(bg: string, en: string): { bg: string; en: string } {
   return { bg: b || e, en: e || b };
 }
 
+/** Why a slug cannot be the final address (format, reserved word or the draft placeholder); null when it can. */
+export function slugError(slug: string): { bg: string; en: string } | null {
+  if (!SLUG_RE.test(slug)) return { bg: "Адресът трябва да е 2–39 малки латински букви, цифри и тирета.", en: "The address must be 2–39 lowercase letters, digits and dashes." };
+  if (RESERVED_SLUGS.includes(slug) || slug.startsWith(DRAFT_SLUG_PREFIX)) return { bg: "Този адрес е запазен. Изберете друг.", en: "This address is reserved. Choose another." };
+  return null;
+}
+
 export function validateForPublish(d: WizardDraft): { ok: true } | { ok: false; errors: PublishError[] } {
   const errors: PublishError[] = [];
   const push = (path: string, bg: string, en: string) => {
     if (!errors.some((e) => e.path === path)) errors.push({ path, bg, en });
   };
   if (!d.name.trim()) push("name", "Въведете името на заведението.", "Enter the venue's name.");
-  if (!SLUG_RE.test(d.slug)) push("slug", "Адресът трябва да е 2–39 малки латински букви, цифри и тирета.", "The address must be 2–39 lowercase letters, digits and dashes.");
-  else if (RESERVED_SLUGS.includes(d.slug) || d.slug.startsWith(DRAFT_SLUG_PREFIX)) push("slug", "Този адрес е запазен. Изберете друг.", "This address is reserved. Choose another.");
+  const slugErr = slugError(d.slug);
+  if (slugErr) push("slug", slugErr.bg, slugErr.en);
   if (!isValidHours(d.hours)) push("hours", "Проверете работното време: отварянето трябва да е преди затварянето.", "Check the opening hours: opening must be before closing.");
   if (!HEX.test(d.theme.accent)) push("theme.accent", "Цветът трябва да е във вид #rrggbb.", "The colour must look like #rrggbb.");
   if (!d.categories.some((c) => c.items.length > 0)) push("categories", "Добавете поне един продукт в менюто.", "Add at least one menu item.");

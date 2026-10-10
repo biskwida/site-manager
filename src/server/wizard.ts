@@ -12,7 +12,7 @@ import { renderPreview } from "../domain/preview";
 import { TEMPLATE_IDS, type ChangeOp, type TemplateId, type Venue } from "../domain/types";
 import { seedMenuFrom, type SeedCategory, type SeedItem, type SeedTexts } from "../seed/demo";
 import type { Store, VenuePatch } from "../store/types";
-import { bothLangs, DRAFT_SLUG_PREFIX, emptyDraft, RESERVED_SLUGS, validateForPublish, WizardPatchSchema, type PublishError, type WizardDraft } from "../wizard/schema";
+import { bothLangs, DRAFT_SLUG_PREFIX, emptyDraft, slugError, validateForPublish, WizardPatchSchema, type PublishError, type WizardDraft } from "../wizard/schema";
 import { readDraftFromRequest, serializeDraftCookie } from "./draft-cookie";
 import { newDraftToken, sha256Hex } from "./hash";
 
@@ -99,10 +99,20 @@ async function assertSlugFree(store: Store, slug: string, selfId: string): Promi
 export async function updateDraft(store: Store, venue: Venue, patch: Partial<WizardDraft>): Promise<WizardDraft> {
   if (venue.status !== "draft") throw ALREADY_PUBLISHED(venue.slug);
   const parsed = WizardPatchSchema.safeParse(patch);
-  if (!parsed.success) throw INVALID(parsed.error.issues.map((i) => ({ path: i.path.map(String).join("."), bg: "Невалидна стойност.", en: "Invalid value." })));
+  if (!parsed.success) {
+    throw INVALID(
+      parsed.error.issues.map((i) => {
+        const path = i.path.map(String).join(".");
+        // The slug is the one field the owner types freely: say what is wrong with it.
+        const why = path === "slug" && typeof patch.slug === "string" ? slugError(patch.slug) : null;
+        return { path, ...(why ?? { bg: "Невалидна стойност.", en: "Invalid value." }) };
+      }),
+    );
+  }
   const clean = parsed.data;
   if (clean.slug) {
-    if (RESERVED_SLUGS.includes(clean.slug) || clean.slug.startsWith(DRAFT_SLUG_PREFIX)) throw INVALID([{ path: "slug", bg: "Този адрес е запазен. Изберете друг.", en: "This address is reserved. Choose another." }]);
+    const why = slugError(clean.slug);
+    if (why) throw INVALID([{ path: "slug", ...why }]);
     await assertSlugFree(store, clean.slug, venue.id);
   }
   const merged: WizardDraft = { ...(venue.wizard_draft ?? emptyDraft(venue.template)), ...clean };
