@@ -17,9 +17,10 @@ function signature(s: SiteState): Map<string, string> {
 /**
  * Polls `feedUrl` (the public feed: `{ state: SiteState }`) every 5 s while `live`. `changed` maps ids whose content just
  * changed to the change time, for the flash. No realtime: this hook also runs inside deployed venue sites that have no Supabase keys.
+ * While not live (draft previews, the wizard preview) the rendered state follows `initial`, so the wizard can type into it.
  */
 export function useLiveSite(initial: SiteState, feedUrl: string, live: boolean): { state: SiteState; changed: Changed } {
-  const [state, setState] = useState(initial);
+  const [polled, setPolled] = useState(initial);
   const [changed, setChanged] = useState<Changed>(new Map());
   const seq = useRef(0);
   const prev = useRef<Map<string, string> | null>(null);
@@ -41,7 +42,7 @@ export function useLiveSite(initial: SiteState, feedUrl: string, live: boolean):
         for (const [id, v] of sig) if (prev.current?.get(id) !== v) diff.set(id, at);
         prev.current = sig;
         if (diff.size) setChanged((c) => new Map([...c, ...diff]));
-        setState(data.state);
+        setPolled(data.state);
       } catch {
         // keep the last good state; the next poll retries
       }
@@ -55,7 +56,7 @@ export function useLiveSite(initial: SiteState, feedUrl: string, live: boolean):
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [feedUrl, live]);
 
-  return { state, changed };
+  return { state: live ? polled : initial, changed };
 }
 
 /** Wall clock for open/closed and timers: starts from the server's `now` (hydration-safe) and ticks every 15 s. */
