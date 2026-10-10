@@ -65,25 +65,22 @@ export function createBot(d: BotDeps): Bot {
     const chatId = ctx.chat.id;
     const uiLang = langFromCode(ctx.from?.language_code);
     const existing = await d.store.findMember(chatId);
-    if (existing) {
-      const venue = await d.store.getVenue(existing.venue_id);
-      const c = copy(existing.lang);
-      if (existing.role === "owner") await ctx.reply(c.welcomeBack(venue.name, adminUrl(d.baseUrl, venue.slug, await d.store.getAdminToken(venue.id))));
-      else await ctx.reply(c.welcomeStaff(venue.name, publicUrl(d.baseUrl, venue.slug)));
-      return;
-    }
     const code = (ctx.match ?? "").trim().toUpperCase();
-    if (!code) {
-      await ctx.reply(copy(uiLang).noAccess);
-      return;
-    }
-    const member = await d.store.redeemInvite(code, chatId, uiLang, d.now().toISOString());
+    // A code is tried first, even from a linked chat: the owner may be setting up another venue (the demo phone, a second
+    // café). redeemInvite moves the chat to the code's venue. Only without a usable code does a linked chat get welcome-back.
+    const member = code ? await d.store.redeemInvite(code, chatId, uiLang, d.now().toISOString()) : null;
     if (!member) {
-      await ctx.reply(copy(uiLang).badCode);
+      if (existing) {
+        const venue = await d.store.getVenue(existing.venue_id);
+        const c = copy(existing.lang);
+        if (existing.role === "owner") await ctx.reply(c.welcomeBack(venue.name, adminUrl(d.baseUrl, venue.slug, await d.store.getAdminToken(venue.id))));
+        else await ctx.reply(c.welcomeStaff(venue.name, publicUrl(d.baseUrl, venue.slug)));
+      } else await ctx.reply(code ? copy(uiLang).badCode : copy(uiLang).noAccess);
       return;
     }
     const venue = await d.store.getVenue(member.venue_id);
     const c = copy(member.lang);
+    if (existing && existing.venue_id !== member.venue_id) await ctx.reply(c.switched(venue.name));
     if (member.role === "owner") {
       await ctx.reply(c.welcome(venue.name, adminUrl(d.baseUrl, venue.slug, await d.store.getAdminToken(venue.id)), publicUrl(d.baseUrl, venue.slug)));
       if (d.onOwnerJoined) {
