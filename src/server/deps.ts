@@ -93,12 +93,13 @@ export async function makeServerDeps(o: DepsOptions): Promise<ServerDeps> {
   return { config, store: s, messenger, bot, handleRun, isMemory };
 }
 
-let cached: Promise<ServerDeps> | null = null;
+// On globalThis, not a module variable: `next dev` (HMR, separate route bundles) then shares one in-memory store between pages and API routes.
+const g = globalThis as { __siteManagerDeps?: Promise<ServerDeps> | null };
 /** One set of deps per server process (Vercel function instance or dev server). */
 export function getServerDeps(defer: DepsOptions["defer"]): Promise<ServerDeps> {
-  cached ??= makeServerDeps({ defer }).catch((e) => {
-    cached = null; // let the next request retry (e.g. after env vars are fixed)
+  g.__siteManagerDeps ??= makeServerDeps({ defer }).catch((e) => {
+    g.__siteManagerDeps = null; // let the next request retry (e.g. after env vars are fixed)
     throw e;
   });
-  return cached;
+  return g.__siteManagerDeps;
 }
