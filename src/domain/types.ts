@@ -195,7 +195,7 @@ export const OP_NAMES: readonly OpName[] = [
   "set_text", "set_theme",
 ];
 
-export type Entity = "venue" | "category" | "item" | "holiday" | "announcement" | "media" | "site_text";
+export type Entity = "venue" | "category" | "item" | "holiday" | "announcement" | "media" | "site_text" | WpEntity;
 export type Row = Record<string, unknown>;
 
 /**
@@ -205,7 +205,7 @@ export type Row = Record<string, unknown>;
  */
 export interface Change {
   position: number;
-  op: OpName;
+  op: OpName | WpOpName;
   entity: Entity;
   entity_id: string;
   before: Row | null;
@@ -257,4 +257,15 @@ export interface Conversation {
   /** Set by the ✏️ Change button: the next message corrects this proposal. */
   correction_for: string | null;
   updated_at: string;
+}
+
+// --- WordPress write channel (integrations track, appended 2026-10-10) ---
+/** Ops produced by the WordPress tools (src/agent/wp-tools.ts) from live WordPress data; never by planChange. */
+export type WpOpName = "wp_edit_page" | "wp_upload_photo" | "wp_set_option" | "wp_edit_menu" | "wp_edit_product";
+export const WP_OP_NAMES: readonly WpOpName[] = ["wp_edit_page", "wp_upload_photo", "wp_set_option", "wp_edit_menu", "wp_edit_product"];
+/** Entities that live on the owner's WordPress site, not in our database: the store applies them as no-ops and the destination push writes them. */
+export type WpEntity = "wp_page" | "wp_media" | "wp_option" | "wp_menu" | "wp_product";
+export const WP_ENTITIES: readonly WpEntity[] = ["wp_page", "wp_media", "wp_option", "wp_menu", "wp_product"];
+export function isWpEntity(e: string): e is WpEntity {
+  return (WP_ENTITIES as readonly string[]).includes(e);
 }
