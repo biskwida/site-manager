@@ -1,0 +1,14 @@
+{
+  "$schema": "https://schemas.wp.org/trunk/block.json",
+  "apiVersion": 3,
+  "name": "site-manager/hours",
+  "title": "Site Manager: Hours & contact",
+  "category": "widgets",
+  "icon": "clock",
+  "description": "Open-now status, opening hours, upcoming closures, address, map, phone and Instagram.",
+  "keywords": ["hours", "работно време", "контакт", "site manager"],
+  "textdomain": "site-manager",
+  "attributes": { "lang": { "type": "string", "default": "auto", "enum": ["auto", "bg", "en"] } },
+  "supports": { "html": false, "align": ["wide", "full"] },
+  "editorScript": "site-manager-blocks"
+}

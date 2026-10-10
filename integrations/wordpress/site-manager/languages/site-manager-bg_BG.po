@@ -88,3 +88,12 @@ msgstr "Site Manager отговори неочаквано (HTTP %d)."
 
 msgid "Site Manager could not render this block."
 msgstr "Site Manager не успя да покаже този блок."
+
+msgid "Nothing to show right now; the block is hidden on the site."
+msgstr "Няма какво да се покаже в момента; блокът не се вижда на сайта."
+
+msgid "Language"
+msgstr "Език"
+
+msgid "Text"
+msgstr "Текст"
