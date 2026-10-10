@@ -12,6 +12,10 @@ final class SM_Client
     public const LAST_GOOD = 'site_manager_feed_last_good';
     private const STALE_TTL = 86400;
     private const TIMEOUT = 6;
+    /** After a failed remote fetch, page views serve the last good copy (or the error) without calling out for this long. */
+    private const FAIL_TTL = 60;
+    /** @var array<string, array{state: array, now: string, stale: bool}|WP_Error> Results of this request, by feed URL. */
+    private static array $memo = [];
 
     /** @return array{base_url: string, slug: string, cache_seconds: int, lang: string} */
     public static function settings(): array
@@ -55,7 +59,31 @@ final class SM_Client
         return 'site_manager_feed_' . md5($url);
     }
 
+    private static function fail_key(string $url): string
+    {
+        return 'site_manager_feed_fail_' . md5($url);
+    }
+
+    /** Forgets this request's results (tests; also after the settings change). */
+    public static function reset_memo(): void
+    {
+        self::$memo = [];
+    }
+
+    /** The last good copy for $url (aged, marked stale) when it is younger than a day, else null. */
+    private static function last_good(string $url): ?array
+    {
+        $last = get_option(self::LAST_GOOD, null);
+        if (is_array($last) && ($last['url'] ?? '') === $url && isset($last['state'], $last['now'], $last['at']) && (int) $last['at'] + self::STALE_TTL > time()) {
+            return self::aged($last) + ['stale' => true];
+        }
+        return null;
+    }
+
     /**
+     * Several blocks on one page share one result per request (unless $bypass_cache, the settings page's
+     * "Check connection"), and for a minute after a failed remote fetch no page view calls out again.
+     *
      * @return array{state: array, now: string, stale: bool}|WP_Error
      */
     public static function fetch(bool $bypass_cache = false): array|WP_Error
@@ -64,12 +92,28 @@ final class SM_Client
         if ($url === null) {
             return new WP_Error('site_manager_unconfigured', __('Site Manager is not configured yet: set the address and the venue code under Settings → Site Manager.', 'site-manager'));
         }
+        if ($bypass_cache) {
+            return self::fetch_uncached($url, true);
+        }
+        if (!isset(self::$memo[$url])) {
+            self::$memo[$url] = self::fetch_uncached($url, false);
+        }
+        return self::$memo[$url];
+    }
+
+    /** @return array{state: array, now: string, stale: bool}|WP_Error */
+    private static function fetch_uncached(string $url, bool $bypass_cache): array|WP_Error
+    {
         $s = self::settings();
         $key = self::cache_key($url);
         if (!$bypass_cache) {
             $cached = get_transient($key);
             if (is_array($cached) && isset($cached['state'], $cached['now'])) {
                 return self::aged($cached) + ['stale' => false];
+            }
+            $failed = get_transient(self::fail_key($url));
+            if (is_array($failed)) {
+                return self::last_good($url) ?? new WP_Error((string) ($failed['code'] ?? 'site_manager_unavailable'), (string) ($failed['message'] ?? ''));
             }
         }
         $res = wp_remote_get($url, ['timeout' => self::TIMEOUT, 'headers' => ['Accept' => 'application/json'], 'user-agent' => 'SiteManagerWP/' . SITE_MANAGER_VERSION]);
@@ -88,14 +132,12 @@ final class SM_Client
                 $stored = $value + ['fetched_at' => time()];
                 set_transient($key, $stored, $s['cache_seconds']);
                 update_option(self::LAST_GOOD, ['at' => time(), 'url' => $url] + $stored, false);
+                delete_transient(self::fail_key($url));
                 return $value + ['stale' => false];
             }
         }
-        $last = get_option(self::LAST_GOOD, null);
-        if (is_array($last) && ($last['url'] ?? '') === $url && isset($last['state'], $last['now'], $last['at']) && (int) $last['at'] + self::STALE_TTL > time()) {
-            return self::aged($last) + ['stale' => true];
-        }
-        return $error;
+        set_transient(self::fail_key($url), ['code' => $error->get_error_code(), 'message' => $error->get_error_message()], self::FAIL_TTL);
+        return self::last_good($url) ?? $error;
     }
 
     public static function clear_cache(): void
@@ -103,6 +145,8 @@ final class SM_Client
         $url = self::feed_url();
         if ($url !== null) {
             delete_transient(self::cache_key($url));
+            delete_transient(self::fail_key($url));
+            unset(self::$memo[$url]);
         }
     }
 }

@@ -51,7 +51,8 @@ function wp_strip_all_tags(string $s): string { return trim(preg_replace('/\s+/'
 function trailingslashit(string $s): string { return rtrim($s, '/') . '/'; }
 function untrailingslashit(string $s): string { return rtrim($s, '/'); }
 function esc_url_raw(string $s): string { return $s; }
-function wp_remote_get(string $url, array $args = []): mixed { return $GLOBALS['sm_test_remote'] ?? new WP_Error('http_request_failed', 'no network in tests'); }
+$GLOBALS['sm_test_remote_calls'] = 0;
+function wp_remote_get(string $url, array $args = []): mixed { $GLOBALS['sm_test_remote_calls']++; return $GLOBALS['sm_test_remote'] ?? new WP_Error('http_request_failed', 'no network in tests'); }
 function wp_remote_retrieve_response_code(mixed $r): int { return is_array($r) ? ($r['response']['code'] ?? 0) : 0; }
 function wp_remote_retrieve_body(mixed $r): string { return is_array($r) ? ($r['body'] ?? '') : ''; }
 function wp_slash(mixed $v): mixed { return $v; }

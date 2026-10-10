@@ -118,9 +118,11 @@ $GLOBALS['sm_test_remote'] = ['response' => ['code' => 200], 'body' => json_enco
 $fetched = SM_Client::fetch();
 check('fetch parses the feed', is_array($fetched) && $fetched['now'] === $now && $fetched['stale'] === false);
 $cachedKey = 'site_manager_feed_' . md5((string) SM_Client::feed_url());
+SM_Client::reset_memo(); // each page view is a new request
 $cachedAgain = SM_Client::fetch();
 check('cached copy keeps the clock moving', is_array($cachedAgain) && $cachedAgain['stale'] === false && strtotime($cachedAgain['now']) >= strtotime($now));
 $GLOBALS['sm_test_transients'][$cachedKey]['fetched_at'] -= 120;
+SM_Client::reset_memo();
 $cachedOld = SM_Client::fetch();
 check('cached copy is advanced by its age', is_array($cachedOld) && strtotime($cachedOld['now']) - strtotime($now) >= 120 && strtotime($cachedOld['now']) - strtotime($now) < 130, is_array($cachedOld) ? $cachedOld['now'] : '');
 $GLOBALS['sm_test_remote'] = new WP_Error('http_request_failed', 'down');
@@ -136,9 +138,49 @@ SM_Client::clear_cache();
 $err = SM_Client::fetch();
 check('fetch returns WP_Error without any copy', is_wp_error($err) && $err->get_error_code() === 'site_manager_unavailable');
 $GLOBALS['sm_test_remote'] = ['response' => ['code' => 404], 'body' => '{"error":"not found"}'];
+SM_Client::clear_cache(); // also ends the failure window of the previous case
 $err404 = SM_Client::fetch();
 check('404 is an error that names the slug', is_wp_error($err404) && has($err404->get_error_message(), 'agala'));
 check('unavailable comment is safe', has(SM_Render::unavailable($err404), '<!-- Site Manager:') && !has(SM_Render::unavailable($err404), '<script'));
+
+// Outage protection: one remote call per request for the same URL
+$failKey = 'site_manager_feed_fail_' . md5((string) SM_Client::feed_url());
+$GLOBALS['sm_test_remote'] = new WP_Error('http_request_failed', 'down');
+SM_Client::clear_cache();
+$GLOBALS['sm_test_remote_calls'] = 0;
+SM_Client::fetch();
+delete_transient($failKey); // only the per-request memo may stop the second call
+$memoAgain = SM_Client::fetch();
+check('a second fetch in the same request does not call the remote', $GLOBALS['sm_test_remote_calls'] === 1 && is_wp_error($memoAgain), (string) $GLOBALS['sm_test_remote_calls']);
+// ... and for 60 s after a failure no page view calls out: it gets the last good copy (aged, stale) or the error
+$GLOBALS['sm_test_remote'] = ['response' => ['code' => 200], 'body' => json_encode($feed)];
+SM_Client::clear_cache();
+SM_Client::reset_memo();
+SM_Client::fetch(); // a good copy exists
+SM_Client::clear_cache();
+SM_Client::reset_memo();
+$GLOBALS['sm_test_remote'] = new WP_Error('http_request_failed', 'down');
+$GLOBALS['sm_test_remote_calls'] = 0;
+$down = SM_Client::fetch();
+SM_Client::reset_memo(); // the next page view
+$windowed = SM_Client::fetch();
+check('a failure sets the 60-second window', is_array(get_transient($failKey)) && is_array($down) && $down['stale'] === true);
+check('within the window a fetch serves the stale copy without calling the remote', $GLOBALS['sm_test_remote_calls'] === 1 && is_array($windowed) && $windowed['stale'] === true && strtotime($windowed['now']) >= strtotime($now), (string) $GLOBALS['sm_test_remote_calls']);
+delete_option('site_manager_feed_last_good');
+SM_Client::reset_memo();
+$windowedErr = SM_Client::fetch();
+check('within the window and without a copy the error comes back directly', $GLOBALS['sm_test_remote_calls'] === 1 && is_wp_error($windowedErr) && $windowedErr->get_error_code() === 'site_manager_unavailable' && has($windowedErr->get_error_message(), 'down'));
+$GLOBALS['sm_test_remote'] = ['response' => ['code' => 200], 'body' => json_encode($feed)];
+$checked = SM_Client::fetch(true);
+check('"Check connection" (bypass) ignores the window and ends it on success', $GLOBALS['sm_test_remote_calls'] === 2 && is_array($checked) && $checked['stale'] === false && get_transient($failKey) === false);
+$GLOBALS['sm_test_remote'] = new WP_Error('http_request_failed', 'down');
+SM_Client::clear_cache();
+SM_Client::reset_memo();
+SM_Client::fetch();
+$windowSet = is_array(get_transient($failKey));
+SM_Client::clear_cache();
+check('clear_cache drops the failure window', $windowSet && get_transient($failKey) === false);
+SM_Client::reset_memo();
 
 // Shortcodes never break the page
 $broken = $feed;
