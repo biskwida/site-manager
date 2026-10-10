@@ -7,6 +7,12 @@ const page = (messaging: unknown[], object = "page") => ({ object, entry: [{ id:
 const wa = (value: Record<string, unknown>) => ({ object: "whatsapp_business_account", entry: [{ id: "WABA1", changes: [{ field: "messages", value: { messaging_product: "whatsapp", metadata: { display_phone_number: "1555", phone_number_id: "PNID" }, ...value } }] }] });
 
 describe("parseMetaWebhook: Messenger and Instagram", () => {
+  it("keeps a referral code that arrives on the message itself, with the text", () => {
+    const out = parseMetaWebhook(page([
+      { sender: { id: "503" }, recipient: { id: "PAGE1" }, timestamp: 11, message: { mid: "m11", text: "Здравейте", referral: { ref: "QRST2345", source: "SHORTLINK", type: "OPEN_THREAD" } } },
+    ], "instagram"), deps);
+    expect(out).toEqual([{ chatRef: "ig:503", kind: "text", text: "Здравейте", referralCode: "QRST2345", messageRef: "m11", eventId: "m11" }]);
+  });
   it("maps text, image, audio, quick reply, postback, referral and skips echoes/reads", async () => {
     const out = parseMetaWebhook(page([
       { sender: { id: "500" }, recipient: { id: "PAGE1" }, timestamp: 1, message: { mid: "m1", text: "Капучиното става 3,20" } },

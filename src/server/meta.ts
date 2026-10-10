@@ -3,6 +3,7 @@
 // acknowledged at once and processed in the deferred callback (Meta retries anything slower than ~20 s).
 import { createHmac, timingSafeEqual } from "node:crypto";
 import type { BotDeps, RunRequest } from "../bot/bot";
+import { copy } from "../bot/copy";
 import { handleInbound } from "../bot/inbound";
 import type { MediaFetch } from "../channels/meta/graph";
 import { parseMetaWebhook } from "../channels/meta/parse";
@@ -54,7 +55,13 @@ export async function handleMetaRequest(req: Request, deps: MetaServerDeps): Pro
       const runs: Promise<void>[] = [];
       const d: BotDeps = { ...deps.botDeps, startRun: (r) => { runs.push(deps.handleRun(r)); } };
       for (const m of messages) {
-        try { await handleInbound(d, m); } catch (e) { console.error("[meta] inbound failed:", e instanceof Error ? e.message : e); }
+        try {
+          await handleInbound(d, m);
+        } catch (e) {
+          console.error("[meta] inbound failed:", e instanceof Error ? e.message : e);
+          // Tell the owner rather than lose the message silently. Best-effort: never throws.
+          try { await deps.botDeps.messenger.send(m.chatRef, copy("bg").error); } catch { /* already logged above */ }
+        }
       }
       await Promise.all(runs);
     });

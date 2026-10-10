@@ -1,5 +1,5 @@
 // scripts/meta-setup.mts
-// npm run meta:setup — checks the Meta tokens, subscribes the Page to this app's webhook fields, prints the webhook URL and the enabled channels. Never prints a token.
+// npm run meta:setup — checks the Meta tokens, subscribes the Page to this app's webhook fields, sets the Messenger Get Started button, prints the webhook URL and the enabled channels. Never prints a token.
 import { GRAPH } from "../src/channels/meta/graph";
 import { loadConfig } from "../src/config";
 
@@ -17,6 +17,9 @@ if (cfg.metaPageToken) {
   console.log(`Messenger: Page "${me.name}" (${me.id})`);
   const sub = await fetch(`${GRAPH}/${me.id}/subscribed_apps`, { method: "POST", headers: { authorization: `Bearer ${cfg.metaPageToken}`, "content-type": "application/json" }, body: JSON.stringify({ subscribed_fields: ["messages", "messaging_postbacks", "messaging_referrals"] }) });
   console.log(`Messenger: page subscribed to the app webhook → HTTP ${sub.status}`);
+  // A Get Started button makes Messenger deliver the m.me ?ref= code as a postback referral on the first contact.
+  const profile = await fetch(`${GRAPH}/me/messenger_profile`, { method: "POST", headers: { authorization: `Bearer ${cfg.metaPageToken}`, "content-type": "application/json" }, body: JSON.stringify({ get_started: { payload: "GET_STARTED" } }) });
+  console.log(`Messenger: Get Started button set → HTTP ${profile.status}`);
   const ig = me.instagram_business_account as { id: string; username: string } | undefined;
   console.log(ig ? `Instagram: @${ig.username} (${ig.id}) linked to the Page` : "Instagram: no professional account linked to this Page (link it in Page settings → Linked accounts)");
 } else console.log("Messenger/Instagram: disabled (META_PAGE_TOKEN not set)");

@@ -52,6 +52,17 @@ describe("handleMetaRequest", () => {
     const noSecret = new Request("http://x/api/meta", { method: "POST", headers: { "x-hub-signature-256": sign("{}") }, body: "{}" });
     expect((await handleMetaRequest(noSecret, { ...deps, config: { metaAppSecret: null, metaVerifyToken: "v" } })).status).toBe(401);
   });
+  it("tells the owner something went wrong when handling a message throws", async () => {
+    const { post, deferred, messenger, store } = await setup();
+    store.findMember = async () => { throw new Error("db down"); };
+    const errs: string[] = []; const orig = console.error; console.error = (...a: unknown[]) => { errs.push(a.join(" ")); };
+    try {
+      expect((await post(text("m9", "Баницата свърши"))).status).toBe(200);
+      await Promise.all(deferred);
+    } finally { console.error = orig; }
+    expect(messenger.sent.map((s) => [s.chatRef, s.text])).toEqual([["fb:500", "Възникна грешка. Опитайте отново."]]);
+    expect(errs.some((e) => e.includes("db down"))).toBe(true);
+  });
   it("verifySignature is constant-time safe on length mismatch", () => {
     expect(verifySignature("abc", "sha256=00", SECRET)).toBe(false);
     expect(verifySignature("abc", null, SECRET)).toBe(false);

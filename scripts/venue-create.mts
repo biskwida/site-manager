@@ -1,7 +1,7 @@
 // scripts/venue-create.mts
 // npm run venue:create -- --name "Кафене „Ъгъла“" --slug agala --lang bg [--seed demo|coffique] [--tz Europe/Sofia]
 // Prints the owner invite code, a staff invite code and the admin link ONCE. Keep them.
-import { INVITE_TTL_MS } from "../src/bot/bot";
+import { INVITE_TTL_MS } from "../src/bot/links";
 import { startLinks } from "../src/channels/links";
 import { seedCoffique } from "../src/seed/coffique";
 import { seedDemo } from "../src/seed/demo";
@@ -54,4 +54,6 @@ console.log(`admin link:  ${deps.config.publicBaseUrl}/admin/${venue.slug}?key=$
 console.log(`owner code:  /start ${owner}   (valid 7 days, one use)`);
 console.log(`staff code:  /start ${staff}   (valid 7 days, one use)`);
 for (const [channel, url] of Object.entries(startLinks(deps.config, owner))) console.log(`owner link (${channel}): ${url}`);
+for (const [channel, url] of Object.entries(startLinks(deps.config, staff))) console.log(`staff link (${channel}): ${url}`);
+console.log(`On Messenger, Instagram and WhatsApp the owner can also just send the bare code as a message: ${owner} (staff: ${staff}).`);
 console.log("These codes and the admin link are shown once. Keep them out of git and chat logs.");
