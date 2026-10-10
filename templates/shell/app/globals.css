@@ -1,0 +1,47 @@
+@import "tailwindcss";
+/* Templates and the shared language toggle use Tailwind utilities in TSX (mt-*, text-*, font-bold, sr-only, object-cover). */
+@source "../src/templates";
+@source "../src/i18n";
+
+@theme {
+  --color-paper: #faf7f2;
+  --color-paper-deep: #f1ebe1;
+  --color-card: #fffdf9;
+  --color-ink: #1d2a24;
+  --color-ink-soft: #4b5a53;
+  --color-amber: #8f5c10;
+  --color-amber-soft: #fbf0dc;
+  --color-clay: #a4442c;
+  --color-clay-soft: #f7e4dc;
+  --animate-rise: rise 520ms cubic-bezier(0.2, 0.7, 0.2, 1) both;
+  --animate-flash: flash 2.2s ease-out both;
+  --animate-line-in: line-in 700ms cubic-bezier(0.2, 0.7, 0.2, 1) both;
+
+  @keyframes rise { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: none; } }
+  /* Held for ~1.5 s, then fades: readable as "this just changed" from the back of a room. */
+  @keyframes flash { 0%, 65% { opacity: 1; } 100% { opacity: 0; } }
+  @keyframes line-in { 0% { opacity: 0; transform: translateX(-8px); background-color: var(--color-amber-soft); } 40% { opacity: 1; transform: none; background-color: var(--color-amber-soft); } 100% { background-color: transparent; } }
+}
+
+/* `inline`: utilities read var(--accent) where they are used, so a venue wrapper that sets --accent recolours its descendants.
+   `reference`: no :root copy of these tokens, so nothing can resolve --accent at the root by mistake; in custom CSS use var(--accent, #2f6b4f). */
+@theme inline reference {
+  --color-accent: var(--accent, #2f6b4f);
+  --color-accent-soft: color-mix(in oklab, var(--accent, #2f6b4f) 14%, white);
+}
+
+/* The template's fontVars class (on <html>) defines --font-display and --font-body. */
+@utility font-display { font-family: var(--font-display, ui-serif, Georgia, serif); }
+
+html { -webkit-text-size-adjust: 100%; }
+body { background: var(--color-paper); color: var(--color-ink); font-family: var(--font-body, ui-sans-serif, system-ui, sans-serif); -webkit-font-smoothing: antialiased; text-rendering: optimizeLegibility; }
+h1, h2, h3 { font-family: var(--font-display, ui-serif, Georgia, serif); font-variation-settings: "opsz" 48; }
+/* Faint tinted grain so the off-white does not read as flat on a projector. */
+body::before { content: ""; position: fixed; inset: 0; z-index: -1; pointer-events: none;
+  background-image: radial-gradient(1200px 600px at 85% -10%, color-mix(in oklab, var(--accent, #2f6b4f) 9%, transparent), transparent 60%),
+    radial-gradient(900px 500px at -10% 110%, rgb(183 121 31 / 0.06), transparent 60%); }
+:focus-visible { outline: 3px solid var(--accent, #2f6b4f); outline-offset: 3px; }
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation-duration: 1ms !important; animation-delay: 0ms !important; animation-iteration-count: 1 !important; transition-duration: 1ms !important; }
+}
+@media (min-width: 1600px) { html { font-size: 112.5%; } }
