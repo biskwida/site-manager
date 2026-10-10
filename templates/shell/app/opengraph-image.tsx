@@ -7,14 +7,14 @@ export const alt = "Site";
 export const size = { width: 1200, height: 630 };
 export const contentType = "image/png";
 
-/** Onest subset to the glyphs we print, as TTF (Satori needs TTF/OTF/WOFF). Best effort: null after 3 s or any error. */
+/** Onest subset to the glyphs we print (Google serves this user agent WOFF; Satori reads TTF/OTF/WOFF, not WOFF2). Best effort: null after 3 s or any error. */
 async function cyrillicFont(text: string): Promise<ArrayBuffer | null> {
   try {
     const css = await fetch(`https://fonts.googleapis.com/css2?family=Onest:wght@600&text=${encodeURIComponent(text)}`, {
       headers: { "User-Agent": "Mozilla/5.0 (Windows NT 6.1; WOW64; rv:27.0) Gecko/20100101 Firefox/27.0" },
       signal: AbortSignal.timeout(3000),
     }).then((r) => (r.ok ? r.text() : ""));
-    const url = css.match(/src:\s*url\(([^)]+\.ttf)\)/)?.[1];
+    const url = css.match(/src:\s*url\(([^)]+)\)\s*format\(['"](?:woff|truetype|opentype)['"]\)/)?.[1];
     if (!url) return null;
     const res = await fetch(url, { signal: AbortSignal.timeout(3000) });
     return res.ok ? res.arrayBuffer() : null;
@@ -42,6 +42,7 @@ export default async function Image() {
         </div>
       </div>
     ),
-    { ...size, fonts: font ? [{ name: "Onest", data: font, weight: 600, style: "normal" }] : [] },
+    // No `fonts` key at all without Onest: an empty array switches off Satori's built-in default font and the card fails to render.
+    { ...size, ...(font ? { fonts: [{ name: "Onest", data: font, weight: 600, style: "normal" as const }] } : {}) },
   );
 }
