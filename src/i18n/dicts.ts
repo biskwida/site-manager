@@ -100,6 +100,8 @@ const en = {
   "admin.status.reverted": "reverted",
   "admin.busy": "Working…",
   "admin.failed": "That did not work. Try again.",
+  "admin.newTab": "(opens in a new tab)",
+  "admin.details": "Before → after",
 };
 export type MessageKey = keyof typeof en;
 
@@ -200,6 +202,8 @@ const bg: Record<MessageKey, string> = {
   "admin.status.reverted": "върнато",
   "admin.busy": "Изпълнява се…",
   "admin.failed": "Не се получи. Опитайте отново.",
+  "admin.newTab": "(отваря се в нов раздел)",
+  "admin.details": "Преди → след",
 };
 
 export const DICTS = { en, bg } as const;
