@@ -19,7 +19,8 @@ export function SiteCard({ overview: o, post }: { overview: AdminOverview; post:
   const { lang, t } = useLang();
   const [template, setTemplate] = useState<TemplateId>(o.template);
   const [busy, setBusy] = useState(false);
-  const [msg, setMsg] = useState<{ tone: "good" | "warn"; text: string } | null>(null);
+  // Kept as a key (or the server's bg/en pair) so the line follows the language toggle instead of freezing in the language it was submitted in.
+  const [msg, setMsg] = useState<{ tone: "good" | "warn"; key: MessageKey } | { tone: "warn"; bg: string; en: string } | null>(null);
   const d = o.deploy;
   const publishing = d?.status === "pending" || d?.status === "building";
   const unchanged = template === o.template;
@@ -30,10 +31,11 @@ export function SiteCard({ overview: o, post }: { overview: AdminOverview; post:
     setBusy(true);
     setMsg(null);
     const r = await post({ action: "set_template", template });
-    if (r.ok) setMsg({ tone: "good", text: t(d ? "admin.templateChanged" : "admin.templateChangedLocal") });
-    else setMsg({ tone: "warn", text: isLocalized(r.data) ? r.data[lang] : t("admin.failed") });
+    if (r.ok) setMsg({ tone: "good", key: d ? "admin.templateChanged" : "admin.templateChangedLocal" });
+    else setMsg(isLocalized(r.data) ? { tone: "warn", bg: r.data.bg, en: r.data.en } : { tone: "warn", key: "admin.failed" });
     setBusy(false);
   }
+  const msgText = msg ? ("key" in msg ? t(msg.key) : msg[lang]) : null;
 
   const statusTone = d?.status === "ready" ? "good" : d?.status === "error" ? "warn" : "plain";
   return (
@@ -60,7 +62,7 @@ export function SiteCard({ overview: o, post }: { overview: AdminOverview; post:
             {busy ? t("admin.busy") : t("admin.changeTemplate")}
           </button>
         </form>
-        {msg && <p role="status" className={`mt-2 text-sm font-semibold ${msg.tone === "good" ? "text-ink" : "text-clay"}`}>{msg.text}</p>}
+        {msg && <p role="status" className={`mt-2 text-sm font-semibold ${msg.tone === "good" ? "text-ink" : "text-clay"}`}>{msgText}</p>}
         {!msg && publishing && <p className="mt-2 text-sm text-ink-soft">{t("admin.busyPublishing")}</p>}
       </div>
     </Section>
