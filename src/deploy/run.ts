@@ -53,7 +53,11 @@ export async function startDeploy(d: StartDeployDeps, venueId: string): Promise<
       template: venue.template,
       updated_at: d.now().toISOString(),
     };
-    await d.store.setDeploy(venueId, base);
+    // The claim is the only gate that holds under concurrency (two /start webhooks, a tick and a /start): one caller wins pending.
+    if (!(await d.store.claimDeploy(venueId, base, { whenStatusIn: [null, "error"] }))) {
+      log(`[deploy] ${venue.slug}: another request is deploying, skipped`);
+      return;
+    }
     const input: DeployInput = { slug: venue.slug, templateId: venue.template, feedUrl: d.feedUrlFor(venue.slug) };
     try {
       const r = projectId ? { projectId, ...(await d.deployer.redeploy(projectId, input)) } : await d.deployer.createSite(input);

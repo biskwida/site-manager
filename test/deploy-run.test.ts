@@ -9,6 +9,19 @@ const T0 = new Date("2026-10-09T09:00:00.000Z");
 const feedUrlFor = (slug: string) => `https://sm.example/api/site/${slug}`;
 
 describe("startDeploy", () => {
+  it("lets only one of two concurrent starts create the site (the deploy claim)", async () => {
+    const { store, venue } = await makeDemo();
+    const deployer = new FakeDeployer();
+    const logs: string[] = [];
+    const d = { store, deployer, feedUrlFor, now: () => T0, log: (s: string) => logs.push(s) };
+    // Both read the venue before either writes (as two webhook requests would), so only the claim can decide.
+    await Promise.all([startDeploy(d, venue.id), startDeploy(d, venue.id)]);
+    expect(deployer.projects.size).toBe(1);
+    expect(deployer.deployments.size).toBe(1);
+    expect((await store.getVenue(venue.id)).deploy?.status).toBe("building");
+    expect(logs.filter((l) => l.includes("another request is deploying"))).toHaveLength(1);
+  });
+
   it("creates the site and moves pending → building; no-op for drafts, existing deployments and unknown ids", async () => {
     const { store, venue } = await makeDemo();
     const deployer = new FakeDeployer();

@@ -1,8 +1,8 @@
 // src/store/supabase.ts
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
-import type { Announcement, BusinessType, Category, Change, ChangeSet, Conversation, DeployInfo, Holiday, Item, Lang, Media, Member, Role, SiteState, SiteText, SiteTextKey, TemplateId, Venue, VenueStatus } from "../domain/types";
+import type { Announcement, BusinessType, Category, Change, ChangeSet, Conversation, DeployInfo, DeployStatus, Holiday, Item, Lang, Media, Member, Role, SiteState, SiteText, SiteTextKey, TemplateId, Venue, VenueStatus } from "../domain/types";
 import type { WizardDraft } from "../wizard/schema";
-import { DEFAULT_HOURS, extensionFor, newInviteCode, newToken, type ChangeSetPatch, type ExpiredTimer, type NewCategory, type NewChangeSet, type NewItem, type NewVenue, type Store, type VenuePatch } from "./types";
+import { DEFAULT_HOURS, extensionFor, newInviteCode, newToken, PUBLISH_CLAIM_TTL_MS, type ChangeSetPatch, type ExpiredTimer, type NewCategory, type NewChangeSet, type NewItem, type NewVenue, type Store, type VenuePatch } from "./types";
 
 type Row = Record<string, unknown>;
 type DbError = { message: string; code?: string } | null;
@@ -180,6 +180,23 @@ export class SupabaseStore implements Store {
   }
   async setDeploy(id: string, deploy: DeployInfo | null) {
     await mustRows(this.db.from("venues").update({ deploy }).eq("id", id).select("id"), `setDeploy ${id}`);
+  }
+  async claimDeploy(id: string, next: DeployInfo, opts: { whenStatusIn: (DeployStatus | null)[] }) {
+    if (badVenue(id)) return false;
+    // One conditional UPDATE: the row filter is the claim, so two concurrent callers cannot both see the old status.
+    const statuses = opts.whenStatusIn.filter((s): s is DeployStatus => s !== null);
+    const parts = [...(opts.whenStatusIn.includes(null) ? ["deploy.is.null"] : []), ...(statuses.length ? [`deploy->>status.in.(${statuses.join(",")})`] : [])];
+    if (parts.length === 0) return false;
+    const { data, error } = await this.db.from("venues").update({ deploy: next }).eq("id", id).or(parts.join(",")).select("id");
+    if (error) throw new Error(`claimDeploy ${id}: ${error.message}`);
+    return (data?.length ?? 0) === 1;
+  }
+  async claimPublish(id: string, now = new Date().toISOString()) {
+    if (badVenue(id)) return false;
+    const stale = new Date(Date.parse(now) - PUBLISH_CLAIM_TTL_MS).toISOString();
+    const { data, error } = await this.db.from("venues").update({ publishing_at: now }).eq("id", id).eq("status", "draft").or(`publishing_at.is.null,publishing_at.lt.${stale}`).select("id");
+    if (error) throw new Error(`claimPublish ${id}: ${error.message}`);
+    return (data?.length ?? 0) === 1;
   }
   async setDraftToken(id: string, tokenHash: string | null) {
     await mustRows(this.db.from("venues").update({ draft_token_hash: tokenHash }).eq("id", id).select("id"), `setDraftToken ${id}`);

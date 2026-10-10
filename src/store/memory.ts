@@ -1,7 +1,7 @@
 // src/store/memory.ts
 import { applyChanges } from "../domain/changes";
-import type { Category, ChangeSet, Conversation, DeployInfo, Item, Lang, Media, Member, Role, SiteState, SiteTextKey, Venue, VenueStatus } from "../domain/types";
-import { DEFAULT_HOURS, extensionFor, newInviteCode, newToken, type ChangeSetPatch, type ExpiredTimer, type NewCategory, type NewChangeSet, type NewItem, type NewVenue, type Store, type VenuePatch } from "./types";
+import type { Category, ChangeSet, Conversation, DeployInfo, DeployStatus, Item, Lang, Media, Member, Role, SiteState, SiteTextKey, Venue, VenueStatus } from "../domain/types";
+import { DEFAULT_HOURS, extensionFor, newInviteCode, newToken, PUBLISH_CLAIM_TTL_MS, type ChangeSetPatch, type ExpiredTimer, type NewCategory, type NewChangeSet, type NewItem, type NewVenue, type Store, type VenuePatch } from "./types";
 
 const clone = <T>(v: T): T => structuredClone(v);
 
@@ -22,6 +22,7 @@ export class InMemoryStore implements Store {
   conversations = new Map<string, Conversation>();
   files = new Map<string, Uint8Array>();
   draftTokens = new Map<string, string>(); // venue id -> sha256 of the draft token
+  publishing = new Map<string, string>(); // venue id -> ISO time of the last publish claim
   rateLimits = new Map<string, { count: number; window_start: number }>();
   private lastTick = 0;
   /** Strictly increasing clock for created_at (so newest-first ordering is stable); tests may override. */
@@ -90,6 +91,20 @@ export class InMemoryStore implements Store {
   async setDeploy(id: string, deploy: DeployInfo | null) {
     this.site(id).venue.deploy = deploy ? clone(deploy) : null;
   }
+  async claimDeploy(id: string, next: DeployInfo, opts: { whenStatusIn: (DeployStatus | null)[] }) {
+    const s = this.sites.get(id);
+    if (!s || !opts.whenStatusIn.includes(s.venue.deploy?.status ?? null)) return false;
+    s.venue.deploy = clone(next);
+    return true;
+  }
+  async claimPublish(id: string, now = this.clock()) {
+    const s = this.sites.get(id);
+    if (!s || s.venue.status !== "draft") return false;
+    const prev = this.publishing.get(id);
+    if (prev && Date.parse(now) - Date.parse(prev) < PUBLISH_CLAIM_TTL_MS) return false;
+    this.publishing.set(id, now);
+    return true;
+  }
   async setDraftToken(id: string, tokenHash: string | null) {
     this.site(id);
     if (tokenHash === null) this.draftTokens.delete(id);
@@ -103,6 +118,7 @@ export class InMemoryStore implements Store {
     if (!this.sites.has(id)) return;
     this.sites.delete(id);
     this.draftTokens.delete(id);
+    this.publishing.delete(id);
     this.tokens.delete(id);
     for (const [chatId, m] of this.members) if (m.venue_id === id) this.members.delete(chatId);
     for (const [code, inv] of this.invites) if (inv.venue_id === id) this.invites.delete(code);
