@@ -23,14 +23,19 @@ export const DEMO_VENUE: NewVenue = {
   theme: { accent: "#2f6b4f" },
 };
 
-const CATEGORIES = [
+/** Seed data shapes shared by every seed file. `cat` indexes into the categories array. */
+export type SeedCategory = { name_bg: string; name_en: string };
+export type SeedItem = { cat: number; name_bg: string; name_en: string; desc_bg: string; desc_en: string; price_eur: number; allergens: number[] };
+export type SeedTexts = Record<"welcome" | "footer_note", { bg: string; en: string }>;
+
+const CATEGORIES: SeedCategory[] = [
   { name_bg: "Кафе", name_en: "Coffee" },
   { name_bg: "Закуски", name_en: "Pastries" },
   { name_bg: "Сандвичи и салати", name_en: "Sandwiches & salads" },
   { name_bg: "Напитки", name_en: "Drinks" },
 ];
 
-const ITEMS: { cat: number; name_bg: string; name_en: string; desc_bg: string; desc_en: string; price_eur: number; allergens: number[] }[] = [
+const ITEMS: SeedItem[] = [
   { cat: 0, name_bg: "Еспресо", name_en: "Espresso", desc_bg: "Двойна доза от местна пържилня.", desc_en: "A double shot from a local roaster.", price_eur: 1.8, allergens: [] },
   { cat: 0, name_bg: "Капучино", name_en: "Cappuccino", desc_bg: "С прясно мляко и гъста пяна.", desc_en: "With fresh milk and thick foam.", price_eur: 2.9, allergens: [7] },
   { cat: 0, name_bg: "Лате", name_en: "Latte", desc_bg: "Меко и млечно, в голяма чаша.", desc_en: "Soft and milky, in a big cup.", price_eur: 3.2, allergens: [7] },
@@ -45,25 +50,39 @@ const ITEMS: { cat: number; name_bg: string; name_en: string; desc_bg: string; d
   { cat: 3, name_bg: "Домашна лимонада", name_en: "Homemade lemonade", desc_bg: "С мента и лед.", desc_en: "With mint and ice.", price_eur: 3.0, allergens: [] },
 ];
 
-export const DEMO_TEXTS = {
+export const DEMO_TEXTS: SeedTexts = {
   welcome: { bg: "Добре дошли! Днешните предложения са на дъската и тук.", en: "Welcome! Today's specials are on the board and right here." },
   footer_note: { bg: "Приемаме карти. Кучетата са добре дошли.", en: "Cards accepted. Dogs welcome." },
 };
 
-/** Inserts the demo categories, items and site texts into an existing venue (used by seedDemo and demo:reset). */
-export async function seedMenu(store: Store, venueId: string): Promise<{ categories: Category[]; items: Item[] }> {
+/**
+ * Inserts categories (positioned 0..n), items (positioned per category) and site texts into an existing venue.
+ * Shared by every seed file.
+ */
+export async function seedMenuFrom(
+  store: Store,
+  venueId: string,
+  cats: readonly SeedCategory[],
+  seedItems: readonly SeedItem[],
+  texts: SeedTexts,
+): Promise<{ categories: Category[]; items: Item[] }> {
   const categories: Category[] = [];
-  for (const [i, c] of CATEGORIES.entries()) categories.push(await store.insertCategory({ venue_id: venueId, ...c, position: i }));
+  for (const [i, c] of cats.entries()) categories.push(await store.insertCategory({ venue_id: venueId, ...c, position: i }));
   const items: Item[] = [];
   const perCat = new Map<number, number>();
-  for (const it of ITEMS) {
+  for (const it of seedItems) {
     const pos = perCat.get(it.cat) ?? 0;
     perCat.set(it.cat, pos + 1);
     const { cat, ...rest } = it;
     items.push(await store.insertItem({ venue_id: venueId, category_id: categories[cat].id, ...rest, position: pos }));
   }
-  for (const [key, t] of Object.entries(DEMO_TEXTS)) await store.setSiteText(venueId, key as "welcome" | "footer_note", t.bg, t.en);
+  for (const [key, t] of Object.entries(texts)) await store.setSiteText(venueId, key as keyof SeedTexts, t.bg, t.en);
   return { categories, items };
+}
+
+/** Inserts the demo categories, items and site texts into an existing venue (used by seedDemo and demo:reset). */
+export function seedMenu(store: Store, venueId: string): Promise<{ categories: Category[]; items: Item[] }> {
+  return seedMenuFrom(store, venueId, CATEGORIES, ITEMS, DEMO_TEXTS);
 }
 
 /** Creates the demo venue with its menu and texts. Idempotent per store only if the slug is free. */
