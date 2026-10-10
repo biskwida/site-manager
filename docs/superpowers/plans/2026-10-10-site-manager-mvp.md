@@ -23,7 +23,7 @@
 - Agent: model `claude-opus-5-5` (env `AGENT_MODEL`), effort `medium` default (env `AGENT_EFFORT`), `high` for image/bulk/scheduled turns; `tool_choice: { type: "auto", disable_parallel_tool_use: true }`, `betas: ["server-side-fallback-2026-07-01"]`, `fallbacks: "default"`, `max_tokens: 16000`, `max_iterations: 30`, refusal handling.
 - All tests run offline with `InMemoryStore` and fakes: `npm test` must never need network or keys.
 - Next 16 specifics verified in the installed docs (`node_modules/next/dist/docs`): `after` from `next/server`; `export const maxDuration = 300` in a route file; `params`/`searchParams` are Promises; global `PageProps<'/x/[slug]'>` and `RouteContext<'/api/x'>` helpers exist after typegen; `next/font/google` `Literata` and `Onest` both have the `cyrillic` subset.
-- Copy rules: no invented testimonials; pitch facts only: two venues quoted 30 € (Bar and Dinner Central) and 20 € (Coffique) a month before the product existed; list price 25 €/venue/month. No contact details on the landing (user's decision 2026-10-10).
+- Copy rules: no invented testimonials; pitch facts only: three venues quoted a monthly price before the product existed: Bar and Dinner Central 30 €, Coffique 20 €, Family House 50 € ("three venues already quoted us 20–50 € a month"); list price 25 €/venue/month. No contact details on the landing (user's decision 2026-10-10).
 
 ## Review Focus
 
@@ -3779,6 +3779,1104 @@ async function writeAutoSet(store: Store, t: ExpiredTimer, now: string): Promise
 ```bash
 git add src/bot/messenger.ts src/tick.ts test/tick.test.ts test/helpers.ts
 git commit -m "Tick: due scheduled sets, auto sets for elapsed timers, reminders, proposal expiry
+
+Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>"
+```
+
+---
+
+### Task 10: Agent tools, part 1 (site/menu reads, propose, cancel, list) — most capable model
+
+**Files:**
+- Create: `src/agent/tools.ts`, `src/agent/tool-schemas.ts`
+- Test: `test/tools-core.test.ts`, `test/tool-call.ts` (helper)
+
+**Interfaces:**
+- Consumes: `Store` (Task 6), `Messenger` (Task 9), domain (Tasks 1–5).
+- Produces: `AgentDeps { store; venueId; chatId; member; messenger; now: () => Date; baseUrl; correctionFor?: string | null }`, `makeTools(d): BetaZodTool[]` (9 tools; this task implements `get_site`, `get_menu`, `propose_changes`, `cancel_change_set`, `list_changes`; Task 11 adds the rest in the same file), `ChangeInputSchema` (zod), `resolveTokens(ops, site, now)`, `proposalText(preview, lang, applyAt, tz)`, `requireRole`.
+
+- [ ] **Step 1: Write the tool-call helper**
+
+```ts
+// test/tool-call.ts
+import type { makeTools } from "@/src/agent/tools";
+
+type Tools = ReturnType<typeof makeTools>;
+
+/** Finds a tool by name, runs it with already-validated input, parses the JSON string it returns. */
+export async function call(tools: Tools, name: string, input: unknown): Promise<Record<string, unknown>> {
+  const tool = tools.find((t) => t.name === name);
+  if (!tool) throw new Error(`no tool ${name}`);
+  const parsed = tool.inputSchema.parse(input);
+  return JSON.parse(await (tool.run as (i: unknown) => Promise<string>)(parsed));
+}
+```
+
+- [ ] **Step 2: Write the failing tests**
+
+```ts
+// test/tools-core.test.ts
+import { describe, expect, it } from "vitest";
+import { makeTools, type AgentDeps } from "@/src/agent/tools";
+import { FakeMessenger, makeDemo, type Demo } from "./helpers";
+import { call } from "./tool-call";
+
+const T0 = new Date("2026-10-09T09:00:00.000Z"); // Fri 12:00 Sofia, open
+
+async function setup(over: Partial<AgentDeps> = {}) {
+  const demo = await makeDemo();
+  const messenger = new FakeMessenger();
+  const member = (await demo.store.findMember(1001))!;
+  const deps: AgentDeps = { store: demo.store, venueId: demo.venue.id, chatId: 1001, member, messenger, now: () => T0, baseUrl: "https://site.example", ...over };
+  return { ...demo, messenger, deps, tools: makeTools(deps) } as Demo & { messenger: FakeMessenger; deps: AgentDeps; tools: ReturnType<typeof makeTools> };
+}
+
+describe("get_site / get_menu", () => {
+  it("describes the venue with now, status, language and role", async () => {
+    const { tools } = await setup();
+    const r = await call(tools, "get_site", {});
+    expect(r).toMatchObject({ owner_lang: "bg", member_role: "owner", public_url: "https://site.example/agala", pending_proposal: null });
+    expect(r.now).toContain("GMT+03:00");
+    expect(r.today).toEqual({ state: "open", until: "18:00", holiday: null });
+    expect((r.venue as Record<string, unknown>).name).toBe("Кафене „Ъгъла“");
+    expect(r.hours).toHaveProperty("mon");
+  });
+  it("lists active items by category with ids", async () => {
+    const { tools, items } = await setup();
+    const r = await call(tools, "get_menu", {});
+    const cats = r.categories as { name_en: string; items: { id: string; name_en: string; price_eur: number; allergens: number[] }[] }[];
+    expect(cats.map((c) => c.name_en)).toEqual(["Coffee", "Pastries", "Sandwiches & salads", "Drinks"]);
+    expect(cats[0].items.find((i) => i.id === items.Cappuccino.id)).toMatchObject({ name_en: "Cappuccino", price_eur: 2.9, allergens: [7] });
+  });
+});
+
+describe("propose_changes", () => {
+  it("creates a proposal, sends the preview with buttons in the owner's language, stores both previews", async () => {
+    const { tools, store, items, messenger, venue } = await setup();
+    const r = await call(tools, "propose_changes", { summary_bg: "Капучино 3,20 €", summary_en: "Cappuccino €3.20", changes: [{ op: "set_price", item_id: items.Cappuccino.id, price_eur: 3.2 }] });
+    expect(r).toMatchObject({ status: "proposed", preview: "• Капучино: 2,90 € → 3,20 €" });
+    const cs = await store.getChangeSet(r.change_set_id as string);
+    expect(cs).toMatchObject({ status: "proposed", source: "text", chat_id: 1001, preview_bg: "• Капучино: 2,90 € → 3,20 €", preview_en: "• Cappuccino: €2.90 → €3.20", tg_message_id: 100 });
+    expect(messenger.sent[0]).toMatchObject({ chatId: 1001, setId: cs.id, lang: "bg", text: "• Капучино: 2,90 € → 3,20 €\n\nДа приложа ли?" });
+    expect((await store.getSite(venue.id)).items.find((i) => i.id === items.Cappuccino.id)?.price_eur).toBe(2.9); // not applied yet
+  });
+  it("applies all-sold-out sets at once, resolving next_opening", async () => {
+    const { tools, store, items, messenger, venue } = await setup();
+    const r = await call(tools, "propose_changes", { summary_bg: "Баницата свърши", summary_en: "Banitsa sold out", changes: [{ op: "set_sold_out", item_id: items["Cheese banitsa"].id, until: "next_opening" }] });
+    expect(r).toMatchObject({ status: "applied", sold_out_until: "2026-10-10T06:00:00.000Z" });
+    expect((await store.getSite(venue.id)).items.find((i) => i.id === items["Cheese banitsa"].id)?.sold_out_until).toBe("2026-10-10T06:00:00.000Z");
+    expect(messenger.sent[0].text).toBe("✅ Баница със сирене: изчерпано до 10.10.2026, 09:00");
+    expect(messenger.sent[0].setId).toBeUndefined();
+  });
+  it("returns an error for a stale id, a pending proposal, or a closed venue with next_opening unavailable", async () => {
+    const { tools, items, store, venue } = await setup();
+    expect(await call(tools, "propose_changes", { summary_bg: "x", summary_en: "x", changes: [{ op: "set_price", item_id: "nope", price_eur: 2 }] })).toEqual({ error: 'item_id "nope" not found; use an id from get_menu.' });
+    await call(tools, "propose_changes", { summary_bg: "x", summary_en: "x", changes: [{ op: "set_price", item_id: items.Latte.id, price_eur: 3.5 }] });
+    const second = await call(tools, "propose_changes", { summary_bg: "y", summary_en: "y", changes: [{ op: "set_price", item_id: items.Latte.id, price_eur: 3.6 }] });
+    expect(second.error).toMatch(/already waiting for a decision/);
+    const closed = { mon: null, tue: null, wed: null, thu: null, fri: null, sat: null, sun: null };
+    const site = await store.getSite(venue.id);
+    store.sites.get(venue.id)!.venue.hours = closed;
+    const r = await call(tools, "propose_changes", { summary_bg: "x", summary_en: "x", changes: [{ op: "set_sold_out", item_id: site.items[0].id, until: "next_opening" }] });
+    expect(r.error).toMatch(/no opening in the next 14 days/);
+  });
+  it("replaces the proposal the owner asked to change", async () => {
+    const base = await setup();
+    const first = await call(base.tools, "propose_changes", { summary_bg: "x", summary_en: "x", changes: [{ op: "set_price", item_id: base.items.Latte.id, price_eur: 3.5 }] });
+    const tools = makeTools({ ...base.deps, correctionFor: first.change_set_id as string });
+    const second = await call(tools, "propose_changes", { summary_bg: "y", summary_en: "y", changes: [{ op: "set_price", item_id: base.items.Latte.id, price_eur: 3.4 }] });
+    expect(second.status).toBe("proposed");
+    expect((await base.store.getChangeSet(first.change_set_id as string)).status).toBe("cancelled");
+    expect(base.messenger.edits[0]).toMatchObject({ messageId: 100 });
+    expect(base.messenger.edits[0].text).toContain("✏️");
+  });
+  it("lets staff mark sold-out and add specials but not change prices", async () => {
+    const base = await setup();
+    const staff = (await base.store.findMember(1002))!;
+    const tools = makeTools({ ...base.deps, chatId: 1002, member: staff });
+    const denied = await call(tools, "propose_changes", { summary_bg: "x", summary_en: "x", changes: [{ op: "set_price", item_id: base.items.Latte.id, price_eur: 3.5 }] });
+    expect(denied.error).toMatch(/only the owner/);
+    const ok = await call(tools, "propose_changes", { summary_bg: "x", summary_en: "x", changes: [{ op: "add_item", item: { category_id: base.categories.Pastries.id, name_bg: "Супа", name_en: "Soup", desc_bg: "", desc_en: "", price_eur: 4, allergens: [], is_special: true, special_expires_at: "closing_today" } }] });
+    expect(ok.status).toBe("proposed");
+    expect(base.messenger.last().lang).toBe("en");
+    expect(base.messenger.last().text).toContain("Today's special (until 18:00)");
+  });
+  it("renders a preview in English for an English-speaking owner", async () => {
+    const base = await setup();
+    await base.store.setMemberLang(base.venue.id, 1001, "en");
+    const tools = makeTools({ ...base.deps, member: { ...base.deps.member, lang: "en" } });
+    const r = await call(tools, "propose_changes", { summary_bg: "x", summary_en: "x", changes: [{ op: "set_text", key: "tagline", text_bg: "Ново", text_en: "New" }] });
+    expect(r.preview).toBe("• Tagline: “Coffee on the corner” → “New”\n  BG: „Кафе на ъгъла“ → „Ново“");
+  });
+});
+
+describe("cancel_change_set / list_changes", () => {
+  it("cancels a proposal, edits its message, and lists history newest first", async () => {
+    const { tools, items, store, messenger } = await setup();
+    const p = await call(tools, "propose_changes", { summary_bg: "Лате 3,50", summary_en: "Latte 3.50", changes: [{ op: "set_price", item_id: items.Latte.id, price_eur: 3.5 }] });
+    const c = await call(tools, "cancel_change_set", { change_set_id: p.change_set_id });
+    expect(c).toEqual({ change_set_id: p.change_set_id, status: "cancelled" });
+    expect((await store.getChangeSet(p.change_set_id as string)).status).toBe("cancelled");
+    expect(messenger.edits[0].text).toContain("❌");
+    expect(await call(tools, "cancel_change_set", { change_set_id: p.change_set_id })).toEqual({ error: 'Change set is "cancelled"; only proposed or scheduled sets can be cancelled.' });
+    await call(tools, "propose_changes", { summary_bg: "Баницата свърши", summary_en: "Banitsa out", changes: [{ op: "set_sold_out", item_id: items["Cheese banitsa"].id, until: null }] });
+    const l = await call(tools, "list_changes", { limit: 5 });
+    const sets = l.change_sets as { status: string; summary_en: string; undoable: boolean }[];
+    expect(sets.map((s) => s.status)).toEqual(["applied", "cancelled"]);
+    expect(sets[0]).toMatchObject({ summary_en: "Banitsa out", undoable: true });
+  });
+});
+```
+
+- [ ] **Step 3: Run** `npx vitest run test/tools-core.test.ts` → FAIL.
+
+- [ ] **Step 4: Write `src/agent/tool-schemas.ts`**
+
+```ts
+// src/agent/tool-schemas.ts
+import { z } from "zod";
+import { ROUNDINGS } from "../domain/pricing";
+import { SITE_TEXT_KEYS, VENUE_TEXT_KEYS, WEEKDAYS } from "../domain/types";
+
+const Id = z.string().min(1);
+const Price = z.number().describe("EUR with at most two decimals, 0.10–500");
+const Allergens = z.array(z.number().int().min(1).max(14)).describe("EU allergen codes 1–14 (see check_allergens)");
+const Until = z.string().nullable().describe('"next_opening" (the tool resolves it from the opening hours), an ISO 8601 datetime with offset, or null = back on sale');
+const Expiry = z.string().nullable().describe('"closing_today" (resolved by the tool), an ISO 8601 datetime with offset, or null = no expiry');
+
+const DayHours = z.object({ open: z.string().regex(/^\d{2}:\d{2}$/), close: z.string().regex(/^\d{2}:\d{2}$/) }).nullable();
+export const HoursSchema = z.object(Object.fromEntries(WEEKDAYS.map((d) => [d, DayHours])) as Record<(typeof WEEKDAYS)[number], typeof DayHours>);
+
+export const NewItemSchema = z.object({
+  category_id: Id,
+  name_bg: z.string().min(1),
+  name_en: z.string().min(1),
+  desc_bg: z.string().describe("One short sentence in Bulgarian; may be empty"),
+  desc_en: z.string().describe("One short sentence in English; may be empty"),
+  price_eur: Price,
+  allergens: Allergens,
+  is_special: z.boolean().describe("true for a daily special (it disappears at special_expires_at)"),
+  special_expires_at: Expiry,
+  image_media_id: z.string().nullable().optional(),
+});
+
+export const ChangeInputSchema = z.discriminatedUnion("op", [
+  z.object({ op: z.literal("set_price"), item_id: Id, price_eur: Price }),
+  z.object({ op: z.literal("set_sold_out"), item_id: Id, until: Until }),
+  z.object({ op: z.literal("add_item"), item: NewItemSchema }),
+  z.object({
+    op: z.literal("update_item"),
+    item_id: Id,
+    patch: z.object({ category_id: Id.optional(), name_bg: z.string().optional(), name_en: z.string().optional(), desc_bg: z.string().optional(), desc_en: z.string().optional(), price_eur: Price.optional(), allergens: Allergens.optional(), position: z.number().int().optional() }),
+  }),
+  z.object({ op: z.literal("remove_item"), item_id: Id }),
+  z.object({ op: z.literal("set_item_image"), item_id: Id, media_id: z.string().nullable() }),
+  z.object({ op: z.literal("set_cover_image"), media_id: z.string().nullable() }),
+  z.object({ op: z.literal("set_logo_image"), media_id: z.string().nullable() }),
+  z.object({ op: z.literal("add_gallery_image"), media_id: Id }),
+  z.object({ op: z.literal("remove_gallery_image"), media_id: Id }),
+  z.object({ op: z.literal("set_hours"), hours: HoursSchema }),
+  z.object({ op: z.literal("add_holiday"), date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/), note_bg: z.string().min(1), note_en: z.string().min(1) }),
+  z.object({ op: z.literal("remove_holiday"), holiday_id: Id }),
+  z.object({ op: z.literal("add_announcement"), text_bg: z.string().min(1), text_en: z.string().min(1), expires_at: Expiry }),
+  z.object({ op: z.literal("remove_announcement"), announcement_id: Id }),
+  z.object({ op: z.literal("set_text"), key: z.enum([...SITE_TEXT_KEYS, ...VENUE_TEXT_KEYS]), text_bg: z.string(), text_en: z.string() }),
+  z.object({ op: z.literal("set_theme"), accent: z.string().regex(/^#[0-9a-fA-F]{6}$/) }),
+]);
+export type ChangeInput = z.infer<typeof ChangeInputSchema>;
+
+export const ProposeSchema = z.object({
+  summary_bg: z.string().min(1).describe("One line in Bulgarian, e.g. „Капучино 3,20 €“"),
+  summary_en: z.string().min(1).describe("The same line in English"),
+  changes: z.array(ChangeInputSchema).min(1).max(40),
+});
+export const ScheduleSchema = ProposeSchema.extend({
+  apply_at: z.string().describe("ISO 8601 datetime with offset, in the future, e.g. 2026-12-24T08:00:00+02:00"),
+});
+export const BulkSchema = z.object({
+  summary_bg: z.string().optional(),
+  summary_en: z.string().optional(),
+  category_id: z.string().optional().describe("Limit to one category (id from get_menu)"),
+  name_contains: z.string().optional().describe("Limit to items whose BG or EN name contains this text (case-insensitive)"),
+  percent: z.number().optional().describe("e.g. 10 for +10 %, -5 for -5 %"),
+  delta_eur: z.number().optional().describe("e.g. 0.2 for +0.20 €"),
+  rounding: z.enum(ROUNDINGS).describe('Round the new price to this step; "0.10" is the usual choice'),
+});
+export const CheckAllergensSchema = z.object({ name: z.string(), desc: z.string().optional(), declared: Allergens });
+export const UndoSchema = z.object({ change_set_id: z.string().describe('An id from list_changes, or "last" for the most recent applied set') });
+export const ListSchema = z.object({ limit: z.number().int().min(1).max(50).default(10) });
+export const CancelSchema = z.object({ change_set_id: Id });
+```
+
+- [ ] **Step 5: Write `src/agent/tools.ts`** (part 1; part 2 adds the remaining tools in Task 11)
+
+```ts
+// src/agent/tools.ts
+import { betaZodTool } from "@anthropic-ai/sdk/helpers/beta/zod";
+import { z } from "zod";
+import type { Messenger } from "../bot/messenger";
+import { invertChanges, planChanges, type PlanContext } from "../domain/changes";
+import { isSoldOut, visibleItems } from "../domain/effective";
+import { itemName, tr } from "../domain/format";
+import { closingToday, nextOpening, todayStatus } from "../domain/hours";
+import { renderPreview } from "../domain/preview";
+import type { ChangeOp, ChangeSet, ChangeSource, Lang, Member, SiteState } from "../domain/types";
+import type { Store } from "../store/types";
+import { formatDateTime, nowText } from "../time";
+import { CancelSchema, ListSchema, ProposeSchema, type ChangeInput } from "./tool-schemas";
+
+export interface AgentDeps {
+  store: Store;
+  venueId: string;
+  chatId: number;
+  member: Member;
+  messenger: Messenger;
+  now: () => Date;
+  /** Deployment URL without a trailing slash, for public links. */
+  baseUrl: string;
+  /** From the ✏️ Change button: the proposal the next propose_changes/schedule_changes replaces. */
+  correctionFor?: string | null;
+  /** How this turn arrived; recorded on the change set. Default "text". */
+  source?: ChangeSource;
+}
+
+const STAFF_OPS = new Set<ChangeOp["op"]>(["set_sold_out", "add_item"]);
+
+export function requireRole(member: Member, ops: ChangeOp[]): void {
+  if (member.role === "owner") return;
+  for (const op of ops) {
+    const ok = STAFF_OPS.has(op.op) && (op.op !== "add_item" || op.item.is_special);
+    if (!ok) throw new Error(`"${op.op}" is only the owner's decision; staff may mark items sold out and add today's specials. Tell the owner to send this change.`);
+  }
+}
+
+/** Replaces "next_opening" / "closing_today" with ISO instants from the venue's hours. */
+export function resolveTokens(ops: ChangeInput[], site: SiteState, now: Date): ChangeOp[] {
+  const { hours, tz } = site.venue;
+  const opening = () => {
+    const iso = nextOpening(hours, site.holidays, now, tz);
+    if (!iso) throw new Error("The venue has no opening in the next 14 days (check get_site hours/holidays); give an explicit ISO datetime for until, or null.");
+    return iso;
+  };
+  const closing = () => {
+    const iso = closingToday(hours, site.holidays, now, tz);
+    if (!iso) throw new Error("The venue is not open right now, so closing_today has no value; give an explicit ISO datetime with offset for the expiry, or null.");
+    return iso;
+  };
+  return ops.map((op): ChangeOp => {
+    if (op.op === "set_sold_out") return { ...op, until: op.until === "next_opening" ? opening() : op.until };
+    if (op.op === "add_item") return { ...op, item: { ...op.item, special_expires_at: op.item.special_expires_at === "closing_today" ? closing() : op.item.special_expires_at } };
+    if (op.op === "add_announcement") return { ...op, expires_at: op.expires_at === "closing_today" ? closing() : op.expires_at };
+    return op as ChangeOp;
+  });
+}
+
+/** The Telegram message for a proposal: preview, optional schedule line, and the question. */
+export function proposalText(preview: string, lang: Lang, applyAt: string | null, tz: string): string {
+  const when = applyAt ? `\n\n${tr(lang, "⏰ Ще се приложи на", "⏰ Will be applied on")} ${formatDateTime(applyAt, lang, tz)}` : "";
+  return `${preview}${when}\n\n${tr(lang, "Да приложа ли?", "Apply this?")}`;
+}
+
+const NEXT_STEP: Record<ChangeSet["status"], string> = {
+  proposed: "it is waiting for the owner's decision.",
+  scheduled: "it will be applied at apply_at; cancel_change_set stops it.",
+  applied: "undo can revert it.",
+  rejected: "propose again if the owner wants a different version.",
+  expired: "propose it again.",
+  cancelled: "propose it again.",
+  reverted: "it was undone already.",
+};
+
+export function makeTools(d: AgentDeps) {
+  // Tools run one at a time per turn, even if the runner calls several at once.
+  let queue: Promise<unknown> = Promise.resolve();
+  const attempt = (fn: () => Promise<unknown>): Promise<string> => {
+    const run = queue.then(async () => {
+      try {
+        return JSON.stringify(await fn());
+      } catch (e) {
+        return JSON.stringify({ error: e instanceof Error ? e.message : String(e) });
+      }
+    });
+    queue = run;
+    return run;
+  };
+
+  const lang = d.member.lang;
+  const site = () => d.store.getSite(d.venueId);
+  const ctx = (): PlanContext => ({ newId: () => crypto.randomUUID(), now: d.now().toISOString() });
+  const previews = (s: SiteState, changes: ReturnType<typeof planChanges>) => ({
+    preview_bg: renderPreview(s, changes, "bg", s.venue.tz),
+    preview_en: renderPreview(s, changes, "en", s.venue.tz),
+  });
+  const mine = (p: { preview_bg: string; preview_en: string }) => (lang === "bg" ? p.preview_bg : p.preview_en);
+
+  const getSet = async (id: string): Promise<ChangeSet> => {
+    try {
+      const cs = await d.store.getChangeSet(id);
+      if (cs.venue_id !== d.venueId) throw new Error("not this venue");
+      return cs;
+    } catch {
+      throw new Error(`change_set_id "${id}" not found; use an id from list_changes.`);
+    }
+  };
+
+  /** Cancels a pending proposal (because the owner asked to change it) and edits its message. */
+  const cancelPending = async (cs: ChangeSet, mark: string) => {
+    await d.store.updateChangeSet(cs.id, { status: "cancelled", decided_at: d.now().toISOString() });
+    if (cs.chat_id !== null && cs.tg_message_id !== null) await d.messenger.edit(cs.chat_id, cs.tg_message_id, `${mine(cs)}\n\n${mark}`);
+  };
+
+  /** One proposal per chat: replace it when the owner pressed ✏️, otherwise refuse. */
+  const ensureNoPending = async () => {
+    const pending = await d.store.findProposed(d.venueId, d.chatId);
+    if (!pending) return;
+    if (d.correctionFor && pending.id === d.correctionFor) {
+      await cancelPending(pending, tr(lang, "✏️ Заменено с ново предложение.", "✏️ Replaced by a new proposal."));
+      return;
+    }
+    throw new Error(`A proposal (${pending.id}: ${lang === "bg" ? pending.summary_bg : pending.summary_en}) is already waiting for a decision. Ask the owner to tap ✅/❌ on it, or call cancel_change_set("${pending.id}") if this message clearly supersedes it.`);
+  };
+
+  /** Shared by propose_changes and schedule_changes. */
+  const propose = async (input: z.infer<typeof ProposeSchema>, applyAt: string | null) => {
+    const s = await site();
+    const ops = resolveTokens(input.changes, s, d.now());
+    requireRole(d.member, ops);
+    const changes = planChanges(s, ops, ctx());
+    const p = previews(s, changes);
+    const instant = applyAt === null && ops.every((o) => o.op === "set_sold_out");
+    if (!instant) await ensureNoPending();
+    const cs = await d.store.createChangeSet({
+      venue_id: d.venueId, chat_id: d.chatId, summary_bg: input.summary_bg, summary_en: input.summary_en, ...p,
+      source: d.source ?? "text", status: "proposed", apply_at: applyAt, changes,
+    });
+    if (instant) {
+      await d.store.applyChangeSet(cs.id, d.now().toISOString());
+      await d.messenger.send(d.chatId, `✅ ${mine(p).replace(/^• /gm, "")}`);
+      const first = ops[0] as Extract<ChangeOp, { op: "set_sold_out" }>;
+      return { change_set_id: cs.id, status: "applied", preview: mine(p), sold_out_until: first.until };
+    }
+    const messageId = await d.messenger.sendProposal(d.chatId, proposalText(mine(p), lang, applyAt, s.venue.tz), cs.id, lang);
+    if (messageId !== null) await d.store.updateChangeSet(cs.id, { tg_message_id: messageId });
+    return { change_set_id: cs.id, status: "proposed", preview: mine(p), apply_at: applyAt, next: "The owner decides with the buttons. Reply with at most one short sentence, or nothing." };
+  };
+
+  const getSite = betaZodTool({
+    name: "get_site",
+    description: "The venue's texts, hours, today's status, holidays, announcements, theme, images, the current time with its UTC offset, the member's language and role, and any pending proposal. Call this first when the request touches anything but the menu.",
+    inputSchema: z.object({}),
+    run: () =>
+      attempt(async () => {
+        const s = await site();
+        const now = d.now();
+        const pending = await d.store.findProposed(d.venueId, d.chatId);
+        return {
+          venue: {
+            name: s.venue.name, slug: s.venue.slug, tz: s.venue.tz, default_lang: s.venue.default_lang,
+            tagline_bg: s.venue.tagline_bg, tagline_en: s.venue.tagline_en, about_bg: s.venue.about_bg, about_en: s.venue.about_en,
+            address: s.venue.address, phone: s.venue.phone, maps_url: s.venue.maps_url, instagram: s.venue.instagram,
+            theme: s.venue.theme, has_cover: s.venue.cover_media_id !== null, has_logo: s.venue.logo_media_id !== null,
+          },
+          texts: Object.fromEntries(s.texts.map((t) => [t.key, { bg: t.text_bg, en: t.text_en }])),
+          hours: s.venue.hours,
+          today: todayStatus(s.venue.hours, s.holidays, now, s.venue.tz),
+          holidays: s.holidays.map((h) => ({ id: h.id, date: h.date, note_bg: h.note_bg, note_en: h.note_en })),
+          announcements: s.announcements.map((a) => ({ id: a.id, text_bg: a.text_bg, text_en: a.text_en, expires_at: a.expires_at })),
+          gallery_count: s.media.filter((m) => m.is_gallery).length,
+          media_ids: s.media.map((m) => m.id),
+          now: nowText(now, s.venue.tz),
+          now_iso: now.toISOString(),
+          owner_lang: lang,
+          member_role: d.member.role,
+          public_url: `${d.baseUrl}/${s.venue.slug}`,
+          pending_proposal: pending ? { id: pending.id, summary: lang === "bg" ? pending.summary_bg : pending.summary_en, apply_at: pending.apply_at } : null,
+        };
+      }),
+  });
+
+  const getMenu = betaZodTool({
+    name: "get_menu",
+    description: "Categories and active items with ids, names in both languages, prices, sold-out and special state, allergens and whether they have a photo. Use the ids in propose_changes.",
+    inputSchema: z.object({}),
+    run: () =>
+      attempt(async () => {
+        const s = await site();
+        const nowMs = d.now().getTime();
+        const items = s.items.filter((i) => i.active);
+        return {
+          categories: s.categories.filter((c) => c.active).sort((a, b) => a.position - b.position).map((c) => ({
+            id: c.id, name_bg: c.name_bg, name_en: c.name_en,
+            items: items.filter((i) => i.category_id === c.id).sort((a, b) => a.position - b.position).map((i) => ({
+              id: i.id, name_bg: i.name_bg, name_en: i.name_en, desc_bg: i.desc_bg, desc_en: i.desc_en, price_eur: i.price_eur,
+              allergens: i.allergens, sold_out: isSoldOut(i, nowMs), sold_out_until: i.sold_out_until,
+              is_special: i.is_special, special_expires_at: i.special_expires_at, has_image: i.image_media_id !== null,
+            })),
+          })),
+          visible_count: visibleItems(items, nowMs).length,
+        };
+      }),
+  });
+
+  const proposeChanges = betaZodTool({
+    name: "propose_changes",
+    description: "Validate a list of changes, snapshot before/after, and send the owner a preview with ✅ Apply / ✏️ Change / ❌ Cancel buttons. Sets made only of set_sold_out apply at once (they are undoable). Returns the preview text; do not repeat it.",
+    inputSchema: ProposeSchema,
+    run: (input) => attempt(() => propose(input, null)),
+  });
+
+  const cancelChangeSet = betaZodTool({
+    name: "cancel_change_set",
+    description: "Cancel a proposed or scheduled change set (for example when the owner's new message supersedes a pending proposal).",
+    inputSchema: CancelSchema,
+    run: (input) =>
+      attempt(async () => {
+        const cs = await getSet(input.change_set_id);
+        if (cs.status !== "proposed" && cs.status !== "scheduled") throw new Error(`Change set is "${cs.status}"; only proposed or scheduled sets can be cancelled.`);
+        await cancelPending(cs, tr(lang, "❌ Отказано.", "❌ Cancelled."));
+        return { change_set_id: cs.id, status: "cancelled" };
+      }),
+  });
+
+  const listChanges = betaZodTool({
+    name: "list_changes",
+    description: "Recent change sets for this venue, newest first, with status and whether undo can revert them.",
+    inputSchema: ListSchema,
+    run: (input) =>
+      attempt(async () => {
+        const sets = await d.store.listChangeSets(d.venueId, { limit: input.limit });
+        return {
+          change_sets: sets.map((cs) => ({
+            id: cs.id, status: cs.status, source: cs.source, summary_bg: cs.summary_bg, summary_en: cs.summary_en,
+            created_at: cs.created_at, applied_at: cs.applied_at, apply_at: cs.apply_at, undoable: cs.status === "applied",
+            next: NEXT_STEP[cs.status],
+          })),
+        };
+      }),
+  });
+
+  // Task 11 appends schedule_changes, propose_bulk_price_change, check_allergens, undo here.
+  return [getSite, getMenu, proposeChanges, cancelChangeSet, listChanges, ...extraTools(d, { attempt, site, ctx, previews, mine, propose, getSet, ensureNoPending, lang })];
+}
+
+/** Hook for Task 11; returns [] until then. */
+export interface ToolKit {
+  attempt: (fn: () => Promise<unknown>) => Promise<string>;
+  site: () => Promise<SiteState>;
+  ctx: () => PlanContext;
+  previews: (s: SiteState, changes: ReturnType<typeof planChanges>) => { preview_bg: string; preview_en: string };
+  mine: (p: { preview_bg: string; preview_en: string }) => string;
+  propose: (input: z.infer<typeof ProposeSchema>, applyAt: string | null) => Promise<unknown>;
+  getSet: (id: string) => Promise<ChangeSet>;
+  ensureNoPending: () => Promise<void>;
+  lang: Lang;
+}
+function extraTools(_d: AgentDeps, _kit: ToolKit): ReturnType<typeof betaZodTool>[] {
+  return [];
+}
+export { itemName as _itemName, invertChanges as _invertChanges }; // re-exports used by Task 11; remove when extraTools is filled in
+```
+
+Note for the implementer: `extraTools` is a seam so Task 11 can add tools in the same file without re-reading this whole block; Task 11 replaces its body and deletes the throwaway re-export line.
+
+- [ ] **Step 6: Run** `npx vitest run test/tools-core.test.ts` → PASS. `npx tsc --noEmit` clean (if `betaZodTool` typing of a discriminated union errors, wrap `inputSchema: ProposeSchema` as-is and type `run`'s input via `z.infer`; do not weaken the schema).
+
+- [ ] **Step 7: Commit**
+
+```bash
+git add src/agent/tools.ts src/agent/tool-schemas.ts test/tools-core.test.ts test/tool-call.ts
+git commit -m "Agent tools: get_site, get_menu, propose_changes (instant sold-out, previews, buttons), cancel, list
+
+Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>"
+```
+
+---
+
+### Task 11: Agent tools, part 2 (schedule, bulk prices, allergen check, undo) — most capable model
+
+**Files:**
+- Modify: `src/agent/tools.ts` (fill `extraTools`)
+- Test: `test/tools-more.test.ts`
+
+**Interfaces:**
+- Consumes: `ToolKit` seam (Task 10), `bulkPrices` (Task 3), `allergenWarnings`/`allergenName` (Task 2), `invertChanges` (Task 4).
+- Produces: tools `schedule_changes`, `propose_bulk_price_change`, `check_allergens`, `undo`.
+
+- [ ] **Step 1: Write the failing tests**
+
+```ts
+// test/tools-more.test.ts
+import { describe, expect, it } from "vitest";
+import { makeTools, type AgentDeps } from "@/src/agent/tools";
+import { FakeMessenger, makeDemo } from "./helpers";
+import { call } from "./tool-call";
+
+const T0 = new Date("2026-10-09T09:00:00.000Z");
+
+async function setup() {
+  const demo = await makeDemo();
+  const messenger = new FakeMessenger();
+  const member = (await demo.store.findMember(1001))!;
+  const deps: AgentDeps = { store: demo.store, venueId: demo.venue.id, chatId: 1001, member, messenger, now: () => T0, baseUrl: "https://site.example" };
+  return { ...demo, messenger, deps, tools: makeTools(deps) };
+}
+
+describe("schedule_changes", () => {
+  it("creates a proposal with apply_at and says so in the message", async () => {
+    const { tools, store, messenger } = await setup();
+    const r = await call(tools, "schedule_changes", { summary_bg: "Коледни почивни дни", summary_en: "Christmas closure", apply_at: "2026-12-20T08:00:00+02:00", changes: [{ op: "add_holiday", date: "2026-12-24", note_bg: "Бъдни вечер", note_en: "Christmas Eve" }, { op: "add_holiday", date: "2026-12-25", note_bg: "Коледа", note_en: "Christmas" }] });
+    expect(r).toMatchObject({ status: "proposed", apply_at: "2026-12-20T06:00:00.000Z" });
+    expect((await store.getChangeSet(r.change_set_id as string)).apply_at).toBe("2026-12-20T06:00:00.000Z");
+    expect(messenger.sent[0].text).toContain("⏰ Ще се приложи на 20.12.2026, 08:00");
+    expect(messenger.sent[0].text).toContain("• Почивен ден 24.12.2026: Бъдни вечер / Christmas Eve");
+  });
+  it("rejects a past or malformed apply_at", async () => {
+    const { tools, items } = await setup();
+    const past = await call(tools, "schedule_changes", { summary_bg: "x", summary_en: "x", apply_at: "2026-10-01T08:00:00+03:00", changes: [{ op: "set_price", item_id: items.Latte.id, price_eur: 3 }] });
+    expect(past.error).toMatch(/in the future/);
+    const bad = await call(tools, "schedule_changes", { summary_bg: "x", summary_en: "x", apply_at: "tomorrow 8am", changes: [{ op: "set_price", item_id: items.Latte.id, price_eur: 3 }] });
+    expect(bad.error).toMatch(/ISO 8601/);
+  });
+});
+
+describe("propose_bulk_price_change", () => {
+  it("computes rounded prices for a category and proposes set_price ops", async () => {
+    const { tools, categories, store, messenger } = await setup();
+    const r = await call(tools, "propose_bulk_price_change", { category_id: categories.Coffee.id, percent: 10, rounding: "0.10" });
+    const rows = r.rows as { name_en: string; old_eur: number; new_eur: number }[];
+    expect(rows).toEqual([
+      { item_id: expect.any(String), name_bg: "Еспресо", name_en: "Espresso", old_eur: 1.8, new_eur: 2.0 },
+      { item_id: expect.any(String), name_bg: "Капучино", name_en: "Cappuccino", old_eur: 2.9, new_eur: 3.2 },
+      { item_id: expect.any(String), name_bg: "Лате", name_en: "Latte", old_eur: 3.2, new_eur: 3.5 },
+      { item_id: expect.any(String), name_bg: "Чай", name_en: "Tea", old_eur: 2.0, new_eur: 2.2 },
+    ]);
+    const cs = await store.getChangeSet(r.change_set_id as string);
+    expect(cs.changes).toHaveLength(4);
+    expect(cs.summary_bg).toBe("Цени +10 % (Кафе), закръглени до 0.10 €");
+    expect(cs.summary_en).toBe("Prices +10 % (Coffee), rounded to €0.10");
+    expect(messenger.sent[0].text.split("\n")[0]).toBe("• Еспресо: 1,80 € → 2,00 €");
+  });
+  it("filters by name, skips unchanged prices, and errors when nothing matches", async () => {
+    const { tools } = await setup();
+    const r = await call(tools, "propose_bulk_price_change", { name_contains: "сандвич", delta_eur: 0.5, rounding: "none", summary_bg: "Сандвичите +0,50", summary_en: "Sandwiches +0.50" });
+    expect((r.rows as unknown[]).length).toBe(2);
+    const none = await call(tools, "propose_bulk_price_change", { name_contains: "pizza", percent: 5, rounding: "none" });
+    expect(none.error).toMatch(/No active items match/);
+  });
+});
+
+describe("check_allergens", () => {
+  it("returns suggestions and warnings with names in both languages", async () => {
+    const { tools } = await setup();
+    const r = await call(tools, "check_allergens", { name: "Кроасан с масло", declared: [1] });
+    expect(r).toEqual({ suggested: [1, 7], warnings: [{ code: 7, keyword: "масло", name_bg: "Мляко", name_en: "Milk" }], ok: false, note: "Keyword-based and advisory: mention the warnings in the preview and let the owner decide." });
+    expect((await call(tools, "check_allergens", { name: "Fresh orange juice", declared: [] })).ok).toBe(true);
+  });
+});
+
+describe("undo", () => {
+  it("proposes the inverse of the last applied set and, once approved, marks it reverted", async () => {
+    const { tools, store, items, messenger, venue, deps } = await setup();
+    const p = await call(tools, "propose_changes", { summary_bg: "Капучино 3,20 €", summary_en: "Cappuccino €3.20", changes: [{ op: "set_price", item_id: items.Cappuccino.id, price_eur: 3.2 }] });
+    await store.applyChangeSet(p.change_set_id as string, T0.toISOString());
+    const u = await call(tools, "undo", { change_set_id: "last" });
+    expect(u).toMatchObject({ status: "proposed", undoes: p.change_set_id, preview: "• Капучино: 3,20 € → 2,90 €" });
+    const undoSet = await store.getChangeSet(u.change_set_id as string);
+    expect(undoSet).toMatchObject({ source: "undo", undoes_id: p.change_set_id, summary_bg: "Отмяна: Капучино 3,20 €", summary_en: "Undo: Cappuccino €3.20" });
+    expect(messenger.last().setId).toBe(undoSet.id);
+    await store.applyChangeSet(undoSet.id, deps.now().toISOString());
+    expect((await store.getSite(venue.id)).items.find((i) => i.id === items.Cappuccino.id)?.price_eur).toBe(2.9);
+    expect((await store.getChangeSet(p.change_set_id as string)).status).toBe("reverted");
+  });
+  it("refuses when nothing is applied, when the set is not applied, and for staff", async () => {
+    const base = await setup();
+    expect((await call(base.tools, "undo", { change_set_id: "last" })).error).toMatch(/Nothing to undo/);
+    const p = await call(base.tools, "propose_changes", { summary_bg: "x", summary_en: "x", changes: [{ op: "set_price", item_id: base.items.Latte.id, price_eur: 3.5 }] });
+    expect((await call(base.tools, "undo", { change_set_id: p.change_set_id })).error).toMatch(/"proposed"/);
+    const staff = (await base.store.findMember(1002))!;
+    const staffTools = makeTools({ ...base.deps, chatId: 1002, member: staff });
+    expect((await call(staffTools, "undo", { change_set_id: "last" })).error).toMatch(/only the owner/);
+  });
+  it("skips auto sets when looking for the last one", async () => {
+    const { tools, store, venue, items } = await setup();
+    const site = await store.getSite(venue.id);
+    const { planChanges } = await import("@/src/domain/changes");
+    const real = await store.createChangeSet({ venue_id: venue.id, chat_id: 1001, summary_bg: "Истинска", summary_en: "Real", preview_bg: "p", preview_en: "p", source: "text", status: "proposed", changes: planChanges(site, [{ op: "set_price", item_id: items.Tea.id, price_eur: 2.2 }], { newId: () => "n", now: T0.toISOString() }) });
+    await store.applyChangeSet(real.id, T0.toISOString());
+    const auto = await store.createChangeSet({ venue_id: venue.id, chat_id: null, summary_bg: "авто", summary_en: "auto", preview_bg: "p", preview_en: "p", source: "auto", status: "proposed", changes: [] });
+    await store.applyChangeSet(auto.id, "2026-10-09T09:01:00.000Z");
+    const u = await call(tools, "undo", { change_set_id: "last" });
+    expect(u.undoes).toBe(real.id);
+  });
+});
+```
+
+- [ ] **Step 2: Run** `npx vitest run test/tools-more.test.ts` → FAIL (tools missing).
+
+- [ ] **Step 3: Fill in `extraTools` in `src/agent/tools.ts`** (replace the stub and remove the throwaway re-export line)
+
+```ts
+// src/agent/tools.ts — replace `function extraTools(...) { return []; }` with:
+import { allergenName, allergenWarnings, suggestAllergens } from "../domain/allergens";
+import { bulkPrices } from "../domain/pricing";
+import { categoryName } from "../domain/format";
+import { BulkSchema, CheckAllergensSchema, ScheduleSchema, UndoSchema } from "./tool-schemas";
+// (move these imports to the top of the file)
+
+const ISO_WITH_OFFSET = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(:\d{2}(\.\d+)?)?(Z|[+-]\d{2}:?\d{2})$/i;
+
+function extraTools(d: AgentDeps, k: ToolKit) {
+  const scheduleChanges = betaZodTool({
+    name: "schedule_changes",
+    description: "Like propose_changes, but the set is applied at apply_at (ISO 8601 with offset, in the future) after the owner approves. The owner gets a reminder 24 h before. Use for holidays, seasonal prices, announcements that start later.",
+    inputSchema: ScheduleSchema,
+    run: (input) =>
+      k.attempt(async () => {
+        if (!ISO_WITH_OFFSET.test(input.apply_at) || Number.isNaN(Date.parse(input.apply_at))) throw new Error("apply_at must be an ISO 8601 datetime with offset, e.g. 2026-12-24T08:00:00+02:00.");
+        const applyAt = new Date(input.apply_at).toISOString();
+        if (Date.parse(applyAt) <= d.now().getTime()) throw new Error("apply_at must be in the future; for an immediate change use propose_changes.");
+        return k.propose(input, applyAt);
+      }),
+  });
+
+  const bulk = betaZodTool({
+    name: "propose_bulk_price_change",
+    description: "Change many prices at once by a percentage or a fixed amount, with rounding. The tool does the arithmetic and sends the owner a table preview. Filter by category_id and/or name_contains; no filter = every active item.",
+    inputSchema: BulkSchema,
+    run: (input) =>
+      k.attempt(async () => {
+        const s = await k.site();
+        const needle = input.name_contains?.toLowerCase();
+        const cat = input.category_id ? s.categories.find((c) => c.id === input.category_id) : undefined;
+        if (input.category_id && !cat) throw new Error(`category_id "${input.category_id}" not found; use an id from get_menu.`);
+        const targets = s.items.filter((i) => i.active && !i.is_special && (!cat || i.category_id === cat.id) && (!needle || i.name_bg.toLowerCase().includes(needle) || i.name_en.toLowerCase().includes(needle)));
+        if (targets.length === 0) throw new Error("No active items match that filter; check get_menu.");
+        const rows = bulkPrices(targets, { percent: input.percent, delta_eur: input.delta_eur, rounding: input.rounding });
+        const changed = rows.filter((r) => r.new_eur !== r.old_eur);
+        if (changed.length === 0) throw new Error("Every price would stay the same after rounding; choose a finer rounding or a bigger change.");
+        const amount = input.percent !== undefined ? `${input.percent > 0 ? "+" : ""}${input.percent} %` : `${(input.delta_eur as number) > 0 ? "+" : ""}${(input.delta_eur as number).toFixed(2)} €`;
+        const scope = cat ? { bg: ` (${categoryName(cat, "bg")})`, en: ` (${categoryName(cat, "en")})` } : needle ? { bg: ` („${input.name_contains}“)`, en: ` (“${input.name_contains}”)` } : { bg: "", en: "" };
+        const round = input.rounding === "none" ? { bg: "", en: "" } : { bg: `, закръглени до ${input.rounding} €`, en: `, rounded to €${input.rounding}` };
+        const summary_bg = input.summary_bg ?? `Цени ${amount}${scope.bg}${round.bg}`;
+        const summary_en = input.summary_en ?? `Prices ${amount}${scope.en}${round.en}`;
+        const result = (await k.propose({ summary_bg, summary_en, changes: changed.map((r) => ({ op: "set_price" as const, item_id: r.item_id, price_eur: r.new_eur })) }, null)) as Record<string, unknown>;
+        return { ...result, rows };
+      }),
+  });
+
+  const checkAllergens = betaZodTool({
+    name: "check_allergens",
+    description: "Keyword check of a dish name/description against the 14 EU allergens. Returns suggested codes and warnings for suggested-but-undeclared ones. Call it before add_item or a rename; mention warnings in your reply.",
+    inputSchema: CheckAllergensSchema,
+    run: (input) =>
+      k.attempt(async () => {
+        const text = `${input.name} ${input.desc ?? ""}`;
+        const warnings = allergenWarnings(input.declared, text).map((w) => ({ ...w, name_bg: allergenName(w.code, "bg"), name_en: allergenName(w.code, "en") }));
+        return { suggested: suggestAllergens(text), warnings, ok: warnings.length === 0, note: "Keyword-based and advisory: mention the warnings in the preview and let the owner decide." };
+      }),
+  });
+
+  const undo = betaZodTool({
+    name: "undo",
+    description: 'Propose reverting an applied change set ("last" = the most recent applied one that was not automatic). The owner approves with the buttons; the inverse is applied as a new set.',
+    inputSchema: UndoSchema,
+    run: (input) =>
+      k.attempt(async () => {
+        if (d.member.role !== "owner") throw new Error("undo is only the owner's decision; tell the owner.");
+        let target: ChangeSet | undefined;
+        if (input.change_set_id === "last") {
+          target = (await d.store.listChangeSets(d.venueId, { status: ["applied"], limit: 50 })).find((cs) => cs.source !== "auto");
+          if (!target) throw new Error("Nothing to undo: no applied change set yet.");
+        } else {
+          target = await k.getSet(input.change_set_id);
+          if (target.status !== "applied") throw new Error(`Change set is "${target.status}"; only applied sets can be undone. ${NEXT_STEP[target.status]}`);
+        }
+        await k.ensureNoPending();
+        const s = await k.site();
+        const changes = invertChanges(target.changes);
+        const p = k.previews(s, changes);
+        const cs = await d.store.createChangeSet({
+          venue_id: d.venueId, chat_id: d.chatId, summary_bg: `Отмяна: ${target.summary_bg}`, summary_en: `Undo: ${target.summary_en}`, ...p,
+          source: "undo", status: "proposed", undoes_id: target.id, changes,
+        });
+        const messageId = await d.messenger.sendProposal(d.chatId, proposalText(k.mine(p), k.lang, null, s.venue.tz), cs.id, k.lang);
+        if (messageId !== null) await d.store.updateChangeSet(cs.id, { tg_message_id: messageId });
+        return { change_set_id: cs.id, status: "proposed", undoes: target.id, preview: k.mine(p), next: "The owner decides with the buttons." };
+      }),
+  });
+
+  return [scheduleChanges, bulk, checkAllergens, undo];
+}
+```
+
+Also add `source` to the `ToolKit` seam if `k.propose` needs it (it does not: `propose` closes over `d`). Keep `renderPreview` of the undo against the **current** state so the preview shows "3,20 € → 2,90 €".
+
+- [ ] **Step 4: Run** `npx vitest run test/tools-more.test.ts test/tools-core.test.ts` → PASS; `npx tsc --noEmit` clean.
+
+- [ ] **Step 5: Commit**
+
+```bash
+git add src/agent/tools.ts test/tools-more.test.ts
+git commit -m "Agent tools: schedule, bulk price change, allergen check, undo
+
+Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>"
+```
+
+---
+
+### Task 12: Prompt, conversation memory and the run loop — most capable model
+
+**Files:**
+- Create: `src/agent/prompt.ts`, `src/agent/memory.ts`, `src/agent/run.ts`
+- Test: `test/memory.test.ts`, `test/run.test.ts`
+
+**Interfaces:**
+- Consumes: `makeTools`, `AgentDeps` (Tasks 10–11), `Config.Effort` (Task 7), `Store` conversations (Task 6).
+- Produces: `SYSTEM_PROMPT`, `userMessage(ctx: UserMessageContext): string`; `loadMemory(store, venueId, chatId, now): Promise<{ text: string; correctionFor: string | null }>`, `appendMemory(store, venueId, chatId, turn, now)`, `setCorrection(store, venueId, chatId, setId, now)`, `MEMORY_TURNS = 8`, `MEMORY_TTL_MS`; `ImageInput { data: string; media_type: "image/jpeg" | "image/png" | "image/webp" | "image/gif" }`, `TurnInput { text; source; image?; mediaId? }`, `AgentConfig { model; effort; apiKey? }`, `pickEffort(base, { hasImage, text })`, `runTurn(deps, input, cfg, client?)`.
+
+- [ ] **Step 1: Write the failing memory tests**
+
+```ts
+// test/memory.test.ts
+import { describe, expect, it } from "vitest";
+import { appendMemory, loadMemory, MEMORY_TURNS, setCorrection } from "@/src/agent/memory";
+import { InMemoryStore } from "@/src/store/memory";
+
+const T = (min: number) => new Date(Date.parse("2026-10-09T09:00:00.000Z") + min * 60_000);
+
+describe("conversation memory", () => {
+  it("is empty at first and renders the last 8 turns as text", async () => {
+    const s = new InMemoryStore();
+    const v = await s.createVenue({ slug: "m", name: "M" });
+    expect(await loadMemory(s, v.id, 1, T(0))).toEqual({ text: "", correctionFor: null });
+    for (let i = 1; i <= 10; i++) await appendMemory(s, v.id, 1, { at: T(i).toISOString(), owner: `msg ${i}`, agent: `reply ${i}`, outcome: i % 2 ? "applied" : undefined }, T(i));
+    const m = await loadMemory(s, v.id, 1, T(11));
+    const lines = m.text.split("\n");
+    expect(lines[0]).toBe("Recent conversation (oldest first):");
+    expect(m.text).not.toContain("msg 2\n");
+    expect(m.text).toContain("Owner: msg 3");
+    expect(m.text).toContain("Agent: reply 10");
+    expect(m.text).toContain("Outcome: applied");
+    expect((await s.getConversation(v.id, 1))?.turns).toHaveLength(MEMORY_TURNS);
+  });
+  it("forgets after 30 minutes", async () => {
+    const s = new InMemoryStore();
+    const v = await s.createVenue({ slug: "m", name: "M" });
+    await appendMemory(s, v.id, 1, { at: T(0).toISOString(), owner: "a", agent: "b" }, T(0));
+    expect((await loadMemory(s, v.id, 1, T(29))).text).toContain("Owner: a");
+    expect((await loadMemory(s, v.id, 1, T(31))).text).toBe("");
+  });
+  it("keeps the correction marker until the next turn is appended", async () => {
+    const s = new InMemoryStore();
+    const v = await s.createVenue({ slug: "m", name: "M" });
+    await setCorrection(s, v.id, 1, "set-1", T(0));
+    expect((await loadMemory(s, v.id, 1, T(1))).correctionFor).toBe("set-1");
+    await appendMemory(s, v.id, 1, { at: T(1).toISOString(), owner: "a", agent: "b" }, T(1));
+    expect((await loadMemory(s, v.id, 1, T(2))).correctionFor).toBeNull();
+  });
+});
+```
+
+- [ ] **Step 2: Implement `src/agent/memory.ts`**
+
+```ts
+// src/agent/memory.ts
+import type { ConversationTurn } from "../domain/types";
+import type { Store } from "../store/types";
+
+export const MEMORY_TURNS = 8;
+export const MEMORY_TTL_MS = 30 * 60_000;
+
+export function renderMemory(turns: ConversationTurn[]): string {
+  if (turns.length === 0) return "";
+  const lines = ["Recent conversation (oldest first):"];
+  for (const t of turns) {
+    lines.push(`Owner: ${t.owner}`);
+    lines.push(`Agent: ${t.agent}`);
+    if (t.outcome) lines.push(`Outcome: ${t.outcome}`);
+  }
+  return lines.join("\n");
+}
+
+/** Plain-text memory for the next user message. Expired memory is dropped (and cleared in the store). */
+export async function loadMemory(store: Store, venueId: string, chatId: number, now: Date): Promise<{ text: string; correctionFor: string | null }> {
+  const c = await store.getConversation(venueId, chatId);
+  if (!c) return { text: "", correctionFor: null };
+  if (now.getTime() - Date.parse(c.updated_at) > MEMORY_TTL_MS) {
+    await store.setConversation(venueId, chatId, { turns: [], correction_for: null, updated_at: now.toISOString() });
+    return { text: "", correctionFor: null };
+  }
+  return { text: renderMemory(c.turns), correctionFor: c.correction_for };
+}
+
+export async function appendMemory(store: Store, venueId: string, chatId: number, turn: ConversationTurn, now: Date): Promise<void> {
+  const c = await store.getConversation(venueId, chatId);
+  const fresh = c && now.getTime() - Date.parse(c.updated_at) <= MEMORY_TTL_MS ? c.turns : [];
+  await store.setConversation(venueId, chatId, { turns: [...fresh, turn].slice(-MEMORY_TURNS), correction_for: null, updated_at: now.toISOString() });
+}
+
+export async function setCorrection(store: Store, venueId: string, chatId: number, setId: string | null, now: Date): Promise<void> {
+  const c = await store.getConversation(venueId, chatId);
+  await store.setConversation(venueId, chatId, { turns: c?.turns ?? [], correction_for: setId, updated_at: now.toISOString() });
+}
+```
+
+- [ ] **Step 3: Run** `npx vitest run test/memory.test.ts` → PASS.
+
+- [ ] **Step 4: Write `src/agent/prompt.ts`**
+
+```ts
+// src/agent/prompt.ts
+import type { Lang, Role } from "../domain/types";
+
+export const SYSTEM_PROMPT = `You manage the website of one café or restaurant on behalf of its owner, who talks to you on Telegram in Bulgarian or English, by text, voice note (already transcribed) or photo. You act only through your tools; nothing changes on the site except through propose_changes, schedule_changes, propose_bulk_price_change or undo, and the owner approves every proposal with buttons (sold-out marks apply at once).
+
+How to work:
+1. Read first. Call get_menu for anything about dishes, prices or availability; call get_site for hours, holidays, texts, images, announcements, theme, or when you need the current time. Use only ids these tools returned.
+2. Understand casual speech. "Капучиното става три и двайсет" means the cappuccino price becomes 3.20 €. "Баницата свърши" means the cheese banitsa is sold out until the next opening (until: "next_opening"). "Затворени сме на 24 и 25 декември" means two holidays. A photo of a specials board means add_item with is_special true and special_expires_at "closing_today" for each dish you can read, with its price. "Това е новата снимка на капучиното" with a photo means set_item_image with the media_id you were given. "Смени корицата" with a photo means set_cover_image. "Върни ..." usually means undo.
+3. One proposal per message, with every change the owner asked for in it. Pick the closest matching item by name in either language; if two items could be meant, ask one short question instead of guessing. If a category is unclear for a new dish, ask. Never invent ingredients, prices or allergens.
+4. Languages: every text you store needs both Bulgarian (…_bg) and English (…_en). When the owner gives one language, write the other yourself: same meaning, natural tone, no literal word-for-word translation. Keep names of dishes as the owner wrote them in their language. Prices are EUR with two decimals.
+5. Numbers and time: the tools do arithmetic (propose_bulk_price_change) and resolve "next_opening" and "closing_today". For explicit times write ISO 8601 with the UTC offset shown in the Now line. Spoken Bulgarian numbers: "три и двайсет" = 3.20, "две и петдесет" = 2.50, "четири и половина" = 4.50, "пет лева" still means 5.00 € here (the menu is in euro).
+6. New dishes: call check_allergens with the name and description before add_item, declare the suggested allergens unless the owner says otherwise, and mention any warning in one short sentence after proposing.
+7. Pending proposals: get_site shows one if it exists. If the owner's message is a correction to it, your propose_changes replaces it automatically. If the owner clearly wants something else, call cancel_change_set first. If they are just chatting, answer briefly and leave it.
+8. Errors from tools are instructions: read the message, fix the call, try once more. Status-aware messages say what to do next.
+
+Replying: the preview with buttons is sent by the tool, so after a proposal reply with at most one short sentence in the owner's language (for example a warning, or the time a sold-out item returns), or nothing. For questions or chit-chat reply briefly and warmly in the owner's language. No markdown, no emojis except the ones in the previews, no English to a Bulgarian owner.`;
+
+export interface UserMessageContext {
+  venueName: string;
+  slug: string;
+  nowText: string;
+  lang: Lang;
+  role: Role;
+  memory: string;
+  correctionFor: string | null;
+  mediaId?: string;
+  text: string;
+  source: "text" | "voice" | "photo";
+}
+
+export function userMessage(c: UserMessageContext): string {
+  const parts = [
+    `Venue: ${c.venueName} (slug ${c.slug}).`,
+    `Now: ${c.nowText}.`,
+    `Owner language: ${c.lang === "bg" ? "Bulgarian" : "English"}. Member role: ${c.role}.`,
+  ];
+  if (c.memory) parts.push("", c.memory);
+  if (c.correctionFor) parts.push("", `The owner tapped ✏️ Change on proposal ${c.correctionFor}: this message corrects it; propose the corrected version (it replaces the old one).`);
+  if (c.mediaId) parts.push("", `The attached photo was stored as media_id: ${c.mediaId}. Use that id for image changes.`);
+  parts.push("", c.source === "voice" ? "Transcribed voice note from the owner:" : c.source === "photo" ? "Caption sent with the photo (may be empty):" : "Message from the owner:", c.text);
+  return parts.join("\n");
+}
+```
+
+- [ ] **Step 5: Write the failing run tests**
+
+```ts
+// test/run.test.ts
+import type Anthropic from "@anthropic-ai/sdk";
+import { describe, expect, it } from "vitest";
+import type { AgentDeps } from "@/src/agent/tools";
+import { pickEffort, runTurn } from "@/src/agent/run";
+import { appendMemory } from "@/src/agent/memory";
+import { FakeMessenger, makeDemo } from "./helpers";
+
+const T0 = new Date("2026-10-09T09:00:00.000Z");
+
+/** A fake Anthropic client: records the params, optionally runs scripted tool calls, returns a final message. */
+function fakeClient(script: { tool: string; input: unknown }[] = [], final: { stop_reason: string; text: string } = { stop_reason: "end_turn", text: "Готово." }) {
+  const calls: Record<string, unknown>[] = [];
+  const toolResults: string[] = [];
+  const client = {
+    beta: {
+      messages: {
+        toolRunner(params: Record<string, unknown>) {
+          calls.push(params);
+          const run = (async () => {
+            const tools = params.tools as { name: string; run: (i: unknown) => Promise<string> }[];
+            for (const step of script) toolResults.push(await tools.find((t) => t.name === step.tool)!.run(step.input));
+            return { stop_reason: final.stop_reason, content: [{ type: "text", text: final.text }] };
+          })();
+          return { then: run.then.bind(run) };
+        },
+      },
+    },
+  };
+  return { client: client as unknown as Anthropic, calls, toolResults };
+}
+
+async function setup() {
+  const demo = await makeDemo();
+  const messenger = new FakeMessenger();
+  const member = (await demo.store.findMember(1001))!;
+  const deps: AgentDeps = { store: demo.store, venueId: demo.venue.id, chatId: 1001, member, messenger, now: () => T0, baseUrl: "https://site.example" };
+  return { ...demo, messenger, deps };
+}
+
+describe("pickEffort", () => {
+  it("raises effort for images, bulk and scheduling cues", () => {
+    expect(pickEffort("medium", { hasImage: false, text: "Капучиното става 3,20" })).toBe("medium");
+    expect(pickEffort("medium", { hasImage: true, text: "" })).toBe("high");
+    expect(pickEffort("medium", { hasImage: false, text: "Вдигни всички кафета с 10%" })).toBe("high");
+    expect(pickEffort("medium", { hasImage: false, text: "From Monday the latte is 3.50" })).toBe("high");
+    expect(pickEffort("low", { hasImage: false, text: "затворени сме утре" })).toBe("high");
+    expect(pickEffort("high", { hasImage: false, text: "hi" })).toBe("high");
+  });
+});
+
+describe("runTurn", () => {
+  it("sends the right params, memory and image block, relays the final text and stores memory", async () => {
+    const { deps, messenger, store, venue } = await setup();
+    await appendMemory(store, venue.id, 1001, { at: T0.toISOString(), owner: "здравей", agent: "Здравейте!" }, T0);
+    const { client, calls } = fakeClient([], { stop_reason: "end_turn", text: "Готово, върнах я." });
+    const out = await runTurn(deps, { text: "това е новата корица", source: "photo", image: { data: "AAAA", media_type: "image/jpeg" }, mediaId: "m-1" }, { model: "claude-opus-5-5", effort: "medium" }, client);
+    expect(out).toBe("Готово, върнах я.");
+    const p = calls[0];
+    expect(p).toMatchObject({ model: "claude-opus-5-5", max_tokens: 16000, output_config: { effort: "high" }, tool_choice: { type: "auto", disable_parallel_tool_use: true }, betas: ["server-side-fallback-2026-07-01"], fallbacks: "default" });
+    expect((p.tools as unknown[]).length).toBe(9);
+    const msg = (p.messages as { content: { type: string; text?: string; source?: { data: string } }[] }[])[0];
+    expect(msg.content[0]).toMatchObject({ type: "image", source: { type: "base64", media_type: "image/jpeg", data: "AAAA" } });
+    expect(msg.content[1].text).toContain("Owner: здравей");
+    expect(msg.content[1].text).toContain("media_id: m-1");
+    expect(msg.content[1].text).toContain("GMT+03:00");
+    expect(messenger.sent[0]).toMatchObject({ chatId: 1001, text: "Готово, върнах я." });
+    const conv = await store.getConversation(venue.id, 1001);
+    expect(conv?.turns).toHaveLength(2);
+    expect(conv?.turns[1]).toMatchObject({ owner: "[photo] това е новата корица", agent: "Готово, върнах я." });
+  });
+  it("records the proposal outcome and does not relay an empty final text", async () => {
+    const { deps, messenger, store, venue, items } = await setup();
+    const { client } = fakeClient([{ tool: "propose_changes", input: { summary_bg: "Капучино 3,20 €", summary_en: "Cappuccino €3.20", changes: [{ op: "set_price", item_id: items.Cappuccino.id, price_eur: 3.2 }] } }], { stop_reason: "end_turn", text: "" });
+    await runTurn(deps, { text: "капучиното става три и двайсет", source: "voice" }, { model: "m", effort: "medium" }, client);
+    expect(messenger.sent).toHaveLength(1); // only the proposal
+    expect(messenger.sent[0].setId).toBeDefined();
+    const conv = await store.getConversation(venue.id, 1001);
+    expect(conv?.turns[0].outcome).toBe("proposed: Капучино 3,20 € (waiting for the owner's decision)");
+  });
+  it("tells the owner when the model refuses or errors", async () => {
+    const { deps, messenger } = await setup();
+    const { client } = fakeClient([], { stop_reason: "refusal", text: "" });
+    expect(await runTurn(deps, { text: "x", source: "text" }, { model: "m", effort: "medium" }, client)).toBe("refused");
+    expect(messenger.sent[0].text).toBe("Не мога да изпълня това. Опитайте с друга формулировка.");
+    const boom = { beta: { messages: { toolRunner() { throw new Error("network down"); } } } } as unknown as Anthropic;
+    expect(await runTurn(deps, { text: "x", source: "text" }, { model: "m", effort: "medium" }, boom)).toBe("error");
+    expect(messenger.sent[1].text).toBe("Възникна грешка. Опитайте отново след малко.");
+  });
+  it("passes correctionFor from memory into the tools", async () => {
+    const { deps, store, venue, items } = await setup();
+    const { setCorrection } = await import("@/src/agent/memory");
+    const site = await store.getSite(venue.id);
+    const { planChanges } = await import("@/src/domain/changes");
+    const old = await store.createChangeSet({ venue_id: venue.id, chat_id: 1001, summary_bg: "x", summary_en: "x", preview_bg: "p", preview_en: "p", source: "text", status: "proposed", tg_message_id: 7, changes: planChanges(site, [{ op: "set_price", item_id: items.Latte.id, price_eur: 3.5 }], { newId: () => "n", now: T0.toISOString() }) });
+    await setCorrection(store, venue.id, 1001, old.id, T0);
+    const { client } = fakeClient([{ tool: "propose_changes", input: { summary_bg: "y", summary_en: "y", changes: [{ op: "set_price", item_id: items.Latte.id, price_eur: 3.4 }] } }], { stop_reason: "end_turn", text: "" });
+    await runTurn(deps, { text: "не, 3,40", source: "text" }, { model: "m", effort: "medium" }, client);
+    expect((await store.getChangeSet(old.id)).status).toBe("cancelled");
+    expect(await store.findProposed(venue.id, 1001)).not.toBeNull();
+  });
+});
+```
+
+- [ ] **Step 6: Implement `src/agent/run.ts`**
+
+```ts
+// src/agent/run.ts
+import Anthropic from "@anthropic-ai/sdk";
+import type { Effort } from "../config";
+import { tr } from "../domain/format";
+import type { ChangeSource } from "../domain/types";
+import { nowText } from "../time";
+import { appendMemory, loadMemory } from "./memory";
+import { SYSTEM_PROMPT, userMessage } from "./prompt";
+import { makeTools, type AgentDeps } from "./tools";
+
+export interface ImageInput {
+  data: string; // base64
+  media_type: "image/jpeg" | "image/png" | "image/webp" | "image/gif";
+}
+export interface TurnInput {
+  text: string;
+  source: Extract<ChangeSource, "text" | "voice" | "photo">;
+  image?: ImageInput;
+  mediaId?: string;
+}
+export interface AgentConfig {
+  model: string;
+  effort: Effort;
+  apiKey?: string;
+}
+
+/** Bulk and scheduling cues in BG/EN; image turns are always high. */
+const HIGH_CUES = /всички|всичк|процент|%|вдигни|намали|увеличи|all the|every|bulk|raise|increase|lower|reduce|утре|tomorrow|от понеделник|от вторник|от сряда|от четвъртък|от петък|от събота|от неделя|from monday|from tuesday|from wednesday|from thursday|from friday|from saturday|from sunday|next week|следващата седмица|насрочи|schedule|в \d{1,2}[:.]\d{2}|at \d{1,2}(:\d{2})?\s?(am|pm)?\b.*(tomorrow|on )|декември|януари|december|january/i;
+
+export function pickEffort(base: Effort, input: { hasImage: boolean; text: string }): Effort {
+  if (base === "high" || input.hasImage) return "high";
+  return HIGH_CUES.test(input.text) ? "high" : base;
+}
+
+/** One owner message → one agent turn. Never throws; tells the owner on refusal/error. Returns the final text, "refused" or "error". */
+export async function runTurn(deps: AgentDeps, input: TurnInput, cfg: AgentConfig, client?: Anthropic): Promise<string> {
+  const now = deps.now();
+  const venue = await deps.store.getVenue(deps.venueId);
+  const memory = await loadMemory(deps.store, deps.venueId, deps.chatId, now);
+  const lang = deps.member.lang;
+  const text = userMessage({
+    venueName: venue.name, slug: venue.slug, nowText: nowText(now, venue.tz), lang, role: deps.member.role,
+    memory: memory.text, correctionFor: memory.correctionFor, mediaId: input.mediaId, text: input.text, source: input.source,
+  });
+  const content = [
+    ...(input.image ? [{ type: "image" as const, source: { type: "base64" as const, media_type: input.image.media_type, data: input.image.data } }] : []),
+    { type: "text" as const, text },
+  ];
+  const tools = makeTools({ ...deps, correctionFor: memory.correctionFor, source: input.source });
+  const ownerLine = `${input.source === "voice" ? "[voice] " : input.source === "photo" ? "[photo] " : ""}${input.text}`.trim();
+
+  const closeOut = async (reply: string, outcome?: string) => {
+    if (reply) await deps.messenger.send(deps.chatId, reply);
+    await appendMemory(deps.store, deps.venueId, deps.chatId, { at: now.toISOString(), owner: ownerLine, agent: reply || "(no reply)", outcome }, now);
+  };
+
+  let final: { stop_reason: string | null; content: { type: string; text?: string }[] };
+  try {
+    const anthropic = client ?? new Anthropic(cfg.apiKey ? { apiKey: cfg.apiKey } : undefined);
+    final = await anthropic.beta.messages.toolRunner({
+      model: cfg.model,
+      max_tokens: 16000,
+      max_iterations: 30,
+      output_config: { effort: pickEffort(cfg.effort, { hasImage: !!input.image, text: input.text }) },
+      // One tool call at a time: proposals must be sequential and the queue in makeTools expects it.
+      tool_choice: { type: "auto", disable_parallel_tool_use: true },
+      betas: ["server-side-fallback-2026-07-01"],
+      fallbacks: "default",
+      system: SYSTEM_PROMPT,
+      tools,
+      messages: [{ role: "user", content }],
+    });
+  } catch (e) {
+    console.error("[agent] turn failed:", e instanceof Error ? e.message : e);
+    await closeOut(tr(lang, "Възникна грешка. Опитайте отново след малко.", "Something went wrong. Please try again in a moment."), "error");
+    return "error";
+  }
+
+  if (final.stop_reason === "refusal") {
+    await closeOut(tr(lang, "Не мога да изпълня това. Опитайте с друга формулировка.", "I can't do that one. Try putting it differently."), "refused");
+    return "refused";
+  }
+  const reply = final.content.flatMap((b) => (b.type === "text" && b.text ? [b.text] : [])).join("\n").trim();
+  const pending = await deps.store.findProposed(deps.venueId, deps.chatId);
+  const outcome = pending ? `proposed: ${lang === "bg" ? pending.summary_bg : pending.summary_en} (waiting for the owner's decision)` : undefined;
+  await closeOut(reply, outcome);
+  return reply;
+}
+```
+
+- [ ] **Step 7: Run** `npx vitest run test/run.test.ts test/memory.test.ts` → PASS. If the SDK's `toolRunner` type rejects `fallbacks: "default"` or `betas`, check `node_modules/@anthropic-ai/sdk/resources/beta/messages/messages.d.ts` for the exact field names (`BetaFallbacksParam`) and keep the semantics; do not drop the option.
+
+- [ ] **Step 8: Commit**
+
+```bash
+git add src/agent/prompt.ts src/agent/memory.ts src/agent/run.ts test/memory.test.ts test/run.test.ts
+git commit -m "Agent: bilingual system prompt, 30-minute conversation memory, run loop with effort routing
 
 Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>"
 ```
