@@ -40,7 +40,11 @@
 }
 @media (min-width: 640px) { .tpl-lumen { --l-gutter: 1.5rem; } }
 @media (min-width: 1024px) { .tpl-lumen { --l-gutter: 2.5rem; } }
-.tpl-lumen h1, .tpl-lumen h2, .tpl-lumen h3, .tpl-lumen h4, .tpl-lumen .l-display {
+/* The main app's globals.css puts every h1-h3 in its own display face; inside the template headings start from the body face. */
+.tpl-lumen h1, .tpl-lumen h2, .tpl-lumen h3, .tpl-lumen h4 { font-family: inherit; font-variation-settings: normal; font-weight: 600; }
+/* The serif is an explicit opt-in (title, section and category headings, tagline, footer name); labels, item names and the
+   specials' names stay in the body face so the serif keeps its weight as the page's one voice. */
+.tpl-lumen .l-title, .tpl-lumen .l-h2, .tpl-lumen .l-h3, .tpl-lumen .l-cat-h, .tpl-lumen .l-display {
   font-family: var(--font-display), ui-serif, Georgia, serif;
   font-variation-settings: normal;
   font-weight: 500;
@@ -59,7 +63,7 @@
 .l-section { scroll-margin-top: 4.5rem; }
 .l-soft { color: var(--l-ink-soft); }
 /* The one uppercase label on the page: "Today", in the accent, before the open/closed answer. */
-.l-eyebrow { font-family: var(--font-body), ui-sans-serif, system-ui, sans-serif; font-size: 0.75rem; font-weight: 700; letter-spacing: 0.12em; text-transform: uppercase; color: var(--l-accent-text); }
+.l-eyebrow { font-size: 0.75rem; font-weight: 700; letter-spacing: 0.12em; text-transform: uppercase; color: var(--l-accent-text); }
 .l-h2 { font-size: 1.75rem; line-height: 1.15; text-wrap: balance; }
 .l-h3 { font-size: 1.25rem; line-height: 1.25; }
 .l-prose { max-width: 60ch; }
@@ -71,7 +75,7 @@
 .l-tag { display: inline-flex; min-width: 1.5rem; justify-content: center; border-radius: 0.375rem; padding: 0.125rem 0.375rem; font-size: 0.75rem; font-weight: 600; background: var(--l-bg-2); color: var(--l-ink-soft); }
 
 /* Status: the one semantic dot on the page (open / opens later / closed). */
-.l-dot { display: inline-block; width: 0.625rem; height: 0.625rem; border-radius: 999px; flex: none; }
+.l-dot { display: inline-block; width: 0.625rem; height: 0.625rem; margin-top: 0.5em; border-radius: 999px; flex: none; } /* on the first line of a wrapped status */
 .l-dot-open { background: var(--l-accent-text); }
 .l-dot-opens_later { background: var(--l-amber); }
 .l-dot-closed { background: var(--l-red); }
@@ -97,10 +101,12 @@
 .l-hero-text { container-type: inline-size; display: flex; flex-direction: column; align-items: flex-start; }
 .l-title { font-size: clamp(2.5rem, 9vw, 4.5rem); line-height: 1.02; letter-spacing: -0.015em; text-wrap: balance; overflow-wrap: anywhere; }
 .l-hero-menu .l-title { font-size: clamp(2rem, 7vw, 3.25rem); }
-.l-tagline { margin-top: 1rem; max-width: 30rem; font-style: italic; font-size: 1.25rem; line-height: 1.35; color: var(--l-ink-soft); padding-bottom: 0.125rem; }
-.l-welcome { margin-top: 1rem; max-width: 34rem; font-size: 1.0625rem; line-height: 1.6; }
+.l-tagline { margin-top: 1rem; max-width: 30rem; text-wrap: pretty; font-style: italic; font-size: 1.25rem; line-height: 1.35; color: var(--l-ink-soft); padding-bottom: 0.125rem; }
+.l-welcome { margin-top: 1rem; max-width: 34rem; text-wrap: pretty; font-size: 1.0625rem; line-height: 1.6; }
 .l-hero-cta { margin-top: 1.75rem; }
 .l-hero-photo { aspect-ratio: 16 / 10; width: 100%; }
+/* Without a cover the placeholder stays short on a phone, so "open now?" is still above the fold. */
+.l-hero-photo.is-fallback { aspect-ratio: 16 / 7; }
 .l-hero-fallback { position: absolute; inset: 0; display: grid; place-items: center; background: var(--l-accent-soft); color: var(--l-accent-text); font-family: var(--font-display), ui-serif, Georgia, serif; font-style: italic; font-size: clamp(6rem, 24vw, 12rem); line-height: 1; }
 @media (min-width: 640px) {
   .l-hero-home { padding-block: 3.5rem 3.5rem; }
@@ -113,7 +119,7 @@
      and 13cqi keeps a nine-letter Cyrillic name on one line in Playfair Display. Browsers without cqi keep the clamp above. */
   .l-title { font-size: clamp(2.5rem, 13cqi, 4.75rem); }
   .l-hero-menu .l-title { font-size: clamp(2rem, 10cqi, 3.5rem); }
-  .l-hero-photo { aspect-ratio: 4 / 5; }
+  .l-hero-photo, .l-hero-photo.is-fallback { aspect-ratio: 4 / 5; }
   .l-hero-menu .l-hero-photo { aspect-ratio: 4 / 3; }
   .l-welcome { font-size: 1.125rem; }
 }
@@ -130,10 +136,14 @@
 /* Today: one hairline strip under the hero (label, status, holiday note, announcement pills), then specials as photo cards. */
 .l-today { outline: none; }
 .l-strip-today { display: flex; flex-wrap: wrap; align-items: center; gap: 0.5rem 1.25rem; padding-block: 1rem; border-top: 1px solid var(--l-line); border-bottom: 1px solid var(--l-line); }
-.l-status { display: flex; align-items: center; gap: 0.625rem; font-size: 1.0625rem; font-weight: 600; line-height: 1.4; text-wrap: pretty; }
+.l-status { display: flex; align-items: flex-start; gap: 0.625rem; font-size: 1.0625rem; font-weight: 600; line-height: 1.4; text-wrap: pretty; }
 .l-note { color: var(--l-ink-soft); }
 .l-news { display: flex; flex-wrap: wrap; gap: 0.5rem; }
 .l-specials { margin-top: 2.5rem; }
+/* Special cards carry a name, a price and a line of text: one per row on a phone, then two, then three. */
+.l-specials .l-grid { grid-template-columns: minmax(0, 1fr); }
+@media (min-width: 640px) { .l-specials .l-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (min-width: 1024px) { .l-specials .l-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
 .l-special { overflow: hidden; isolation: isolate; }
 .l-special-img { position: relative; aspect-ratio: 4 / 3; background: var(--l-bg-2); }
 .l-special-body { padding: 1rem; }
@@ -147,7 +157,7 @@
 /* Menu rows: name and price on one line, description under, sold-out badge and allergen tags last. No leaders, no boxes. */
 .l-row { position: relative; isolation: isolate; padding-block: 0.875rem; }
 .l-row-head { display: flex; align-items: baseline; justify-content: space-between; gap: 1rem; }
-.l-name { min-width: 0; font-family: inherit; font-size: 1.0625rem; font-weight: 600; line-height: 1.35; letter-spacing: 0; overflow-wrap: anywhere; }
+.l-name { min-width: 0; font-size: 1.0625rem; font-weight: 600; line-height: 1.35; overflow-wrap: anywhere; }
 .l-name.is-sold { color: var(--l-ink-soft); }
 .l-price { flex: none; font-variant-numeric: tabular-nums; white-space: nowrap; font-weight: 600; font-size: 1.0625rem; line-height: 1.35; }
 .l-price.is-sold { text-decoration: line-through; color: var(--l-ink-soft); }
@@ -159,7 +169,7 @@
 @media (min-width: 768px) { .l-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 1.25rem 1.5rem; } }
 .l-tile { position: relative; isolation: isolate; }
 .l-tile-photo { aspect-ratio: 1 / 1; }
-.l-tile h3 { margin-top: 0.625rem; font-family: inherit; font-size: 0.9375rem; font-weight: 600; line-height: 1.35; letter-spacing: 0; }
+.l-tile h3 { margin-top: 0.625rem; font-size: 0.9375rem; font-weight: 600; line-height: 1.35; }
 .l-tile .l-price { display: block; font-size: 0.9375rem; color: var(--l-ink-soft); }
 .l-rows { max-width: 40rem; }
 
@@ -196,7 +206,7 @@
 /* Visit: about and the contact actions on the left, hours as a definition list on the right. Hairlines, no boxes. */
 .l-visit { display: grid; gap: 2.5rem; margin-top: 4rem; padding-top: 2.5rem; border-top: 1px solid var(--l-line); }
 @media (min-width: 1024px) { .l-visit { grid-template-columns: minmax(0, 1fr) minmax(0, 22rem); gap: 5rem; } }
-.l-about { margin-top: 1rem; font-size: 1.125rem; line-height: 1.6; color: var(--l-ink-soft); }
+.l-about { margin-top: 1rem; text-wrap: pretty; font-size: 1.125rem; line-height: 1.6; color: var(--l-ink-soft); }
 .l-address { margin-top: 1.5rem; font-weight: 600; }
 .l-actions { display: flex; flex-wrap: wrap; gap: 0.5rem; margin-top: 1rem; }
 .l-hours { margin-top: 0.75rem; font-size: 0.9375rem; }

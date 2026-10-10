@@ -48,7 +48,7 @@ export function Hero({ state, slug, page, media }: { state: SiteState; slug: str
           {page === "home" && <Link href={pageHref(slug, "menu")} className="l-btn l-btn-accent l-hero-cta">{t("site.fullMenu")}</Link>}
         </div>
         {(page === "home" || cover) && (
-          <div className="l-photo l-hero-photo l-rise" style={{ animationDelay: "80ms" }}>
+          <div className={`l-photo l-hero-photo l-rise${cover ? "" : " is-fallback"}`} style={{ animationDelay: "80ms" }}>
             {cover ? (
               <Image src={cover} alt="" fill priority sizes="(min-width: 1024px) 460px, 100vw" className="l-cover" />
             ) : (
