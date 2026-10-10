@@ -27,7 +27,7 @@ const arg = (c: Call, m: string) => c.steps.find(([s]) => s === m)?.[1][0];
 describe("SupabaseStore.applyChangeSet", () => {
   it("resets the set to its prior status when an entity write fails", async () => {
     const changes = [0, 1, 2].map((position) => ({ id: `x${position}`, position, op: "set_price", entity: "item", entity_id: `i${position}`, before: { price_eur: 1 }, after: { price_eur: 2 } }));
-    const row = { id: "cs1", venue_id: "v1", chat_id: 10, summary_bg: "", summary_en: "", preview_bg: "", preview_en: "", source: "text", status: "applied", apply_at: null, reminded_at: null, decided_at: null, applied_at: "2026-10-09T10:00:00.000Z", reverted_by: null, undoes_id: null, tg_message_id: null, created_at: "2026-10-09T09:00:00.000Z", changes };
+    const row = { id: "cs1", venue_id: "v1", chat_ref: "tg:10", summary_bg: "", summary_en: "", preview_bg: "", preview_en: "", source: "text", status: "applied", apply_at: null, reminded_at: null, decided_at: null, applied_at: "2026-10-09T10:00:00.000Z", reverted_by: null, undoes_id: null, message_ref: null, created_at: "2026-10-09T09:00:00.000Z", changes };
     let itemWrites = 0;
     const { calls, client } = fakeClient((c) => {
       if (c.table === "change_sets" && has(c, "maybeSingle")) return { data: { status: "proposed" }, error: null };

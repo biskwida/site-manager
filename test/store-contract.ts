@@ -39,21 +39,25 @@ export function storeContract(name: string, make: () => Promise<Store>) {
       const v = await s.createVenue({ slug: "t3", name: "Test" });
       const code = await s.createInvite(v.id, "owner", LATER);
       expect(code).toMatch(/^[A-Z2-9]{8}$/);
-      expect(await s.redeemInvite("WRONGCOD", 10, "bg", NOW)).toBeNull();
-      const m = await s.redeemInvite(code, 10, "en", NOW);
-      expect(m).toMatchObject({ venue_id: v.id, tg_chat_id: 10, role: "owner", lang: "en" });
-      expect(await s.redeemInvite(code, 11, "bg", NOW)).toBeNull(); // used
+      expect(await s.redeemInvite("WRONGCOD", "tg:10", "bg", NOW)).toBeNull();
+      const m = await s.redeemInvite(code, "tg:10", "en", NOW);
+      expect(m).toMatchObject({ venue_id: v.id, chat_ref: "tg:10", role: "owner", lang: "en" });
+      expect(await s.redeemInvite(code, "tg:11", "bg", NOW)).toBeNull(); // used
       const expired = await s.createInvite(v.id, "staff", NOW);
-      expect(await s.redeemInvite(expired, 12, "bg", LATER)).toBeNull();
-      expect(await s.findMember(10)).toMatchObject({ role: "owner", lang: "en" });
-      await s.setMemberLang(v.id, 10, "bg");
-      expect((await s.findMember(10))?.lang).toBe("bg");
-      expect(await s.findMember(99)).toBeNull();
+      expect(await s.redeemInvite(expired, "tg:12", "bg", LATER)).toBeNull();
+      expect(await s.findMember("tg:10")).toMatchObject({ role: "owner", lang: "en" });
+      await s.setMemberLang(v.id, "tg:10", "bg");
+      expect((await s.findMember("tg:10"))?.lang).toBe("bg");
+      expect(await s.findMember("tg:99")).toBeNull();
       const token = await s.getAdminToken(v.id);
       expect(token.length).toBeGreaterThanOrEqual(32);
       expect(await s.getAdminToken(v.id)).toBe(token);
       expect((await s.findVenueByAdminToken(token))?.id).toBe(v.id);
       expect(await s.findVenueByAdminToken("x".repeat(32))).toBeNull();
+      expect((await s.findMember("tg:10"))?.last_seen_at).toBeNull();
+      await s.touchMember("tg:10", LATER);
+      expect((await s.findMember("tg:10"))?.last_seen_at).toBe(LATER);
+      await s.touchMember("fb:nobody", LATER); // unknown ref: no throw
     });
 
     it("creates, lists, applies and skips change sets", async () => {
@@ -63,12 +67,12 @@ export function storeContract(name: string, make: () => Promise<Store>) {
       const i = await s.insertItem({ venue_id: v.id, category_id: c.id, name_bg: "Еспресо", name_en: "Espresso", desc_bg: "", desc_en: "", price_eur: 1.8, allergens: [], position: 0 });
       const site = await s.getSite(v.id);
       const changes = planChanges(site, [{ op: "set_price", item_id: i.id, price_eur: 2 }], ctx);
-      const cs = await s.createChangeSet({ venue_id: v.id, chat_id: 10, summary_bg: "Цена", summary_en: "Price", preview_bg: "p", preview_en: "p", source: "text", status: "proposed", changes });
-      expect(cs).toMatchObject({ status: "proposed", source: "text", chat_id: 10, apply_at: null, undoes_id: null });
+      const cs = await s.createChangeSet({ venue_id: v.id, chat_ref: "tg:10", summary_bg: "Цена", summary_en: "Price", preview_bg: "p", preview_en: "p", source: "text", status: "proposed", changes });
+      expect(cs).toMatchObject({ status: "proposed", source: "text", chat_ref: "tg:10", apply_at: null, undoes_id: null });
       expect(cs.changes).toHaveLength(1);
       expect(cs.changes[0]).toMatchObject({ op: "set_price", entity: "item", entity_id: i.id, before: { price_eur: 1.8 }, after: { price_eur: 2 } });
-      expect((await s.findProposed(v.id, 10))?.id).toBe(cs.id);
-      expect(await s.findProposed(v.id, 11)).toBeNull();
+      expect((await s.findProposed(v.id, "tg:10"))?.id).toBe(cs.id);
+      expect(await s.findProposed(v.id, "tg:11")).toBeNull();
 
       expect(await s.applyChangeSet(cs.id, LATER)).toBe("applied");
       expect((await s.getSite(v.id)).items[0].price_eur).toBe(2);
@@ -76,7 +80,7 @@ export function storeContract(name: string, make: () => Promise<Store>) {
       expect(after).toMatchObject({ status: "applied", applied_at: LATER });
       expect(await s.applyChangeSet(cs.id, LATER)).toBe("skipped");
       expect((await s.getSite(v.id)).items[0].price_eur).toBe(2);
-      expect(await s.findProposed(v.id, 10)).toBeNull();
+      expect(await s.findProposed(v.id, "tg:10")).toBeNull();
       expect((await s.listChangeSets(v.id, { status: ["applied"] })).map((x) => x.id)).toEqual([cs.id]);
       expect(await s.listChangeSets(v.id, { status: ["proposed"] })).toEqual([]);
     });
@@ -87,9 +91,9 @@ export function storeContract(name: string, make: () => Promise<Store>) {
       const c = await s.insertCategory({ venue_id: v.id, name_bg: "Кафе", name_en: "Coffee", position: 0 });
       const i = await s.insertItem({ venue_id: v.id, category_id: c.id, name_bg: "Еспресо", name_en: "Espresso", desc_bg: "", desc_en: "", price_eur: 1.8, allergens: [], position: 0 });
       const changes = planChanges(await s.getSite(v.id), [{ op: "set_price", item_id: i.id, price_eur: 2 }], ctx);
-      const cs = await s.createChangeSet({ venue_id: v.id, chat_id: 10, summary_bg: "Цена", summary_en: "Price", preview_bg: "p", preview_en: "p", source: "text", status: "proposed", changes });
+      const cs = await s.createChangeSet({ venue_id: v.id, chat_ref: "tg:10", summary_bg: "Цена", summary_en: "Price", preview_bg: "p", preview_en: "p", source: "text", status: "proposed", changes });
       await s.applyChangeSet(cs.id, NOW);
-      const undo = await s.createChangeSet({ venue_id: v.id, chat_id: 10, summary_bg: "Отмяна", summary_en: "Undo", preview_bg: "u", preview_en: "u", source: "undo", status: "proposed", undoes_id: cs.id, changes: [{ ...changes[0], before: changes[0].after, after: changes[0].before }] });
+      const undo = await s.createChangeSet({ venue_id: v.id, chat_ref: "tg:10", summary_bg: "Отмяна", summary_en: "Undo", preview_bg: "u", preview_en: "u", source: "undo", status: "proposed", undoes_id: cs.id, changes: [{ ...changes[0], before: changes[0].after, after: changes[0].before }] });
       expect(await s.applyChangeSet(undo.id, LATER)).toBe("applied");
       expect((await s.getSite(v.id)).items[0].price_eur).toBe(1.8);
       expect(await s.getChangeSet(cs.id)).toMatchObject({ status: "reverted", reverted_by: undo.id });
@@ -98,7 +102,7 @@ export function storeContract(name: string, make: () => Promise<Store>) {
     it("finds due, upcoming and stale sets", async () => {
       const s = await make();
       const v = await s.createVenue({ slug: "t6", name: "Test" });
-      const base = { venue_id: v.id, chat_id: 10, summary_bg: "x", summary_en: "x", preview_bg: "x", preview_en: "x", source: "text" as const, changes: [] };
+      const base = { venue_id: v.id, chat_ref: "tg:10", summary_bg: "x", summary_en: "x", preview_bg: "x", preview_en: "x", source: "text" as const, changes: [] };
       const due = await s.createChangeSet({ ...base, status: "scheduled", apply_at: "2026-10-09T09:30:00.000Z" });
       const soon = await s.createChangeSet({ ...base, status: "scheduled", apply_at: "2026-10-10T08:00:00.000Z" });
       const far = await s.createChangeSet({ ...base, status: "scheduled", apply_at: "2026-10-20T08:00:00.000Z" });
@@ -116,7 +120,7 @@ export function storeContract(name: string, make: () => Promise<Store>) {
     it("expires only a still-proposed set", async () => {
       const s = await make();
       const v = await s.createVenue({ slug: "t6b", name: "Test" });
-      const base = { venue_id: v.id, chat_id: 10, summary_bg: "x", summary_en: "x", preview_bg: "x", preview_en: "x", source: "text" as const, changes: [] };
+      const base = { venue_id: v.id, chat_ref: "tg:10", summary_bg: "x", summary_en: "x", preview_bg: "x", preview_en: "x", source: "text" as const, changes: [] };
       const proposed = await s.createChangeSet({ ...base, status: "proposed" });
       expect(await s.expireChangeSet(proposed.id, LATER)).toBe("expired");
       expect(await s.getChangeSet(proposed.id)).toMatchObject({ status: "expired", decided_at: LATER });
@@ -134,7 +138,7 @@ export function storeContract(name: string, make: () => Promise<Store>) {
       const mk = (name: string, extra: Partial<Parameters<Store["insertItem"]>[0]>) =>
         s.insertItem({ venue_id: v.id, category_id: c.id, name_bg: name, name_en: name, desc_bg: "", desc_en: "", price_eur: 1, allergens: [], position: 0, ...extra });
       const a = await mk("a", {});
-      await s.createChangeSet({ venue_id: v.id, chat_id: null, summary_bg: "", summary_en: "", preview_bg: "", preview_en: "", source: "text", status: "proposed", changes: [{ position: 0, op: "set_sold_out", entity: "item", entity_id: a.id, before: { sold_out_until: null }, after: { sold_out_until: "2026-10-09T09:30:00.000Z" } }] }).then((cs) => s.applyChangeSet(cs.id, NOW));
+      await s.createChangeSet({ venue_id: v.id, chat_ref: null, summary_bg: "", summary_en: "", preview_bg: "", preview_en: "", source: "text", status: "proposed", changes: [{ position: 0, op: "set_sold_out", entity: "item", entity_id: a.id, before: { sold_out_until: null }, after: { sold_out_until: "2026-10-09T09:30:00.000Z" } }] }).then((cs) => s.applyChangeSet(cs.id, NOW));
       const sp = await mk("special", { is_special: true, special_expires_at: "2026-10-09T09:45:00.000Z" });
       await mk("live special", { is_special: true, special_expires_at: "2026-10-09T15:00:00.000Z" });
       const timers = await s.listExpiredTimers(LATER, v.id);
@@ -148,7 +152,7 @@ export function storeContract(name: string, make: () => Promise<Store>) {
       const v = await s.createVenue({ slug: "t7b", name: "Test" });
       const c = await s.insertCategory({ venue_id: v.id, name_bg: "Кафе", name_en: "Coffee", position: 0 });
       const i = await s.insertItem({ venue_id: v.id, category_id: c.id, name_bg: "a", name_en: "a", desc_bg: "", desc_en: "", price_eur: 1, allergens: [], position: 0 });
-      const base = { venue_id: v.id, chat_id: null, summary_bg: "", summary_en: "", preview_bg: "", preview_en: "", source: "text" as const, status: "proposed" as const };
+      const base = { venue_id: v.id, chat_ref: null, summary_bg: "", summary_en: "", preview_bg: "", preview_en: "", source: "text" as const, status: "proposed" as const };
       const soldOut = await s.createChangeSet({ ...base, changes: [{ position: 0, op: "set_sold_out", entity: "item", entity_id: i.id, before: { sold_out_until: null }, after: { sold_out_until: "2026-10-09T09:30:00.000Z" } }] });
       await s.applyChangeSet(soldOut.id, NOW);
       const removed = await s.createChangeSet({ ...base, changes: [{ position: 0, op: "remove_item", entity: "item", entity_id: i.id, before: { active: true }, after: { active: false } }] });
@@ -166,10 +170,10 @@ export function storeContract(name: string, make: () => Promise<Store>) {
       expect(m.public_url).toContain(m.storage_path);
       expect(await s.getMedia(m.id)).toEqual(m);
       expect((await s.getSite(v.id)).media).toEqual([m]);
-      expect(await s.getConversation(v.id, 10)).toBeNull();
+      expect(await s.getConversation(v.id, "tg:10")).toBeNull();
       const conv = { turns: [{ at: NOW, owner: "hi", agent: "hello" }], correction_for: null, updated_at: NOW };
-      await s.setConversation(v.id, 10, conv);
-      expect(await s.getConversation(v.id, 10)).toEqual(conv);
+      await s.setConversation(v.id, "tg:10", conv);
+      expect(await s.getConversation(v.id, "tg:10")).toEqual(conv);
     });
 
     it("clears venue content but keeps members", async () => {
@@ -177,12 +181,12 @@ export function storeContract(name: string, make: () => Promise<Store>) {
       const v = await s.createVenue({ slug: "t9", name: "Test" });
       const c = await s.insertCategory({ venue_id: v.id, name_bg: "Кафе", name_en: "Coffee", position: 0 });
       await s.insertItem({ venue_id: v.id, category_id: c.id, name_bg: "x", name_en: "x", desc_bg: "", desc_en: "", price_eur: 1, allergens: [], position: 0 });
-      await s.upsertMember({ venue_id: v.id, tg_chat_id: 10, role: "owner", lang: "bg" });
+      await s.upsertMember({ venue_id: v.id, chat_ref: "tg:10", role: "owner", lang: "bg" });
       await s.clearVenueContent(v.id);
       const site = await s.getSite(v.id);
       expect(site.items).toEqual([]);
       expect(site.categories).toEqual([]);
-      expect(await s.findMember(10)).not.toBeNull();
+      expect(await s.findMember("tg:10")).not.toBeNull();
     });
 
     it("gives new venues the classic template, café type and live status, and accepts overrides", async () => {
@@ -254,10 +258,10 @@ export function storeContract(name: string, make: () => Promise<Store>) {
       expect((await s.findVenueByDraftToken("a".repeat(64)))?.id).toBe(v.id);
       await s.setDraftToken(v.id, null);
       expect(await s.findVenueByDraftToken("a".repeat(64))).toBeNull();
-      await s.upsertMember({ venue_id: v.id, tg_chat_id: 21, role: "owner", lang: "bg" });
-      await s.upsertMember({ venue_id: v.id, tg_chat_id: 22, role: "staff", lang: "en" });
+      await s.upsertMember({ venue_id: v.id, chat_ref: "tg:21", role: "owner", lang: "bg" });
+      await s.upsertMember({ venue_id: v.id, chat_ref: "tg:22", role: "staff", lang: "en" });
       const members = await s.listMembers(v.id);
-      expect(members.map((m) => [m.tg_chat_id, m.role]).sort()).toEqual([[21, "owner"], [22, "staff"]]);
+      expect(members.map((m) => [m.chat_ref, m.role]).sort()).toEqual([["tg:21", "owner"], ["tg:22", "staff"]]);
       expect(await s.listMembers("00000000-0000-0000-0000-000000000000")).toEqual([]);
     });
 
@@ -266,16 +270,16 @@ export function storeContract(name: string, make: () => Promise<Store>) {
       const v = await s.createVenue({ slug: "t15", name: "Test" });
       const c = await s.insertCategory({ venue_id: v.id, name_bg: "Кафе", name_en: "Coffee", position: 0 });
       await s.insertItem({ venue_id: v.id, category_id: c.id, name_bg: "x", name_en: "x", desc_bg: "", desc_en: "", price_eur: 1, allergens: [], position: 0 });
-      await s.upsertMember({ venue_id: v.id, tg_chat_id: 31, role: "owner", lang: "bg" });
+      await s.upsertMember({ venue_id: v.id, chat_ref: "tg:31", role: "owner", lang: "bg" });
       const code = await s.createInvite(v.id, "staff", LATER);
       const token = await s.getAdminToken(v.id);
       await s.setDraftToken(v.id, "b".repeat(64));
-      await s.createChangeSet({ venue_id: v.id, chat_id: 31, summary_bg: "", summary_en: "", preview_bg: "", preview_en: "", source: "text", status: "proposed", changes: [] });
+      await s.createChangeSet({ venue_id: v.id, chat_ref: "tg:31", summary_bg: "", summary_en: "", preview_bg: "", preview_en: "", source: "text", status: "proposed", changes: [] });
       await s.deleteVenue(v.id);
       expect(await s.getVenueBySlug("t15")).toBeNull();
       await expect(s.getVenue(v.id)).rejects.toThrow();
-      expect(await s.findMember(31)).toBeNull();
-      expect(await s.redeemInvite(code, 32, "bg", NOW)).toBeNull();
+      expect(await s.findMember("tg:31")).toBeNull();
+      expect(await s.redeemInvite(code, "tg:32", "bg", NOW)).toBeNull();
       expect(await s.findVenueByAdminToken(token)).toBeNull();
       expect(await s.findVenueByDraftToken("b".repeat(64))).toBeNull();
       expect(await s.listProposedBefore("2027-01-01T00:00:00.000Z", v.id)).toEqual([]);

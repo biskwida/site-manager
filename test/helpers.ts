@@ -11,12 +11,12 @@ export interface Demo {
   items: Record<string, Item>; // by name_en
 }
 
-/** A memory store with the demo venue and an owner (chat 1001, bg) and a staff member (chat 1002, en). */
+/** A memory store with the demo venue and an owner (chat tg:1001, bg) and a staff member (chat tg:1002, en). */
 export async function makeDemo(): Promise<Demo> {
   const store = new InMemoryStore();
   const seeded = await seedDemo(store);
-  await store.upsertMember({ venue_id: seeded.venue.id, tg_chat_id: 1001, role: "owner", lang: "bg" });
-  await store.upsertMember({ venue_id: seeded.venue.id, tg_chat_id: 1002, role: "staff", lang: "en" });
+  await store.upsertMember({ venue_id: seeded.venue.id, chat_ref: "tg:1001", role: "owner", lang: "bg" });
+  await store.upsertMember({ venue_id: seeded.venue.id, chat_ref: "tg:1002", role: "staff", lang: "en" });
   return {
     store,
     venue: seeded.venue,
@@ -26,21 +26,21 @@ export async function makeDemo(): Promise<Demo> {
 }
 
 export class FakeMessenger implements Messenger {
-  sent: { chatId: number; text: string; setId?: string; lang?: Lang; messageId: number }[] = [];
-  edits: { chatId: number; messageId: number; text: string }[] = [];
+  sent: { chatRef: string; text: string; setId?: string; lang?: Lang; messageRef: string }[] = [];
+  edits: { chatRef: string; messageRef: string; text: string }[] = [];
   private next = 100;
-  async send(chatId: number, text: string) {
-    const messageId = this.next++;
-    this.sent.push({ chatId, text, messageId });
-    return messageId;
+  async send(chatRef: string, text: string) {
+    const messageRef = String(this.next++);
+    this.sent.push({ chatRef, text, messageRef });
+    return messageRef;
   }
-  async sendProposal(chatId: number, text: string, setId: string, lang: Lang) {
-    const messageId = this.next++;
-    this.sent.push({ chatId, text, setId, lang, messageId });
-    return messageId;
+  async sendProposal(chatRef: string, text: string, setId: string, lang: Lang) {
+    const messageRef = String(this.next++);
+    this.sent.push({ chatRef, text, setId, lang, messageRef });
+    return messageRef;
   }
-  async edit(chatId: number, messageId: number, text: string) {
-    this.edits.push({ chatId, messageId, text });
+  async edit(chatRef: string, messageRef: string, text: string) {
+    this.edits.push({ chatRef, messageRef, text });
   }
   last() {
     return this.sent[this.sent.length - 1];

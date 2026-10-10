@@ -9,7 +9,7 @@ describe("loadSite", () => {
   it("returns the live state, null for an unknown slug, and ignores draft without a valid key", async () => {
     const { store, venue, items } = await makeDemo();
     const site = await store.getSite(venue.id);
-    const cs = await store.createChangeSet({ venue_id: venue.id, chat_id: 1001, summary_bg: "Капучино 3,20 €", summary_en: "Cappuccino €3.20", preview_bg: "p", preview_en: "p", source: "text", status: "proposed", changes: planChanges(site, [{ op: "set_price", item_id: items.Cappuccino.id, price_eur: 3.2 }], { newId: () => "n", now: "2026-10-09T09:00:00.000Z" }) });
+    const cs = await store.createChangeSet({ venue_id: venue.id, chat_ref: "tg:1001", summary_bg: "Капучино 3,20 €", summary_en: "Cappuccino €3.20", preview_bg: "p", preview_en: "p", source: "text", status: "proposed", changes: planChanges(site, [{ op: "set_price", item_id: items.Cappuccino.id, price_eur: 3.2 }], { newId: () => "n", now: "2026-10-09T09:00:00.000Z" }) });
     expect(await loadSite(store, "nope")).toBeNull();
     const live = await loadSite(store, "agala");
     expect(live?.draft).toBeNull();
@@ -43,7 +43,7 @@ describe("loadSite", () => {
     // a live venue ignores draftToken
     expect((await loadSite(store, "agala", { draftToken: "anything" }))?.state.venue.id).toBe(venue.id);
     // DraftInfo carries the key
-    const cs = await store.createChangeSet({ venue_id: venue.id, chat_id: 1001, summary_bg: "x", summary_en: "x", preview_bg: "p", preview_en: "p", source: "text", status: "proposed", changes: [] });
+    const cs = await store.createChangeSet({ venue_id: venue.id, chat_ref: "tg:1001", summary_bg: "x", summary_en: "x", preview_bg: "p", preview_en: "p", source: "text", status: "proposed", changes: [] });
     const key = await store.getAdminToken(venue.id);
     expect((await loadSite(store, "agala", { draftId: cs.id, key }))?.draft).toMatchObject({ id: cs.id, key });
   });

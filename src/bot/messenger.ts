@@ -1,15 +1,16 @@
 // src/bot/messenger.ts
 import type { Api } from "grammy";
 import { InlineKeyboard } from "grammy";
+import { parseRef } from "../channels/ref";
 import type { Lang } from "../domain/types";
 
 export interface Messenger {
-  /** Plain message; returns the Telegram message id or null if sending failed (never throws). */
-  send(chatId: number, text: string): Promise<number | null>;
+  /** Plain message; returns the message ref or null if sending failed (never throws). */
+  send(chatRef: string, text: string): Promise<string | null>;
   /** Preview with ✅ / ✏️ / ❌ buttons. */
-  sendProposal(chatId: number, text: string, setId: string, lang: Lang): Promise<number | null>;
+  sendProposal(chatRef: string, text: string, setId: string, lang: Lang): Promise<string | null>;
   /** Replaces the text and removes the buttons; best-effort. */
-  edit(chatId: number, messageId: number, text: string): Promise<void>;
+  edit(chatRef: string, messageRef: string, text: string): Promise<void>;
 }
 
 export function proposalKeyboard(setId: string, lang: Lang): InlineKeyboard {
@@ -20,29 +21,34 @@ export function proposalKeyboard(setId: string, lang: Lang): InlineKeyboard {
     .text(bg ? "❌ Откажи" : "❌ Cancel", `cs:cancel:${setId}`);
 }
 
+/** The numeric Telegram chat id inside a "tg:" ref. */
+function telegramChat(chatRef: string): number {
+  return Number(parseRef(chatRef).id);
+}
+
 export class TelegramMessenger implements Messenger {
   constructor(private api: Api) {}
-  async send(chatId: number, text: string) {
+  async send(chatRef: string, text: string) {
     try {
-      const m = await this.api.sendMessage(chatId, text);
-      return m.message_id;
+      const m = await this.api.sendMessage(telegramChat(chatRef), text);
+      return String(m.message_id);
     } catch (e) {
       console.error("[messenger] send failed:", e instanceof Error ? e.message : e);
       return null;
     }
   }
-  async sendProposal(chatId: number, text: string, setId: string, lang: Lang) {
+  async sendProposal(chatRef: string, text: string, setId: string, lang: Lang) {
     try {
-      const m = await this.api.sendMessage(chatId, text, { reply_markup: proposalKeyboard(setId, lang) });
-      return m.message_id;
+      const m = await this.api.sendMessage(telegramChat(chatRef), text, { reply_markup: proposalKeyboard(setId, lang) });
+      return String(m.message_id);
     } catch (e) {
       console.error("[messenger] sendProposal failed:", e instanceof Error ? e.message : e);
       return null;
     }
   }
-  async edit(chatId: number, messageId: number, text: string) {
+  async edit(chatRef: string, messageRef: string, text: string) {
     try {
-      await this.api.editMessageText(chatId, messageId, text, { reply_markup: { inline_keyboard: [] } });
+      await this.api.editMessageText(telegramChat(chatRef), Number(messageRef), text, { reply_markup: { inline_keyboard: [] } });
     } catch (e) {
       console.error("[messenger] edit failed:", e instanceof Error ? e.message : e);
     }

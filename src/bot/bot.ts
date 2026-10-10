@@ -2,6 +2,7 @@
 import { Bot, type Context } from "grammy";
 import type { UserFromGetMe } from "grammy/types";
 import type { ImageInput } from "../agent/run";
+import { makeRef } from "../channels/ref";
 import { detectLang } from "../domain/format";
 import type { Lang, Member } from "../domain/types";
 import type { Store } from "../store/types";
@@ -12,7 +13,7 @@ import { type Messenger, TelegramMessenger } from "./messenger";
 
 export interface RunRequest {
   venueId: string;
-  chatId: number;
+  chatRef: string;
   member: Member;
   text: string;
   source: "text" | "voice" | "photo";
@@ -48,9 +49,8 @@ export function publicUrl(baseUrl: string, slug: string): string {
 
 /** Resolves the member for a chat, or replies with the no-access hint and returns null. */
 export async function requireMember(d: BotDeps, ctx: Context): Promise<Member | null> {
-  const chatId = ctx.chat?.id;
-  if (chatId === undefined) return null;
-  const member = await d.store.findMember(chatId);
+  if (ctx.chat === undefined) return null;
+  const member = await d.store.findMember(makeRef("tg", ctx.chat.id));
   if (member) return member;
   await ctx.reply(copy(langFromCode(ctx.from?.language_code)).noAccess);
   return null;
@@ -60,9 +60,9 @@ export function createBot(d: BotDeps): Bot {
   const bot = new Bot(d.token, d.botInfo ? { botInfo: d.botInfo } : undefined);
 
   bot.command("start", async (ctx) => {
-    const chatId = ctx.chat.id;
+    const chatRef = makeRef("tg", ctx.chat.id);
     const uiLang = langFromCode(ctx.from?.language_code);
-    const existing = await d.store.findMember(chatId);
+    const existing = await d.store.findMember(chatRef);
     if (existing) {
       const venue = await d.store.getVenue(existing.venue_id);
       const c = copy(existing.lang);
@@ -75,7 +75,7 @@ export function createBot(d: BotDeps): Bot {
       await ctx.reply(copy(uiLang).noAccess);
       return;
     }
-    const member = await d.store.redeemInvite(code, chatId, uiLang, d.now().toISOString());
+    const member = await d.store.redeemInvite(code, chatRef, uiLang, d.now().toISOString());
     if (!member) {
       await ctx.reply(copy(uiLang).badCode);
       return;
@@ -94,7 +94,7 @@ export function createBot(d: BotDeps): Bot {
       await ctx.reply(copy(member.lang).langUsage);
       return;
     }
-    await d.store.setMemberLang(member.venue_id, member.tg_chat_id, arg);
+    await d.store.setMemberLang(member.venue_id, member.chat_ref, arg);
     await ctx.reply(copy(arg).langSet);
   });
 
@@ -115,7 +115,7 @@ export function createBot(d: BotDeps): Bot {
     const member = await requireMember(d, ctx);
     if (!member) return;
     const lang = detectLang(ctx.message?.text ?? "") ?? member.lang;
-    d.startRun({ venueId: member.venue_id, chatId: member.tg_chat_id, member: { ...member, lang }, text: "Undo the last change.", source: "text" });
+    d.startRun({ venueId: member.venue_id, chatRef: member.chat_ref, member: { ...member, lang }, text: "Undo the last change.", source: "text" });
     await ctx.replyWithChatAction("typing").catch(() => undefined);
   });
 
@@ -125,23 +125,23 @@ export function createBot(d: BotDeps): Bot {
     if (!member) return;
     // Start first: a failed acknowledgement must not lose the message.
     const lang = detectLang(ctx.message.text) ?? member.lang;
-    d.startRun({ venueId: member.venue_id, chatId: member.tg_chat_id, member: { ...member, lang }, text: ctx.message.text, source: "text" });
+    d.startRun({ venueId: member.venue_id, chatRef: member.chat_ref, member: { ...member, lang }, text: ctx.message.text, source: "text" });
     await ctx.replyWithChatAction("typing").catch(() => undefined);
   });
 
   bot.on("callback_query:data", async (ctx) => {
     const parsed = parseCallback(ctx.callbackQuery.data);
-    const chatId = ctx.chat?.id;
-    if (!parsed || chatId === undefined) {
+    if (!parsed || ctx.chat === undefined) {
       await ctx.answerCallbackQuery().catch(() => undefined);
       return;
     }
     // Answer first so the client stops spinning, then do the work, then edit the message.
     await ctx.answerCallbackQuery().catch(() => undefined);
-    const r = await handleDecision({ store: d.store, messenger: d.messenger, now: d.now }, chatId, parsed.decision, parsed.setId);
+    const chatRef = makeRef("tg", ctx.chat.id);
+    const r = await handleDecision({ store: d.store, messenger: d.messenger, now: d.now }, chatRef, parsed.decision, parsed.setId);
     const messageId = ctx.callbackQuery.message?.message_id;
     // Edit through this update's API (removes the buttons); best-effort, never throws.
-    if (r.edit && messageId !== undefined) await new TelegramMessenger(ctx.api).edit(chatId, messageId, r.edit);
+    if (r.edit && messageId !== undefined) await new TelegramMessenger(ctx.api).edit(chatRef, String(messageId), r.edit);
     if (r.reply) await ctx.reply(r.reply);
   });
 

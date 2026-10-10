@@ -3,6 +3,7 @@
 import type Anthropic from "@anthropic-ai/sdk";
 import type { Bot } from "grammy";
 import { runTurn } from "../agent/run";
+import { makeRef } from "../channels/ref";
 import { createBot, type BotDeps, type RunRequest } from "../bot/bot";
 import { downloadTelegramFile } from "../bot/media";
 import { TelegramMessenger, type Messenger } from "../bot/messenger";
@@ -46,7 +47,8 @@ export async function makeServerDeps(o: DepsOptions): Promise<ServerDeps> {
       const mem = new InMemoryStore();
       const { venue } = await seedDemo(mem, config.demoVenueSlug);
       const chat = Number(env.DEMO_OWNER_CHAT_ID);
-      if (Number.isInteger(chat) && chat > 0) await mem.upsertMember({ venue_id: venue.id, tg_chat_id: chat, role: "owner", lang: "bg" });
+      const ref = env.DEMO_OWNER_CHAT_REF?.trim() || (Number.isInteger(chat) && chat > 0 ? makeRef("tg", chat) : null);
+      if (ref) await mem.upsertMember({ venue_id: venue.id, chat_ref: ref, role: "owner", lang: "bg" });
       log(`[memory store] demo venue "${venue.slug}" seeded; admin link: ${config.publicBaseUrl}/admin/${venue.slug}?key=${await mem.getAdminToken(venue.id)}`);
       store = mem;
     } else {
@@ -80,7 +82,7 @@ export async function makeServerDeps(o: DepsOptions): Promise<ServerDeps> {
     }
     try {
       await runTurn(
-        { store: s, venueId: r.venueId, chatId: r.chatId, member: r.member, messenger, now: () => new Date(), baseUrl: config.publicBaseUrl },
+        { store: s, venueId: r.venueId, chatRef: r.chatRef, member: r.member, messenger, now: () => new Date(), baseUrl: config.publicBaseUrl },
         { text: r.text, source: r.source, image: r.image, mediaId: r.mediaId },
         { model: config.agentModel, effort: config.agentEffort, apiKey: config.anthropicApiKey || undefined },
         o.client,

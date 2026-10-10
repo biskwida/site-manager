@@ -10,7 +10,7 @@ describe("makeServerDeps (memory mode)", () => {
     const venue = await deps.store.getVenueBySlug("agala");
     expect(venue?.name).toBe("Кафене „Ъгъла“");
     expect((await deps.store.getSite(venue!.id)).items.length).toBe(12);
-    expect(await deps.store.findMember(777)).toMatchObject({ role: "owner" });
+    expect(await deps.store.findMember("tg:777")).toMatchObject({ role: "owner" });
     expect(logs.join("\n")).toMatch(/admin link: http:\/\/localhost:3000\/admin\/agala\?key=/);
   });
 });

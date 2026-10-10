@@ -218,7 +218,7 @@ export type ChangeSetStatus = "proposed" | "scheduled" | "applied" | "rejected" 
 export interface ChangeSet {
   id: string;
   venue_id: string;
-  chat_id: number | null;
+  chat_ref: string | null;
   summary_bg: string;
   summary_en: string;
   preview_bg: string;
@@ -232,7 +232,8 @@ export interface ChangeSet {
   reverted_by: string | null;
   /** For source "undo": the set this one reverts. */
   undoes_id: string | null;
-  tg_message_id: number | null;
+  /** The proposal message on the owner's channel (Telegram message id as text; Meta ids as given). */
+  message_ref: string | null;
   created_at: string;
   changes: Change[];
 }
@@ -240,9 +241,12 @@ export interface ChangeSet {
 export type Role = "owner" | "staff";
 export interface Member {
   venue_id: string;
-  tg_chat_id: number;
+  /** "<channel>:<id>", see src/channels/ref.ts. */
+  chat_ref: string;
   role: Role;
   lang: Lang;
+  /** Last inbound message from this member; Meta channels may only be messaged proactively within 24 h of it. */
+  last_seen_at: string | null;
   created_at: string;
 }
 

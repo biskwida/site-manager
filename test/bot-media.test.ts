@@ -53,6 +53,6 @@ describe("voice", () => {
     expect(runs[0]).toMatchObject({ source: "voice", text: "Баницата свърши" });
     expect(runs[0].member.lang).toBe("bg");
     expect(api.texts()[0]).toMatch(/^🎤 Чух/);
-    expect((await store.findMember(1002))?.lang).toBe("en");
+    expect((await store.findMember("tg:1002"))?.lang).toBe("en");
   });
 });

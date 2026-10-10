@@ -11,27 +11,27 @@ import { runTick } from "../src/tick";
 
 class ConsoleMessenger implements Messenger {
   private next = 1;
-  async send(chatId: number, text: string) {
-    console.log(`→ [${chatId}] ${text}`);
-    return this.next++;
+  async send(chatRef: string, text: string) {
+    console.log(`→ [${chatRef}] ${text}`);
+    return String(this.next++);
   }
-  async sendProposal(chatId: number, text: string) {
-    console.log(`→ [${chatId}] ${text}\n   [✅ Приложи] [✏️ Промени] [❌ Откажи]`);
-    return this.next++;
+  async sendProposal(chatRef: string, text: string) {
+    console.log(`→ [${chatRef}] ${text}\n   [✅ Приложи] [✏️ Промени] [❌ Откажи]`);
+    return String(this.next++);
   }
-  async edit(chatId: number, messageId: number, text: string) {
-    console.log(`✎ [${chatId}#${messageId}] ${text.split("\n").pop()}`);
+  async edit(chatRef: string, messageRef: string, text: string) {
+    console.log(`✎ [${chatRef}#${messageRef}] ${text.split("\n").pop()}`);
   }
 }
 
 const store = new InMemoryStore();
 const { venue, items } = await seedDemo(store);
-await store.upsertMember({ venue_id: venue.id, tg_chat_id: 1, role: "owner", lang: "bg" });
-const member = (await store.findMember(1))!;
+await store.upsertMember({ venue_id: venue.id, chat_ref: "tg:1", role: "owner", lang: "bg" });
+const member = (await store.findMember("tg:1"))!;
 const messenger = new ConsoleMessenger();
 let now = new Date("2026-10-09T09:00:00.000Z"); // Friday 12:00 in Sofia
 const clock = () => now;
-const tools = makeTools({ store, venueId: venue.id, chatId: 1, member, messenger, now: clock, baseUrl: "http://localhost:3000" });
+const tools = makeTools({ store, venueId: venue.id, chatRef: "tg:1", member, messenger, now: clock, baseUrl: "http://localhost:3000" });
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 const call = async (name: string, input: unknown): Promise<any> => {
   const t = tools.find((x) => x.name === name);
@@ -47,7 +47,7 @@ const assert = (cond: unknown, msg: string) => {
   }
   console.log(`PASS ${msg}`);
 };
-const decide = (setId: string) => handleDecision({ store, messenger, now: clock }, 1, "apply", setId);
+const decide = (setId: string) => handleDecision({ store, messenger, now: clock }, "tg:1", "apply", setId);
 const price = async (id: string) => (await store.getSite(venue.id)).items.find((i) => i.id === id)!.price_eur;
 const cap = items.find((i) => i.name_en === "Cappuccino")!;
 const ban = items.find((i) => i.name_en === "Cheese banitsa")!;

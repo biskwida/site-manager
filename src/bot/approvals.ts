@@ -28,8 +28,8 @@ export interface DecisionResult {
 }
 
 /** Answer the callback first (the caller does), then run this, then edit the message with `edit`. */
-export async function handleDecision(d: DecisionDeps, chatId: number, decision: Decision, setId: string): Promise<DecisionResult> {
-  const member = await d.store.findMember(chatId);
+export async function handleDecision(d: DecisionDeps, chatRef: string, decision: Decision, setId: string): Promise<DecisionResult> {
+  const member = await d.store.findMember(chatRef);
   const lang: Lang = member?.lang ?? "bg";
   const c = copy(lang);
   let cs;
@@ -38,7 +38,7 @@ export async function handleDecision(d: DecisionDeps, chatId: number, decision: 
   } catch {
     return { toast: c.notYours };
   }
-  if (cs.chat_id !== chatId || !member || member.venue_id !== cs.venue_id) return { toast: c.notYours };
+  if (cs.chat_ref !== chatRef || !member || member.venue_id !== cs.venue_id) return { toast: c.notYours };
   const preview = lang === "bg" ? cs.preview_bg : cs.preview_en;
   const venue = await d.store.getVenue(cs.venue_id);
   const now = d.now();
@@ -46,7 +46,7 @@ export async function handleDecision(d: DecisionDeps, chatId: number, decision: 
   if (cs.status !== "proposed") return { edit: `${preview}\n\n${c.status[cs.status]}`, toast: c.status[cs.status] };
 
   if (decision === "change") {
-    await setCorrection(d.store, cs.venue_id, chatId, cs.id, now);
+    await setCorrection(d.store, cs.venue_id, chatRef, cs.id, now);
     return { reply: c.changePrompt, toast: "✏️" };
   }
   if (decision === "cancel") {

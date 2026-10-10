@@ -15,7 +15,7 @@ interface Invite {
 
 export class InMemoryStore implements Store {
   sites = new Map<string, SiteState>();
-  members = new Map<number, Member>(); // one venue per chat
+  members = new Map<string, Member>(); // one venue per chat
   invites = new Map<string, Invite>();
   tokens = new Map<string, string>(); // venue id -> token
   sets = new Map<string, ChangeSet>();
@@ -104,7 +104,7 @@ export class InMemoryStore implements Store {
     this.sites.delete(id);
     this.draftTokens.delete(id);
     this.tokens.delete(id);
-    for (const [chatId, m] of this.members) if (m.venue_id === id) this.members.delete(chatId);
+    for (const [chatRef, m] of this.members) if (m.venue_id === id) this.members.delete(chatRef);
     for (const [code, inv] of this.invites) if (inv.venue_id === id) this.invites.delete(code);
     for (const [setId, cs] of this.sets) if (cs.venue_id === id) this.sets.delete(setId);
     for (const key of [...this.conversations.keys()]) if (key.startsWith(`${id}:`)) this.conversations.delete(key);
@@ -160,22 +160,27 @@ export class InMemoryStore implements Store {
     for (const key of [...this.conversations.keys()]) if (key.startsWith(`${venueId}:`)) this.conversations.delete(key);
   }
 
-  async findMember(chatId: number) {
-    const m = this.members.get(chatId);
+  async findMember(chatRef: string) {
+    const m = this.members.get(chatRef);
     return m ? clone(m) : null;
   }
   async listMembers(venueId: string) {
     return [...this.members.values()].filter((m) => m.venue_id === venueId).sort((a, b) => a.created_at.localeCompare(b.created_at)).map(clone);
   }
-  async upsertMember(m: Omit<Member, "created_at">) {
-    const row: Member = { ...m, created_at: this.members.get(m.tg_chat_id)?.created_at ?? this.clock() };
-    this.members.set(m.tg_chat_id, row);
+  async upsertMember(m: Omit<Member, "created_at" | "last_seen_at"> & { last_seen_at?: string | null }) {
+    const prev = this.members.get(m.chat_ref);
+    const row: Member = { ...m, last_seen_at: m.last_seen_at ?? prev?.last_seen_at ?? null, created_at: prev?.created_at ?? this.clock() };
+    this.members.set(m.chat_ref, row);
     return clone(row);
   }
-  async setMemberLang(venueId: string, chatId: number, lang: Lang) {
-    const m = this.members.get(chatId);
-    if (!m || m.venue_id !== venueId) throw new Error(`member ${chatId} not found`);
+  async setMemberLang(venueId: string, chatRef: string, lang: Lang) {
+    const m = this.members.get(chatRef);
+    if (!m || m.venue_id !== venueId) throw new Error(`member ${chatRef} not found`);
     m.lang = lang;
+  }
+  async touchMember(chatRef: string, nowIso: string) {
+    const m = this.members.get(chatRef);
+    if (m) m.last_seen_at = nowIso;
   }
   async createInvite(venueId: string, role: Role, expiresAt: string) {
     this.site(venueId);
@@ -183,11 +188,11 @@ export class InMemoryStore implements Store {
     this.invites.set(code, { code, venue_id: venueId, role, expires_at: expiresAt, used_at: null });
     return code;
   }
-  async redeemInvite(code: string, chatId: number, lang: Lang, now: string) {
+  async redeemInvite(code: string, chatRef: string, lang: Lang, now: string) {
     const inv = this.invites.get(code);
     if (!inv || inv.used_at !== null || Date.parse(inv.expires_at) <= Date.parse(now)) return null;
     inv.used_at = now;
-    return this.upsertMember({ venue_id: inv.venue_id, tg_chat_id: chatId, role: inv.role, lang });
+    return this.upsertMember({ venue_id: inv.venue_id, chat_ref: chatRef, role: inv.role, lang });
   }
   async getAdminToken(venueId: string) {
     this.site(venueId);
@@ -208,7 +213,7 @@ export class InMemoryStore implements Store {
     const row: ChangeSet = {
       id: crypto.randomUUID(),
       venue_id: cs.venue_id,
-      chat_id: cs.chat_id,
+      chat_ref: cs.chat_ref,
       summary_bg: cs.summary_bg,
       summary_en: cs.summary_en,
       preview_bg: cs.preview_bg,
@@ -221,7 +226,7 @@ export class InMemoryStore implements Store {
       applied_at: null,
       reverted_by: null,
       undoes_id: cs.undoes_id ?? null,
-      tg_message_id: cs.tg_message_id ?? null,
+      message_ref: cs.message_ref ?? null,
       created_at: this.clock(),
       changes: clone(cs.changes).map((c, i) => ({ ...c, position: i })),
     };
@@ -233,8 +238,8 @@ export class InMemoryStore implements Store {
     if (!cs) throw new Error(`change set ${id} not found`);
     return clone(cs);
   }
-  async findProposed(venueId: string, chatId: number) {
-    const cs = [...this.sets.values()].find((x) => x.venue_id === venueId && x.chat_id === chatId && x.status === "proposed");
+  async findProposed(venueId: string, chatRef: string) {
+    const cs = [...this.sets.values()].find((x) => x.venue_id === venueId && x.chat_ref === chatRef && x.status === "proposed");
     return cs ? clone(cs) : null;
   }
   async listChangeSets(venueId: string, opts: { status?: ChangeSet["status"][]; limit?: number } = {}) {
@@ -318,12 +323,12 @@ export class InMemoryStore implements Store {
     return null;
   }
 
-  async getConversation(venueId: string, chatId: number) {
-    const c = this.conversations.get(`${venueId}:${chatId}`);
+  async getConversation(venueId: string, chatRef: string) {
+    const c = this.conversations.get(`${venueId}:${chatRef}`);
     return c ? clone(c) : null;
   }
-  async setConversation(venueId: string, chatId: number, c: Conversation) {
-    this.conversations.set(`${venueId}:${chatId}`, clone(c));
+  async setConversation(venueId: string, chatRef: string, c: Conversation) {
+    this.conversations.set(`${venueId}:${chatRef}`, clone(c));
   }
 
   async bumpRateLimit(key: string, windowMs: number, max: number, now: string) {

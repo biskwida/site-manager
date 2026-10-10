@@ -9,8 +9,8 @@ const T0 = new Date("2026-10-09T09:00:00.000Z"); // Fri 12:00 Sofia, open
 async function setup(over: Partial<AgentDeps> = {}) {
   const demo = await makeDemo();
   const messenger = new FakeMessenger();
-  const member = (await demo.store.findMember(1001))!;
-  const deps: AgentDeps = { store: demo.store, venueId: demo.venue.id, chatId: 1001, member, messenger, now: () => T0, baseUrl: "https://site.example", ...over };
+  const member = (await demo.store.findMember("tg:1001"))!;
+  const deps: AgentDeps = { store: demo.store, venueId: demo.venue.id, chatRef: "tg:1001", member, messenger, now: () => T0, baseUrl: "https://site.example", ...over };
   return { ...demo, messenger, deps, tools: makeTools(deps) } as Demo & { messenger: FakeMessenger; deps: AgentDeps; tools: ReturnType<typeof makeTools> };
 }
 
@@ -39,8 +39,8 @@ describe("propose_changes", () => {
     const r = await call(tools, "propose_changes", { summary_bg: "Капучино 3,20 €", summary_en: "Cappuccino €3.20", changes: [{ op: "set_price", item_id: items.Cappuccino.id, price_eur: 3.2 }] });
     expect(r).toMatchObject({ status: "proposed", preview: "• Капучино: 2,90 € → 3,20 €" });
     const cs = await store.getChangeSet(r.change_set_id as string);
-    expect(cs).toMatchObject({ status: "proposed", source: "text", chat_id: 1001, preview_bg: "• Капучино: 2,90 € → 3,20 €", preview_en: "• Cappuccino: €2.90 → €3.20", tg_message_id: 100 });
-    expect(messenger.sent[0]).toMatchObject({ chatId: 1001, setId: cs.id, lang: "bg", text: "• Капучино: 2,90 € → 3,20 €\n\nДа приложа ли?" });
+    expect(cs).toMatchObject({ status: "proposed", source: "text", chat_ref: "tg:1001", preview_bg: "• Капучино: 2,90 € → 3,20 €", preview_en: "• Cappuccino: €2.90 → €3.20", message_ref: "100" });
+    expect(messenger.sent[0]).toMatchObject({ chatRef: "tg:1001", setId: cs.id, lang: "bg", text: "• Капучино: 2,90 € → 3,20 €\n\nДа приложа ли?" });
     expect((await store.getSite(venue.id)).items.find((i) => i.id === items.Cappuccino.id)?.price_eur).toBe(2.9); // not applied yet
   });
   it("applies all-sold-out sets at once, resolving next_opening", async () => {
@@ -76,13 +76,13 @@ describe("propose_changes", () => {
     const second = await call(tools, "propose_changes", { summary_bg: "y", summary_en: "y", changes: [{ op: "set_price", item_id: base.items.Latte.id, price_eur: 3.4 }] });
     expect(second.status).toBe("proposed");
     expect((await base.store.getChangeSet(first.change_set_id as string)).status).toBe("cancelled");
-    expect(base.messenger.edits[0]).toMatchObject({ messageId: 100 });
+    expect(base.messenger.edits[0]).toMatchObject({ messageRef: "100" });
     expect(base.messenger.edits[0].text).toContain("✏️");
   });
   it("lets staff mark sold-out and add specials but not change prices", async () => {
     const base = await setup();
-    const staff = (await base.store.findMember(1002))!;
-    const tools = makeTools({ ...base.deps, chatId: 1002, member: staff });
+    const staff = (await base.store.findMember("tg:1002"))!;
+    const tools = makeTools({ ...base.deps, chatRef: "tg:1002", member: staff });
     const denied = await call(tools, "propose_changes", { summary_bg: "x", summary_en: "x", changes: [{ op: "set_price", item_id: base.items.Latte.id, price_eur: 3.5 }] });
     expect(denied.error).toMatch(/only the owner/);
     const ok = await call(tools, "propose_changes", { summary_bg: "x", summary_en: "x", changes: [{ op: "add_item", item: { category_id: base.categories.Pastries.id, name_bg: "Супа", name_en: "Soup", desc_bg: "", desc_en: "", price_eur: 4, allergens: [], is_special: true, special_expires_at: "closing_today" } }] });
@@ -92,7 +92,7 @@ describe("propose_changes", () => {
   });
   it("renders a preview in English for an English-speaking owner", async () => {
     const base = await setup();
-    await base.store.setMemberLang(base.venue.id, 1001, "en");
+    await base.store.setMemberLang(base.venue.id, "tg:1001", "en");
     const tools = makeTools({ ...base.deps, member: { ...base.deps.member, lang: "en" } });
     const r = await call(tools, "propose_changes", { summary_bg: "x", summary_en: "x", changes: [{ op: "set_text", key: "tagline", text_bg: "Ново", text_en: "New" }] });
     expect(r.preview).toBe("• Tagline: “Coffee, pastries and a quiet corner on Rakovski street.” → “New”\n  BG: „Кафе, закуски и спокойствие на ъгъла на „Раковски“.“ → „Ново“");

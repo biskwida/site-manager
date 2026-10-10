@@ -45,10 +45,10 @@ export interface AdminDeps {
 }
 
 async function editTelegram(d: AdminDeps, cs: ChangeSet, mark: { bg: string; en: string }) {
-  if (cs.chat_id === null || cs.tg_message_id === null) return;
-  const member = await d.store.findMember(cs.chat_id);
+  if (cs.chat_ref === null || cs.message_ref === null) return;
+  const member = await d.store.findMember(cs.chat_ref);
   const lang = member?.lang ?? "bg";
-  await d.messenger.edit(cs.chat_id, cs.tg_message_id, `${lang === "bg" ? cs.preview_bg : cs.preview_en}\n\n${lang === "bg" ? mark.bg : mark.en}`);
+  await d.messenger.edit(cs.chat_ref, cs.message_ref, `${lang === "bg" ? cs.preview_bg : cs.preview_en}\n\n${lang === "bg" ? mark.bg : mark.en}`);
 }
 
 /** The owner's dashboard decisions. The owner's key is the authority, so "apply" applies at once (or schedules a future apply_at). */
@@ -67,12 +67,12 @@ export async function adminAction(d: AdminDeps, venue: Venue, action: AdminActio
     const site = await d.store.getSite(venue.id);
     const changes = invertChanges(cs.changes);
     const undo = await d.store.createChangeSet({
-      venue_id: venue.id, chat_id: cs.chat_id, summary_bg: `Отмяна: ${cs.summary_bg}`, summary_en: `Undo: ${cs.summary_en}`,
+      venue_id: venue.id, chat_ref: cs.chat_ref, summary_bg: `Отмяна: ${cs.summary_bg}`, summary_en: `Undo: ${cs.summary_en}`,
       preview_bg: renderPreview(site, changes, "bg", venue.tz), preview_en: renderPreview(site, changes, "en", venue.tz),
       source: "undo", status: "proposed", undoes_id: cs.id, changes,
     });
     await d.store.applyChangeSet(undo.id, nowIso);
-    if (cs.chat_id !== null) await d.messenger.send(cs.chat_id, (await d.store.findMember(cs.chat_id))?.lang === "en" ? `↩️ Reverted from the dashboard: ${cs.summary_en}` : `↩️ Отменено от таблото: ${cs.summary_bg}`);
+    if (cs.chat_ref !== null) await d.messenger.send(cs.chat_ref, (await d.store.findMember(cs.chat_ref))?.lang === "en" ? `↩️ Reverted from the dashboard: ${cs.summary_en}` : `↩️ Отменено от таблото: ${cs.summary_bg}`);
     return { ok: true, status: "applied", change_set_id: undo.id };
   }
   if (action === "cancel") {

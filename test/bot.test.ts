@@ -32,7 +32,7 @@ describe("bot", () => {
     const token = await store.getAdminToken(venue.id);
     expect(api.texts()[2]).toContain(`Табло (пазете линка, той е вашият ключ): https://site.example/admin/agala?key=${token}`);
     expect(api.texts()[2]).toContain("Сайт: https://site.example/agala");
-    expect(await store.findMember(2000)).toMatchObject({ role: "owner", lang: "bg" });
+    expect(await store.findMember("tg:2000")).toMatchObject({ role: "owner", lang: "bg" });
     await bot.handleUpdate(textUpdate(2000, "hello"));
     expect(api.texts()).toHaveLength(3);
   });
@@ -42,13 +42,13 @@ describe("bot", () => {
     await bot.handleUpdate(textUpdate(2001, `/start ${code}`, "en"));
     expect(api.texts()[0]).toBe("You are linked as staff of Кафене „Ъгъла“. You can mark items sold out and add today's specials.\n\nSite: https://site.example/agala");
     expect(api.texts()[0]).not.toContain("/admin/");
-    expect(await store.findMember(2001)).toMatchObject({ role: "staff", lang: "en" });
+    expect(await store.findMember("tg:2001")).toMatchObject({ role: "staff", lang: "en" });
   });
   it("handles /lang, /help, /menu and /undo", async () => {
     const { bot, api, runs, store } = await setup();
     await bot.handleUpdate(textUpdate(1001, "/lang en"));
     expect(api.texts().at(-1)).toBe("Language set to English.");
-    expect((await store.findMember(1001))?.lang).toBe("en");
+    expect((await store.findMember("tg:1001"))?.lang).toBe("en");
     await bot.handleUpdate(textUpdate(1001, "/lang"));
     expect(api.texts().at(-1)).toBe("Use /lang bg or /lang en.");
     await bot.handleUpdate(textUpdate(1001, "/help"));
@@ -56,13 +56,13 @@ describe("bot", () => {
     await bot.handleUpdate(textUpdate(1001, "/menu"));
     expect(api.texts().at(-1)).toMatch(/^Site: https:\/\/site.example\/agala\nMenu: https:\/\/site.example\/agala\/menu\nQR code and dashboard: https:\/\/site.example\/admin\/agala\?key=/);
     await bot.handleUpdate(textUpdate(1001, "/undo"));
-    expect(runs.at(-1)).toMatchObject({ chatId: 1001, text: "Undo the last change.", source: "text" });
+    expect(runs.at(-1)).toMatchObject({ chatRef: "tg:1001", text: "Undo the last change.", source: "text" });
   });
   it("starts a run for a member's text and shows typing", async () => {
     const { bot, api, runs, venue } = await setup();
     await bot.handleUpdate(textUpdate(1001, "Капучиното става 3,20"));
     expect(runs).toHaveLength(1);
-    expect(runs[0]).toMatchObject({ venueId: venue.id, chatId: 1001, text: "Капучиното става 3,20", source: "text" });
+    expect(runs[0]).toMatchObject({ venueId: venue.id, chatRef: "tg:1001", text: "Капучиното става 3,20", source: "text" });
     expect(runs[0].member.role).toBe("owner");
     expect(api.calls.some((c) => c.method === "sendChatAction")).toBe(true);
     expect(api.texts()).toEqual([]);
@@ -71,7 +71,7 @@ describe("bot", () => {
     const { bot, runs, store } = await setup();
     await bot.handleUpdate(textUpdate(1002, "Баницата свърши"));
     expect(runs[0].member.lang).toBe("bg");
-    expect((await store.findMember(1002))?.lang).toBe("en");
+    expect((await store.findMember("tg:1002"))?.lang).toBe("en");
   });
   it("a Latin message keeps the stored language", async () => {
     const { bot, runs } = await setup();
@@ -81,7 +81,7 @@ describe("bot", () => {
   it("answers the callback first, then applies and edits the message", async () => {
     const { bot, api, store, venue, items } = await setup();
     const site = await store.getSite(venue.id);
-    const cs = await store.createChangeSet({ venue_id: venue.id, chat_id: 1001, summary_bg: "x", summary_en: "x", preview_bg: "• Капучино: 2,90 € → 3,20 €", preview_en: "p", source: "text", status: "proposed", tg_message_id: 42, changes: planChanges(site, [{ op: "set_price", item_id: items.Cappuccino.id, price_eur: 3.2 }], { newId: () => "n", now: T0.toISOString() }) });
+    const cs = await store.createChangeSet({ venue_id: venue.id, chat_ref: "tg:1001", summary_bg: "x", summary_en: "x", preview_bg: "• Капучино: 2,90 € → 3,20 €", preview_en: "p", source: "text", status: "proposed", message_ref: "42", changes: planChanges(site, [{ op: "set_price", item_id: items.Cappuccino.id, price_eur: 3.2 }], { newId: () => "n", now: T0.toISOString() }) });
     await bot.handleUpdate(callbackUpdate(1001, `cs:apply:${cs.id}`, 42));
     const methods = api.calls.map((c) => c.method);
     expect(methods.indexOf("answerCallbackQuery")).toBeLessThan(methods.indexOf("editMessageText"));
@@ -95,7 +95,7 @@ describe("bot", () => {
   });
   it("sends the change prompt on ✏️", async () => {
     const { bot, api, store, venue } = await setup();
-    const cs = await store.createChangeSet({ venue_id: venue.id, chat_id: 1001, summary_bg: "x", summary_en: "x", preview_bg: "p", preview_en: "p", source: "text", status: "proposed", tg_message_id: 43, changes: [] });
+    const cs = await store.createChangeSet({ venue_id: venue.id, chat_ref: "tg:1001", summary_bg: "x", summary_en: "x", preview_bg: "p", preview_en: "p", source: "text", status: "proposed", message_ref: "43", changes: [] });
     await bot.handleUpdate(callbackUpdate(1001, `cs:change:${cs.id}`, 43));
     expect(api.texts().at(-1)).toBe("Напишете какво да променя в предложението.");
     expect(api.calls.some((c) => c.method === "editMessageText")).toBe(false);

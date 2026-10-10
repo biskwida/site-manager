@@ -63,7 +63,7 @@ export function registerMediaHandlers(bot: Bot, d: BotDeps): void {
       return;
     }
     const media = await d.store.saveMedia(member.venue_id, bytes, media_type);
-    d.startRun({ venueId: member.venue_id, chatId: member.tg_chat_id, member: { ...member, lang }, text: caption ?? "", source: "photo", image: { data: toBase64(bytes), media_type }, mediaId: media.id });
+    d.startRun({ venueId: member.venue_id, chatRef: member.chat_ref, member: { ...member, lang }, text: caption ?? "", source: "photo", image: { data: toBase64(bytes), media_type }, mediaId: media.id });
     await ctx.replyWithChatAction("typing").catch(() => undefined);
   };
 
@@ -98,7 +98,7 @@ export function registerMediaHandlers(bot: Bot, d: BotDeps): void {
       return;
     }
     const lang = detectLang(text) ?? member.lang;
-    d.startRun({ venueId: member.venue_id, chatId: member.tg_chat_id, member: { ...member, lang }, text, source: "voice" });
+    d.startRun({ venueId: member.venue_id, chatRef: member.chat_ref, member: { ...member, lang }, text, source: "voice" });
     await ctx.reply(copy(lang).heard(text)).catch(() => undefined);
   };
   bot.on("message:voice", (ctx) => handleVoice(ctx, ctx.message.voice.file_id));

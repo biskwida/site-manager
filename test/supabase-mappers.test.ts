@@ -1,6 +1,6 @@
 // test/supabase-mappers.test.ts
 import { describe, expect, it } from "vitest";
-import { toChangeSet, toItem, toVenue } from "@/src/store/supabase";
+import { legacyColumns, toChangeSet, toItem, toMember, toVenue } from "@/src/store/supabase";
 
 describe("supabase row mappers", () => {
   it("coerces numerics and nulls", () => {
@@ -14,9 +14,15 @@ describe("supabase row mappers", () => {
     expect(v).toMatchObject({ tagline_bg: "", cover_media_id: null, default_lang: "en", theme: { accent: "#000000" } });
   });
   it("maps a change set with nested changes", () => {
-    const cs = toChangeSet({ id: "c", venue_id: "v", chat_id: "1001", summary_bg: "", summary_en: "", preview_bg: "", preview_en: "", source: "text", status: "proposed", apply_at: null, reminded_at: null, decided_at: null, applied_at: null, reverted_by: null, undoes_id: null, tg_message_id: "55", created_at: "2026-10-09T09:00:00Z", changes: [{ id: "x", position: 0, op: "set_price", entity: "item", entity_id: "i", before: { price_eur: 1 }, after: { price_eur: 2 } }] });
-    expect(cs.chat_id).toBe(1001);
-    expect(cs.tg_message_id).toBe(55);
+    const cs = toChangeSet({ id: "c", venue_id: "v", chat_ref: "tg:1001", chat_id: "1001", summary_bg: "", summary_en: "", preview_bg: "", preview_en: "", source: "text", status: "proposed", apply_at: null, reminded_at: null, decided_at: null, applied_at: null, reverted_by: null, undoes_id: null, message_ref: "55", tg_message_id: "55", created_at: "2026-10-09T09:00:00Z", changes: [{ id: "x", position: 0, op: "set_price", entity: "item", entity_id: "i", before: { price_eur: 1 }, after: { price_eur: 2 } }] });
+    expect(cs.chat_ref).toBe("tg:1001");
+    expect(cs.message_ref).toBe("55");
     expect(cs.changes[0]).toEqual({ position: 0, op: "set_price", entity: "item", entity_id: "i", before: { price_eur: 1 }, after: { price_eur: 2 } });
+  });
+  it("writes legacy bigint columns only for Telegram refs (Review Focus 2)", () => {
+    expect(legacyColumns("tg:-100123", "55")).toEqual({ chat_id: -100123, tg_message_id: 55 });
+    expect(legacyColumns("fb:123", "123456789")).toEqual({ chat_id: null, tg_message_id: null });
+    expect(legacyColumns(null, null)).toEqual({ chat_id: null, tg_message_id: null });
+    expect(toMember({ venue_id: "v", chat_ref: "fb:9", tg_chat_id: null, role: "owner", lang: "en", last_seen_at: "2026-10-09T09:00:00Z", created_at: "2026-10-09T09:00:00Z" })).toMatchObject({ chat_ref: "fb:9", last_seen_at: "2026-10-09T09:00:00.000Z" });
   });
 });

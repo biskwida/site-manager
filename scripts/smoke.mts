@@ -4,6 +4,7 @@
 //   npm run smoke -- --chat <telegram chat id> [--text "…"]  Supabase store + Telegram: the preview really arrives on that phone
 // --chat must belong to a linked member (/start <code> first). Exit 0 unless the turn returned "error".
 import { pickEffort, runTurn } from "../src/agent/run";
+import { makeRef } from "../src/channels/ref";
 import { TelegramMessenger, type Messenger } from "../src/bot/messenger";
 import { loadConfig } from "../src/config";
 import { seedDemo } from "../src/seed/demo";
@@ -23,16 +24,16 @@ const text = flag("text") || "Капучиното става 3,20";
 
 class ConsoleMessenger implements Messenger {
   private next = 1;
-  async send(chatId: number, t: string) {
-    console.log(`→ [${chatId}] ${t}`);
-    return this.next++;
+  async send(chatRef: string, t: string) {
+    console.log(`→ [${chatRef}] ${t}`);
+    return String(this.next++);
   }
-  async sendProposal(chatId: number, t: string) {
-    console.log(`→ [${chatId}] ${t}\n   [✅ Приложи] [✏️ Промени] [❌ Откажи]`);
-    return this.next++;
+  async sendProposal(chatRef: string, t: string) {
+    console.log(`→ [${chatRef}] ${t}\n   [✅ Приложи] [✏️ Промени] [❌ Откажи]`);
+    return String(this.next++);
   }
-  async edit(chatId: number, messageId: number, t: string) {
-    console.log(`✎ [${chatId}#${messageId}] ${t}`);
+  async edit(chatRef: string, messageRef: string, t: string) {
+    console.log(`✎ [${chatRef}#${messageRef}] ${t}`);
   }
 }
 
@@ -50,7 +51,7 @@ if (dry) {
   }
   const mem = new InMemoryStore();
   const { venue } = await seedDemo(mem, config.demoVenueSlug);
-  member = await mem.upsertMember({ venue_id: venue.id, tg_chat_id: 1, role: "owner", lang: "bg" });
+  member = await mem.upsertMember({ venue_id: venue.id, chat_ref: "tg:1", role: "owner", lang: "bg" });
   store = mem;
   messenger = new ConsoleMessenger();
   baseUrl = config.publicBaseUrl || "http://localhost:3000";
@@ -63,7 +64,7 @@ if (dry) {
     process.exit(1);
   }
   const deps = await makeServerDeps({ defer: (fn) => void fn() });
-  const found = await deps.store.findMember(chat);
+  const found = await deps.store.findMember(makeRef("tg", chat));
   if (!found) {
     console.error(`chat ${chat} is not linked to any venue; send /start <code> to the bot from that phone first`);
     process.exit(1);
@@ -81,12 +82,12 @@ console.log(`model: ${cfg.model}; effort: ${cfg.effort} (this turn: ${effective}
 console.log(`owner says: ${text}\n`);
 const started = Date.now();
 const result = await runTurn(
-  { store, venueId: member.venue_id, chatId: member.tg_chat_id, member, messenger, now: () => new Date(), baseUrl },
+  { store, venueId: member.venue_id, chatRef: member.chat_ref, member, messenger, now: () => new Date(), baseUrl },
   { text, source: "text" },
   { model: cfg.model, effort: cfg.effort, apiKey: cfg.apiKey },
 );
 console.log(`\nfinal reply (${((Date.now() - started) / 1000).toFixed(1)} s): ${result || "(empty)"}`);
-const pending = await store.findProposed(member.venue_id, member.tg_chat_id);
+const pending = await store.findProposed(member.venue_id, member.chat_ref);
 if (pending) {
   console.log(`pending proposal: ${pending.summary_bg} / ${pending.summary_en} (${pending.changes.length} change${pending.changes.length === 1 ? "" : "s"}: ${pending.changes.map((c) => c.op).join(", ")})`);
 } else {

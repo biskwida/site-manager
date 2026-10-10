@@ -12,21 +12,21 @@ describe("runTick", () => {
     const { store, venue, items } = await makeDemo();
     const m = new FakeMessenger();
     const site = await store.getSite(venue.id);
-    const due = await store.createChangeSet({ venue_id: venue.id, chat_id: 1001, summary_bg: "Нова цена на капучиното", summary_en: "New cappuccino price", preview_bg: "p", preview_en: "p", source: "text", status: "scheduled", apply_at: "2026-10-09T08:00:00.000Z", changes: planChanges(site, [{ op: "set_price", item_id: items.Cappuccino.id, price_eur: 3.2 }], ctx) });
-    const future = await store.createChangeSet({ venue_id: venue.id, chat_id: 1001, summary_bg: "x", summary_en: "x", preview_bg: "p", preview_en: "p", source: "text", status: "scheduled", apply_at: "2026-10-20T08:00:00.000Z", changes: [] });
+    const due = await store.createChangeSet({ venue_id: venue.id, chat_ref: "tg:1001", summary_bg: "Нова цена на капучиното", summary_en: "New cappuccino price", preview_bg: "p", preview_en: "p", source: "text", status: "scheduled", apply_at: "2026-10-09T08:00:00.000Z", changes: planChanges(site, [{ op: "set_price", item_id: items.Cappuccino.id, price_eur: 3.2 }], ctx) });
+    const future = await store.createChangeSet({ venue_id: venue.id, chat_ref: "tg:1001", summary_bg: "x", summary_en: "x", preview_bg: "p", preview_en: "p", source: "text", status: "scheduled", apply_at: "2026-10-20T08:00:00.000Z", changes: [] });
     const r = await runTick({ store, messenger: m, now: T0 });
     expect(r.applied).toEqual([due.id]);
     expect((await store.getChangeSet(due.id)).status).toBe("applied");
     expect((await store.getChangeSet(future.id)).status).toBe("scheduled");
     expect((await store.getSite(venue.id)).items.find((i) => i.id === items.Cappuccino.id)?.price_eur).toBe(3.2);
     expect(m.sent).toHaveLength(1);
-    expect(m.sent[0]).toMatchObject({ chatId: 1001, text: "✅ Приложено по график: Нова цена на капучиното" });
+    expect(m.sent[0]).toMatchObject({ chatRef: "tg:1001", text: "✅ Приложено по график: Нова цена на капучиното" });
   });
 
   it("writes auto sets once for elapsed sold-out and special timers", async () => {
     const { store, venue, items } = await makeDemo();
     const site = await store.getSite(venue.id);
-    const cs = await store.createChangeSet({ venue_id: venue.id, chat_id: 1001, summary_bg: "", summary_en: "", preview_bg: "", preview_en: "", source: "text", status: "proposed", changes: planChanges(site, [{ op: "set_sold_out", item_id: items["Cheese banitsa"].id, until: "2026-10-09T08:30:00.000Z" }], { ...ctx, now: "2026-10-09T08:00:00.000Z" }) });
+    const cs = await store.createChangeSet({ venue_id: venue.id, chat_ref: "tg:1001", summary_bg: "", summary_en: "", preview_bg: "", preview_en: "", source: "text", status: "proposed", changes: planChanges(site, [{ op: "set_sold_out", item_id: items["Cheese banitsa"].id, until: "2026-10-09T08:30:00.000Z" }], { ...ctx, now: "2026-10-09T08:00:00.000Z" }) });
     await store.applyChangeSet(cs.id, "2026-10-09T08:00:00.000Z");
     const special = await store.insertItem({ venue_id: venue.id, category_id: items.Espresso.category_id, name_bg: "Супа", name_en: "Soup", desc_bg: "", desc_en: "", price_eur: 4, allergens: [], position: 9, is_special: true, special_expires_at: "2026-10-09T08:45:00.000Z" });
     const r1 = await runTick({ store, messenger: null, now: T0 });
@@ -44,7 +44,7 @@ describe("runTick", () => {
   it("reminds once about sets due within 24 h", async () => {
     const { store, venue } = await makeDemo();
     const m = new FakeMessenger();
-    const soon = await store.createChangeSet({ venue_id: venue.id, chat_id: 1001, summary_bg: "Коледно работно време", summary_en: "Christmas hours", preview_bg: "p", preview_en: "p", source: "text", status: "scheduled", apply_at: "2026-10-10T06:00:00.000Z", changes: [] });
+    const soon = await store.createChangeSet({ venue_id: venue.id, chat_ref: "tg:1001", summary_bg: "Коледно работно време", summary_en: "Christmas hours", preview_bg: "p", preview_en: "p", source: "text", status: "scheduled", apply_at: "2026-10-10T06:00:00.000Z", changes: [] });
     const r1 = await runTick({ store, messenger: m, now: T0 });
     expect(r1.reminded).toEqual([soon.id]);
     expect(m.sent[0].text).toBe("⏰ Напомняне: на 10.10.2026, 09:00 ще се приложи: Коледно работно време");
@@ -57,21 +57,21 @@ describe("runTick", () => {
     const { store, venue } = await makeDemo();
     const m = new FakeMessenger();
     store.clock = () => "2026-10-09T06:00:00.000Z";
-    const old = await store.createChangeSet({ venue_id: venue.id, chat_id: 1001, summary_bg: "Стара", summary_en: "Old", preview_bg: "превю", preview_en: "preview", source: "text", status: "proposed", tg_message_id: 42, changes: [] });
+    const old = await store.createChangeSet({ venue_id: venue.id, chat_ref: "tg:1001", summary_bg: "Стара", summary_en: "Old", preview_bg: "превю", preview_en: "preview", source: "text", status: "proposed", message_ref: "42", changes: [] });
     store.clock = () => "2026-10-09T08:30:00.000Z";
-    const fresh = await store.createChangeSet({ venue_id: venue.id, chat_id: 1001, summary_bg: "Нова", summary_en: "New", preview_bg: "p", preview_en: "p", source: "text", status: "proposed", changes: [] });
+    const fresh = await store.createChangeSet({ venue_id: venue.id, chat_ref: "tg:1001", summary_bg: "Нова", summary_en: "New", preview_bg: "p", preview_en: "p", source: "text", status: "proposed", changes: [] });
     const r = await runTick({ store, messenger: m, now: T0 });
     expect(r.expired).toEqual([old.id]);
     expect((await store.getChangeSet(old.id)).status).toBe("expired");
     expect((await store.getChangeSet(fresh.id)).status).toBe("proposed");
-    expect(m.edits[0]).toEqual({ chatId: 1001, messageId: 42, text: "превю\n\n⌛ Изтекло: предложението не беше потвърдено в рамките на 2 часа." });
+    expect(m.edits[0]).toEqual({ chatRef: "tg:1001", messageRef: "42", text: "превю\n\n⌛ Изтекло: предложението не беше потвърдено в рамките на 2 часа." });
   });
 
   it("limits itself to one venue when asked", async () => {
     const { store, venue } = await makeDemo();
     const other = await store.createVenue({ slug: "other", name: "Other" });
-    const a = await store.createChangeSet({ venue_id: venue.id, chat_id: null, summary_bg: "", summary_en: "", preview_bg: "", preview_en: "", source: "text", status: "scheduled", apply_at: "2026-10-09T08:00:00.000Z", changes: [] });
-    const b = await store.createChangeSet({ venue_id: other.id, chat_id: null, summary_bg: "", summary_en: "", preview_bg: "", preview_en: "", source: "text", status: "scheduled", apply_at: "2026-10-09T08:00:00.000Z", changes: [] });
+    const a = await store.createChangeSet({ venue_id: venue.id, chat_ref: null, summary_bg: "", summary_en: "", preview_bg: "", preview_en: "", source: "text", status: "scheduled", apply_at: "2026-10-09T08:00:00.000Z", changes: [] });
+    const b = await store.createChangeSet({ venue_id: other.id, chat_ref: null, summary_bg: "", summary_en: "", preview_bg: "", preview_en: "", source: "text", status: "scheduled", apply_at: "2026-10-09T08:00:00.000Z", changes: [] });
     const r = await runTick({ store, messenger: null, now: T0, venueId: other.id });
     expect(r.applied).toEqual([b.id]);
     expect((await store.getChangeSet(a.id)).status).toBe("scheduled");

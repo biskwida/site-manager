@@ -56,7 +56,7 @@ export interface NewItem {
 }
 export interface NewChangeSet {
   venue_id: string;
-  chat_id: number | null;
+  chat_ref: string | null;
   summary_bg: string;
   summary_en: string;
   preview_bg: string;
@@ -65,10 +65,10 @@ export interface NewChangeSet {
   status: "proposed" | "scheduled";
   apply_at?: string | null;
   undoes_id?: string | null;
-  tg_message_id?: number | null;
+  message_ref?: string | null;
   changes: Change[];
 }
-export type ChangeSetPatch = Partial<Pick<ChangeSet, "status" | "apply_at" | "reminded_at" | "decided_at" | "applied_at" | "reverted_by" | "tg_message_id" | "preview_bg" | "preview_en">>;
+export type ChangeSetPatch = Partial<Pick<ChangeSet, "status" | "apply_at" | "reminded_at" | "decided_at" | "applied_at" | "reverted_by" | "message_ref" | "preview_bg" | "preview_en">>;
 export type VenuePatch = Partial<Pick<Venue,
   "slug" | "name" | "tagline_bg" | "tagline_en" | "about_bg" | "about_en" | "address" | "phone" | "maps_url" | "instagram" |
   "hours" | "tz" | "default_lang" | "theme" | "template" | "business_type" | "status" | "wizard_draft">>;
@@ -101,14 +101,16 @@ export interface Store {
   /** Deletes the venue's menu, texts, holidays, announcements, media rows and change sets (demo reset). Members, invites and tokens stay. */
   clearVenueContent(venueId: string): Promise<void>;
 
-  // members and access
-  findMember(chatId: number): Promise<Member | null>;
+  // members and access (chatRef = "<channel>:<id>", src/channels/ref.ts)
+  findMember(chatRef: string): Promise<Member | null>;
   listMembers(venueId: string): Promise<Member[]>;
-  upsertMember(m: Omit<Member, "created_at">): Promise<Member>;
-  setMemberLang(venueId: string, chatId: number, lang: Lang): Promise<void>;
+  upsertMember(m: Omit<Member, "created_at" | "last_seen_at"> & { last_seen_at?: string | null }): Promise<Member>;
+  setMemberLang(venueId: string, chatRef: string, lang: Lang): Promise<void>;
+  /** Records an inbound message from the member; no-op for unknown refs. */
+  touchMember(chatRef: string, nowIso: string): Promise<void>;
   createInvite(venueId: string, role: Role, expiresAt: string): Promise<string>;
   /** Links the chat and marks the code used; null when the code is unknown, used or expired. */
-  redeemInvite(code: string, chatId: number, lang: Lang, now: string): Promise<Member | null>;
+  redeemInvite(code: string, chatRef: string, lang: Lang, now: string): Promise<Member | null>;
   /** Creates the token on first call. */
   getAdminToken(venueId: string): Promise<string>;
   findVenueByAdminToken(token: string): Promise<Venue | null>;
@@ -116,7 +118,7 @@ export interface Store {
   // change sets
   createChangeSet(cs: NewChangeSet): Promise<ChangeSet>;
   getChangeSet(id: string): Promise<ChangeSet>;
-  findProposed(venueId: string, chatId: number): Promise<ChangeSet | null>;
+  findProposed(venueId: string, chatRef: string): Promise<ChangeSet | null>;
   /** Newest first. */
   listChangeSets(venueId: string, opts?: { status?: ChangeSetStatus[]; limit?: number }): Promise<ChangeSet[]>;
   /** Scheduled sets with apply_at <= now (oldest first). */
@@ -140,8 +142,8 @@ export interface Store {
   getMedia(id: string): Promise<Media | null>;
 
   // conversations
-  getConversation(venueId: string, chatId: number): Promise<Conversation | null>;
-  setConversation(venueId: string, chatId: number, c: Conversation): Promise<void>;
+  getConversation(venueId: string, chatRef: string): Promise<Conversation | null>;
+  setConversation(venueId: string, chatRef: string, c: Conversation): Promise<void>;
 
   // rate limits
   /** Sliding window counter. Returns true when the call is allowed (count after increment <= max). */
