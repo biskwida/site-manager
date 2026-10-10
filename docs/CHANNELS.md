@@ -1,0 +1,157 @@
+# Channels: Telegram, Messenger, Instagram, WhatsApp
+
+The owner of a venue can run their site from Telegram, Facebook Messenger, Instagram Direct or WhatsApp. Each channel works the same way: they link once with the invite code from `npm run venue:create`, then change the site by text, voice note or photo and approve with one tap. One Facebook Page, one Instagram professional account and one WhatsApp number serve every venue, exactly like the one Telegram bot. Nothing is installed on the owner's phone.
+
+A channel is switched on by its token: `META_PAGE_TOKEN` enables Messenger and Instagram, `WHATSAPP_TOKEN` (with `WHATSAPP_PHONE_NUMBER_ID`) enables WhatsApp. Without them the app is Telegram-only, as before. Design: [superpowers/specs/2026-10-10-site-manager-channels-design.md](superpowers/specs/2026-10-10-site-manager-channels-design.md).
+
+## What the owner needs to know: the 24-hour rule
+
+On Messenger, Instagram and WhatsApp, Meta lets a business write to someone only within 24 hours of that person's last message. For the owner this means:
+
+- Answers to their own messages, previews and "✅ Applied" always arrive, because they just wrote.
+- Messages the service starts on its own (the reminder before a scheduled change, "applied as scheduled", "proposal expired", a change applied or undone from the dashboard) arrive only if the owner wrote to the bot in the last 24 hours. Otherwise they are skipped; the dashboard still shows everything.
+- Telegram has no such limit and gets every message.
+
+In words for the owner: "Write to the bot at least once a day if you want its reminders on Messenger, Instagram or WhatsApp. Everything is always visible on your dashboard."
+
+(The app uses 23 hours to keep a margin. Paid Meta templates, which would lift the limit, are not part of this version.)
+
+## Onboarding: eight steps
+
+You create the accounts and paste the keys; the app needs no code change. Every key goes into `.env.local` with `npm run env:set -- KEY` (asks with echo off, writes only into `.env.local`) and into the Vercel preview with the loop in "Preview deployment" below. Never paste a key into chat, a file in git, or a terminal command line.
+
+1. **Facebook Page and Instagram account.**
+   - A Facebook Page for the service (or reuse one you admin): facebook.com → Pages → Create new Page.
+   - An Instagram professional account (Business or Creator) linked to that Page: Instagram app → Settings and activity → Account type and tools → Switch to professional account; then Facebook Page → Settings → Linked accounts → Instagram → Connect.
+   - Allow apps to read Instagram messages: Instagram app → Settings and activity → Messages and story replies → Message requests / Connected tools → **Allow access to messages** (on).
+   - Keys for the invite links: `npm run env:set -- MESSENGER_PAGE_HANDLE` (the Page username, as in `m.me/<handle>`), `npm run env:set -- INSTAGRAM_USERNAME` (no `@`).
+
+2. **Meta Business portfolio and the developer app.**
+   - business.facebook.com → Create a business portfolio (if you do not have one); add the Page to it (Settings → Accounts → Pages → Add).
+   - developers.facebook.com → My Apps → Create app → type **Business** (newer dashboards: choose the use cases "Engage with customers on Messenger from Meta", "Manage messaging & content on Instagram" and "Connect with customers through WhatsApp"), attach it to the business portfolio.
+   - In the app: Add products → **Messenger**, **Instagram**, **WhatsApp** (on newer dashboards these are the use cases above, under Use cases → Customize).
+
+3. **Tokens and the app secret.**
+   - App secret: App settings → Basic → App secret → Show. `npm run env:set -- META_APP_SECRET`.
+   - Verify token: invent one, `openssl rand -hex 16`, and keep it for step 5. `npm run env:set -- META_VERIFY_TOKEN`.
+   - Page token (Messenger and Instagram): Messenger → Settings (or Messenger API Settings) → Access Tokens → Add or remove Pages → pick the Page → **Generate token**; the Instagram settings page has the same button for the linked Instagram account. The token must carry `pages_messaging`, `instagram_basic`, `instagram_manage_messages`, `pages_manage_metadata`. `npm run env:set -- META_PAGE_TOKEN`.
+   - WhatsApp: WhatsApp → API Setup → the free **test number**. Copy the "Phone number ID": `npm run env:set -- WHATSAPP_PHONE_NUMBER_ID`. Copy the test number itself (digits with country code) for the invite link: `npm run env:set -- WHATSAPP_NUMBER`. Under "To", add the owner's phone as a recipient (they get a confirmation code on WhatsApp). Generate a token: the API Setup token lasts 24 hours; for a permanent one create a system user (Business settings → Users → System users → Add → Generate new token, with `whatsapp_business_messaging` and `whatsapp_business_management`, and assign the app and the WhatsApp account to it). `npm run env:set -- WHATSAPP_TOKEN`. A system-user token with the Page permissions as well may serve as both `META_PAGE_TOKEN` and `WHATSAPP_TOKEN`.
+
+4. **Keys in place.** Check that `.env.local` has the eight keys above (`META_APP_SECRET`, `META_VERIFY_TOKEN`, `META_PAGE_TOKEN`, `WHATSAPP_TOKEN`, `WHATSAPP_PHONE_NUMBER_ID`, `MESSENGER_PAGE_HANDLE`, `INSTAGRAM_USERNAME`, `WHATSAPP_NUMBER`); `npm run env:set` with no argument lists every key. The app refuses to start with a Meta token but without `META_APP_SECRET` and `META_VERIFY_TOKEN`, or with `WHATSAPP_TOKEN` but without `WHATSAPP_PHONE_NUMBER_ID`. Copy them to the Vercel preview (see "Preview deployment").
+
+5. **Deploy and connect the webhooks.**
+   - Deploy the branch as a preview (see "Preview deployment"); the webhook URL is `<preview URL>/api/meta`.
+   - Messenger → Settings → Webhooks (newer dashboards: Use cases → Messenger → Customize → Configure webhooks) → Callback URL `<preview URL>/api/meta`, Verify token = your `META_VERIFY_TOKEN` → Verify and save → subscribe the Page to `messages`, `messaging_postbacks`, `messaging_referrals`.
+   - Instagram → Webhooks (or API setup with Instagram login → Configure webhooks) → the same callback and verify token → subscribe `messages`, `messaging_postbacks`, `messaging_referral`.
+   - WhatsApp → Configuration → Webhook → Edit → the same callback and verify token → Webhook fields → subscribe `messages`.
+   - `npm run meta:setup` (with `PUBLIC_BASE_URL` pointing at the preview): prints the Page name and id, subscribes the app to the Page's `messages,messaging_postbacks,messaging_referrals` (Messenger needs this besides the dashboard), prints the WhatsApp display number, the enabled channels and the webhook URL to paste. It never prints a token.
+
+6. **Testers.** Until App Review (step 8) only people with a role on the app can talk to the bot.
+   - Messenger: App roles → Roles → Add People → **Testers** → the owner's Facebook account. The owner must **accept the invitation** (developers.facebook.com/requests, or the notification on Facebook); until then the bot does not receive their messages.
+   - Instagram: App roles → Roles → Instagram Testers → Add → the owner's Instagram username. The owner accepts in the Instagram app: Settings and activity → Website permissions → Apps and websites → Tester invites → Accept.
+   - WhatsApp test number: no roles, only the recipient list from step 3, **at most 5 phone numbers**. Each recipient confirms with the code WhatsApp sends them.
+
+7. **Try it.** `npm run venue:create -- --name "Тест Канали" --slug kanali-test` prints the owner code and one deep link per enabled channel (`startLinks` in `src/channels/links.ts`):
+   - Messenger `https://m.me/<page>?ref=<code>`, Instagram `https://ig.me/m/<username>?ref=<code>`, WhatsApp `https://wa.me/<digits>?text=<code>`, Telegram `https://t.me/<bot>?start=<code>`.
+   - Open the link on the owner's phone and send. If the link does not carry the code, sending the code alone as a message links the chat too. Then "Капучиното става 3,20" → a preview with three buttons → tap ✅ → "✅ Приложено" and `/kanali-test` updates.
+
+8. **Later, for real customers.**
+   - **App Review** for `pages_messaging` and `instagram_manage_messages` (App Review → Permissions and features → Request advanced access), with a screencast of the flow. Meta currently warns of about **20 days per submission**; a rejection restarts the clock, so plan 3 to 6 weeks. Business verification of the portfolio is a separate step. Testers keep working meanwhile.
+   - **WhatsApp**: a real number (a SIM not registered on WhatsApp) added under WhatsApp → API Setup → Add phone number, plus Meta Business verification to lift the test-number limits. Update `WHATSAPP_PHONE_NUMBER_ID` and `WHATSAPP_NUMBER`; no code change.
+
+### WhatsApp test-number limits
+
+- Messages go only to the recipient list: at most **5 numbers**, each confirmed by code.
+- The display name is Meta's ("Test Number"), not yours.
+- The API Setup token expires after 24 hours; use a system-user token (step 3) for anything longer than one sitting.
+- Interactive buttons (the ✅ / ✏️ / ❌ preview) work only inside the 24-hour window, which is always the case for a preview the owner just asked for.
+
+## Preview deployment (Vercel)
+
+Webhooks live on a preview deployment of this branch until it merges; production (`site-manager-lovat.vercel.app`, Telegram only) is untouched. Never run `vercel --prod` from this branch and never point the Telegram webhook at the preview: production keeps the Telegram webhook.
+
+```bash
+cp ../site-manager/.vercel/project.json .vercel/project.json   # link the worktree to the same Vercel project (.vercel is git-ignored)
+# Copy every non-empty key to the Preview target; values go through a pipe, never onto the screen.
+# Skipped: VERCEL_OIDC_TOKEN (Vercel's own), SUPABASE_DB_URL (scripts only), DEMO_OWNER_CHAT_REF (memory mode only).
+for k in $(grep -E '^[A-Z_0-9]+=.+' .env.local | cut -d= -f1); do
+  case "$k" in VERCEL_OIDC_TOKEN|SUPABASE_DB_URL|DEMO_OWNER_CHAT_REF) continue;; esac
+  case "$k" in NEXT_PUBLIC_*) type="--type config";; *) type="";; esac   # Vercel refuses NEXT_PUBLIC_ keys without --type config
+  grep "^$k=" .env.local | cut -d= -f2- | tr -d '\n' | vercel env add "$k" preview $type --yes --force >/dev/null && echo "ok $k"
+done
+vercel --yes                                                    # preview deployment; prints the deployment URL
+vercel alias set <deployment URL> site-manager-channels-biskwida.vercel.app   # a stable name, so Meta's callback URL survives redeploys
+printf '%s' "https://site-manager-channels-biskwida.vercel.app" | vercel env add PUBLIC_BASE_URL preview --type config --yes --force
+vercel --yes                                                    # redeploy so admin links use it
+vercel alias set <new deployment URL> site-manager-channels-biskwida.vercel.app
+npm run meta:setup                                              # with PUBLIC_BASE_URL pointing at the preview
+```
+
+After every redeploy, move the alias with `vercel alias set` again; the Meta callback URL then stays the same.
+
+Check the webhook (the verify token is read from `.env.local` inside the URL and never printed):
+
+```bash
+curl -s "https://site-manager-channels-biskwida.vercel.app/api/meta?hub.mode=subscribe&hub.verify_token=$(grep '^META_VERIFY_TOKEN=' .env.local | cut -d= -f2-)&hub.challenge=ping"   # → ping
+curl -s -o /dev/null -w '%{http_code}\n' -X POST "https://site-manager-channels-biskwida.vercel.app/api/meta" -d '{}'                                   # → 401
+```
+
+**Deployment Protection.** The Vercel project has Vercel Authentication on for every deployment except custom domains, so a preview URL answers `302` to Vercel's login page, and Meta cannot reach the webhook. Before step 5 choose one, in Vercel → Project → Settings → Deployment Protection:
+
+- turn Vercel Authentication off for previews (the webhook is protected by its own HMAC signature check, the admin pages by their key), or
+- create a "Protection Bypass for Automation" secret and use `<preview URL>/api/meta?x-vercel-protection-bypass=<secret>` as the callback URL in all three webhook settings (and in the curl checks above).
+
+### Current preview
+
+- Stable URL: https://site-manager-channels-biskwida.vercel.app (alias), webhook `https://site-manager-channels-biskwida.vercel.app/api/meta`.
+- Deployment on 2026-10-10: https://site-manager-k0m6uxem4-biskwida-dev.vercel.app (`PUBLIC_BASE_URL` for Preview = the stable URL).
+- Behind Deployment Protection (see above): the public URL answers `302` until protection is changed. The same build run locally with `next start` answered the handshake with `ping`, a wrong verify token with `403` and an unsigned POST with `401`.
+
+## Database migration
+
+The Supabase project is shared with production, which still runs the Telegram-only code. Phase 1 of the identity change (`chat_ref` = `tg:<id>`, `fb:<PSID>`, `ig:<id>`, `wa:<digits>`) is additive: it adds `chat_ref`, `message_ref` and `last_seen_at`, moves the primary keys to `chat_ref`, keeps the old bigint columns with unique indexes for production's upserts, and adds a `fill_chat_ref` trigger that fills `chat_ref` from the old columns when production writes a row. Production keeps working before and after.
+
+Order (from this worktree, `SUPABASE_DB_URL` in `.env.local`):
+
+```bash
+npm run db:dry-run      # runs the migration inside a transaction and ROLLS BACK; must end with "DRY RUN OK"
+npm run db:apply -- supabase/migrations/2026-10-10-chat-ref.sql   # FIRST: the migration alone
+npm run db:apply        # then schema.sql + policies.sql (idempotent; schema.sql already has the new shape)
+npm run check:rls       # every line PASS
+```
+
+`npm run db:dry-run` (`scripts/db-dry-run.mts`) takes file arguments like `db:apply` (`npm run db:dry-run -- supabase/migrations/2026-10-10-chat-ref.sql schema.sql policies.sql` tries the whole sequence) and checks, before rolling back: no `venue_members` row without `chat_ref`, the `fill_chat_ref` trigger present on the three tables, and production's two upserts (`on conflict (venue_id, tg_chat_id)` and `on conflict (venue_id, chat_id)`) still working and filling `chat_ref`.
+
+Status on 2026-10-10: **not applied.** The dry run against the shared database failed with `column "tg_chat_id" is in a primary key`: the migration drops `not null` on `tg_chat_id` (and `conversations.chat_id`) before it swaps the primary key. With those two `drop not null` lines moved after the primary-key blocks, the dry run passes (migration alone, and migration + schema.sql + policies.sql). Fix the file, run the dry run, then apply in the order above.
+
+### Phase 2 (after merge)
+
+After the branch is merged and production runs the new code, the legacy columns (`venue_members.tg_chat_id`, `change_sets.chat_id`, `change_sets.tg_message_id`, `conversations.chat_id`), their unique indexes and the `fill_chat_ref` trigger are dropped, and the three mapper lines marked `// legacy: remove in phase 2` go: see `migrations/2026-10-11-drop-legacy-chat-ids.sql`, added by the next task.
+
+## Offline: no Meta account needed
+
+- `DEMO_OWNER_CHAT_REF` (memory mode only, not in `.env.example`): links that chat as the demo owner when `npm run dev:offline` seeds the café, for example `fb:4242`, `ig:4242`, `wa:4242` or `tg:<chat id>`. The older `DEMO_OWNER_CHAT_ID` (a Telegram chat id) still works.
+- `npm run meta:sim` signs a fake Meta webhook with `META_APP_SECRET` and posts it to the local server, so the whole path runs against the memory store:
+
+```bash
+# .env.local: META_APP_SECRET, META_VERIFY_TOKEN (any values) and DEMO_OWNER_CHAT_REF=fb:4242
+npm run dev:offline
+npm run meta:sim -- fb text "Капучиното става 3,20"     # the preview appears in the dev log as "→ [fb:4242] …"
+npm run meta:sim -- fb button cs:apply:<id>             # the id from the preview's buttons
+npm run meta:sim -- wa text "menu" --sender 4242        # --sender <id>, --url <url> anywhere on the line
+```
+
+- `npm run e2e` includes a Messenger leg: a `fb:` owner links with a bare code, gets a proposal, taps apply, and a proactive reminder is skipped after the clock jumps 25 hours.
+
+## Резюме (български)
+
+Собственикът може да управлява сайта си през Telegram, Messenger, Instagram или WhatsApp: веднъж изпраща кода си, после пише, говори или снима, и потвърждава с един бутон.
+Една Facebook страница, един Instagram акаунт и един WhatsApp номер обслужват всички заведения; каналът се включва, когато има токен.
+Правило 24 часа: в Messenger, Instagram и WhatsApp напомнянията и съобщенията, които ботът започва сам, пристигат само ако собственикът е писал през последните 24 часа; таблото винаги показва всичко.
+Осем стъпки: страница и Instagram, бизнес портфолио и приложение в Meta, токени и app secret, ключове с `npm run env:set -- KEY`, preview в Vercel и webhook `<URL>/api/meta`, тестери, проба с линковете от `venue:create`, после App Review.
+До App Review ботът отговаря само на тестери; собственикът трябва да приеме поканата (Facebook и Instagram).
+App Review отнема около 20 дни за всеки опит; WhatsApp тестовият номер праща само до 5 потвърдени номера.
+Webhook-ът живее на preview в Vercel (https://site-manager-channels-biskwida.vercel.app); production и Telegram webhook-ът не се пипат.
+Preview-то е зад Vercel Authentication: изключете я за preview или ползвайте bypass секрет, иначе Meta не стига до webhook-а.
+Базата: първо `npm run db:dry-run`, после миграцията, после `npm run db:apply` и `npm run check:rls`; миграцията още не е приложена (грешка в реда на командите, описана по-горе).
+Офлайн: `DEMO_OWNER_CHAT_REF=fb:4242`, `npm run dev:offline` и `npm run meta:sim` пускат целия път без акаунт в Meta.

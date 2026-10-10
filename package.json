@@ -12,6 +12,7 @@
     "typecheck": "tsc --noEmit",
     "env:set": "tsx scripts/env-set.mts",
     "db:apply": "tsx --env-file-if-exists=.env.local scripts/db-apply.mts",
+    "db:dry-run": "tsx --env-file-if-exists=.env.local scripts/db-dry-run.mts",
     "check:rls": "tsx --env-file-if-exists=.env.local scripts/check-rls.mts",
     "venue:create": "tsx --env-file-if-exists=.env.local scripts/venue-create.mts",
     "bot:dev": "tsx --env-file-if-exists=.env.local scripts/dev-bot.mts",

@@ -8510,6 +8510,8 @@ Model: fable
 - Assumed from Task 9 (wizard UI): after a successful publish the UI navigates to `/new/<id>/done?code=<invite_code>&key=<admin token>` (the key is the last path segment of `admin_url`). The done page also works without either param (see Step 4).
 - Produces: `DRAFT_COOKIE = "sm_draft"`, `parseDraftCookie(value): { id; token } | null`, `venueFromDraftCookie(store, value, pathId): Promise<Venue | null>` (`src/server/draft-cookie.ts`); `DoneStatus` props `{ id; slug; code: string | null; startUrl: string | null; adminKey; baseUrl; initial: DoneStatusResponse; fetcher?: typeof fetch }`, `phaseOf(s): "waiting" | "publishing" | "live" | "error"`; `AdminOverview` gains `template: TemplateId; status: VenueStatus; deploy: DeployInfo | null; site_url: string`; `AdminSiteDeps = { store; deployer; feedUrlFor; now }`; `setTemplate(d: AdminSiteDeps, venue, template: unknown): Promise<{ ok: true; template: TemplateId; deploy: DeployInfo | null } | { ok: false; error: string }>`; `POST /api/admin/[slug]?key=` accepts `{ action: "set_template", template }`; `useAdminOverview` returns `post(body)` (`Post` type) used by Task 11.
 
+> **Note (channels branch, `build/channels`):** render `startLinks(config, code)` next to the Telegram QR, see `src/channels/links.ts` (Messenger, Instagram and WhatsApp deep links for the enabled channels).
+
 - [ ] **Step 1: Dictionary keys**
 
 In `src/i18n/dicts.ts`, `en` object, after `"admin.details": "Before → after",` add:
