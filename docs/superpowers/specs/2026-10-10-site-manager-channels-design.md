@@ -242,7 +242,7 @@ export async function handleInbound(d: BotDeps, m: InboundMessage): Promise<void
 // src/bot/messenger.ts — Messenger as above; proposalButtons(lang) → [{ id, label }] shared by all adapters
 
 // src/channels/meta/parse.ts
-export function parseMetaWebhook(body: unknown, deps: { waDownload: MediaFetch; fetchUrl: MediaFetch }): { messages: InboundMessage[]; ids: string[] };  // ids: message ids for dedupe
+export function parseMetaWebhook(body: unknown, deps: { waDownload: MediaFetch; fetchUrl: MediaFetch }): InboundMessage[];  // each message carries eventId for dedupe
 
 // src/channels/meta/send.ts
 export class MetaMessenger implements Messenger { constructor(o: { pageToken: string; fetch?: typeof fetch; now?: () => Date }) }
