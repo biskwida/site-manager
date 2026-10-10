@@ -6799,7 +6799,7 @@ describe("admin", () => {
     const p1 = await mk("proposed", 3.2);
     const p2 = await mk("proposed", 3.3);
     const s1 = await mk("scheduled", 3.4, "2026-12-01T08:00:00.000Z");
-    const o = await adminOverview(store, venue, T0);
+    const o = await adminOverview(store, venue, T0, "https://site.example");
     expect(o.public_url).toBe("https://site.example/agala");
     expect(o.pending.map((x) => x.id)).toEqual([p2.id, p1.id]);
     expect(o.scheduled.map((x) => x.id)).toEqual([s1.id]);
@@ -6817,7 +6817,7 @@ describe("admin", () => {
     expect(u.ok).toBe(true);
     expect((await store.getSite(venue.id)).items.find((i) => i.id === items.Cappuccino.id)?.price_eur).toBe(2.9);
     expect((await store.getChangeSet(p1.id)).status).toBe("reverted");
-    const after = await adminOverview(store, venue, T0);
+    const after = await adminOverview(store, venue, T0, "https://site.example");
     expect(after.log.map((x) => x.status)).toEqual(["applied", "cancelled", "rejected", "reverted"]);
     expect(after.log[0]).toMatchObject({ source: "undo", undoes_id: p1.id });
   });
