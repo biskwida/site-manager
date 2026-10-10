@@ -283,6 +283,47 @@ export function storeContract(name: string, make: () => Promise<Store>) {
       }
     });
 
+    it("claims a deploy only from the statuses the caller names (one winner)", async () => {
+      const s = await make();
+      const v = await s.createVenue({ slug: "t13d", name: "D" });
+      try {
+        const base = { provider: "fake" as const, project_id: "p", deployment_id: "", url: null, error: null, template: "classic" as const, updated_at: NOW };
+        const pending = { ...base, status: "pending" as const };
+        expect(await s.claimDeploy(v.id, pending, { whenStatusIn: ["error"] })).toBe(false); // no deploy yet, null not allowed
+        expect((await s.getVenue(v.id)).deploy).toBeNull();
+        expect(await s.claimDeploy(v.id, pending, { whenStatusIn: [null, "error"] })).toBe(true);
+        expect((await s.getVenue(v.id)).deploy).toEqual(pending);
+        expect(await s.claimDeploy(v.id, pending, { whenStatusIn: [null, "error"] })).toBe(false); // already pending: the other caller lost
+        const building = { ...base, deployment_id: "d1", status: "building" as const, template: "lumen" as const };
+        expect(await s.claimDeploy(v.id, building, { whenStatusIn: ["ready", "error"] })).toBe(false);
+        expect(await s.claimDeploy(v.id, building, { whenStatusIn: ["pending"] })).toBe(true);
+        expect((await s.getVenue(v.id)).deploy).toEqual(building);
+        expect(await s.claimDeploy(v.id, building, { whenStatusIn: [] })).toBe(false);
+        expect(await s.claimDeploy("00000000-0000-0000-0000-000000000000", pending, { whenStatusIn: [null] })).toBe(false);
+      } finally {
+        await s.deleteVenue(v.id);
+      }
+    });
+
+    it("lets one publish claim a draft; the claim expires so a crashed publish does not block a retry", async () => {
+      const s = await make();
+      const draft = await s.createVenue({ slug: "t13e", name: "E", status: "draft" });
+      const live = await s.createVenue({ slug: "t13f", name: "F" });
+      try {
+        expect(await s.claimPublish(live.id, NOW)).toBe(false); // only drafts publish
+        expect(await s.claimPublish("00000000-0000-0000-0000-000000000000", NOW)).toBe(false);
+        expect(await s.claimPublish(draft.id, NOW)).toBe(true);
+        expect(await s.claimPublish(draft.id, NOW)).toBe(false);
+        expect(await s.claimPublish(draft.id, "2026-10-09T09:04:00.000Z")).toBe(false); // 4 min later: still held
+        expect(await s.claimPublish(draft.id, "2026-10-09T09:06:00.000Z")).toBe(true); // past PUBLISH_CLAIM_TTL_MS: stale claim is taken over
+        await s.updateVenue(draft.id, { status: "live" });
+        expect(await s.claimPublish(draft.id, "2026-10-09T10:00:00.000Z")).toBe(false); // published: never again
+      } finally {
+        await s.deleteVenue(draft.id);
+        await s.deleteVenue(live.id);
+      }
+    });
+
     it("finds a draft by its token hash and lists members", async () => {
       const s = await make();
       const v = await s.createVenue({ slug: "t14", name: "Test", status: "draft" });

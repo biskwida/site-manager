@@ -1,8 +1,11 @@
 // src/store/types.ts
 import type {
-  BusinessType, Category, Change, ChangeSet, ChangeSetStatus, ChangeSource, Conversation, DeployInfo, Item, Lang, Media, Member, Role, SiteState, SiteTextKey, TemplateId, Venue, VenueStatus, WeekHours,
+  BusinessType, Category, Change, ChangeSet, ChangeSetStatus, ChangeSource, Conversation, DeployInfo, DeployStatus, Item, Lang, Media, Member, Role, SiteState, SiteTextKey, TemplateId, Venue, VenueStatus, WeekHours,
 } from "../domain/types";
 import type { WizardDraft } from "../wizard/schema";
+
+/** How long a publish claim (claimPublish) blocks a second publish of the same draft; a publish that died keeps nobody out for longer. */
+export const PUBLISH_CLAIM_TTL_MS = 5 * 60_000;
 
 export const DEFAULT_HOURS: WeekHours = {
   mon: { open: "08:00", close: "18:00" },
@@ -88,6 +91,17 @@ export interface Store {
   /** Throws on an unknown id or a slug that another venue already has. Keys set to undefined are ignored. */
   updateVenue(id: string, patch: VenuePatch): Promise<Venue>;
   setDeploy(id: string, deploy: DeployInfo | null): Promise<void>;
+  /**
+   * Conditional deploy write: sets `deploy = next` only while the current deploy status is one of `whenStatusIn`
+   * (`null` = no deploy yet). One atomic update; true when the row changed, false when another request got there first
+   * (or the venue is unknown). Deploy starts and template switches claim through this so two requests never both deploy.
+   */
+  claimDeploy(id: string, next: DeployInfo, opts: { whenStatusIn: (DeployStatus | null)[] }): Promise<boolean>;
+  /**
+   * Marks a draft as "publishing now" (`now` ISO, defaults to the clock) only if its status is still `draft` and no other
+   * publish claimed it in the last PUBLISH_CLAIM_TTL_MS (a crashed publish releases itself). True when this call won the claim.
+   */
+  claimPublish(id: string, now?: string): Promise<boolean>;
   /** Stores the sha256 of the wizard's draft token (null clears it). */
   setDraftToken(id: string, tokenHash: string | null): Promise<void>;
   findVenueByDraftToken(tokenHash: string): Promise<Venue | null>;
