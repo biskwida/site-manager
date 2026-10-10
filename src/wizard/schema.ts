@@ -13,6 +13,11 @@ export const RESERVED_SLUGS = ["new", "admin", "api", "embed", "draft", "demo", 
 /** Placeholder slug of an unpublished draft: `draft-<8 hex>`. Never accepted as the final address. */
 export const DRAFT_SLUG_PREFIX = "draft-";
 const HEX = /^#[0-9a-fA-F]{6}$/;
+/**
+ * R25 (amended): menu extraction accepts at most 3 MB of decoded file bytes per request, all files together, which is
+ * about 4 MB of base64 JSON and stays under Vercel's 4.5 MB request body limit. The client downscales to fit.
+ */
+export const EXTRACT_MAX_TOTAL_BYTES = 3 * 1024 * 1024;
 
 /**
  * Copy of `def.accentDefault` from src/templates/<id>/index.ts, kept here so server code never imports next/font.

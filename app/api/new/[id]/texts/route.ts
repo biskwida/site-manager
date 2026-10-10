@@ -12,5 +12,5 @@ export async function POST(req: Request, ctx: RouteContext<"/api/new/[id]/texts"
   const deps = await getServerDeps((fn) => after(fn));
   const guard = await requireDraft(req, deps, id);
   if (guard instanceof Response) return guard;
-  return handleTexts(req, { store: deps.store, anthropic: deps.anthropic, model: deps.config.agentModel }, guard.venue);
+  return handleTexts(req, { store: deps.store, anthropic: deps.anthropic, model: deps.config.agentModel, now: () => new Date() }, guard.venue);
 }

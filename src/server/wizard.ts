@@ -16,7 +16,7 @@ import { bothLangs, DRAFT_SLUG_PREFIX, emptyDraft, slugError, validateForPublish
 import { readDraftFromRequest, serializeDraftCookie } from "./draft-cookie";
 import { newDraftToken, sha256Hex } from "./hash";
 
-/** Error codes the wizard client can branch on. The last three come from the Claude-backed routes (src/server/wizard-ai.ts). */
+/** Error codes the wizard client can branch on. The last four come from the Claude-backed routes (src/server/wizard-ai.ts). */
 export type WizardErrorCode =
   | "bad_request"
   | "invalid"
@@ -33,7 +33,9 @@ export type WizardErrorCode =
   /** 422: the model refused the files or facts. */
   | "refused"
   /** 502: the model call failed or returned nothing usable; try again. */
-  | "ai_error";
+  | "ai_error"
+  /** 429: this draft's hourly or the server's daily number of AI requests is used up. */
+  | "ai_rate_limited";
 
 /** Every wizard failure the client can show: a code, both languages, an HTTP status and optional field errors. */
 export class WizardError extends Error {

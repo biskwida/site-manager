@@ -6,11 +6,13 @@ import { POST as textsRoute } from "@/app/api/new/[id]/texts/route";
 import { makeServerDeps, type ServerDeps } from "@/src/server/deps";
 import { COOKIE_NAME, cookieFromHeader } from "@/src/server/draft-cookie";
 import { handleNewDraft, updateDraft, type WizardDeps } from "@/src/server/wizard";
-import { EXTRACT_MAX_TOTAL_BYTES, handleExtract, handleTexts, type WizardAiDeps } from "@/src/server/wizard-ai";
+import { AI_GLOBAL_PER_DAY, AI_PER_DRAFT_PER_HOUR, aiRateLimitKeys, EXTRACT_MAX_BODY, handleExtract, handleTexts, type WizardAiDeps } from "@/src/server/wizard-ai";
 import type { ExtractResult } from "@/src/wizard/extract";
+import { EXTRACT_MAX_TOTAL_BYTES } from "@/src/wizard/schema";
 import type { DraftTexts } from "@/src/wizard/texts";
 import { makeDemo } from "./helpers";
 
+const T0 = new Date("2026-10-10T09:00:00.000Z");
 const PNG_1x1 = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==";
 const PDF_STUB = Buffer.from("%PDF-1.4\n%stub\n").toString("base64");
 
@@ -53,7 +55,7 @@ async function draftVenue() {
 async function aiDeps(reply: Reply | null) {
   const { store, venue } = await draftVenue();
   const fake = reply ? fakeClient(reply) : null;
-  const d: WizardAiDeps = { store, anthropic: fake?.client ?? null, model: "claude-opus-5-5" };
+  const d: WizardAiDeps = { store, anthropic: fake?.client ?? null, model: "claude-opus-5-5", now: () => T0 };
   return { d, venue, store, calls: fake?.calls ?? [] };
 }
 const errorOf = async (r: Response) => ((await r.json()) as { error: { code: string; bg: string; en: string } }).error;
@@ -110,24 +112,30 @@ describe("handleExtract", () => {
     expect(calls).toHaveLength(0);
   });
 
-  it("applies the 4 MB wizard limit to the decoded files together (R25), and to a declared body length before reading it", async () => {
+  it("applies the 3 MB limit to the decoded files together (R25 amended), and a 4 MB + 64 KB cap to the declared body length before reading it", async () => {
     const { d, venue, calls } = await aiDeps(toolUse("extract_menu", MENU));
-    expect(EXTRACT_MAX_TOTAL_BYTES).toBe(4 * 1024 * 1024);
-    // Each image is under the helper's 5 MB per-file limit; together they are over 4 MB.
-    const half = { media_type: "image/jpeg", data: b64Of(2 * 1024 * 1024 + 3) };
+    expect(EXTRACT_MAX_TOTAL_BYTES).toBe(3 * 1024 * 1024);
+    expect(EXTRACT_MAX_BODY).toBe(4 * 1024 * 1024 + 64 * 1024);
+    // Each image is under the helper's 5 MB per-file limit; together they are over 3 MB.
+    const half = { media_type: "image/jpeg", data: b64Of(1.5 * 1024 * 1024 + 3) };
     const tooBig = await handleExtract(post(EXTRACT_URL, { files: [half, half] }), d, venue);
     expect(tooBig.status).toBe(400);
-    expect(await errorOf(tooBig)).toMatchObject({ code: "too_large", en: expect.stringContaining("4 MB") });
-    // A single PDF the helper would accept (≤ 10 MB) is still over the wizard's 4 MB.
-    const pdf = { media_type: "application/pdf", data: b64Of(4 * 1024 * 1024 + 3) };
+    const err = await errorOf(tooBig);
+    expect(err).toMatchObject({ code: "too_large" });
+    expect(err.en).toContain("up to 3 MB in total");
+    expect(err.bg).toContain("общо до 3 MB");
+    // A single PDF the helper would accept (≤ 10 MB) is still over 3 MB.
+    const pdf = { media_type: "application/pdf", data: b64Of(3 * 1024 * 1024 + 3) };
     expect(await errorOf(await handleExtract(post(EXTRACT_URL, { files: [pdf] }), d, venue))).toMatchObject({ code: "too_large" });
-    // Exactly 4 MB together is allowed.
-    const exact = { media_type: "image/jpeg", data: b64Of(2 * 1024 * 1024) };
-    const ok = await handleExtract(post(EXTRACT_URL, { files: [exact, exact] }), d, venue);
+    // Exactly 3 MB together is allowed, and its JSON body fits under the precheck.
+    const exact = { media_type: "image/jpeg", data: b64Of(1.5 * 1024 * 1024) };
+    const exactReq = post(EXTRACT_URL, { files: [exact, exact] });
+    expect(JSON.stringify({ files: [exact, exact] }).length).toBeLessThan(EXTRACT_MAX_BODY);
+    const ok = await handleExtract(exactReq, d, venue);
     expect(ok.status).toBe(200);
     expect(calls).toHaveLength(1);
-    // A declared content-length far over the limit is refused before the body is read.
-    const declared = await handleExtract(new Request(EXTRACT_URL, { method: "POST", headers: { "content-length": String(8 * 1024 * 1024) }, body: "x" }), d, venue);
+    // A declared content-length over 4 MB + 64 KB is refused before the body is read; one at the cap is read.
+    const declared = await handleExtract(new Request(EXTRACT_URL, { method: "POST", headers: { "content-length": String(EXTRACT_MAX_BODY + 1) }, body: "x" }), d, venue);
     expect(await errorOf(declared)).toMatchObject({ code: "too_large" });
     expect(calls).toHaveLength(1);
   });
@@ -191,6 +199,58 @@ describe("handleTexts", () => {
     const { venue: live } = await makeDemo();
     expect((await handleTexts(post(TEXTS_URL, { facts: "f" }), d, live)).status).toBe(409);
     expect(calls).toHaveLength(0);
+  });
+});
+
+describe("AI rate limits", () => {
+  it("allows 20 model calls per draft per hour, then answers 429 ai_rate_limited; another draft and the next hour are unaffected", async () => {
+    expect(AI_PER_DRAFT_PER_HOUR).toBe(20);
+    const { d, venue, store, calls } = await aiDeps(toolUse("draft_texts", TEXTS));
+    for (let i = 0; i < 20; i++) expect((await handleTexts(post(TEXTS_URL, { facts: "f" }), d, venue)).status).toBe(200);
+    const limited = await handleTexts(post(TEXTS_URL, { facts: "f" }), d, venue);
+    expect(limited.status).toBe(429);
+    expect(await errorOf(limited)).toEqual({ code: "ai_rate_limited", bg: "Твърде много заявки към асистента, опитайте след малко.", en: "Too many assistant requests, try again in a little while." });
+    // extract shares the same per-draft quota
+    const ex = await handleExtract(post(EXTRACT_URL, { files: [png] }), d, venue);
+    expect(ex.status).toBe(429);
+    expect(calls).toHaveLength(20);
+    // a denied draft request does not use up the global quota
+    expect(store.rateLimits.get(aiRateLimitKeys(venue.id).global)?.count).toBe(20);
+    // another draft on the same store still works
+    const other = await handleNewDraft(post("https://site.example/api/new", { template: "nocturne" }), { store, config: { publicBaseUrl: "https://site.example", rateSalt: "s", maxSitesPerDay: 50, telegramBotUsername: null }, now: () => T0 });
+    const otherVenue = await store.getVenue(((await other.json()) as { id: string }).id);
+    expect((await handleTexts(post(TEXTS_URL, { facts: "f" }), d, otherVenue)).status).toBe(200);
+    // an hour later the draft may ask again
+    const later = { ...d, now: () => new Date(T0.getTime() + 3_600_000 + 1) };
+    expect((await handleTexts(post(TEXTS_URL, { facts: "f" }), later, venue)).status).toBe(200);
+  });
+
+  it("answers 429 when the server's 500 calls per day are used up, for both routes", async () => {
+    expect(AI_GLOBAL_PER_DAY).toBe(500);
+    const { d, venue, store, calls } = await aiDeps(toolUse("extract_menu", MENU));
+    store.rateLimits.set(aiRateLimitKeys(venue.id).global, { count: 499, window_start: T0.getTime() });
+    expect((await handleExtract(post(EXTRACT_URL, { files: [png] }), d, venue)).status).toBe(200); // the 500th
+    const ex = await handleExtract(post(EXTRACT_URL, { files: [png] }), d, venue);
+    expect(ex.status).toBe(429);
+    expect(await errorOf(ex)).toMatchObject({ code: "ai_rate_limited" });
+    expect((await handleTexts(post(TEXTS_URL, { facts: "f" }), d, venue)).status).toBe(429);
+    expect(calls).toHaveLength(1);
+    // the next day it opens again
+    const tomorrow = { ...d, now: () => new Date(T0.getTime() + 24 * 3_600_000 + 1) };
+    expect((await handleExtract(post(EXTRACT_URL, { files: [png] }), tomorrow, venue)).status).toBe(200);
+  });
+
+  it("does not count requests that are refused before the model call (no key, bad body, too large, live venue)", async () => {
+    const { d, venue, store } = await aiDeps(toolUse("extract_menu", MENU));
+    await handleExtract(post(EXTRACT_URL, { files: [] }), d, venue);
+    await handleExtract(post(EXTRACT_URL, { files: [{ media_type: "application/pdf", data: b64Of(3 * 1024 * 1024 + 3) }] }), d, venue);
+    await handleTexts(post(TEXTS_URL, { facts: " " }), d, venue);
+    await handleTexts(post(TEXTS_URL, { facts: "f" }), { ...d, anthropic: null }, venue);
+    const { venue: live } = await makeDemo();
+    expect((await handleTexts(post(TEXTS_URL, { facts: "f" }), d, live)).status).toBe(409);
+    expect([...store.rateLimits.keys()].filter((k) => k.startsWith("ai:"))).toEqual([]);
+    expect(store.rateLimits.has(aiRateLimitKeys(venue.id).draft)).toBe(false);
+    expect(store.rateLimits.has("ai:global")).toBe(false);
   });
 });
 
