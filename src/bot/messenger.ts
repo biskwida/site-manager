@@ -21,9 +21,11 @@ export function proposalKeyboard(setId: string, lang: Lang): InlineKeyboard {
     .text(bg ? "❌ Откажи" : "❌ Cancel", `cs:cancel:${setId}`);
 }
 
-/** The numeric Telegram chat id inside a "tg:" ref. */
+/** The numeric Telegram chat id inside a "tg:" ref; throws for any other channel (callers catch and log). */
 function telegramChat(chatRef: string): number {
-  return Number(parseRef(chatRef).id);
+  const { channel, id } = parseRef(chatRef);
+  if (channel !== "tg") throw new Error(`not a Telegram ref: ${channel}`);
+  return Number(id);
 }
 
 export class TelegramMessenger implements Messenger {
