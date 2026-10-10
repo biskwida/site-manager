@@ -9,7 +9,7 @@ import { useLang } from "@/src/i18n";
 import { formatDateTime } from "@/src/time";
 import { pageHref } from "../shared/links";
 import type { Changed } from "../shared/types";
-import { Flash, type MediaLookup } from "./bits";
+import { Flash, RowHead, type MediaLookup } from "./bits";
 
 type Props = { state: SiteState; now: number; changed: Changed; media: MediaLookup; slug: string; variant: "highlights" | "full" };
 
@@ -23,23 +23,19 @@ function Row({ i, lang, now, tz, changed, media, t }: { i: Item; lang: Lang; now
       <div className="n-row-inner">
         {img && (
           <div className="n-thumb">
-            <Image src={img} alt={itemName(i, lang)} fill sizes="80px" className="object-cover" />
+            <Image src={img} alt={itemName(i, lang)} fill sizes="80px" className="n-cover" />
           </div>
         )}
         <div className="n-row-text">
-          <div className="n-row-head">
-            <h3 className={`n-name${sold ? " is-sold" : ""}`}>{itemName(i, lang)}</h3>
-            <span aria-hidden="true" className="n-lead" />
-            <span className={`n-price${sold ? " is-sold" : ""}`}>{formatPrice(i.price_eur, lang)}</span>
-          </div>
+          <RowHead name={itemName(i, lang)} price={formatPrice(i.price_eur, lang)} sold={sold} />
           {desc && <p className="n-desc">{desc}</p>}
           {(sold || i.allergens.length > 0) && (
             <div className="n-meta">
               {sold && i.sold_out_until && <span className="n-badge">{t("site.soldOutUntil", { when: formatDateTime(i.sold_out_until, lang, tz) })}</span>}
-              {i.allergens.length > 0 && <span className="sr-only">{t("site.allergens")}:</span>}
+              {i.allergens.length > 0 && <span className="n-sr">{t("site.allergens")}:</span>}
               {i.allergens.map((a) => (
                 <span key={a} title={allergenName(a, lang)} className="n-tag">
-                  {a}<span className="sr-only"> {allergenName(a, lang)}</span>
+                  {a}<span className="n-sr"> {allergenName(a, lang)}</span>
                 </span>
               ))}
             </div>
@@ -60,11 +56,13 @@ export function MenuList({ state, now, changed, media, slug, variant }: Props) {
     const catPos = new Map(cats.map((c) => [c.id, c.position]));
     const picks = items
       .filter((i) => !i.is_special)
-      .sort((a, b) => Number(!media(a.image_media_id)) - Number(!media(b.image_media_id)) || (catPos.get(a.category_id) ?? 0) - (catPos.get(b.category_id) ?? 0) || a.position - b.position)
-      .slice(0, 6);
+      .map((i) => ({ i, noImage: media(i.image_media_id) ? 0 : 1 }))
+      .sort((a, b) => a.noImage - b.noImage || (catPos.get(a.i.category_id) ?? 0) - (catPos.get(b.i.category_id) ?? 0) || a.i.position - b.i.position)
+      .slice(0, 6)
+      .map((x) => x.i);
     if (picks.length === 0) return null;
     return (
-      <section aria-labelledby="highlights" className="n-section mt-12">
+      <section aria-labelledby="highlights" className="n-section n-board mt-12">
         <h2 id="highlights" className="n-h2">{t("site.highlights")}</h2>
         <ul className="n-divide mt-2">
           {picks.map((i) => <Row key={i.id} i={i} lang={lang} now={now} tz={tz} changed={changed} media={media} t={t} />)}
@@ -79,7 +77,7 @@ export function MenuList({ state, now, changed, media, slug, variant }: Props) {
   const used = [...new Set(sections.flatMap((s) => s.items.flatMap((i) => i.allergens)))].sort((a, b) => a - b);
   if (sections.length === 0) return <p className="n-soft mt-10 text-center">{t("site.noItems")}</p>;
   return (
-    <div className="mt-6">
+    <div className="n-board mt-6">
       {sections.length > 1 && (
         <nav aria-label={t("site.categories")} className="n-jump">
           {sections.map(({ c }) => <a key={c.id} href={`#cat-${c.id}`} className="n-chip">{categoryName(c, lang)}</a>)}

@@ -1,13 +1,17 @@
 "use client";
 import Image from "next/image";
 import Link from "next/link";
+import type { ReactNode } from "react";
 import type { SiteState } from "@/src/domain/types";
 import { LangToggle, useLang } from "@/src/i18n";
 import { pageHref } from "../shared/links";
 import { pick, type MediaLookup } from "./bits";
 
-/** Full-bleed cover (or a tinted gradient), nav + language, then the name as poster-scale display type pinned to the bottom. */
-export function Hero({ state, slug, page, media }: { state: SiteState; slug: string; page: "home" | "menu"; media: MediaLookup }) {
+/**
+ * Full-bleed cover (or a tinted gradient), nav + language, then the name as poster-scale display type pinned to the bottom,
+ * with the Tonight card (`aside`) under it on a phone and beside it on a laptop.
+ */
+export function Hero({ state, slug, page, media, aside }: { state: SiteState; slug: string; page: "home" | "menu"; media: MediaLookup; aside: ReactNode }) {
   const { lang, t } = useLang();
   const v = state.venue;
   const cover = media(v.cover_media_id);
@@ -22,7 +26,7 @@ export function Hero({ state, slug, page, media }: { state: SiteState; slug: str
   return (
     <header className={`n-hero ${page === "home" ? "n-hero-home" : "n-hero-menu"}${cover ? " has-cover" : ""}`}>
       <a href="#main" className="n-skip">{t("site.skip")}</a>
-      {cover ? <Image src={cover} alt="" fill priority sizes="100vw" className="object-cover" /> : <div aria-hidden="true" className="n-cover-fallback" />}
+      {cover ? <Image src={cover} alt="" fill priority sizes="100vw" className="n-cover" /> : <div aria-hidden="true" className="n-cover-fallback" />}
       <div aria-hidden="true" className="n-veil" />
       <div className="n-wrap n-hero-inner">
         <div className="n-topbar">
@@ -33,18 +37,21 @@ export function Hero({ state, slug, page, media }: { state: SiteState; slug: str
           </nav>
           <LangToggle className="n-lang" />
         </div>
-        <div className="n-hero-body">
-          {logo && (
-            <span className="n-logo n-rise">
-              <Image src={logo} alt="" fill sizes="56px" className="object-cover" />
-            </span>
-          )}
-          <h1 className="n-title n-rise">{v.name}</h1>
-          {tagline && <p className="n-tagline n-rise" style={{ animationDelay: "60ms" }}>{tagline}</p>}
-          {welcomeText && <p className="n-welcome n-rise" style={{ animationDelay: "120ms" }}>{welcomeText}</p>}
-          {page === "home" && (
-            <Link href={pageHref(slug, "menu")} className="n-btn n-btn-accent n-hero-cta n-rise" style={{ animationDelay: "180ms" }}>{t("site.fullMenu")}</Link>
-          )}
+        <div className="n-hero-grid">
+          <div className="n-hero-body">
+            {logo && (
+              <span className="n-logo n-rise">
+                <Image src={logo} alt="" fill sizes="56px" className="n-cover" />
+              </span>
+            )}
+            <h1 className="n-title n-rise" translate="no">{v.name}</h1>
+            {tagline && <p className="n-tagline n-rise" style={{ animationDelay: "60ms" }}>{tagline}</p>}
+            {welcomeText && <p className="n-welcome n-rise" style={{ animationDelay: "120ms" }}>{welcomeText}</p>}
+            {page === "home" && (
+              <Link href={pageHref(slug, "menu")} className="n-btn n-btn-accent n-hero-cta n-rise" style={{ animationDelay: "180ms" }}>{t("site.fullMenu")}</Link>
+            )}
+          </div>
+          {aside}
         </div>
       </div>
     </header>

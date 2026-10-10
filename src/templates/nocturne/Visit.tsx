@@ -32,9 +32,9 @@ export function Visit({ state, now }: { state: SiteState; now: number }) {
               {WEEKDAYS.map((d) => {
                 const h = v.hours[d];
                 return (
-                  <tr key={d} aria-current={d === today ? "date" : undefined}>
+                  <tr key={d} aria-current={d === today ? "date" : undefined} suppressHydrationWarning>
                     <th scope="row">{weekdayLabel(d, lang)}</th>
-                    <td suppressHydrationWarning>{h ? `${hhmm(h.open)}–${hhmm(h.close)}` : t("site.closedDay")}</td>
+                    <td>{h ? `${hhmm(h.open)}–${hhmm(h.close)}` : t("site.closedDay")}</td>
                   </tr>
                 );
               })}

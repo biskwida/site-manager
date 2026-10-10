@@ -20,10 +20,10 @@ export function Footer({ state, feedUrl }: { state: SiteState; feedUrl: string }
     <footer className="n-footer">
       <div className="n-wrap n-footer-inner">
         <div>
-          <p className="n-display font-bold">{state.venue.name}</p>
+          <p className="n-display font-bold" translate="no">{state.venue.name}</p>
           {noteText && <p className="n-soft mt-1">{noteText}</p>}
         </div>
-        <a href={poweredHref(feedUrl)} className="n-powered">{t("site.poweredBy")}</a>
+        <a href={poweredHref(feedUrl)} className="n-powered" translate="no">{t("site.poweredBy")}</a>
       </div>
     </footer>
   );

@@ -21,7 +21,7 @@ export function Gallery({ state, media }: { state: SiteState; media: MediaLookup
       <ul className="n-strip mt-4">
         {photos.map((p, n) => (
           <li key={p.id} className="n-photo">
-            <Image src={p.src} alt={t("site.galleryPhoto", { name: state.venue.name, n: n + 1 })} fill sizes="(min-width: 640px) 320px, 78vw" className="object-cover" />
+            <Image src={p.src} alt={t("site.galleryPhoto", { name: state.venue.name, n: n + 1 })} fill sizes="(min-width: 640px) 320px, 78vw" className="n-cover" />
           </li>
         ))}
       </ul>

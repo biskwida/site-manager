@@ -10,7 +10,7 @@ import { Footer } from "./Footer";
 import { Gallery } from "./Gallery";
 import { Hero } from "./Hero";
 import { MenuList } from "./MenuList";
-import { Tonight } from "./Tonight";
+import { Specials, Tonight } from "./Tonight";
 import { Visit } from "./Visit";
 import "./styles.css";
 
@@ -39,9 +39,9 @@ export function Template({ state: initial, now: initialNow, slug, page, draft, l
     <div className={`tpl-nocturne ${fontVars}`} style={{ "--accent": accent } as CSSProperties} data-page={page}>
       <div aria-hidden="true" className="n-grain" />
       {draft && <DraftNote summary_bg={draft.summary_bg} summary_en={draft.summary_en} />}
-      <Hero state={state} slug={slug} page={page} media={media} />
+      <Hero state={state} slug={slug} page={page} media={media} aside={<Tonight state={state} now={now} />} />
       <main id="main" className="n-wrap n-main">
-        <Tonight state={state} now={now} changed={changed} media={media} />
+        <Specials state={state} now={now} changed={changed} media={media} />
         {page === "home" ? (
           <>
             <MenuList variant="highlights" state={state} now={now} changed={changed} media={media} slug={slug} />

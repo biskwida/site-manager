@@ -1,6 +1,7 @@
 // test/template-nocturne.test.ts
 import { createElement, type ReactNode } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
+import { readFileSync } from "node:fs";
 import { describe, expect, it, vi } from "vitest";
 import type { DraftInfo, Lang, SiteState } from "@/src/domain/types";
 import { LangProvider } from "@/src/i18n";
@@ -87,6 +88,17 @@ describe("nocturne template", () => {
     const html = await render("en", { mutate });
     expect(html).toContain("Item 39");
     expect(html.match(/class="n-chip"/g)?.length).toBe(4);
+  });
+  it("keeps the change flash reaching its final frame under reduced motion", () => {
+    // `animation: none` would freeze .n-flash at its base opacity (1) forever, because useLiveSite never clears `changed`.
+    const css = readFileSync(new URL("../src/templates/nocturne/styles.css", import.meta.url), "utf8");
+    const reduced = css.slice(css.indexOf("@media (prefers-reduced-motion: reduce)"));
+    expect(reduced).toMatch(/\.n-flash\s*\{[^}]*animation:\s*n-flash\s+1ms[^}]*both\s*!important/);
+    expect(reduced.indexOf(".n-flash")).toBeGreaterThan(reduced.indexOf("animation: none !important"));
+  });
+  it("keeps the status date-time on one line", async () => {
+    const mutate = (s: SiteState) => { s.venue.hours = { ...s.venue.hours, fri: null }; };
+    expect(await render("en", { mutate })).toMatch(/<span class="n-nowrap">[^<]*2026[^<]*<\/span>/);
   });
   it("renders the draft bar with the summary when a draft is given", async () => {
     const draft: DraftInfo = { id: "d1", status: "proposed", summary_bg: "Капучино 3,20 €", summary_en: "Cappuccino €3.20", preview_bg: "", preview_en: "", key: "k" };
