@@ -272,19 +272,28 @@ export class SupabaseStore implements Store {
     await mustRows(this.db.from("change_sets").update(clean).eq("id", id).select("id"), `updateChangeSet ${id}`);
   }
 
-  /** Conditional status flip first (so two appliers cannot both write), then the entity writes. */
+  /**
+   * Conditional status flip first (so two appliers cannot both write), then the entity writes.
+   * If any write fails, the set is reset to its prior status so it can be retried (every write is idempotent).
+   */
   async applyChangeSet(id: string, now: string) {
+    const prior = await must<{ status: ChangeSet["status"] }>(this.db.from("change_sets").select("status").eq("id", id).maybeSingle(), `applyChangeSet ${id}`);
     const flipped = await must(
-      this.db.from("change_sets").update({ status: "applied", applied_at: now }).eq("id", id).in("status", ["proposed", "scheduled"]).select("*"),
+      this.db.from("change_sets").update({ status: "applied", applied_at: now }).eq("id", id).in("status", ["proposed", "scheduled"]).select(SET_SELECT),
       `applyChangeSet ${id}`,
     );
     if (flipped.length === 0) return "skipped";
-    const cs = await this.getChangeSet(id);
-    if (cs.decided_at === null) await this.updateChangeSet(id, { decided_at: now });
-    for (const c of cs.changes) await this.writeEntity(cs.venue_id, c);
-    if (cs.undoes_id) {
-      const { error } = await this.db.from("change_sets").update({ status: "reverted", reverted_by: cs.id }).eq("id", cs.undoes_id).eq("status", "applied");
-      if (error) throw new Error(`applyChangeSet revert ${cs.undoes_id}: ${error.message}`);
+    const cs = toChangeSet(flipped[0]);
+    try {
+      if (cs.decided_at === null) await this.updateChangeSet(id, { decided_at: now });
+      for (const c of cs.changes) await this.writeEntity(cs.venue_id, c);
+      if (cs.undoes_id) {
+        const { error } = await this.db.from("change_sets").update({ status: "reverted", reverted_by: cs.id }).eq("id", cs.undoes_id).eq("status", "applied");
+        if (error) throw new Error(`applyChangeSet revert ${cs.undoes_id}: ${error.message}`);
+      }
+    } catch (e) {
+      await this.db.from("change_sets").update({ status: prior.status, applied_at: null, decided_at: cs.decided_at }).eq("id", id);
+      throw e;
     }
     return "applied";
   }
