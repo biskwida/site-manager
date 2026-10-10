@@ -297,7 +297,8 @@ function extraTools(d: AgentDeps, k: ToolKit) {
         const summary_bg = input.summary_bg ?? `Цени ${amount}${scope.bg}${round.bg}`;
         const summary_en = input.summary_en ?? `Prices ${amount}${scope.en}${round.en}`;
         const result = (await k.propose({ summary_bg, summary_en, changes: changed.map((r) => ({ op: "set_price" as const, item_id: r.item_id, price_eur: r.new_eur })) }, null)) as Record<string, unknown>;
-        return { ...result, rows };
+        // Only the rows that became changes: the model has nothing to say about prices that stay the same.
+        return { ...result, rows: changed };
       }),
   });
 
@@ -322,7 +323,11 @@ function extraTools(d: AgentDeps, k: ToolKit) {
         if (d.member.role !== "owner") throw new Error("undo is only the owner's decision; tell the owner.");
         let target: ChangeSet | undefined;
         if (input.change_set_id === "last") {
-          target = (await d.store.listChangeSets(d.venueId, { status: ["applied"], limit: 50 })).find((cs) => cs.source !== "auto");
+          // listChangeSets orders by created_at; a scheduled set lands long after its creation, so rank by when it was applied.
+          const appliedAt = (cs: ChangeSet) => cs.applied_at ?? cs.created_at;
+          target = (await d.store.listChangeSets(d.venueId, { status: ["applied"], limit: 50 }))
+            .filter((cs) => cs.source !== "auto")
+            .sort((a, b) => appliedAt(b).localeCompare(appliedAt(a)))[0];
           if (!target) throw new Error("Nothing to undo: no applied change set yet.");
         } else {
           target = await k.getSet(input.change_set_id);

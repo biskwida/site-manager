@@ -56,6 +56,17 @@ describe("propose_bulk_price_change", () => {
     const none = await call(tools, "propose_bulk_price_change", { name_contains: "pizza", percent: 5, rounding: "none" });
     expect(none.error).toMatch(/No active items match/);
   });
+  it("returns only the rows that became changes, not the ones rounding left untouched", async () => {
+    const { tools, categories, store } = await setup();
+    // +2 % rounded to 0.10: 1.80 → 1.80 and 2.00 → 2.00 stay; 2.90 → 3.00 and 3.20 → 3.30 change.
+    const r = await call(tools, "propose_bulk_price_change", { category_id: categories.Coffee.id, percent: 2, rounding: "0.10" });
+    const rows = r.rows as { name_en: string; old_eur: number; new_eur: number }[];
+    const cs = await store.getChangeSet(r.change_set_id as string);
+    expect(cs.changes).toHaveLength(2);
+    expect(rows.length).toBe(cs.changes.length);
+    expect(rows.map((x) => [x.name_en, x.old_eur, x.new_eur])).toEqual([["Cappuccino", 2.9, 3.0], ["Latte", 3.2, 3.3]]);
+    expect(rows.every((x) => x.new_eur !== x.old_eur)).toBe(true);
+  });
 });
 
 describe("check_allergens", () => {
@@ -100,5 +111,19 @@ describe("undo", () => {
     await store.applyChangeSet(auto.id, "2026-10-09T09:01:00.000Z");
     const u = await call(tools, "undo", { change_set_id: "last" });
     expect(u.undoes).toBe(real.id);
+  });
+  it("undo last prefers the most recently applied set, not the most recently created one", async () => {
+    const { tools, store, venue, items } = await setup();
+    const site = await store.getSite(venue.id);
+    const { planChanges } = await import("@/src/domain/changes");
+    const ctx = { newId: () => "n", now: T0.toISOString() };
+    // A is created first and applied later (T0+1h), like a scheduled set that lands after a quick fix.
+    const a = await store.createChangeSet({ venue_id: venue.id, chat_id: 1001, summary_bg: "A", summary_en: "A", preview_bg: "p", preview_en: "p", source: "text", status: "proposed", changes: planChanges(site, [{ op: "set_price", item_id: items.Tea.id, price_eur: 2.2 }], ctx) });
+    // B is created second and applied earlier (T0).
+    const b = await store.createChangeSet({ venue_id: venue.id, chat_id: 1001, summary_bg: "B", summary_en: "B", preview_bg: "p", preview_en: "p", source: "text", status: "scheduled", apply_at: T0.toISOString(), changes: planChanges(site, [{ op: "set_price", item_id: items.Latte.id, price_eur: 3.5 }], ctx) });
+    await store.applyChangeSet(b.id, T0.toISOString());
+    await store.applyChangeSet(a.id, "2026-10-09T10:00:00.000Z");
+    const u = await call(tools, "undo", { change_set_id: "last" });
+    expect(u.undoes).toBe(a.id);
   });
 });
