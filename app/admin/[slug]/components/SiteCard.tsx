@@ -26,6 +26,8 @@ export function SiteCard({ overview: o, post, adminKey = "", refresh }: { overvi
   const d = o.deploy;
   const publishing = d?.status === "pending" || d?.status === "building";
   const unchanged = template === o.template;
+  // After a failed publish the same template can be sent again: setTemplate redeploys (or creates the site) from the error state.
+  const retry = d?.status === "error" && unchanged;
 
   useEffect(() => {
     if (!publishing || !adminKey) return;
@@ -34,11 +36,11 @@ export function SiteCard({ overview: o, post, adminKey = "", refresh }: { overvi
 
   async function change(e: FormEvent) {
     e.preventDefault();
-    if (busy || unchanged) return;
+    if (busy || (unchanged && !retry)) return;
     setBusy(true);
     setMsg(null);
     const r = await post({ action: "set_template", template });
-    if (r.ok) setMsg({ tone: "good", key: d ? "admin.templateChanged" : "admin.templateChangedLocal" });
+    if (r.ok) setMsg({ tone: "good", key: retry ? "admin.retryStarted" : d ? "admin.templateChanged" : "admin.templateChangedLocal" });
     else setMsg(isLocalized(r.data) ? { tone: "warn", bg: r.data.bg, en: r.data.en } : { tone: "warn", key: "admin.failed" });
     setBusy(false);
   }
@@ -57,7 +59,8 @@ export function SiteCard({ overview: o, post, adminKey = "", refresh }: { overvi
         <a href={o.site_url} target="_blank" rel="noopener" className="mt-3 inline-flex min-h-11 items-center font-semibold underline underline-offset-4 [overflow-wrap:anywhere] hover:text-accent">
           {o.site_url}<span className="sr-only"> {t("admin.newTab")}</span>
         </a>
-        {d?.status === "error" && d.error && <p className="text-sm text-clay [overflow-wrap:anywhere]">{d.error}</p>}
+        {/* The provider's build log means nothing to an owner (and may be long): a short line, then Try again. */}
+        {d?.status === "error" && <p className="text-sm text-clay">{t("admin.deployFailedLine")}</p>}
         <form onSubmit={(e) => void change(e)} className="mt-4 flex flex-wrap items-end gap-2">
           <label className="flex min-w-0 flex-1 flex-col gap-1 text-sm font-semibold sm:flex-none">
             {t("admin.template")}
@@ -65,9 +68,9 @@ export function SiteCard({ overview: o, post, adminKey = "", refresh }: { overvi
               {TEMPLATE_IDS.map((id) => <option key={id} value={id}>{t(`admin.template.${id}` as MessageKey)}</option>)}
             </select>
           </label>
-          <button type="submit" disabled={busy || publishing || unchanged} aria-busy={busy}
+          <button type="submit" disabled={busy || publishing || (unchanged && !retry)} aria-busy={busy}
             className="min-h-11 rounded-full bg-accent px-5 text-sm font-semibold text-white transition-[transform,filter] duration-150 hover:brightness-110 active:scale-[0.98] disabled:opacity-60 disabled:hover:brightness-100 disabled:active:scale-100">
-            {busy ? t("admin.busy") : t("admin.changeTemplate")}
+            {busy ? t("admin.busy") : retry ? t("admin.tryAgain") : t("admin.changeTemplate")}
           </button>
         </form>
         {msg && <p role="status" className={`mt-2 text-sm font-semibold ${msg.tone === "good" ? "text-ink" : "text-clay"}`}>{msgText}</p>}

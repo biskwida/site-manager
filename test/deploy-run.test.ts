@@ -131,7 +131,7 @@ describe("pollDeployments", () => {
     await startDeploy({ store, deployer: failing, feedUrlFor, now: () => T0 }, venue.id);
     expect(await pollDeployments({ store, deployer: failing, messenger: m, now: () => T0 })).toEqual({ ready: [], failed: [venue.id] });
     expect((await store.getVenue(venue.id)).deploy).toMatchObject({ status: "error", error: "Build failed\nModule not found: zod", url: null });
-    expect(m.sent).toEqual([expect.objectContaining({ chatId: 1001, text: "Публикуването на сайта на Кафене „Ъгъла“ не успя. Ще го погледнем; дотогава сайтът ви остава достъпен на адреса от приветственото съобщение." })]);
+    expect(m.sent).toEqual([expect.objectContaining({ chatId: 1001, text: "Публикуването на сайта на Кафене „Ъгъла“ не успя. Отворете таблото и натиснете „Опитай пак“; дотогава сайтът ви остава достъпен на адреса от приветственото съобщение." })]);
     const other = await store.createVenue({ slug: "other", name: "Other" });
     await startDeploy({ store, deployer: failing, feedUrlFor, now: () => T0 }, other.id);
     expect(await pollDeployments({ store, deployer: failing, messenger: null, now: () => T0 })).toEqual({ ready: [], failed: [other.id] });

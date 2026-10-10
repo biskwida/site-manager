@@ -37,4 +37,21 @@ describe("SiteCard", () => {
       expect(html).toContain('href="https://site.example/agala"');
     }
   });
+
+  it("offers Try again with the current template after a failed publish, and a short line instead of the build log", () => {
+    const failed: DeployInfo = { ...ready, status: "error", error: "Error: Command \"npm run build\" exited with 1\n  at /vercel/path0/node_modules/next/dist/build" };
+    const en = render("en", { deploy: failed });
+    expect(en).toMatch(/<button type="submit"[^>]*>Try again<\/button>/);
+    expect(en).not.toMatch(/<button type="submit" disabled=""/);
+    expect(en).toContain("The last publish did not finish.");
+    expect(en).not.toContain("npm run build");
+    const bg = render("bg", { deploy: failed });
+    expect(bg).toMatch(/<button type="submit"[^>]*>Опитай пак<\/button>/);
+    expect(bg).toContain("Последното публикуване не завърши.");
+  });
+
+  it("keeps Change template disabled while nothing changed on a healthy site", () => {
+    const html = render("en", { deploy: ready, site_url: ready.url! });
+    expect(html).toMatch(/<button type="submit" disabled=""[^>]*>Change template<\/button>/);
+  });
 });
