@@ -1,7 +1,9 @@
 // test/tick.test.ts
 import { describe, expect, it } from "vitest";
+import { FakeDeployer } from "@/src/deploy/fake";
+import { startDeploy } from "@/src/deploy/run";
 import { planChanges } from "@/src/domain/changes";
-import { runTick } from "@/src/tick";
+import { cleanupDrafts, DRAFT_TTL_MS, runTick } from "@/src/tick";
 import { FakeMessenger, makeDemo } from "./helpers";
 
 const T0 = new Date("2026-10-09T09:00:00.000Z");
@@ -75,5 +77,48 @@ describe("runTick", () => {
     const r = await runTick({ store, messenger: null, now: T0, venueId: other.id });
     expect(r.applied).toEqual([b.id]);
     expect((await store.getChangeSet(a.id)).status).toBe("scheduled");
+  });
+
+  it("deletes drafts older than 48 h, keeps fresh drafts and old live venues, and polls deployments when a deployer is given", async () => {
+    const { store, venue } = await makeDemo();
+    store.clock = () => "2026-10-06T09:00:00.000Z";
+    const old = await store.createVenue({ slug: "old-draft", name: "Old", status: "draft" });
+    store.clock = () => "2026-10-01T09:00:00.000Z";
+    await store.createVenue({ slug: "old-live", name: "Live" });
+    store.clock = () => "2026-10-09T08:00:00.000Z";
+    await store.createVenue({ slug: "fresh-draft", name: "Fresh", status: "draft" });
+    const deployer = new FakeDeployer();
+    const m = new FakeMessenger();
+    await startDeploy({ store, deployer, feedUrlFor: (s) => `https://sm.example/api/site/${s}`, now: () => T0 }, venue.id);
+    const r1 = await runTick({ store, messenger: m, now: T0, deployer });
+    expect(r1.cleaned).toEqual([old.id]);
+    expect(r1.deployed).toEqual([]);
+    expect(r1.deployFailed).toEqual([]);
+    expect(await store.getVenueBySlug("old-draft")).toBeNull();
+    expect(await store.getVenueBySlug("old-live")).not.toBeNull();
+    expect(await store.getVenueBySlug("fresh-draft")).not.toBeNull();
+    const r2 = await runTick({ store, messenger: m, now: T0, deployer });
+    expect(r2.deployed).toEqual([venue.id]);
+    expect(r2.cleaned).toEqual([]);
+    expect(m.sent.at(-1)).toMatchObject({ chatId: 1001, text: expect.stringContaining("https://agala.example.test") });
+    const r3 = await runTick({ store, messenger: null, now: T0 }); // no deployer: nothing polled, report fields still present
+    expect(r3).toMatchObject({ deployed: [], deployFailed: [], cleaned: [] });
+  });
+
+  it("cleanupDrafts never deletes a live venue, honours the exact TTL boundary and the venue filter", async () => {
+    const { store } = await makeDemo();
+    const cutoff = new Date(T0.getTime() - DRAFT_TTL_MS);
+    store.clock = () => new Date(cutoff.getTime() - 1).toISOString();
+    const stale = await store.createVenue({ slug: "stale", name: "Stale", status: "draft" });
+    const staleLive = await store.createVenue({ slug: "stale-live", name: "Stale live" });
+    store.clock = () => cutoff.toISOString();
+    const boundary = await store.createVenue({ slug: "boundary", name: "Boundary", status: "draft" });
+    expect(await cleanupDrafts({ store, now: T0, venueId: staleLive.id })).toEqual([]);
+    expect(await cleanupDrafts({ store, now: T0, venueId: boundary.id })).toEqual([]);
+    expect(await cleanupDrafts({ store, now: T0 })).toEqual([stale.id]);
+    expect(await store.getVenueBySlug("stale")).toBeNull();
+    expect(await store.getVenueBySlug("stale-live")).not.toBeNull();
+    expect(await store.getVenueBySlug("boundary")).not.toBeNull();
+    expect(await store.getVenueBySlug("agala")).not.toBeNull();
   });
 });

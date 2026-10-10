@@ -37,6 +37,9 @@ const BG = {
   photoFailed: "Не успях да изтегля снимката. Опитайте отново.",
   photoTooBig: "Снимката е над 5 MB. Изпратете по-малка или я пратете като снимка, а не като файл.",
   error: "Възникна грешка. Опитайте отново.",
+  publishing: "Сайтът ви се публикува. Ще ви пиша, когато е готов (обикновено до 2–3 минути).",
+  siteLive: (name: string, url: string) => `🎉 Сайтът на ${name} е готов: ${url}\n\nОт тук нататък промените от този чат се появяват на него за секунди.`,
+  siteFailed: (name: string) => `Публикуването на сайта на ${name} не успя. Ще го погледнем; дотогава сайтът ви остава достъпен на адреса от приветственото съобщение.`,
 };
 
 const EN: typeof BG = {
@@ -70,6 +73,9 @@ const EN: typeof BG = {
   photoFailed: "I couldn't download the photo. Please try again.",
   photoTooBig: "The photo is over 5 MB. Send a smaller one, or send it as a photo rather than a file.",
   error: "Something went wrong. Please try again.",
+  publishing: "Your site is being published. I'll message you when it's live (usually within 2–3 minutes).",
+  siteLive: (name, url) => `🎉 ${name}'s site is live: ${url}\n\nFrom now on, changes from this chat show up there within seconds.`,
+  siteFailed: (name) => `Publishing ${name}'s site failed. We'll look into it; until then your site stays available at the address from the welcome message.`,
 };
 
 export function copy(lang: Lang) {

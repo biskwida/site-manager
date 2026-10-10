@@ -1,5 +1,7 @@
 // src/tick.ts
 import type { Messenger } from "./bot/messenger";
+import { pollDeployments } from "./deploy/run";
+import type { Deployer } from "./deploy/types";
 import { planChange } from "./domain/changes";
 import { itemName, tr } from "./domain/format";
 import type { Lang } from "./domain/types";
@@ -12,17 +14,26 @@ export interface TickDeps {
   now: Date;
   /** Restrict to one venue (the per-webhook tick). */
   venueId?: string;
+  /** When set, in-flight deployments are polled (pollDeployments). */
+  deployer?: Deployer | null;
 }
 export interface TickReport {
   applied: string[];
   auto: string[];
   reminded: string[];
   expired: string[];
+  /** Venue ids whose site became ready / failed this tick. */
+  deployed: string[];
+  deployFailed: string[];
+  /** Draft venue ids deleted this tick. */
+  cleaned: string[];
 }
 
 const HOUR = 3_600_000;
 const PROPOSAL_TTL_MS = 2 * HOUR;
 const REMIND_WINDOW_MS = 24 * HOUR;
+/** Wizard drafts nobody published are deleted after this. */
+export const DRAFT_TTL_MS = 48 * HOUR;
 
 async function langFor(store: Store, venueId: string, chatId: number | null): Promise<{ lang: Lang; tz: string }> {
   const venue = await store.getVenue(venueId);
@@ -33,7 +44,7 @@ async function langFor(store: Store, venueId: string, chatId: number | null): Pr
 /** Applies due scheduled sets, writes auto sets for elapsed timers, reminds about upcoming sets, expires stale proposals. */
 export async function runTick(d: TickDeps): Promise<TickReport> {
   const now = d.now.toISOString();
-  const report: TickReport = { applied: [], auto: [], reminded: [], expired: [] };
+  const report: TickReport = { applied: [], auto: [], reminded: [], expired: [], deployed: [], deployFailed: [], cleaned: [] };
 
   // 1. Stale proposals (before applying, so a 2 h-old proposal cannot be applied by a late tap).
   const cutoff = new Date(d.now.getTime() - PROPOSAL_TTL_MS).toISOString();
@@ -87,7 +98,39 @@ export async function runTick(d: TickDeps): Promise<TickReport> {
       await d.messenger.send(cs.chat_id, `${tr(lang, "⏰ Напомняне: на", "⏰ Reminder: on")} ${formatDateTime(cs.apply_at, lang, tz)} ${tr(lang, "ще се приложи", "this will be applied")}: ${summary}`);
     }
   }
+
+  // 5. Deployments in flight (only when the caller has a deployer; tests of the content tick pass none).
+  if (d.deployer) {
+    try {
+      const r = await pollDeployments({ store: d.store, deployer: d.deployer, messenger: d.messenger, now: () => d.now, venueId: d.venueId });
+      report.deployed = r.ready;
+      report.deployFailed = r.failed;
+    } catch (e) {
+      console.error("[tick] pollDeployments failed:", e instanceof Error ? e.message : e);
+    }
+  }
+
+  // 6. Abandoned wizard drafts.
+  report.cleaned = await cleanupDrafts({ store: d.store, now: d.now, venueId: d.venueId });
   return report;
+}
+
+/** Deletes draft venues created more than DRAFT_TTL_MS ago (cookie-only drafts nobody published). Never touches a live venue. Returns the deleted ids. */
+export async function cleanupDrafts(d: { store: Store; now: Date; venueId?: string }): Promise<string[]> {
+  const cutoff = d.now.getTime() - DRAFT_TTL_MS;
+  const out: string[] = [];
+  for (const v of await d.store.listVenues({ status: "draft" })) {
+    if (v.status !== "draft") continue; // belt and braces: a store that ignores the filter must still never lose a live venue
+    if (d.venueId && v.id !== d.venueId) continue;
+    if (Date.parse(v.created_at) >= cutoff) continue;
+    try {
+      await d.store.deleteVenue(v.id);
+      out.push(v.id);
+    } catch (e) {
+      console.error(`[tick] delete draft ${v.id} failed:`, e instanceof Error ? e.message : e);
+    }
+  }
+  return out;
 }
 
 async function writeAutoSet(store: Store, t: ExpiredTimer, now: string): Promise<string> {

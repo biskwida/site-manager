@@ -5,11 +5,8 @@ import { readdir, readFile, stat } from "node:fs/promises";
 import { join, posix, relative, sep } from "node:path";
 import type { TemplateId } from "../domain/types";
 
-export interface InlinedFile {
-  file: string;
-  data: string;
-  encoding: "utf-8" | "base64";
-}
+import type { InlinedFile } from "./types";
+export type { InlinedFile } from "./types";
 
 export const SHELL_ROOT = "templates/shell";
 /** Repo-relative paths copied verbatim (plus src/templates/<id>). */

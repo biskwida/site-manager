@@ -8,6 +8,11 @@ import { downloadTelegramFile } from "../bot/media";
 import { TelegramMessenger, type Messenger } from "../bot/messenger";
 import { makeTranscriber, type Transcriber } from "../bot/voice";
 import { loadConfig, type Config } from "../config";
+import { FakeDeployer } from "../deploy/fake";
+import { buildFiles } from "../deploy/manifest";
+import { startDeploy as runStartDeploy } from "../deploy/run";
+import type { Deployer } from "../deploy/types";
+import { VercelDeployer } from "../deploy/vercel";
 import { seedDemo } from "../seed/demo";
 import { InMemoryStore } from "../store/memory";
 import { SupabaseStore } from "../store/supabase";
@@ -22,6 +27,10 @@ export interface ServerDeps {
   /** Per-venue tick, then the agent turn. Logs and swallows errors. */
   handleRun: (r: RunRequest) => Promise<void>;
   isMemory: boolean;
+  /** VercelDeployer when VERCEL_TOKEN is set and the store is Supabase; FakeDeployer otherwise. */
+  deployer: Deployer;
+  /** Deferred: creates the venue's site (no-op when it is not live or already has one). */
+  startDeploy: (venueId: string) => void;
 }
 
 export interface DepsOptions {
@@ -32,6 +41,7 @@ export interface DepsOptions {
   transcribe?: Transcriber | null;
   client?: Anthropic;
   log?: (line: string) => void;
+  deployer?: Deployer;
 }
 
 export async function makeServerDeps(o: DepsOptions): Promise<ServerDeps> {
@@ -56,6 +66,10 @@ export async function makeServerDeps(o: DepsOptions): Promise<ServerDeps> {
   const s = store;
   const transcribe =
     o.transcribe !== undefined ? o.transcribe : config.sttApiKey ? makeTranscriber({ apiKey: config.sttApiKey, baseUrl: config.sttBaseUrl, model: config.sttModel }) : null;
+  const deployer: Deployer = o.deployer ?? (config.vercelToken && !isMemory ? new VercelDeployer({ token: config.vercelToken, teamId: config.vercelTeamId, files: (id) => buildFiles(id), log }) : new FakeDeployer());
+  if (deployer.provider === "fake") log(`[deploy] fake deployer (${isMemory ? "memory store" : "VERCEL_TOKEN not set"}): sites get https://<slug>.example.test`);
+  const feedUrlFor = (slug: string) => `${config.publicBaseUrl}/api/site/${encodeURIComponent(slug)}`;
+  const startDeploy = (venueId: string) => o.defer(() => runStartDeploy({ store: s, deployer, feedUrlFor, now: () => new Date(), log }, venueId));
 
   // createBot's handlers read `d.messenger` at call time, so the messenger (which needs bot.api) is set on this same object below.
   const botDeps: BotDeps = {
@@ -67,6 +81,7 @@ export async function makeServerDeps(o: DepsOptions): Promise<ServerDeps> {
     startRun: (r) => o.defer(() => handleRun(r)),
     transcribe,
     download: (filePath) => downloadTelegramFile(config.telegramToken, filePath),
+    onOwnerJoined: startDeploy,
   };
   const bot = createBot(botDeps);
   const messenger = new TelegramMessenger(bot.api);
@@ -74,7 +89,7 @@ export async function makeServerDeps(o: DepsOptions): Promise<ServerDeps> {
 
   async function handleRun(r: RunRequest): Promise<void> {
     try {
-      await runTick({ store: s, messenger, now: new Date(), venueId: r.venueId });
+      await runTick({ store: s, messenger, now: new Date(), venueId: r.venueId, deployer });
     } catch (e) {
       console.error("[tick] per-webhook tick failed:", e instanceof Error ? e.message : e);
     }
@@ -90,7 +105,7 @@ export async function makeServerDeps(o: DepsOptions): Promise<ServerDeps> {
     }
   }
 
-  return { config, store: s, messenger, bot, handleRun, isMemory };
+  return { config, store: s, messenger, bot, handleRun, isMemory, deployer, startDeploy };
 }
 
 // On globalThis, not a module variable: `next dev` (HMR, separate route bundles) then shares one in-memory store between pages and API routes.
