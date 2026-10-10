@@ -18,7 +18,8 @@
     "telegram:set-webhook": "tsx --env-file-if-exists=.env.local scripts/set-webhook.mts",
     "demo:reset": "tsx --env-file-if-exists=.env.local scripts/demo-reset.mts",
     "smoke": "tsx --env-file-if-exists=.env.local scripts/smoke.mts",
-    "e2e": "tsx scripts/e2e-offline.ts"
+    "e2e": "tsx scripts/e2e-offline.mts",
+    "cleanup:test-venues": "tsx --env-file-if-exists=.env.local scripts/cleanup-test-venues.mts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "0.133.0",

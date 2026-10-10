@@ -50,19 +50,24 @@ export const DEMO_TEXTS = {
   footer_note: { bg: "Приемаме карти. Кучетата са добре дошли.", en: "Cards accepted. Dogs welcome." },
 };
 
-/** Creates the demo venue with its menu and texts. Idempotent per store only if the slug is free. */
-export async function seedDemo(store: Store, slug = DEMO_SLUG): Promise<{ venue: Venue; categories: Category[]; items: Item[] }> {
-  const venue = await store.createVenue({ ...DEMO_VENUE, slug });
+/** Inserts the demo categories, items and site texts into an existing venue (used by seedDemo and demo:reset). */
+export async function seedMenu(store: Store, venueId: string): Promise<{ categories: Category[]; items: Item[] }> {
   const categories: Category[] = [];
-  for (const [i, c] of CATEGORIES.entries()) categories.push(await store.insertCategory({ venue_id: venue.id, ...c, position: i }));
+  for (const [i, c] of CATEGORIES.entries()) categories.push(await store.insertCategory({ venue_id: venueId, ...c, position: i }));
   const items: Item[] = [];
   const perCat = new Map<number, number>();
   for (const it of ITEMS) {
     const pos = perCat.get(it.cat) ?? 0;
     perCat.set(it.cat, pos + 1);
     const { cat, ...rest } = it;
-    items.push(await store.insertItem({ venue_id: venue.id, category_id: categories[cat].id, ...rest, position: pos }));
+    items.push(await store.insertItem({ venue_id: venueId, category_id: categories[cat].id, ...rest, position: pos }));
   }
-  for (const [key, t] of Object.entries(DEMO_TEXTS)) await store.setSiteText(venue.id, key as "welcome" | "footer_note", t.bg, t.en);
-  return { venue, categories, items };
+  for (const [key, t] of Object.entries(DEMO_TEXTS)) await store.setSiteText(venueId, key as "welcome" | "footer_note", t.bg, t.en);
+  return { categories, items };
+}
+
+/** Creates the demo venue with its menu and texts. Idempotent per store only if the slug is free. */
+export async function seedDemo(store: Store, slug = DEMO_SLUG): Promise<{ venue: Venue; categories: Category[]; items: Item[] }> {
+  const venue = await store.createVenue({ ...DEMO_VENUE, slug });
+  return { venue, ...(await seedMenu(store, venue.id)) };
 }

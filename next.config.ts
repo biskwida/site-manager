@@ -9,6 +9,8 @@ const supabaseHost = (() => {
 })();
 
 const nextConfig: NextConfig = {
+  // Dev request log: never print the owner's key (admin pages, admin API, draft previews with ?key=) or the tick path.
+  logging: { incomingRequests: { ignore: [/\/admin\//, /\/api\/admin\//, /\/api\/tick/, /[?&]key=/] } },
   turbopack: { rules: { "*.css": { loaders: ["@tailwindcss/turbopack"], as: "*.css" } } },
   images: {
     remotePatterns: [
