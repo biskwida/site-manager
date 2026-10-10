@@ -6,21 +6,45 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "eslint"
+    "lint": "eslint",
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit",
+    "env:set": "tsx scripts/env-set.mts",
+    "db:apply": "tsx --env-file-if-exists=.env.local scripts/db-apply.mts",
+    "check:rls": "tsx --env-file-if-exists=.env.local scripts/check-rls.mts",
+    "venue:create": "tsx --env-file-if-exists=.env.local scripts/venue-create.mts",
+    "bot:dev": "tsx --env-file-if-exists=.env.local scripts/dev-bot.mts",
+    "telegram:set-webhook": "tsx --env-file-if-exists=.env.local scripts/set-webhook.mts",
+    "demo:reset": "tsx --env-file-if-exists=.env.local scripts/demo-reset.mts",
+    "smoke": "tsx --env-file-if-exists=.env.local scripts/smoke.mts",
+    "e2e": "tsx scripts/e2e-offline.ts"
   },
   "dependencies": {
+    "@anthropic-ai/sdk": "0.133.0",
+    "@supabase/supabase-js": "2.117.3",
+    "grammy": "1.46.0",
     "next": "16.4.0",
+    "openai": "7.32.0",
+    "qrcode.react": "4.2.0",
     "react": "19.3.0",
-    "react-dom": "19.3.0"
+    "react-dom": "19.3.0",
+    "zod": "4.6.5"
   },
   "devDependencies": {
     "@tailwindcss/turbopack": "^4",
-    "@types/node": "^20",
+    "@types/node": "24.10.0",
+    "@types/pg": "8.23.1",
     "@types/react": "^19",
     "@types/react-dom": "^19",
     "eslint": "^9",
     "eslint-config-next": "16.4.0",
+    "pg": "8.23.1",
     "tailwindcss": "^4",
-    "typescript": "^5"
+    "tsx": "4.23.15",
+    "typescript": "^5",
+    "vitest": "5.0.3"
+  },
+  "engines": {
+    "node": ">=22"
   }
 }
