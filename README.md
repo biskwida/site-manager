@@ -25,6 +25,35 @@ The demo café is Кафене „Ъгъла“ at `/agala`. The projector shows
 
 The same sequence runs offline, without a phone or keys: `npm run e2e`.
 
+## Creating a site with the wizard
+
+Anyone can create a venue site at `/new` (linked from the landing). The owner picks one of three templates (`classic` warm editorial, `nocturne` dark for bars and evenings, `lumen` light and photo-first for daytime coffee), each shown live with the demo café, then fills seven steps with the chosen template rendering their data on the right: Basics (name, web address, main language, contact), Look (accent colour, logo, cover), Hours, Menu (type it, or upload photos or a PDF of the current menu and let Claude read it into a review list you accept row by row), Texts (both languages; "Write for me" drafts all of them from a few facts), Photos (gallery), Review. "Create my site" makes the venue live in our database and shows a one-use Telegram code with a QR (`https://t.me/<bot>?start=<code>`). Pressing Start in Telegram links the owner's chat as the owner and starts the deploy: a new Vercel project named after the slug, built from the thin template shell, polled until READY; the bot then messages "your site is live" with the URL and the done page shows it. From that moment the Telegram agent manages the content; the deployed site reads `/api/site/<slug>` every 10 s (server) and 5 s (client), so a price change from Telegram is visible on it in seconds. Content never needs a new deployment; only a template switch redeploys.
+
+Guards:
+
+- Drafts live in `venues.wizard_draft`, reachable only with a token in an httpOnly cookie (`sm_draft`, 7 days); the database keeps the token's SHA-256 only.
+- `POST /api/new` allows 5 drafts per IP per hour (the IP is hashed with `RATE_SALT`) and `MAX_SITES_PER_DAY` new drafts per day in total.
+- The two AI helpers (menu extraction, "Write for me") use the existing `ANTHROPIC_API_KEY` and are limited to 20 calls per draft per hour and 500 per day across all drafts.
+- Uploads are capped at 4 MB per image (the browser downscales photos before sending them); menu extraction accepts up to 6 files and 3 MB in total. Photos and PDFs sent for extraction go to Claude and are not stored; only images the owner places on the site are saved.
+- Abandoned drafts are deleted by the tick after 48 h.
+
+Without `ANTHROPIC_API_KEY` the wizard still works: the AI routes answer 503 and the two AI buttons are replaced by a one-line explanation. Without `VERCEL_TOKEN` (or with `SITE_MANAGER_STORE=memory`) the fake deployer reports READY after two polls at `https://<slug>.example.test`, so the whole flow runs offline.
+
+## Demo (3 minutes): wizard to live site
+
+| # | You do | What happens |
+|---|---|---|
+| 1 | Open `/new` on the projector | Three live cards: the demo café in Classic, Nocturne and Lumen. |
+| 2 | Pick Nocturne, type the name and address | The right pane is the bar's site, updating as you type; the web address fills itself from the name. |
+| 3 | Menu step: upload a photo of the printed menu | "Reading your menu…", then a review list in Bulgarian and English with EUR prices (BGN converted and flagged) and allergen codes. Accept all. |
+| 4 | Texts: type two facts, press "Write for me" | Tagline, about, greeting and footer in both languages appear in the fields and on the preview. |
+| 5 | Review → "Create my site" | The done page: a QR code and `/start <code>`. "Press Start in Telegram to publish." |
+| 6 | Phone: scan, press Start | The bot welcomes the owner, then: "Сайтът ви се публикува…". The done page polls; within 2–3 minutes the bot sends "🎉 Сайтът на … е готов: https://…" and the done page shows the link. |
+| 7 | Open the live URL on the projector | The deployed site on its own Vercel project. |
+| 8 | Phone: "Негронито става 11" → ✅ | Within 15 s the price changes on the deployed site. |
+
+Offline the same runs with `SITE_MANAGER_STORE=memory` (fake deployer, no phone): run `npm run dev:offline`, and simulate Start with `npm run bot:dev` and `/start <code>`.
+
 ## How it works
 
 - **Change sets.** Every edit is a change set: a list of typed changes (`set_price`, `set_sold_out`, `add_item`, `update_item`, `remove_item`, image ops, `set_hours`, holidays, announcements, `set_text`, `set_theme`) with a before and after snapshot of each entity. Nothing touches the site except through one, so every edit is previewable, logged and undoable. Undo is a new set with the inverse changes; the original is marked `reverted`.
@@ -39,19 +68,26 @@ Owner's phone ── Telegram ──► POST /api/telegram (Next route, webhook 
                                  │ after(): agent turn
                                  ▼
                      Next.js app on Vercel  (one deployment, many venues)
-                     ├─ app/[slug]            public site: home + menu (BG/EN, realtime)
+                     ├─ app/[slug]            public site in the venue's template: home + menu (BG/EN, polls the feed)
+                     ├─ app/new               the wizard: template, seven steps with a live preview, publish
                      ├─ app/admin/[slug]      owner dashboard (?key=TOKEN): QR, approvals, schedule, log, undo
+                     ├─ app/api/new           wizard API: drafts, media, publish, deploy status, AI helpers
+                     ├─ app/api/site/[slug]   public JSON feed (live venues only, CORS open)
                      ├─ app/api/telegram      grammY webhookCallback
-                     ├─ app/api/tick          due scheduled sets, auto sets, reminders (cron + per-webhook)
+                     ├─ app/api/tick          due scheduled sets, auto sets, reminders, deploy polling, draft cleanup
                      └─ src/
-                         agent/   Anthropic tool runner, prompt, tools, memory
-                         domain/  change ops apply/invert, preview, allergens, hours, pricing, i18n copy
-                         bot/     commands, media, voice, approval buttons
-                         store/   Store interface: Supabase (prod) + memory (tests, offline mode)
-                                 │ service-role key (server only)
-                                 ▼
-                     Supabase: Postgres + RLS + Realtime + Storage(media)
-                                 ▲ anon key (browser): public reads and realtime "refetch now" signals
+                         agent/     Anthropic tool runner, prompt, tools, memory
+                         domain/    change ops apply/invert, preview, allergens, hours, pricing
+                         bot/       commands, media, voice, approval buttons, bot copy
+                         templates/ classic, nocturne, lumen (shared with the deployed sites)
+                         wizard/    draft schema, menu extraction, text drafting
+                         deploy/    Vercel deployer (+ fake), file manifest of the thin site shell
+                         store/     Store interface: Supabase (prod) + memory (tests, offline mode)
+                                 │ service-role key (server only)          │ VERCEL_TOKEN (server only)
+                                 ▼                                         ▼
+                     Supabase: Postgres + RLS + Storage(media)     Vercel: one project per venue
+                                 ▲ anon key: read-only, live venues        (thin shell + template, reads
+                                                                           /api/site/<slug> every 10 s / 5 s)
 ```
 
 The public pages and the dashboard read through the app's own server routes (`/api/site/[slug]`, `/api/admin/[slug]`), so the whole web layer also runs on the in-memory store.
@@ -70,7 +106,7 @@ npm run env:set -- ANTHROPIC_API_KEY   # asks for the value with echo off, write
 
 | Key | Where to get it | Required |
 |---|---|---|
-| `ANTHROPIC_API_KEY` | console.anthropic.com → API keys | Yes (the agent) |
+| `ANTHROPIC_API_KEY` | console.anthropic.com → API keys | Yes (the agent; the wizard's menu reading and "Write for me" use it too) |
 | `AGENT_MODEL` | Default `claude-opus-5-5` | No |
 | `AGENT_EFFORT` | `low`, `medium` (default) or `high`; image, bulk and scheduling turns use `high` automatically | No |
 | `TELEGRAM_BOT_TOKEN` | @BotFather in Telegram → `/newbot` | Yes |
@@ -86,6 +122,11 @@ npm run env:set -- ANTHROPIC_API_KEY   # asks for the value with echo off, write
 | `TICK_SECRET` | Any random string: `openssl rand -hex 32` | Yes |
 | `DEMO_VENUE_SLUG` | Default `agala` | No |
 | `NEXT_PUBLIC_LANDING_URL` | The published Lovable landing (`https://…`). When set, `/` redirects there. Read at build time | No |
+| `VERCEL_TOKEN` | vercel.com → Settings → Tokens → Create: set the scope to the **team** that owns the site projects, never a full-account token; expiry per your policy. The wizard creates one Vercel project per venue with it. Server-only | For automatic deploys; without it the fake deployer is used |
+| `VERCEL_TEAM_ID` | Vercel → Team Settings → General → Team ID (`team_…`). Needed with a team-scoped token; empty for a personal account | With `VERCEL_TOKEN` |
+| `RATE_SALT` | Any random string: `openssl rand -hex 16`. Hashed with the visitor's IP for the wizard's rate limits, so raw IPs are never stored. When unset it falls back to `dev-salt`, which works but makes the hashes guessable | Yes in production |
+| `MAX_SITES_PER_DAY` | Default `50`: the global cap on new wizard drafts per 24 h | No |
+| `TELEGRAM_BOT_USERNAME` | The bot's username without `@` (from @BotFather). Builds the `https://t.me/<bot>?start=<code>` link and QR on the wizard's done page | For the done page's Start link; without it only the code is shown |
 
 Offline mode also reads two keys that are not in `.env.example`: `SITE_MANAGER_STORE=memory` (set by the scripts below) and `DEMO_OWNER_CHAT_ID` (optional: links that Telegram chat as the demo owner in the memory store).
 
@@ -127,16 +168,18 @@ Other scripts:
 | `npm run smoke -- --chat <chat id>` | The same against Supabase, with the preview really sent to that linked Telegram chat. |
 | `npm run cleanup:test-venues` | Deletes venues whose slug starts with `test-` (left by the live store contract test) and their images. |
 | `npm run telegram:set-webhook -- --delete` | Removes the webhook so `bot:dev` can poll again. |
+| `npm run test:templates` | Writes each template's thin shell to a temp dir, runs `npm install` (needs network) and `next build` there: the offline proof that a deployed site builds. Slow; not part of `npm test`. Run before a release. |
+| `npm run site:delete -- --slug my-cafe` | Deletes a venue (typically one created by the wizard) and its Vercel project. Prints the venue and the project id and asks you to type the slug again before deleting. Storage objects are not removed. |
 
 ## Landing page (Lovable)
 
-The public marketing landing is built in [Lovable](https://lovable.dev) from the prompt pack in [docs/lovable/LANDING-PROMPT.md](docs/lovable/LANDING-PROMPT.md) (bilingual copy, the pitch facts, design tokens and the demo link). After publishing it in Lovable, set `NEXT_PUBLIC_LANDING_URL` to its address and redeploy: `/` then redirects there. The variable is baked in at build time, so setting it without a redeploy changes nothing. Without it, the app's own `/` renders a short fallback landing.
+The public marketing landing is built in [Lovable](https://lovable.dev) from the prompt pack in [docs/lovable/LANDING-PROMPT.md](docs/lovable/LANDING-PROMPT.md) (bilingual copy, the pitch facts, design tokens, the "Create your site" button to `/new` and the demo link). After publishing it in Lovable, set `NEXT_PUBLIC_LANDING_URL` to its address and redeploy: `/` then redirects there. The variable is baked in at build time, so setting it without a redeploy changes nothing. Without it, the app's own `/` renders a short fallback landing.
 
 ## Deploy to Vercel
 
 1. Install and log in: `npm i -g vercel`, then `vercel login`.
 2. Link the project from this folder: `vercel link`.
-3. Add every required key from the table above for Production, either in the Vercel dashboard (Project → Settings → Environment Variables) or one by one with `vercel env add ANTHROPIC_API_KEY production` (it asks for the value). `SUPABASE_DB_URL` is not needed on Vercel.
+3. Add every required key from the table above for Production, either in the Vercel dashboard (Project → Settings → Environment Variables) or one by one with `vercel env add ANTHROPIC_API_KEY production` (it asks for the value). `SUPABASE_DB_URL` is not needed on Vercel. For the wizard also add `RATE_SALT`, `TELEGRAM_BOT_USERNAME` and, for real site deploys, `VERCEL_TOKEN` and `VERCEL_TEAM_ID`.
 4. Add `CRON_SECRET` with the same value as `TICK_SECRET`. Vercel Cron sends it as `Authorization: Bearer …`, and `/api/tick` accepts that.
 5. Deploy: `vercel --prod`. Note the deployment URL.
 6. Set `PUBLIC_BASE_URL` to that URL (`https://<deployment>`, no trailing slash) and deploy again (`vercel --prod`). If you have the Lovable landing, set `NEXT_PUBLIC_LANDING_URL` before this deploy too.
@@ -165,10 +208,17 @@ Cron: `vercel.json` runs `/api/tick` once a day (`0 3 * * *`), because the Hobby
 - **Webhook secret.** `/api/telegram` rejects any request without Telegram's `X-Telegram-Bot-Api-Secret-Token` header matching `TELEGRAM_WEBHOOK_SECRET`. `/api/tick` needs `TICK_SECRET` (header or Bearer) or a venue's admin key (that venue only).
 - **Telegram file URLs** contain the bot token, so they are never logged. Photos are downloaded server-side and stored in Supabase Storage (the site uses the Storage public URL); voice notes are downloaded, transcribed and not stored.
 - **Invite codes** are one-use and expire after 7 days.
+- **Draft token.** A wizard draft is reachable only with the `sm_draft` httpOnly cookie (`<venue id>.<token>`); the database holds the token's SHA-256 only. Drafts are invisible to the anon key (the policies expose only `status = 'live'` venues; `npm run check:rls` proves it with a throwaway draft), and `/<slug>` renders a draft only for the browser holding its cookie.
+- **Vercel token.** `VERCEL_TOKEN` is read only in `src/config.ts` and used only by the server-side deployer; it is never logged. The deployer logs short lines only (method, path, status, error code, project and deployment ids), never a Vercel response body, and `deploy.error` keeps a short message plus at most the last 20 build-log lines. Check a build with `grep -rl VERCEL_TOKEN .next/static` (it must find nothing).
+- **Rate limits.** 5 new drafts per IP per hour and `MAX_SITES_PER_DAY` per day; 20 AI calls per draft per hour and 500 per day. The IP is hashed with `RATE_SALT` before it is stored; set `RATE_SALT` in production.
+- **Uploaded menus.** Photos and PDFs sent for extraction go to Claude and are not stored; only images the owner places on the site are saved.
+- **Deleting a venue** never deletes its Vercel project automatically; `npm run site:delete` does both, with a typed confirmation.
 
 ## Known gaps
 
-- Only the venue's own site is managed: no delivery apps, no Google Business profile.
+- Only the venue's own site is managed: no delivery apps, no Google Business profile. Integrations with existing sites (WordPress, embed, Google Business Profile, GitHub, Shopify/Wix) are parked in [docs/IDEAS.md](docs/IDEAS.md).
+- Custom domains for wizard-created sites are optional and may not be in this build; each site lives on its Vercel URL.
+- Deleting a venue leaves its storage objects (images) in Supabase Storage; `site:delete` says so and `scripts/cleanup-test-venues.mts` shows how to remove them.
 - Voice uses a third-party transcription service (Groq or OpenAI).
 - Allergen detection is keyword-based and advisory.
 - The demo venue is fictional.
