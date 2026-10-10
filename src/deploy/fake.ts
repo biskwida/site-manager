@@ -36,8 +36,14 @@ export class FakeDeployer implements Deployer {
     const p = this.projects.get(projectId);
     if (p) p.deleted = true;
   }
+  /** Fixed records like Vercel's (CNAME for a subdomain, A for an apex, plus the TXT ownership record); verified from the second call for the same project + domain, so "Connect → Check again" reaches the verified state offline. */
   async addDomain(projectId: string, domain: string): Promise<DomainInstructions> {
     this.domains.push({ projectId, domain });
-    return { verified: false, records: [{ type: "CNAME", name: domain, value: "cname.example.test" }] };
+    const calls = this.domains.filter((d) => d.projectId === projectId && d.domain === domain).length;
+    const apex = domain.split(".").slice(-2).join(".");
+    const main = domain === apex
+      ? { type: "A" as const, name: "@", value: "76.76.21.21" }
+      : { type: "CNAME" as const, name: domain.slice(0, domain.length - apex.length - 1), value: "cname.vercel-dns.com" };
+    return { verified: calls >= 2, records: [main, { type: "TXT", name: `_vercel.${apex}`, value: `vc-domain-verify=${domain},fake` }] };
   }
 }

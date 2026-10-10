@@ -4,13 +4,14 @@ import type { AdminOverview } from "@/src/server/admin";
 import { formatDateTime } from "@/src/time";
 import { Empty, Section } from "./bits";
 import { PendingList, ScheduledList } from "./Decisions";
+import { DomainCard } from "./DomainCard";
 import { InvalidKey } from "./InvalidKey";
 import { LogList } from "./LogList";
 import { QrCard } from "./QrCard";
 import { SiteCard } from "./SiteCard";
 import { useAdminOverview } from "./useAdminOverview";
 
-/** The owner's dashboard: the site (status, template switch), decisions, schedule, sold-out items, change log with undo, QR and links. Client-polled every 3 s. */
+/** The owner's dashboard: the site (status, template switch), the optional custom domain, decisions, schedule, sold-out items, change log with undo, QR and links. Client-polled every 3 s. */
 export function AdminPanel({ slug, adminKey, initial }: { slug: string; adminKey: string; initial: AdminOverview }) {
   const { lang, t } = useLang();
   const { overview: o, unauthorized, decide, post } = useAdminOverview(initial, slug, adminKey);
@@ -44,6 +45,7 @@ export function AdminPanel({ slug, adminKey, initial }: { slug: string; adminKey
           )}
         </Section>
         <LogList sets={o.log} tz={tz} decide={decide} />
+        <DomainCard overview={o} post={post} />
         <QrCard publicUrl={o.public_url} slug={slug} />
       </main>
     </div>
