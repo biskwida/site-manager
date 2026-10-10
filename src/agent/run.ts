@@ -1,0 +1,88 @@
+// src/agent/run.ts
+import Anthropic from "@anthropic-ai/sdk";
+import type { Effort } from "../config";
+import { tr } from "../domain/format";
+import type { ChangeSource } from "../domain/types";
+import { nowText } from "../time";
+import { appendMemory, loadMemory } from "./memory";
+import { SYSTEM_PROMPT, userMessage } from "./prompt";
+import { makeTools, type AgentDeps } from "./tools";
+
+export interface ImageInput {
+  data: string; // base64
+  media_type: "image/jpeg" | "image/png" | "image/webp" | "image/gif";
+}
+export interface TurnInput {
+  text: string;
+  source: Extract<ChangeSource, "text" | "voice" | "photo">;
+  image?: ImageInput;
+  mediaId?: string;
+}
+export interface AgentConfig {
+  model: string;
+  effort: Effort;
+  apiKey?: string;
+}
+
+/** Bulk and scheduling cues in BG/EN; image turns are always high. */
+const HIGH_CUES = /всички|всичк|процент|%|вдигни|намали|увеличи|all the|every|bulk|raise|increase|lower|reduce|утре|tomorrow|от понеделник|от вторник|от сряда|от четвъртък|от петък|от събота|от неделя|from monday|from tuesday|from wednesday|from thursday|from friday|from saturday|from sunday|next week|следващата седмица|насрочи|schedule|в \d{1,2}[:.]\d{2}|at \d{1,2}(:\d{2})?\s?(am|pm)?\b.*(tomorrow|on )|декември|януари|december|january/i;
+
+export function pickEffort(base: Effort, input: { hasImage: boolean; text: string }): Effort {
+  if (base === "high" || input.hasImage) return "high";
+  return HIGH_CUES.test(input.text) ? "high" : base;
+}
+
+/** One owner message → one agent turn. Never throws; tells the owner on refusal/error. Returns the final text, "refused" or "error". */
+export async function runTurn(deps: AgentDeps, input: TurnInput, cfg: AgentConfig, client?: Anthropic): Promise<string> {
+  const now = deps.now();
+  const venue = await deps.store.getVenue(deps.venueId);
+  const memory = await loadMemory(deps.store, deps.venueId, deps.chatId, now);
+  const lang = deps.member.lang;
+  const text = userMessage({
+    venueName: venue.name, slug: venue.slug, nowText: nowText(now, venue.tz), lang, role: deps.member.role,
+    memory: memory.text, correctionFor: memory.correctionFor, mediaId: input.mediaId, text: input.text, source: input.source,
+  });
+  const content = [
+    ...(input.image ? [{ type: "image" as const, source: { type: "base64" as const, media_type: input.image.media_type, data: input.image.data } }] : []),
+    { type: "text" as const, text },
+  ];
+  const tools = makeTools({ ...deps, correctionFor: memory.correctionFor, source: input.source });
+  const ownerLine = `${input.source === "voice" ? "[voice] " : input.source === "photo" ? "[photo] " : ""}${input.text}`.trim();
+
+  const closeOut = async (reply: string, outcome?: string) => {
+    if (reply) await deps.messenger.send(deps.chatId, reply);
+    await appendMemory(deps.store, deps.venueId, deps.chatId, { at: now.toISOString(), owner: ownerLine, agent: reply || "(no reply)", outcome }, now);
+  };
+
+  let final: { stop_reason: string | null; content: { type: string; text?: string }[] };
+  try {
+    const anthropic = client ?? new Anthropic(cfg.apiKey ? { apiKey: cfg.apiKey } : undefined);
+    final = await anthropic.beta.messages.toolRunner({
+      model: cfg.model,
+      max_tokens: 16000,
+      max_iterations: 30,
+      output_config: { effort: pickEffort(cfg.effort, { hasImage: !!input.image, text: input.text }) },
+      // One tool call at a time: proposals must be sequential and the queue in makeTools expects it.
+      tool_choice: { type: "auto", disable_parallel_tool_use: true },
+      betas: ["server-side-fallback-2026-07-01"],
+      fallbacks: "default",
+      system: SYSTEM_PROMPT,
+      tools,
+      messages: [{ role: "user", content }],
+    });
+  } catch (e) {
+    console.error("[agent] turn failed:", e instanceof Error ? e.message : e);
+    await closeOut(tr(lang, "Възникна грешка. Опитайте отново след малко.", "Something went wrong. Please try again in a moment."), "error");
+    return "error";
+  }
+
+  if (final.stop_reason === "refusal") {
+    await closeOut(tr(lang, "Не мога да изпълня това. Опитайте с друга формулировка.", "I can't do that one. Try putting it differently."), "refused");
+    return "refused";
+  }
+  const reply = final.content.flatMap((b) => (b.type === "text" && b.text ? [b.text] : [])).join("\n").trim();
+  const pending = await deps.store.findProposed(deps.venueId, deps.chatId);
+  const outcome = pending ? `proposed: ${lang === "bg" ? pending.summary_bg : pending.summary_en} (waiting for the owner's decision)` : undefined;
+  await closeOut(reply, outcome);
+  return reply;
+}
