@@ -103,14 +103,14 @@ export function storeContract(name: string, make: () => Promise<Store>) {
       const soon = await s.createChangeSet({ ...base, status: "scheduled", apply_at: "2026-10-10T08:00:00.000Z" });
       const far = await s.createChangeSet({ ...base, status: "scheduled", apply_at: "2026-10-20T08:00:00.000Z" });
       const proposed = await s.createChangeSet({ ...base, status: "proposed" });
-      expect((await s.listDue(LATER)).map((x) => x.id)).toEqual([due.id]);
+      expect((await s.listDue(LATER, v.id)).map((x) => x.id)).toEqual([due.id]);
       expect((await s.listDue(LATER, "other-venue"))).toEqual([]);
-      expect((await s.listUpcoming(LATER, "2026-10-10T10:00:00.000Z")).map((x) => x.id)).toEqual([soon.id]);
+      expect((await s.listUpcoming(LATER, "2026-10-10T10:00:00.000Z", v.id)).map((x) => x.id)).toEqual([soon.id]);
       await s.updateChangeSet(soon.id, { reminded_at: LATER });
-      expect(await s.listUpcoming(LATER, "2026-10-10T10:00:00.000Z")).toEqual([]);
+      expect(await s.listUpcoming(LATER, "2026-10-10T10:00:00.000Z", v.id)).toEqual([]);
       expect(far.status).toBe("scheduled");
-      expect((await s.listProposedBefore("2027-01-01T00:00:00.000Z")).map((x) => x.id)).toEqual([proposed.id]);
-      expect(await s.listProposedBefore("2020-01-01T00:00:00.000Z")).toEqual([]);
+      expect((await s.listProposedBefore("2027-01-01T00:00:00.000Z", v.id)).map((x) => x.id)).toEqual([proposed.id]);
+      expect(await s.listProposedBefore("2020-01-01T00:00:00.000Z", v.id)).toEqual([]);
     });
 
     it("lists expired sold-out and special timers", async () => {
@@ -123,10 +123,10 @@ export function storeContract(name: string, make: () => Promise<Store>) {
       await s.createChangeSet({ venue_id: v.id, chat_id: null, summary_bg: "", summary_en: "", preview_bg: "", preview_en: "", source: "text", status: "proposed", changes: [{ position: 0, op: "set_sold_out", entity: "item", entity_id: a.id, before: { sold_out_until: null }, after: { sold_out_until: "2026-10-09T09:30:00.000Z" } }] }).then((cs) => s.applyChangeSet(cs.id, NOW));
       const sp = await mk("special", { is_special: true, special_expires_at: "2026-10-09T09:45:00.000Z" });
       await mk("live special", { is_special: true, special_expires_at: "2026-10-09T15:00:00.000Z" });
-      const timers = await s.listExpiredTimers(LATER);
+      const timers = await s.listExpiredTimers(LATER, v.id);
       expect(timers.map((t) => [t.item.id, t.kind])).toEqual(expect.arrayContaining([[a.id, "sold_out"], [sp.id, "special"]]));
       expect(timers).toHaveLength(2);
-      expect(await s.listExpiredTimers(NOW)).toEqual([]);
+      expect(await s.listExpiredTimers(NOW, v.id)).toEqual([]);
     });
 
     it("stores media and conversations", async () => {
