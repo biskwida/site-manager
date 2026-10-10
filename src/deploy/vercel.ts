@@ -175,9 +175,25 @@ export class VercelDeployer implements Deployer {
     this.log(`[vercel] project ${projectId} deleted`);
   }
 
-  /** POST /v10/projects/{id}/domains then GET /v6/domains/{domain}/config → DNS records the owner must set. */
+  /**
+   * POST /v10/projects/{id}/domains then GET /v6/domains/{domain}/config → DNS records the owner must set. When the add is
+   * refused with a 4xx other than 429 (typically: already attached to this project), the domain is read back with
+   * GET /v9/projects/{id}/domains/{domain}; if that fails too, the original add error is thrown. No read-back on 429 or 5xx.
+   */
   async addDomain(projectId: string, domain: string): Promise<DomainInstructions> {
-    const added = await this.call<VercelDomain>("POST", `/v10/projects/${encodeURIComponent(projectId)}/domains`, { name: domain });
+    const base = `/v10/projects/${encodeURIComponent(projectId)}/domains`;
+    let added: VercelDomain;
+    try {
+      added = await this.call<VercelDomain>("POST", base, { name: domain });
+    } catch (e) {
+      if (!(e instanceof VercelError) || e.status < 400 || e.status > 499 || e.status === 429) throw e;
+      try {
+        added = await this.call<VercelDomain>("GET", `/v9/projects/${encodeURIComponent(projectId)}/domains/${encodeURIComponent(domain)}`);
+      } catch {
+        throw e;
+      }
+      if (!added || typeof added.name !== "string" || typeof added.apexName !== "string") throw e;
+    }
     const cfg = await this.call<{ misconfigured?: boolean }>("GET", `/v6/domains/${encodeURIComponent(domain)}/config`);
     const records: DomainInstructions["records"] = [];
     if (added.apexName === added.name) records.push({ type: "A", name: "@", value: "76.76.21.21" });

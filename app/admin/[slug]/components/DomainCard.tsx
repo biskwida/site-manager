@@ -45,18 +45,18 @@ function CopyButton({ value, label }: { value: string; label: string }) {
     window.setTimeout(() => setCopied(false), 1500);
   }
   return (
-    <button type="button" onClick={() => void copy()} aria-label={`${t("admin.copy")}: ${label}`}
+    <button type="button" onClick={() => void copy()} aria-label={`${copied ? t("admin.copied") : t("admin.copy")}: ${label}`}
       className="min-h-11 min-w-11 rounded-full px-3 text-xs font-semibold text-ink ring-1 ring-ink/25 transition-colors hover:bg-ink/5">
       {copied ? t("admin.copied") : t("admin.copy")}
     </button>
   );
 }
 
-/** The records the owner must add at the DNS provider, with the verification outcome above them. Announced to screen readers when it arrives. */
+/** The records the owner must add at the DNS provider, with the verification outcome above them. The card's live region announces them. */
 export function DnsRecords({ domain, instructions }: { domain: string; instructions: DomainInstructions }) {
   const { t } = useLang();
   return (
-    <div className="mt-4" aria-live="polite">
+    <div className="mt-4">
       <p className={`text-sm font-semibold ${instructions.verified ? "text-ink" : "text-amber"}`}>
         {instructions.verified ? t("admin.domainVerified", { domain }) : t("admin.domainPending")}
       </p>
@@ -97,14 +97,20 @@ export function DomainCard({ overview: o, post }: { overview: AdminOverview; pos
   const [domain, setDomain] = useState(o.custom_domain ?? "");
   const [busy, setBusy] = useState<"add" | "check" | null>(null);
   const [result, setResult] = useState<DomainResult | null>(null);
+  // The last records shown; "Check again" keeps them on screen while it runs, a new Connect clears them.
+  const [records, setRecords] = useState<{ domain: string; instructions: DomainInstructions } | null>(null);
   const deployed = o.deploy?.status === "ready";
+  const publishing = o.deploy?.status === "pending" || o.deploy?.status === "building";
 
   async function run(kind: "add" | "check", body: Record<string, unknown>) {
     setBusy(kind);
     setResult(null);
+    if (kind === "add") setRecords(null);
     const r = await post(body);
     // Errors keep both languages so the line follows the toggle instead of freezing in the language it was submitted in.
-    setResult(isResult(r.data) ? r.data : { ok: false, code: "provider", error: "failed", bg: DICTS.bg["admin.failed"], en: DICTS.en["admin.failed"] });
+    const next: DomainResult = isResult(r.data) ? r.data : { ok: false, code: "provider", error: "failed", bg: DICTS.bg["admin.failed"], en: DICTS.en["admin.failed"] };
+    setResult(next);
+    if (next.ok) setRecords({ domain: next.domain, instructions: next.instructions });
     setBusy(null);
   }
   function submit(e: FormEvent) {
@@ -134,9 +140,9 @@ export function DomainCard({ overview: o, post }: { overview: AdminOverview; pos
           <label htmlFor="domain-input" className="flex min-w-0 flex-1 basis-56 flex-col gap-1 text-sm font-semibold">
             {t("admin.domainLabel")}
             <input id="domain-input" type="text" inputMode="url" autoComplete="off" autoCapitalize="none" spellCheck={false} placeholder="cafe.example.com" required
-              value={domain} onChange={(e) => { setDomain(e.target.value); if (result && !result.ok) setResult(null); }} disabled={busy !== null}
+              value={domain} onChange={(e) => { setDomain(e.target.value); if (result && !result.ok) setResult(null); }} readOnly={busy !== null}
               aria-invalid={result?.ok === false && result.code === "invalid_domain" ? true : undefined} aria-describedby="domain-status"
-              className="min-h-11 w-full rounded-xl bg-paper px-3 text-base font-normal text-ink ring-1 ring-ink/20 placeholder:text-ink-soft/60 disabled:opacity-60" />
+              className="min-h-11 w-full rounded-xl bg-paper px-3 text-base font-normal text-ink ring-1 ring-ink/20 placeholder:text-ink-soft/60 read-only:opacity-60" />
           </label>
           <button type="submit" disabled={busy !== null || !deployed} aria-busy={busy === "add"}
             className="min-h-11 rounded-full bg-accent px-5 text-sm font-semibold text-white transition-[transform,filter] duration-150 hover:brightness-110 active:scale-[0.98] disabled:opacity-60 disabled:hover:brightness-100 disabled:active:scale-100">
@@ -150,10 +156,12 @@ export function DomainCard({ overview: o, post }: { overview: AdminOverview; pos
           )}
         </form>
         <div id="domain-status">
-          {!deployed && <p className="mt-2 text-sm text-ink-soft">{t("admin.domainNeedsSite")}</p>}
+          {publishing ? <p className="mt-2 text-sm text-ink-soft">{t("admin.busyPublishing")}</p>
+            : !deployed && <p className="mt-2 text-sm text-ink-soft">{t("admin.domainNeedsSite")}</p>}
           {errorText && <p role="alert" className="mt-3 text-sm font-semibold text-clay">{errorText}</p>}
         </div>
-        {result?.ok && <DnsRecords domain={result.domain} instructions={result.instructions} />}
+        {/* Always rendered so screen readers already watch it when the records arrive. */}
+        <div aria-live="polite">{records && <DnsRecords domain={records.domain} instructions={records.instructions} />}</div>
       </div>
     </Section>
   );

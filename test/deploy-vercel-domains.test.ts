@@ -28,8 +28,9 @@ describe("normalizeDomain", () => {
     expect(normalizeDomain(" https://Cafe.Example.COM/menu?x=1 ")).toBe("cafe.example.com");
     expect(normalizeDomain("http://cafe.example.com:443/")).toBe("cafe.example.com");
     expect(normalizeDomain("example.bg.")).toBe("example.bg");
-    expect(normalizeDomain("кафе.bg")).toBeNull(); // IDN labels are not accepted as typed; the punycode form is
+    expect(normalizeDomain("Кафе.бг")).toBe("xn--80akn5b.xn--90ae"); // a typed IDN becomes its punycode form
     expect(normalizeDomain("xn--80aa0bf.bg")).toBe("xn--80aa0bf.bg");
+    expect(normalizeDomain("cafe.xn--90ae")).toBe("cafe.xn--90ae");
   });
   it("rejects anything that is not a plain public hostname", () => {
     expect(normalizeDomain("localhost")).toBeNull();
@@ -84,6 +85,38 @@ describe("VercelDeployer.addDomain", () => {
     expect(r.records).toEqual([{ type: "CNAME", name: "cafe", value: "cname.vercel-dns.com" }]);
   });
 
+  it("reads an already attached domain back when the add is refused, then continues to the config", async () => {
+    const { calls, fetchFn } = fakeFetch((c) => {
+      if (c.method === "POST" && c.url === "https://api.vercel.com/v10/projects/prj_1/domains?teamId=team_1") return { status: 409, json: { error: { code: "domain_already_in_use", message: "SECRET" } } };
+      if (c.method === "GET" && c.url === "https://api.vercel.com/v9/projects/prj_1/domains/cafe.example.com?teamId=team_1") return { json: { name: "cafe.example.com", apexName: "example.com", verified: false, verification: [{ type: "TXT", domain: "_vercel.example.com", value: "vc-domain-verify=cafe.example.com,read" }] } };
+      if (c.method === "GET" && c.url === "https://api.vercel.com/v6/domains/cafe.example.com/config?teamId=team_1") return { json: { misconfigured: true } };
+      return undefined;
+    });
+    const lines: string[] = [];
+    const r = await new VercelDeployer({ token: "tok_secret", teamId: "team_1", files, fetch: fetchFn, log: (s) => lines.push(s) }).addDomain("prj_1", "cafe.example.com");
+    expect(r).toEqual({ verified: false, records: [{ type: "CNAME", name: "cafe", value: "cname.vercel-dns.com" }, { type: "TXT", name: "_vercel.example.com", value: "vc-domain-verify=cafe.example.com,read" }] });
+    expect(calls.map((c) => `${c.method} ${new URL(c.url).pathname}`)).toEqual(["POST /v10/projects/prj_1/domains", "GET /v9/projects/prj_1/domains/cafe.example.com", "GET /v6/domains/cafe.example.com/config"]);
+    for (const c of calls) expect(c.headers.authorization).toBe("Bearer tok_secret");
+    expect(lines).toEqual(["[vercel] POST /v10/projects/prj_1/domains → 409 domain_already_in_use"]);
+    expect(lines.join("\n")).not.toContain("SECRET");
+  });
+
+  it("throws the original add error when the read-back fails, and does not read back on 429 or 5xx", async () => {
+    const { calls, fetchFn } = fakeFetch((c) => {
+      if (c.method === "POST") return { status: 409, json: { error: { code: "domain_already_in_use", message: "taken" } } };
+      if (c.method === "GET" && c.url.includes("/v9/projects/")) return { status: 404, json: { error: { code: "not_found", message: "no" } } };
+      return undefined;
+    });
+    const err = await deployer(fetchFn).addDomain("prj_1", "cafe.example.com").catch((e: unknown) => e);
+    expect(err).toMatchObject({ name: "VercelError", status: 409, code: "domain_already_in_use" });
+    expect(calls.map((c) => c.method)).toEqual(["POST", "GET"]);
+    for (const status of [429, 500]) {
+      const { calls: c2, fetchFn: f2 } = fakeFetch(() => ({ status, json: { error: { code: "x", message: "y" } } }));
+      await expect(deployer(f2).addDomain("prj_1", "cafe.example.com")).rejects.toMatchObject({ status });
+      expect(c2.map((c) => c.method)).toEqual(["POST"]);
+    }
+  });
+
   it("throws a VercelError with the status and code, with the provider message capped and nothing logged from the body", async () => {
     const lines: string[] = [];
     const { fetchFn } = fakeFetch((c) => (c.method === "POST" ? { status: 403, json: { error: { code: "forbidden", message: `nope ${"x".repeat(500)} SECRET` } } } : undefined));
@@ -93,7 +126,7 @@ describe("VercelDeployer.addDomain", () => {
     expect(err).toMatchObject({ status: 403, code: "forbidden" });
     expect((err as Error).message.length).toBeLessThanOrEqual(200);
     expect((err as Error).message).not.toContain("SECRET");
-    expect(lines).toEqual(["[vercel] POST /v10/projects/prj_1/domains → 403 forbidden"]);
+    expect(lines).toEqual(["[vercel] POST /v10/projects/prj_1/domains → 403 forbidden", "[vercel] GET /v9/projects/prj_1/domains/cafe.example.com → 404 not_found"]);
     expect(lines.join("\n")).not.toContain("tok_secret");
   });
 });

@@ -42,13 +42,29 @@ describe("DomainCard", () => {
     expect(en).not.toContain("Check again");
   });
 
-  it("disables Connect and explains why when the site is not published yet", () => {
+  it("disables Connect and explains why when the site is not published yet or the publish failed", () => {
     const en = render("en");
     expect(en).toContain("Publish the site first (press Start in Telegram), then connect a domain.");
     expect(en).toMatch(/<button[^>]*type="submit"[^>]*\sdisabled=""/);
-    const bg = render("bg", { deploy: { ...ready, status: "building" } });
+    const bg = render("bg", { deploy: { ...ready, status: "error", error: "Build failed" } });
     expect(bg).toContain("Първо публикувайте сайта");
     expect(bg).toMatch(/<button[^>]*type="submit"[^>]*\sdisabled=""/);
+  });
+
+  it("shows the publishing hint and disables the controls while a deploy is in flight", () => {
+    for (const status of ["pending", "building"] as const) {
+      const en = render("en", { deploy: { ...ready, status, custom_domain: "cafe.example.com" }, custom_domain: "cafe.example.com", domain_verified: false });
+      expect(en).toContain("The site is publishing right now. Try again in a minute.");
+      expect(en).not.toContain("Publish the site first");
+      expect(en).toMatch(/<button[^>]*type="submit"[^>]*\sdisabled=""/);
+      expect(en).toMatch(/<button[^>]*type="button"[^>]*\sdisabled=""[^>]*>Check again</);
+    }
+    const bg = render("bg", { deploy: { ...ready, status: "building" } });
+    expect(bg).toContain("Сайтът се публикува в момента. Опитайте след минута.");
+  });
+
+  it("keeps a live region on the card even before any records arrive", () => {
+    expect(render("en", { deploy: ready })).toContain('aria-live="polite"');
   });
 
   it("shows the stored domain with its verification badge, prefilled input and Check again", () => {
@@ -75,7 +91,6 @@ describe("DomainCard", () => {
     expect(en).toContain("vc-domain-verify=cafe.example.com,fake");
     expect((en.match(/aria-label="Copy: /g) ?? []).length).toBe(2);
     expect(en).toContain('aria-label="Copy: TXT _vercel.example.com"');
-    expect(en).toContain('aria-live="polite"');
     const bg = renderRecords("bg", { ...instructions, verified: true });
     expect(bg).toContain("Свързан. Сайтът ви отговаря на cafe.example.com.");
     expect(bg).toContain("DNS записи за добавяне");

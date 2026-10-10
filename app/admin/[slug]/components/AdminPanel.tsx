@@ -30,7 +30,6 @@ export function AdminPanel({ slug, adminKey, initial }: { slug: string; adminKey
       </header>
       <main className="mx-auto w-full max-w-3xl flex-1 px-4 pb-16 sm:px-6">
         <SiteCard overview={o} post={post} />
-        <DomainCard overview={o} post={post} />
         <PendingList sets={o.pending} slug={slug} adminKey={adminKey} tz={tz} decide={decide} />
         <ScheduledList sets={o.scheduled} tz={tz} decide={decide} />
         <Section id="sold-out" title={t("admin.soldOut")}>
@@ -46,6 +45,7 @@ export function AdminPanel({ slug, adminKey, initial }: { slug: string; adminKey
           )}
         </Section>
         <LogList sets={o.log} tz={tz} decide={decide} />
+        <DomainCard overview={o} post={post} />
         <QrCard publicUrl={o.public_url} slug={slug} />
       </main>
     </div>

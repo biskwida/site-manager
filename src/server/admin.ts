@@ -161,12 +161,13 @@ export async function setTemplate(d: AdminSiteDeps, venue: Venue, template: unkn
 
 export type DomainResult =
   | { ok: true; domain: string; instructions: DomainInstructions }
-  | { ok: false; code: "invalid_domain" | "no_site" | "no_domain" | "busy" | "provider"; error: string; bg: string; en: string };
+  | { ok: false; code: "invalid_domain" | "no_site" | "no_domain" | "busy" | "refused" | "provider"; error: string; bg: string; en: string };
 
 const INVALID_DOMAIN: DomainResult = { ok: false, code: "invalid_domain", error: "Invalid domain.", bg: "Това не прилича на домейн.", en: "That does not look like a domain name." };
 const NO_SITE: DomainResult = { ok: false, code: "no_site", error: "Publish the site first.", bg: "Първо публикувайте сайта.", en: "Publish the site first." };
 const NO_DOMAIN: DomainResult = { ok: false, code: "no_domain", error: "No domain connected.", bg: "Няма свързан домейн.", en: "No domain connected." };
 const DOMAIN_BUSY: DomainResult = { ok: false, code: "busy", error: BUSY.error, bg: BUSY.bg, en: BUSY.en };
+const DOMAIN_REFUSED: DomainResult = { ok: false, code: "refused", error: "The provider refused this domain.", bg: "Доставчикът отказа този домейн. Проверете дали не се използва от друг сайт.", en: "The provider refused this domain. Check that it is not used by another site." };
 const DOMAIN_FAILED: DomainResult = { ok: false, code: "provider", error: "The domain could not be added.", bg: "Домейнът не можа да бъде добавен. Опитайте след минута.", en: "The domain could not be added. Try again in a minute." };
 
 /**
@@ -174,15 +175,29 @@ const DOMAIN_FAILED: DomainResult = { ok: false, code: "provider", error: "The d
  * the verification result. Only a `ready` deploy can take a domain; the write is a conditional claim so a redeploy that
  * started meanwhile (status no longer `ready`) is never overwritten with the stale record.
  */
+/** True for a provider error carrying a numeric 4xx status other than 429 (the provider refused this domain, retrying will not help). */
+function isRefusal(e: unknown): boolean {
+  const status = (e as { status?: unknown } | null)?.status;
+  return typeof status === "number" && status >= 400 && status <= 499 && status !== 429;
+}
+
+/** Busy while a publish is in flight; no_site without a deploy, after a failed publish, or without a project. */
+function siteGate(deploy: DeployInfo | null | undefined): DomainResult | null {
+  if (deploy?.status === "pending" || deploy?.status === "building") return DOMAIN_BUSY;
+  if (!deploy || deploy.status !== "ready" || !deploy.project_id) return NO_SITE;
+  return null;
+}
+
 async function attachDomain(d: AdminSiteDeps, venue: Venue, domain: string): Promise<DomainResult> {
   const deploy = venue.deploy;
-  if (!deploy || deploy.status !== "ready" || !deploy.project_id) return NO_SITE;
+  const gate = siteGate(deploy);
+  if (gate || !deploy?.project_id) return gate ?? NO_SITE;
   if (!d.deployer.addDomain) return DOMAIN_FAILED;
   let instructions: DomainInstructions;
   try {
     instructions = await d.deployer.addDomain(deploy.project_id, domain);
-  } catch {
-    return DOMAIN_FAILED; // the provider message stays out of the response and the stored record
+  } catch (e) {
+    return isRefusal(e) ? DOMAIN_REFUSED : DOMAIN_FAILED; // the provider message stays out of the response and the stored record
   }
   const current = (await d.store.getVenue(venue.id)).deploy;
   if (!current || current.status !== "ready") return DOMAIN_BUSY;
@@ -200,7 +215,8 @@ export async function connectDomain(d: AdminSiteDeps, venue: Venue, domainRaw: u
 
 /** Dashboard "Check again": re-reads the records and the verification for the stored domain (attaching again is idempotent). */
 export async function checkDomain(d: AdminSiteDeps, venue: Venue): Promise<DomainResult> {
-  if (venue.deploy?.status !== "ready") return NO_SITE;
+  const gate = siteGate(venue.deploy);
+  if (gate || !venue.deploy) return gate ?? NO_SITE;
   const domain = venue.deploy.custom_domain;
   if (!domain) return NO_DOMAIN;
   return attachDomain(d, venue, domain);

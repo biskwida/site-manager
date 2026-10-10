@@ -13,6 +13,11 @@ function deps(store: Awaited<ReturnType<typeof makeDemo>>["store"], deployer: De
   return { store, deployer, feedUrlFor: (slug: string) => `https://site.example/api/site/${slug}`, now: () => T0 };
 }
 
+/** A deployer whose addDomain throws `err` (createSite/redeploy are never reached by the domain actions). */
+function throwing(err: unknown): Deployer {
+  return { provider: "fake", createSite: async () => { throw new Error("x"); }, status: async () => ({ state: "building", url: null, error: null }), redeploy: async () => ({ deploymentId: "d" }), deleteSite: async () => {}, addDomain: async () => { throw err; } };
+}
+
 /** A FakeDeployer that already knows project prj_1 (the demo venue's deploy record points at it). */
 function withProject(): FakeDeployer {
   const d = new FakeDeployer();
@@ -157,18 +162,19 @@ describe("custom domain", () => {
     expect((await store.getVenue(venue.id)).deploy).toEqual(ready);
   });
 
-  it("needs a ready deploy: refuses without one, while publishing, and after a failed publish", async () => {
+  it("needs a published site: no_site without a deploy or after a failed publish, busy while publishing", async () => {
     const { store, venue } = await makeDemo();
     const deployer = withProject();
     const noSite = { ok: false, code: "no_site", error: "Publish the site first.", bg: "Първо публикувайте сайта.", en: "Publish the site first." };
+    const busy = { ok: false, code: "busy", error: "The site is publishing right now.", bg: "Сайтът се публикува в момента. Опитайте след минута.", en: "The site is publishing right now. Try again in a minute." };
     expect(await connectDomain(deps(store, deployer), venue, "cafe.example.com")).toEqual(noSite);
-    for (const status of ["pending", "building", "error"] as const) {
-      await store.setDeploy(venue.id, { ...ready, status });
-      expect(await connectDomain(deps(store, deployer), await store.getVenue(venue.id), "cafe.example.com")).toEqual(noSite);
-      expect(await checkDomain(deps(store, deployer), await store.getVenue(venue.id))).toEqual(noSite);
+    expect(await checkDomain(deps(store, deployer), venue)).toEqual(noSite);
+    for (const [status, expected] of [["error", noSite], ["pending", busy], ["building", busy]] as const) {
+      await store.setDeploy(venue.id, { ...ready, status, custom_domain: "cafe.example.com" });
+      expect(await connectDomain(deps(store, deployer), await store.getVenue(venue.id), "cafe.example.com")).toEqual(expected);
+      expect(await checkDomain(deps(store, deployer), await store.getVenue(venue.id))).toEqual(expected);
     }
     expect(deployer.domains).toEqual([]);
-    expect((await store.getVenue(venue.id)).deploy?.custom_domain ?? null).toBeNull();
   });
 
   it("check again needs a connected domain", async () => {
@@ -180,10 +186,23 @@ describe("custom domain", () => {
   it("reports a short provider failure without the provider's message and stores nothing", async () => {
     const { store, venue } = await makeDemo();
     await store.setDeploy(venue.id, ready);
-    const failing: Deployer = { provider: "fake", createSite: async () => { throw new Error("x"); }, status: async () => ({ state: "building", url: null, error: null }), redeploy: async () => ({ deploymentId: "d" }), deleteSite: async () => {}, addDomain: async () => { throw new Error("HTTP 403 forbidden Bearer tok-SECRET"); } };
-    const r = await connectDomain(deps(store, failing), await store.getVenue(venue.id), "cafe.example.com");
+    const r = await connectDomain(deps(store, throwing(new Error("HTTP 503 Bearer tok-SECRET"))), await store.getVenue(venue.id), "cafe.example.com");
     expect(r).toMatchObject({ ok: false, code: "provider", error: "The domain could not be added." });
     expect(JSON.stringify(r)).not.toContain("SECRET");
+    expect((await store.getVenue(venue.id)).deploy).toEqual(ready);
+  });
+
+  it("tells the owner when the provider refused the domain (4xx other than 429), with the generic copy for everything else", async () => {
+    const { store, venue } = await makeDemo();
+    await store.setDeploy(venue.id, ready);
+    const v = await store.getVenue(venue.id);
+    const refused = { ok: false, code: "refused", error: "The provider refused this domain.", bg: "Доставчикът отказа този домейн. Проверете дали не се използва от друг сайт.", en: "The provider refused this domain. Check that it is not used by another site." };
+    for (const status of [400, 403, 409]) {
+      expect(await connectDomain(deps(store, throwing(Object.assign(new Error("SECRET body"), { status }))), v, "cafe.example.com")).toEqual(refused);
+    }
+    for (const err of [Object.assign(new Error("slow down"), { status: 429 }), Object.assign(new Error("boom"), { status: 500 }), Object.assign(new Error("odd"), { status: "403" }), new Error("network")]) {
+      expect(await connectDomain(deps(store, throwing(err)), v, "cafe.example.com")).toMatchObject({ code: "provider", en: "The domain could not be added. Try again in a minute." });
+    }
     expect((await store.getVenue(venue.id)).deploy).toEqual(ready);
   });
 
