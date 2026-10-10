@@ -2,6 +2,7 @@
 // npm run venue:create -- --name "Кафене „Ъгъла“" --slug agala --lang bg [--seed demo|coffique] [--tz Europe/Sofia]
 // Prints the owner invite code, a staff invite code and the admin link ONCE. Keep them.
 import { INVITE_TTL_MS } from "../src/bot/bot";
+import { startLinks } from "../src/channels/links";
 import { seedCoffique } from "../src/seed/coffique";
 import { seedDemo } from "../src/seed/demo";
 import { makeServerDeps } from "../src/server/deps";
@@ -52,4 +53,5 @@ console.log(`site:        ${deps.config.publicBaseUrl}/${venue.slug}`);
 console.log(`admin link:  ${deps.config.publicBaseUrl}/admin/${venue.slug}?key=${token}`);
 console.log(`owner code:  /start ${owner}   (valid 7 days, one use)`);
 console.log(`staff code:  /start ${staff}   (valid 7 days, one use)`);
+for (const [channel, url] of Object.entries(startLinks(deps.config, owner))) console.log(`owner link (${channel}): ${url}`);
 console.log("These codes and the admin link are shown once. Keep them out of git and chat logs.");
