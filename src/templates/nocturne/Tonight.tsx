@@ -24,8 +24,8 @@ export function Tonight({ state, now }: { state: SiteState; now: number }) {
   const note = s.holiday ? pick(lang, s.holiday.note_bg, s.holiday.note_en) : "";
   const news = liveAnnouncements(state.announcements, now);
   return (
-    <section aria-labelledby="tonight" className="n-card n-tonight">
-      <h2 id="tonight" className="n-eyebrow">{t("site.tonight")}</h2>
+    <section id="tonight" tabIndex={-1} aria-labelledby="tonight-h" className="n-card n-tonight">
+      <h2 id="tonight-h" className="n-eyebrow">{t("site.tonight")}</h2>
       <p aria-live="polite" className="n-status">
         <span aria-hidden="true" className={`n-dot n-dot-${s.state}`} />
         <span suppressHydrationWarning><NoWrapArg text={text} arg={next} /></span>

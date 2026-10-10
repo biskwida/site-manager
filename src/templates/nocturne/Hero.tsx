@@ -25,7 +25,7 @@ export function Hero({ state, slug, page, media, aside }: { state: SiteState; sl
   ];
   return (
     <header className={`n-hero ${page === "home" ? "n-hero-home" : "n-hero-menu"}${cover ? " has-cover" : ""}`}>
-      <a href="#main" className="n-skip">{t("site.skip")}</a>
+      <a href="#tonight" className="n-skip">{t("site.skip")}</a>
       {cover ? <Image src={cover} alt="" fill priority sizes="100vw" className="n-cover" /> : <div aria-hidden="true" className="n-cover-fallback" />}
       <div aria-hidden="true" className="n-veil" />
       <div className="n-wrap n-hero-inner">

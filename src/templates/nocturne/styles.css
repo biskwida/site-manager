@@ -100,10 +100,12 @@
 @media (min-width: 640px) { .n-tonight { padding: 1.25rem; } }
 @media (min-width: 1024px) {
   .n-hero-grid { grid-template-columns: minmax(0, 1fr) 24rem; align-items: end; gap: 3rem; padding-top: 5rem; }
-  .n-title { font-size: clamp(2.25rem, 7vw, 7.5rem); }
+  /* The title column is only ~512 px at 1024 px (24rem aside + gaps); 6vw keeps a nine-letter word on one line there. */
+  .n-title { font-size: clamp(2.25rem, 6vw, 7.5rem); }
   .n-logo { width: 4.5rem; height: 4.5rem; }
   .n-tagline { font-size: 1.25rem; }
 }
+@media (min-width: 1200px) { .n-title { font-size: clamp(2.25rem, 7vw, 7.5rem); } }
 .n-status { display: flex; align-items: center; gap: 0.625rem; margin-top: 0.5rem; font-size: 1.125rem; font-weight: 600; line-height: 1.4; text-wrap: pretty; }
 .n-note { margin-top: 0.25rem; padding-left: 1.25rem; color: var(--n-ink-soft); }
 .n-news { display: flex; flex-wrap: wrap; gap: 0.5rem; margin-top: 0.75rem; }
@@ -149,11 +151,11 @@
 .n-legend dt { min-width: 1.5rem; font-weight: 700; font-variant-numeric: tabular-nums; }
 .n-legend dd { color: var(--n-ink-soft); }
 
-/* Category jump bar: sticky, scrolls sideways inside itself (no page overflow). A solid band with a short fade below it,
-   so rows never show through the chips. */
-.n-jump { position: sticky; top: 0; z-index: 2; display: flex; gap: 0.5rem; overflow-x: auto; overscroll-behavior-x: contain; scrollbar-width: none; padding-block: 0.75rem; margin-inline: calc(-1 * var(--n-gutter)); padding-inline: var(--n-gutter); background: var(--n-bg); }
+/* Category jump bar: sticky, scrolls sideways inside itself (no page overflow). A solid band; the fade below it is a blurred
+   box-shadow in the page colour, which is drawn outside the box and so is neither clipped by the scroller's own overflow nor
+   counted in its scrollHeight (a pseudo-element inside it was both, and added a hidden 12 px vertical scroll). */
+.n-jump { position: sticky; top: 0; z-index: 2; display: flex; gap: 0.5rem; overflow-x: auto; overscroll-behavior-x: contain; scrollbar-width: none; padding-block: 0.75rem; margin-inline: calc(-1 * var(--n-gutter)); padding-inline: var(--n-gutter); background: var(--n-bg); box-shadow: 0 0.5rem 0.75rem var(--n-bg); }
 .n-jump::-webkit-scrollbar { display: none; }
-.n-jump::after { content: ""; position: absolute; left: 0; right: 0; top: 100%; height: 0.75rem; pointer-events: none; background: linear-gradient(var(--n-bg), transparent); }
 .n-chip { flex: none; min-height: 44px; display: inline-flex; align-items: center; padding-inline: 1rem; border-radius: 999px; border: 1px solid var(--n-line-strong); color: var(--n-ink-soft); font-size: 0.875rem; font-weight: 600; white-space: nowrap; transition: color 200ms var(--n-ease), border-color 200ms var(--n-ease), transform 160ms var(--n-ease); }
 .n-chip:focus-visible { color: var(--n-ink); border-color: var(--n-ink-soft); }
 .n-chip:active { transform: scale(0.97); }
