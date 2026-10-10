@@ -5,11 +5,11 @@ import { LangToggle, useLang } from "@/src/i18n";
 import { pageHref } from "../shared/links";
 import { mediaUrl, SiteImage } from "./bits";
 
-export function SiteHeader({ state, slug, page }: { state: SiteState; slug: string; page: "home" | "menu" }) {
+export function SiteHeader({ state, slug, page, preview = false }: { state: SiteState; slug: string; page: "home" | "menu"; preview?: boolean }) {
   const { lang, t } = useLang();
   const v = state.venue;
-  const cover = mediaUrl(state, v.cover_media_id);
-  const logo = mediaUrl(state, v.logo_media_id);
+  const cover = mediaUrl(state, v.cover_media_id, preview);
+  const logo = mediaUrl(state, v.logo_media_id, preview);
   const tagline = lang === "bg" ? v.tagline_bg : v.tagline_en;
   const welcome = state.texts.find((x) => x.key === "welcome");
   const welcomeText = welcome ? (lang === "bg" ? welcome.text_bg : welcome.text_en) || welcome.text_bg : "";

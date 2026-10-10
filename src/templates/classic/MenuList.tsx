@@ -7,7 +7,7 @@ import { useLang } from "@/src/i18n";
 import { formatDateTime } from "@/src/time";
 import { Flash, mediaUrl, SiteImage, type Changed } from "./bits";
 
-export function MenuList({ state, now, changed }: { state: SiteState; now: number; changed: Changed }) {
+export function MenuList({ state, now, changed, preview = false }: { state: SiteState; now: number; changed: Changed; preview?: boolean }) {
   const { lang, t } = useLang();
   const items = visibleItems(state.items, now);
   const sections = state.categories
@@ -26,7 +26,7 @@ export function MenuList({ state, now, changed }: { state: SiteState; now: numbe
             {list.map((i) => {
               const sold = isSoldOut(i, now);
               const desc = lang === "bg" ? i.desc_bg : i.desc_en;
-              const img = mediaUrl(state, i.image_media_id); // thumbnail only when there is a photo; otherwise the compact row
+              const img = mediaUrl(state, i.image_media_id, preview); // thumbnail only when there is a photo; otherwise the compact row
               return (
                 <li key={i.id} className="relative isolate py-3.5">
                   <Flash at={changed.get(i.id)} />
