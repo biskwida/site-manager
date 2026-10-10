@@ -38,4 +38,16 @@ describe("WhatsAppMessenger", () => {
     await m.typing("wa:359888123456", "wamid.in1");
     expect(calls[0].json).toEqual({ messaging_product: "whatsapp", status: "read", message_id: "wamid.in1", typing_indicator: { type: "text" } });
   });
+  it("returns null on a malformed chat ref without calling Graph or throwing", async () => {
+    const { f, calls } = fakeFetch();
+    const logs: string[] = [];
+    const orig = console.error; console.error = (...a: unknown[]) => { logs.push(a.join(" ")); };
+    try {
+      const m = new WhatsAppMessenger({ token: "WT", phoneNumberId: "PNID", fetch: f });
+      expect(await m.send("nonsense", "x")).toBeNull();
+      await expect(m.typing("nonsense")).resolves.toBeUndefined();
+    } finally { console.error = orig; }
+    expect(calls).toHaveLength(0);
+    expect(logs.join("\n")).toMatch(/\[meta\] send failed: malformed chat_ref/);
+  });
 });

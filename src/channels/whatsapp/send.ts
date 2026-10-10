@@ -17,8 +17,16 @@ export class WhatsAppMessenger implements Messenger {
     const first = r && Array.isArray(r.messages) ? (r.messages[0] as Record<string, unknown> | undefined) : undefined;
     return first && typeof first.id === "string" ? first.id : null;
   }
-  async send(chatRef: string, text: string): Promise<string | null> {
-    const to = parseRef(chatRef).id;
+  /** The recipient phone digits; a malformed ref (e.g. a bad database row) is logged and yields null so callers never see a throw. */
+  private to(chatRef: string, what: string): string | null {
+    try {
+      return parseRef(chatRef).id;
+    } catch {
+      console.error(`[meta] ${what} failed: malformed chat_ref`);
+      return null;
+    }
+  }
+  private async sendText(to: string, text: string): Promise<string | null> {
     let last: string | null = null;
     for (const chunk of splitText(text, TEXT_MAX)) {
       const r = await this.post({ recipient_type: "individual", to, type: "text", text: { body: chunk, preview_url: false } }, "send");
@@ -27,16 +35,24 @@ export class WhatsAppMessenger implements Messenger {
     }
     return last;
   }
+
+  async send(chatRef: string, text: string): Promise<string | null> {
+    const to = this.to(chatRef, "send");
+    return to ? this.sendText(to, text) : null;
+  }
   async sendProposal(chatRef: string, text: string, setId: string, lang: Lang): Promise<string | null> {
-    const to = parseRef(chatRef).id;
+    const to = this.to(chatRef, "sendProposal");
+    if (!to) return null;
     const { lead, ask } = proposalParts(text, BODY_MAX);
-    if (lead && (await this.send(chatRef, lead)) === null) return null;
+    if (lead && (await this.sendText(to, lead)) === null) return null;
     const buttons = proposalButtons(lang).map((b) => ({ type: "reply", reply: { id: `cs:${b.id}:${setId}`, title: b.label.slice(0, 20) } }));
     return WhatsAppMessenger.id(await this.post({ recipient_type: "individual", to, type: "interactive", interactive: { type: "button", body: { text: ask }, action: { buttons } } }, "sendProposal"));
   }
   async conclude(chatRef: string, _messageRef: string | null, _full: string, short: string): Promise<void> {
-    await this.send(chatRef, short);
+    const to = this.to(chatRef, "conclude");
+    if (to) await this.sendText(to, short);
   }
+  /** WhatsApp's typing indicator is tied to an inbound message id (it also marks it read); without one there is nothing to send. */
   async typing(_chatRef: string, inReplyTo?: string): Promise<void> {
     if (!inReplyTo) return;
     await this.post({ status: "read", message_id: inReplyTo, typing_indicator: { type: "text" } }, "typing");

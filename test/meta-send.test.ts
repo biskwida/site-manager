@@ -63,4 +63,16 @@ describe("MetaMessenger", () => {
     expect(logs.join("\n")).toMatch(/send failed HTTP 400 code=100 subcode=2018001/);
     expect(logs.join("\n")).not.toContain("SECRET-PT");
   });
+  it("returns null on a malformed chat ref without calling Graph or throwing", async () => {
+    const { f, calls } = fakeFetch();
+    const logs: string[] = [];
+    const orig = console.error; console.error = (...a: unknown[]) => { logs.push(a.join(" ")); };
+    try {
+      const m = new MetaMessenger({ pageToken: "PT", fetch: f });
+      expect(await m.send("nonsense", "x")).toBeNull();
+      await expect(m.typing("nonsense")).resolves.toBeUndefined();
+    } finally { console.error = orig; }
+    expect(calls).toHaveLength(0);
+    expect(logs.join("\n")).toMatch(/\[meta\] send failed: malformed chat_ref/);
+  });
 });
