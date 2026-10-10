@@ -4,7 +4,7 @@ A website for a small café or restaurant that the owner runs from Telegram. The
 
 **Price:** 25 € per venue per month (website hosting + the agent), setup included.
 
-**Evidence:** three venues quoted us a monthly price before the product existed: Bar and Dinner Central (30 €), Coffique (20 €) and Family House (50 €). That is the whole claim; there are no testimonials.
+**Evidence:** four venues quoted us a monthly price before the product existed: Bar and Dinner Central (30 €), Coffique (20 €), Family House (50 €) and The High End Bar (70 €). That is the whole claim; there are no testimonials.
 
 Built for the "AI That Does the Work" hackathon. Full design: [docs/superpowers/specs/2026-10-10-site-manager-design.md](docs/superpowers/specs/2026-10-10-site-manager-design.md).
 

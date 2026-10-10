@@ -114,13 +114,13 @@ One dark block: ink background, paper-coloured text, rounded-3xl. Keep every nam
 
 - Price (large, display font): 25 € a month per venue
 - Note under the price: Website hosting and the agent, setup included.
-- Paragraph below a thin divider: Before we had a product, three venues told us what they would pay a month: Bar and Dinner Central 30 €, Coffique 20 €, Family House 50 €.
+- Paragraph below a thin divider: Before we had a product, four venues told us what they would pay a month: Bar and Dinner Central 30 €, Coffique 20 €, Family House 50 €, The High End Bar 70 €.
 
 **Bulgarian (BG)**
 
 - Price (large, display font): 25 € на месец за обект
 - Note under the price: Включени са хостингът на сайта, агентът и настройката.
-- Paragraph below a thin divider: Преди да имаме продукт, три заведения ни казаха колко биха плащали на месец: Bar and Dinner Central 30 €, Coffique 20 €, Family House 50 €.
+- Paragraph below a thin divider: Преди да имаме продукт, четири заведения ни казаха колко биха плащали на месец: Bar and Dinner Central 30 €, Coffique 20 €, Family House 50 €, The High End Bar 70 €.
 
 #### 2.7 How it was built
 
@@ -192,8 +192,8 @@ Accessibility (WCAG 2.1 AA):
 
 - Use only the copy in section 2. Do not invent taglines, statistics, customer counts, ratings, testimonials, quotes, FAQs, partner logos, awards or contact details (no email, phone, address or social links).
 - No stock photos of people, no AI-generated faces, no photos of real cafés.
-- No invented numbers. The only numbers on the page are those in the copy: 25 € a month, the three venues and their amounts, and "3,20" in step 1.
-- Keep the three venue names and amounts exactly as written: Bar and Dinner Central 30 €, Coffique 20 €, Family House 50 €. Do not turn them into testimonials, logos or quotes.
+- No invented numbers. The only numbers on the page are those in the copy: 25 € a month, the four venues and their amounts, and "3,20" in step 1.
+- Keep the four venue names and amounts exactly as written: Bar and Dinner Central 30 €, Coffique 20 €, Family House 50 €, The High End Bar 70 €. Do not turn them into testimonials, logos or quotes.
 - One call to action only, the primary button to `{{DEMO_URL}}`. No second button, no "Sign up", "Book a demo" or "Contact us".
 - Both languages must be complete: no string may stay in English when Bulgarian is selected, except the brand name "Site Manager", "Telegram", "Claude", "Lovable", the venue names and the hackathon name, which stay as written.
 - No cookie banner, analytics or third-party scripts.

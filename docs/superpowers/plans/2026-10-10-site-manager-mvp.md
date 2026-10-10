@@ -23,7 +23,7 @@
 - Agent: model `claude-opus-5-5` (env `AGENT_MODEL`), effort `medium` default (env `AGENT_EFFORT`), `high` for image/bulk/scheduled turns; `tool_choice: { type: "auto", disable_parallel_tool_use: true }`, `betas: ["server-side-fallback-2026-07-01"]`, `fallbacks: "default"`, `max_tokens: 16000`, `max_iterations: 30`, refusal handling.
 - All tests run offline with `InMemoryStore` and fakes: `npm test` must never need network or keys.
 - Next 16 specifics verified in the installed docs (`node_modules/next/dist/docs`): `after` from `next/server`; `export const maxDuration = 300` in a route file; `params`/`searchParams` are Promises; global `PageProps<'/x/[slug]'>` and `RouteContext<'/api/x'>` helpers exist after typegen; `next/font/google` `Literata` and `Onest` both have the `cyrillic` subset.
-- Copy rules: no invented testimonials; pitch facts only: three venues quoted a monthly price before the product existed: Bar and Dinner Central 30 €, Coffique 20 €, Family House 50 € ("three venues already quoted us 20–50 € a month"); list price 25 €/venue/month. No contact details on the landing (user's decision 2026-10-10).
+- Copy rules: no invented testimonials; pitch facts only: four venues quoted a monthly price before the product existed: Bar and Dinner Central 30 €, Coffique 20 €, Family House 50 €, The High End Bar 70 € ("four venues already quoted us 20–70 € a month"); list price 25 €/venue/month. No contact details on the landing (user's decision 2026-10-10).
 
 ## Review Focus
 
@@ -6030,7 +6030,7 @@ const en = {
   "landing.feat6": "New dishes with bilingual descriptions and an allergen check",
   "landing.price": "25 € a month per venue",
   "landing.priceNote": "Website hosting and the agent, setup included.",
-  "landing.evidence": "Before we had a product, three venues told us what they would pay a month: Bar and Dinner Central 30 €, Coffique 20 €, Family House 50 €.",
+  "landing.evidence": "Before we had a product, four venues told us what they would pay a month: Bar and Dinner Central 30 €, Coffique 20 €, Family House 50 €, The High End Bar 70 €.",
   "landing.built": "Built for the “AI That Does the Work” hackathon with Claude. The AI reads casual Bulgarian, voice and handwriting; we built the site, the content model, the approval step, the scheduler, the log and the multi-venue plumbing.",
   "landing.footer": "Site Manager · a website your café runs from Telegram",
   // Public site
@@ -6127,7 +6127,7 @@ const bg: Record<MessageKey, string> = {
   "landing.feat6": "Нови ястия с описания на два езика и проверка за алергени",
   "landing.price": "25 € на месец за обект",
   "landing.priceNote": "Хостинг на сайта и агентът, настройката е включена.",
-  "landing.evidence": "Преди да имаме продукт, три заведения ни казаха колко биха плащали на месец: Bar and Dinner Central 30 €, Coffique 20 €, Family House 50 €.",
+  "landing.evidence": "Преди да имаме продукт, четири заведения ни казаха колко биха плащали на месец: Bar and Dinner Central 30 €, Coffique 20 €, Family House 50 €, The High End Bar 70 €.",
   "landing.built": "Създадено за хакатона „AI That Does the Work“ с Claude. Изкуственият интелект разбира разговорен български, глас и почерк; ние направихме сайта, модела на съдържанието, стъпката за одобрение, насрочването, дневника и инфраструктурата за много обекти.",
   "landing.footer": "Site Manager · сайт, който кафенето ви управлява от Telegram",
   "site.menu": "Меню",
@@ -6454,7 +6454,7 @@ export default function NotFound() {
 - [ ] **Step 5b: Lovable landing (user's decision 2026-10-10: the public landing is built in Lovable as a hackathon requirement)**
 
 1. In `app/page.tsx`, before rendering `<Landing>`, read `process.env.NEXT_PUBLIC_LANDING_URL?.trim()`; when it is a non-empty `https://` URL, `redirect(url)` (from `next/navigation`). Otherwise render the Next.js landing as the fallback. Add `NEXT_PUBLIC_LANDING_URL=` with a comment ("the Lovable landing; when set, / redirects there") to `.env.example` and `.env.local`.
-2. Create `docs/lovable/LANDING-PROMPT.md`: a prompt pack the user pastes into Lovable. Contents, in this order: (a) one paragraph telling Lovable what to build: a single-page bilingual (BG/EN toggle, default EN, remember the choice) marketing landing for "Site Manager", mobile-first, no backend, no forms, no contact section, one primary button "Open the demo café →" linking to `{{DEMO_URL}}` (the user replaces it with `<PUBLIC_BASE_URL>/agala`), and a small footer line "Landing built with Lovable · product by Site Manager"; (b) the exact copy for every section in both languages, taken verbatim from `src/i18n/dicts.ts` keys `landing.*` (eyebrow, h1, lead, cta, ctaNote, how + 3 steps, what + 6 features, price, priceNote, evidence, built, footer), presented as two columns or two blocks per section; (c) design tokens: paper `#faf7f2`, paper-deep `#f1ebe1`, card `#fffdf9`, ink `#1d2a24`, ink-soft `#4b5a53`, accent `#2f6b4f`, amber `#8f5c10`; fonts Literata (display, headings) and Onest (body) from Google Fonts with Cyrillic subsets; rounded-3xl cards, generous whitespace, WCAG AA contrast; a dark ink "price" block; (d) rules: no testimonials or logos that are not in the copy, no stock photos of people, no invented numbers, keep the three venue names and amounts exactly; (e) after it is published: paste the Lovable URL into `NEXT_PUBLIC_LANDING_URL` (Vercel env + `.env.local`) so `/` redirects there, and put `<PUBLIC_BASE_URL>/agala` into the demo button.
+2. Create `docs/lovable/LANDING-PROMPT.md`: a prompt pack the user pastes into Lovable. Contents, in this order: (a) one paragraph telling Lovable what to build: a single-page bilingual (BG/EN toggle, default EN, remember the choice) marketing landing for "Site Manager", mobile-first, no backend, no forms, no contact section, one primary button "Open the demo café →" linking to `{{DEMO_URL}}` (the user replaces it with `<PUBLIC_BASE_URL>/agala`), and a small footer line "Landing built with Lovable · product by Site Manager"; (b) the exact copy for every section in both languages, taken verbatim from `src/i18n/dicts.ts` keys `landing.*` (eyebrow, h1, lead, cta, ctaNote, how + 3 steps, what + 6 features, price, priceNote, evidence, built, footer), presented as two columns or two blocks per section; (c) design tokens: paper `#faf7f2`, paper-deep `#f1ebe1`, card `#fffdf9`, ink `#1d2a24`, ink-soft `#4b5a53`, accent `#2f6b4f`, amber `#8f5c10`; fonts Literata (display, headings) and Onest (body) from Google Fonts with Cyrillic subsets; rounded-3xl cards, generous whitespace, WCAG AA contrast; a dark ink "price" block; (d) rules: no testimonials or logos that are not in the copy, no stock photos of people, no invented numbers, keep the four venue names and amounts exactly; (e) after it is published: paste the Lovable URL into `NEXT_PUBLIC_LANDING_URL` (Vercel env + `.env.local`) so `/` redirects there, and put `<PUBLIC_BASE_URL>/agala` into the demo button.
 3. `test/i18n.test.ts` gains nothing; the README (Task 19) gets a "Landing page (Lovable)" subsection pointing at the prompt pack.
 
 - [ ] **Step 6: Verify**
@@ -7152,7 +7152,7 @@ console.log("\nOFFLINE E2E OK");
 - [ ] **Step 4: `scripts/smoke.mts`** (live; needs keys) — loads deps (Supabase), finds the demo venue and its first owner member (`store.listChangeSets` is not needed; add `listMembers(venueId)` to `Store` if required, or require `--chat <id>`), prints which model/effort it will use, then runs `runTurn` with `--text` (default "Капучиното става 3,20") and the `TelegramMessenger` (so the preview really arrives on the phone) or a console messenger with `--dry`. Exits 0 when the turn returns anything but "error".
 
 - [ ] **Step 5: README** — replace the scaffold README with these sections, in this order; write them for a reader who has never seen the repo: 
-  1. **Site Manager** one-paragraph pitch (what it is, what the owner does, what the AI does), the price line (25 €/venue/month) and the evidence line (three venues, 20–50 €, named), link to the design spec.
+  1. **Site Manager** one-paragraph pitch (what it is, what the owner does, what the AI does), the price line (25 €/venue/month) and the evidence line (four venues, 20–70 €, named), link to the design spec.
   2. **Demo** (2 minutes): the eight steps from the spec, as a table "You say / What happens".
   3. **How it works**: change sets, approval policy, read-time effectiveness and the tick, bilingual content, allergens, multi-venue; the architecture block from the spec.
   4. **Run locally**: `npm install`, `.env.local` from `.env.example` (table of every key: name, where to get it, required?), `npm run env:set`, offline mode (`npm run dev:offline` and `npm run e2e`), real mode (`npm run db:apply`, `npm run check:rls`, `npm run venue:create -- --name … --slug agala --lang bg --seed demo`, `npm run dev` + `npm run bot:dev`, `/start <code>` on the phone).

@@ -26,7 +26,7 @@ const en = {
   "landing.feat6": "New dishes with bilingual descriptions and an allergen check",
   "landing.price": "25 € a month per venue",
   "landing.priceNote": "Website hosting and the agent, setup included.",
-  "landing.evidence": "Before we had a product, three venues told us what they would pay a month: Bar and Dinner Central 30 €, Coffique 20 €, Family House 50 €.",
+  "landing.evidence": "Before we had a product, four venues told us what they would pay a month: Bar and Dinner Central 30 €, Coffique 20 €, Family House 50 €, The High End Bar 70 €.",
   "landing.built": "Built for the “AI That Does the Work” hackathon with Claude. The AI reads casual Bulgarian, voice and handwriting; we built the site, the content model, the approval step, the scheduler, the log and the multi-venue plumbing.",
   "landing.footer": "Site Manager · a website your café runs from Telegram",
   // Public site
@@ -130,7 +130,7 @@ const bg: Record<MessageKey, string> = {
   "landing.feat6": "Нови ястия с описания на два езика и проверка за алергени",
   "landing.price": "25 € на месец за обект",
   "landing.priceNote": "Включени са хостингът на сайта, агентът и настройката.",
-  "landing.evidence": "Преди да имаме продукт, три заведения ни казаха колко биха плащали на месец: Bar and Dinner Central 30 €, Coffique 20 €, Family House 50 €.",
+  "landing.evidence": "Преди да имаме продукт, четири заведения ни казаха колко биха плащали на месец: Bar and Dinner Central 30 €, Coffique 20 €, Family House 50 €, The High End Bar 70 €.",
   "landing.built": "Създадено за хакатона „AI That Does the Work“ с Claude. Изкуственият интелект разбира разговорен български, глас и почерк; ние направихме сайта, модела на съдържанието, стъпката за одобрение, насрочването, дневника и инфраструктурата за много обекти.",
   "landing.footer": "Site Manager · сайт, който кафенето ви управлява от Telegram",
   "site.menu": "Меню",

@@ -6,7 +6,7 @@
 
 **Hackathon framing** ("AI That Does the Work"): Claude does the understanding (casual Bulgarian, speech, handwriting on a whiteboard, which dish is meant, which allergen is missing). We build what it can't do without us: the website, the content model, the approval step, the scheduler, the change log and undo, and the multi-tenant plumbing that makes it sellable.
 
-**Early customer evidence (from the user, 2026-10-10):** three venues the user knows have said what they would pay per month: Bar and Dinner Central, 30 €; Coffique, 20 €; Family House, 50 €. The pitch states this as "three venues already quoted us 20–50 € a month before we had a product" and prices the service at 25 € a month per venue (website hosting + agent), with setup included. The README pitch and the landing page use this; no invented testimonials.
+**Early customer evidence (from the user, 2026-10-10):** four venues the user knows have said what they would pay per month: Bar and Dinner Central, 30 €; Coffique, 20 €; Family House, 50 €; The High End Bar, 70 €. The pitch states this as "four venues already quoted us 20–70 € a month before we had a product" and prices the service at 25 € a month per venue (website hosting + agent), with setup included. The README pitch and the landing page use this; no invented testimonials.
 
 **Decisions made with the user (2026-10-10):**
 - New project, **not** under InstaPay. Folder: `/Users/tanyatopacharova/Projects/site-manager`. Public GitHub repo `biskwida/site-manager` (gh is logged in as `biskwida`). Working name "Site Manager".
