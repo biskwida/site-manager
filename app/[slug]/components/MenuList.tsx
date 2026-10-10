@@ -5,7 +5,7 @@ import { categoryName, formatPrice, itemName } from "@/src/domain/format";
 import type { SiteState } from "@/src/domain/types";
 import { useLang } from "@/src/i18n";
 import { formatDateTime } from "@/src/time";
-import { Flash, type Changed } from "./bits";
+import { Flash, mediaUrl, SiteImage, type Changed } from "./bits";
 
 export function MenuList({ state, now, changed }: { state: SiteState; now: number; changed: Changed }) {
   const { lang, t } = useLang();
@@ -26,27 +26,37 @@ export function MenuList({ state, now, changed }: { state: SiteState; now: numbe
             {list.map((i) => {
               const sold = isSoldOut(i, now);
               const desc = lang === "bg" ? i.desc_bg : i.desc_en;
+              const img = mediaUrl(state, i.image_media_id); // thumbnail only when there is a photo; otherwise the compact row
               return (
                 <li key={i.id} className="relative isolate py-3.5">
                   <Flash at={changed.get(i.id)} />
-                  <div className="flex items-baseline justify-between gap-4">
-                    <h3 className={`text-base font-semibold ${sold ? "text-ink-soft" : ""}`}>{itemName(i, lang)}</h3>
-                    <span className={`shrink-0 font-semibold tabular-nums ${sold ? "line-through opacity-50" : ""}`}>{formatPrice(i.price_eur, lang)}</span>
-                  </div>
-                  {desc && <p className="mt-0.5 text-sm text-ink-soft">{desc}</p>}
-                  {(sold || i.allergens.length > 0) && (
-                    <div className="mt-2 flex flex-wrap items-center gap-1.5">
-                      {sold && i.sold_out_until && (
-                        <span className="rounded-full bg-clay-soft px-2.5 py-0.5 text-xs font-semibold text-clay">{t("site.soldOutUntil", { when: formatDateTime(i.sold_out_until, lang, state.venue.tz) })}</span>
+                  <div className="flex items-start gap-3">
+                    {img && (
+                      <div className="relative size-16 shrink-0 overflow-hidden rounded-xl">
+                        <SiteImage src={img} alt={itemName(i, lang)} sizes="64px" />
+                      </div>
+                    )}
+                    <div className="min-w-0 flex-1">
+                      <div className="flex items-baseline justify-between gap-4">
+                        <h3 className={`min-w-0 break-words text-base font-semibold ${sold ? "text-ink-soft" : ""}`}>{itemName(i, lang)}</h3>
+                        <span className={`shrink-0 font-semibold tabular-nums ${sold ? "line-through opacity-50" : ""}`}>{formatPrice(i.price_eur, lang)}</span>
+                      </div>
+                      {desc && <p className="mt-0.5 text-sm text-ink-soft">{desc}</p>}
+                      {(sold || i.allergens.length > 0) && (
+                        <div className="mt-2 flex flex-wrap items-center gap-1.5">
+                          {sold && i.sold_out_until && (
+                            <span className="rounded-full bg-clay-soft px-2.5 py-0.5 text-xs font-semibold text-clay">{t("site.soldOutUntil", { when: formatDateTime(i.sold_out_until, lang, state.venue.tz) })}</span>
+                          )}
+                          {i.allergens.length > 0 && <span className="sr-only">{t("site.allergens")}:</span>}
+                          {i.allergens.map((a) => (
+                            <span key={a} title={allergenName(a, lang)} className="inline-flex min-w-6 justify-center rounded-md bg-paper-deep px-1.5 py-0.5 text-xs font-semibold text-ink-soft">
+                              {a}<span className="sr-only"> {allergenName(a, lang)}</span>
+                            </span>
+                          ))}
+                        </div>
                       )}
-                      {i.allergens.length > 0 && <span className="sr-only">{t("site.allergens")}:</span>}
-                      {i.allergens.map((a) => (
-                        <span key={a} title={allergenName(a, lang)} className="inline-flex min-w-6 justify-center rounded-md bg-paper-deep px-1.5 py-0.5 text-xs font-semibold text-ink-soft">
-                          {a}<span className="sr-only"> {allergenName(a, lang)}</span>
-                        </span>
-                      ))}
                     </div>
-                  )}
+                  </div>
                 </li>
               );
             })}
