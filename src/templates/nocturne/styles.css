@@ -105,7 +105,7 @@
   .n-logo { width: 4.5rem; height: 4.5rem; }
   .n-tagline { font-size: 1.25rem; }
 }
-@media (min-width: 1200px) { .n-title { font-size: clamp(2.25rem, 7vw, 7.5rem); } }
+@media (min-width: 1200px) { .n-title { font-size: clamp(2.25rem, 7vw, 5rem); } } /* The title column is capped at 640 px by --n-wrap (72rem); 5rem keeps a nine-letter word (~7.9em) on one line. */
 .n-status { display: flex; align-items: center; gap: 0.625rem; margin-top: 0.5rem; font-size: 1.125rem; font-weight: 600; line-height: 1.4; text-wrap: pretty; }
 .n-note { margin-top: 0.25rem; padding-left: 1.25rem; color: var(--n-ink-soft); }
 .n-news { display: flex; flex-wrap: wrap; gap: 0.5rem; margin-top: 0.75rem; }
