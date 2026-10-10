@@ -1,0 +1,277 @@
+// src/store/memory.ts
+import { applyChanges } from "../domain/changes";
+import type { Category, ChangeSet, Conversation, Item, Lang, Media, Member, Role, SiteState, SiteTextKey, Venue } from "../domain/types";
+import { DEFAULT_HOURS, extensionFor, newInviteCode, newToken, type ChangeSetPatch, type ExpiredTimer, type NewCategory, type NewChangeSet, type NewItem, type NewVenue, type Store } from "./types";
+
+const clone = <T>(v: T): T => structuredClone(v);
+
+interface Invite {
+  code: string;
+  venue_id: string;
+  role: Role;
+  expires_at: string;
+  used_at: string | null;
+}
+
+export class InMemoryStore implements Store {
+  sites = new Map<string, SiteState>();
+  members = new Map<number, Member>(); // one venue per chat
+  invites = new Map<string, Invite>();
+  tokens = new Map<string, string>(); // venue id -> token
+  sets = new Map<string, ChangeSet>();
+  conversations = new Map<string, Conversation>();
+  files = new Map<string, Uint8Array>();
+  private lastTick = 0;
+  /** Strictly increasing clock for created_at (so newest-first ordering is stable); tests may override. */
+  clock: () => string = () => {
+    const t = Math.max(Date.now(), this.lastTick + 1);
+    this.lastTick = t;
+    return new Date(t).toISOString();
+  };
+
+  private site(id: string): SiteState {
+    const s = this.sites.get(id);
+    if (!s) throw new Error(`venue ${id} not found`);
+    return s;
+  }
+
+  async createVenue(v: NewVenue): Promise<Venue> {
+    const venue: Venue = {
+      id: crypto.randomUUID(),
+      slug: v.slug,
+      name: v.name,
+      tagline_bg: v.tagline_bg ?? "",
+      tagline_en: v.tagline_en ?? "",
+      about_bg: v.about_bg ?? "",
+      about_en: v.about_en ?? "",
+      address: v.address ?? "",
+      phone: v.phone ?? "",
+      maps_url: v.maps_url ?? "",
+      instagram: v.instagram ?? "",
+      cover_media_id: null,
+      logo_media_id: null,
+      hours: clone(v.hours ?? DEFAULT_HOURS),
+      tz: v.tz ?? "Europe/Sofia",
+      default_lang: v.default_lang ?? "bg",
+      theme: clone(v.theme ?? { accent: "#2f6b4f" }),
+      created_at: this.clock(),
+    };
+    if ([...this.sites.values()].some((s) => s.venue.slug === venue.slug)) throw new Error(`slug ${venue.slug} already exists`);
+    this.sites.set(venue.id, { venue, categories: [], items: [], holidays: [], announcements: [], media: [], texts: [] });
+    return clone(venue);
+  }
+  async getVenue(id: string) {
+    return clone(this.site(id).venue);
+  }
+  async getVenueBySlug(slug: string) {
+    const s = [...this.sites.values()].find((x) => x.venue.slug === slug);
+    return s ? clone(s.venue) : null;
+  }
+  async listVenues() {
+    return [...this.sites.values()].map((s) => clone(s.venue));
+  }
+  async getSite(venueId: string) {
+    return clone(this.site(venueId));
+  }
+  async insertCategory(c: NewCategory): Promise<Category> {
+    const row: Category = { id: crypto.randomUUID(), active: true, ...c };
+    this.site(c.venue_id).categories.push(row);
+    return clone(row);
+  }
+  async insertItem(i: NewItem): Promise<Item> {
+    const now = this.clock();
+    const row: Item = {
+      id: crypto.randomUUID(),
+      venue_id: i.venue_id,
+      category_id: i.category_id,
+      name_bg: i.name_bg,
+      name_en: i.name_en,
+      desc_bg: i.desc_bg,
+      desc_en: i.desc_en,
+      price_eur: i.price_eur,
+      allergens: [...i.allergens],
+      image_media_id: i.image_media_id ?? null,
+      sold_out_until: null,
+      is_special: i.is_special ?? false,
+      special_expires_at: i.special_expires_at ?? null,
+      position: i.position,
+      active: true,
+      created_at: now,
+      updated_at: now,
+    };
+    this.site(i.venue_id).items.push(row);
+    return clone(row);
+  }
+  async setSiteText(venueId: string, key: SiteTextKey, text_bg: string, text_en: string) {
+    const s = this.site(venueId);
+    const existing = s.texts.find((t) => t.key === key);
+    if (existing) Object.assign(existing, { text_bg, text_en });
+    else s.texts.push({ venue_id: venueId, key, text_bg, text_en });
+  }
+  async clearVenueContent(venueId: string) {
+    const s = this.site(venueId);
+    s.categories = [];
+    s.items = [];
+    s.holidays = [];
+    s.announcements = [];
+    s.media = [];
+    s.texts = [];
+    for (const [id, cs] of this.sets) if (cs.venue_id === venueId) this.sets.delete(id);
+    for (const key of [...this.conversations.keys()]) if (key.startsWith(`${venueId}:`)) this.conversations.delete(key);
+  }
+
+  async findMember(chatId: number) {
+    const m = this.members.get(chatId);
+    return m ? clone(m) : null;
+  }
+  async upsertMember(m: Omit<Member, "created_at">) {
+    const row: Member = { ...m, created_at: this.members.get(m.tg_chat_id)?.created_at ?? this.clock() };
+    this.members.set(m.tg_chat_id, row);
+    return clone(row);
+  }
+  async setMemberLang(venueId: string, chatId: number, lang: Lang) {
+    const m = this.members.get(chatId);
+    if (!m || m.venue_id !== venueId) throw new Error(`member ${chatId} not found`);
+    m.lang = lang;
+  }
+  async createInvite(venueId: string, role: Role, expiresAt: string) {
+    this.site(venueId);
+    const code = newInviteCode();
+    this.invites.set(code, { code, venue_id: venueId, role, expires_at: expiresAt, used_at: null });
+    return code;
+  }
+  async redeemInvite(code: string, chatId: number, lang: Lang, now: string) {
+    const inv = this.invites.get(code);
+    if (!inv || inv.used_at !== null || Date.parse(inv.expires_at) <= Date.parse(now)) return null;
+    inv.used_at = now;
+    return this.upsertMember({ venue_id: inv.venue_id, tg_chat_id: chatId, role: inv.role, lang });
+  }
+  async getAdminToken(venueId: string) {
+    this.site(venueId);
+    let t = this.tokens.get(venueId);
+    if (!t) {
+      t = newToken();
+      this.tokens.set(venueId, t);
+    }
+    return t;
+  }
+  async findVenueByAdminToken(token: string) {
+    for (const [venueId, t] of this.tokens) if (t === token) return this.getVenue(venueId);
+    return null;
+  }
+
+  async createChangeSet(cs: NewChangeSet): Promise<ChangeSet> {
+    this.site(cs.venue_id);
+    const row: ChangeSet = {
+      id: crypto.randomUUID(),
+      venue_id: cs.venue_id,
+      chat_id: cs.chat_id,
+      summary_bg: cs.summary_bg,
+      summary_en: cs.summary_en,
+      preview_bg: cs.preview_bg,
+      preview_en: cs.preview_en,
+      source: cs.source,
+      status: cs.status,
+      apply_at: cs.apply_at ?? null,
+      reminded_at: null,
+      decided_at: null,
+      applied_at: null,
+      reverted_by: null,
+      undoes_id: cs.undoes_id ?? null,
+      tg_message_id: cs.tg_message_id ?? null,
+      created_at: this.clock(),
+      changes: clone(cs.changes).map((c, i) => ({ ...c, position: i })),
+    };
+    this.sets.set(row.id, row);
+    return clone(row);
+  }
+  async getChangeSet(id: string) {
+    const cs = this.sets.get(id);
+    if (!cs) throw new Error(`change set ${id} not found`);
+    return clone(cs);
+  }
+  async findProposed(venueId: string, chatId: number) {
+    const cs = [...this.sets.values()].find((x) => x.venue_id === venueId && x.chat_id === chatId && x.status === "proposed");
+    return cs ? clone(cs) : null;
+  }
+  async listChangeSets(venueId: string, opts: { status?: ChangeSet["status"][]; limit?: number } = {}) {
+    return [...this.sets.values()]
+      .filter((x) => x.venue_id === venueId && (!opts.status || opts.status.includes(x.status)))
+      .sort((a, b) => b.created_at.localeCompare(a.created_at) || b.id.localeCompare(a.id))
+      .slice(0, opts.limit ?? 50)
+      .map(clone);
+  }
+  async listDue(now: string, venueId?: string) {
+    return [...this.sets.values()]
+      .filter((x) => x.status === "scheduled" && x.apply_at !== null && x.apply_at <= now && (!venueId || x.venue_id === venueId))
+      .sort((a, b) => (a.apply_at as string).localeCompare(b.apply_at as string))
+      .map(clone);
+  }
+  async listUpcoming(now: string, until: string, venueId?: string) {
+    return [...this.sets.values()]
+      .filter((x) => x.status === "scheduled" && x.reminded_at === null && x.apply_at !== null && x.apply_at > now && x.apply_at <= until && (!venueId || x.venue_id === venueId))
+      .map(clone);
+  }
+  async listProposedBefore(cutoff: string, venueId?: string) {
+    return [...this.sets.values()].filter((x) => x.status === "proposed" && x.created_at < cutoff && (!venueId || x.venue_id === venueId)).map(clone);
+  }
+  async updateChangeSet(id: string, patch: ChangeSetPatch) {
+    const cs = this.sets.get(id);
+    if (!cs) throw new Error(`change set ${id} not found`);
+    for (const [k, v] of Object.entries(patch)) if (v !== undefined) (cs as unknown as Record<string, unknown>)[k] = v;
+  }
+  async applyChangeSet(id: string, now: string) {
+    const cs = this.sets.get(id);
+    if (!cs) throw new Error(`change set ${id} not found`);
+    if (cs.status !== "proposed" && cs.status !== "scheduled") return "skipped";
+    const site = this.site(cs.venue_id);
+    this.sites.set(cs.venue_id, applyChanges(site, cs.changes));
+    cs.status = "applied";
+    cs.applied_at = now;
+    cs.decided_at ??= now;
+    if (cs.undoes_id) {
+      const target = this.sets.get(cs.undoes_id);
+      if (target && target.status === "applied") {
+        target.status = "reverted";
+        target.reverted_by = cs.id;
+      }
+    }
+    return "applied";
+  }
+  async listExpiredTimers(now: string, venueId?: string) {
+    const out: ExpiredTimer[] = [];
+    for (const s of this.sites.values()) {
+      if (venueId && s.venue.id !== venueId) continue;
+      for (const i of s.items) {
+        if (i.sold_out_until !== null && i.sold_out_until <= now) out.push({ item: clone(i), kind: "sold_out" });
+        if (i.is_special && i.active && i.special_expires_at !== null && i.special_expires_at <= now) out.push({ item: clone(i), kind: "special" });
+      }
+    }
+    return out;
+  }
+
+  async saveMedia(venueId: string, bytes: Uint8Array, contentType: string): Promise<Media> {
+    const s = this.site(venueId);
+    const id = crypto.randomUUID();
+    const path = `${venueId}/${id}.${extensionFor(contentType)}`;
+    this.files.set(path, bytes);
+    const row: Media = { id, venue_id: venueId, storage_path: path, public_url: `memory://media/${path}`, is_gallery: false, position: 0, created_at: this.clock() };
+    s.media.push(row);
+    return clone(row);
+  }
+  async getMedia(id: string) {
+    for (const s of this.sites.values()) {
+      const m = s.media.find((x) => x.id === id);
+      if (m) return clone(m);
+    }
+    return null;
+  }
+
+  async getConversation(venueId: string, chatId: number) {
+    const c = this.conversations.get(`${venueId}:${chatId}`);
+    return c ? clone(c) : null;
+  }
+  async setConversation(venueId: string, chatId: number, c: Conversation) {
+    this.conversations.set(`${venueId}:${chatId}`, clone(c));
+  }
+}
