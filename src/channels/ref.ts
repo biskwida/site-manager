@@ -17,6 +17,11 @@ export function parseRef(ref: string): { channel: Channel; id: string } {
 export function channelOf(ref: string): Channel {
   return parseRef(ref).channel;
 }
+/** For logs: a WhatsApp ref carries a phone number, so only its last four digits are shown ("wa:359888123456" → "wa:…3456"). Other refs are unchanged. */
+export function maskRef(ref: string): string {
+  const m = /^wa:(.*)$/.exec(ref);
+  return m ? `wa:…${m[1].slice(-4)}` : ref;
+}
 export function isMetaChannel(c: Channel): boolean {
   return c !== "tg";
 }

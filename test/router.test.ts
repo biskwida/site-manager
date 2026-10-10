@@ -39,4 +39,27 @@ describe("ChannelRouter", () => {
     expect(await r.send("tg:1001", "tg reminder", { proactive: true })).toBe("100"); // Telegram: no window
     expect(await r.send("fb:unknown", "x", { proactive: true })).toBeNull(); // no member: skipped
   });
+  it("treats a failing member lookup as outside the window: proactive send resolves null, never throws", async () => {
+    const { store } = await makeDemo();
+    const fb = new FakeMessenger();
+    const failing = Object.assign(Object.create(Object.getPrototypeOf(store)), store, { findMember: async () => { throw new Error("db down"); } });
+    const logs: string[] = []; const orig = console.error; console.error = (...a: unknown[]) => { logs.push(a.join(" ")); };
+    try {
+      const r = new ChannelRouter({ store: failing, now: () => T0, adapters: { fb } });
+      await expect(r.send("fb:5", "reminder", { proactive: true })).resolves.toBeNull();
+      await expect(r.conclude("fb:5", null, "full", "expired", { proactive: true })).resolves.toBeUndefined();
+      expect(await r.send("fb:5", "reply")).toBe("100"); // not proactive: no lookup
+    } finally { console.error = orig; }
+    expect(fb.sent.map((s) => s.text)).toEqual(["reply"]);
+    expect(logs.filter((l) => l === "[router] proactive check failed: db down")).toHaveLength(2);
+  });
+  it("masks WhatsApp numbers in the skip log", async () => {
+    const { store } = await makeDemo();
+    const logs: string[] = []; const orig = console.log; console.log = (...a: unknown[]) => { logs.push(a.join(" ")); };
+    try {
+      const r = new ChannelRouter({ store, now: () => T0, adapters: { wa: new FakeMessenger() } });
+      expect(await r.send("wa:359888123456", "x", { proactive: true })).toBeNull();
+    } finally { console.log = orig; }
+    expect(logs).toContain("[router] skipped proactive wa:…3456: outside 24h window");
+  });
 });

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { channelOf, isMetaChannel, legacyTelegramId, makeRef, parseRef } from "@/src/channels/ref";
+import { channelOf, isMetaChannel, legacyTelegramId, makeRef, maskRef, parseRef } from "@/src/channels/ref";
 
 describe("chat_ref", () => {
   it("round-trips every channel, including negative Telegram group ids", () => {
@@ -22,5 +22,11 @@ describe("chat_ref", () => {
     expect(legacyTelegramId("tg:-100123")).toBe(-100123);
     expect(legacyTelegramId("fb:123456")).toBeNull();
     expect(legacyTelegramId(null)).toBeNull();
+  });
+  it("masks WhatsApp phone numbers for logs and leaves other refs alone", () => {
+    expect(maskRef("wa:359888123456")).toBe("wa:…3456");
+    expect(maskRef("wa:4242")).toBe("wa:…4242");
+    expect(maskRef("fb:1254477777772919")).toBe("fb:1254477777772919");
+    expect(maskRef("tg:-100123")).toBe("tg:-100123");
   });
 });
