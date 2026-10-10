@@ -70,6 +70,7 @@ const en = {
   "site.tonight": "Tonight",
   "site.visit": "Visit us",
   "site.toTop": "Back to top",
+  "site.today": "Today",
   // Admin
   "admin.title": "Dashboard",
   "admin.invalid": "This link is not valid. Ask the bot for a new one with /menu.",
@@ -178,6 +179,7 @@ const bg: Record<MessageKey, string> = {
   "site.tonight": "Тази вечер",
   "site.visit": "Елате при нас",
   "site.toTop": "Нагоре",
+  "site.today": "Днес",
   "admin.title": "Табло",
   "admin.invalid": "Този линк не е валиден. Поискайте нов от бота с /menu.",
   "admin.qr": "QR код за менюто",

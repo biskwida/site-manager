@@ -4,6 +4,7 @@
 import type { ComponentType } from "react";
 import { TEMPLATE_IDS, type BusinessType, type DraftInfo, type SiteState, type TemplateId } from "@/src/domain/types";
 import { def as classic } from "./classic";
+import { def as lumen } from "./lumen";
 import { def as nocturne } from "./nocturne";
 
 export interface TemplateProps {
@@ -34,11 +35,10 @@ export interface TemplateDef {
   Component: ComponentType<TemplateProps>;
 }
 
-// Task 4 replaces the lumen placeholder (classic components under its own id) with `def` from ./lumen.
 export const TEMPLATES: Record<TemplateId, TemplateDef> = {
   classic,
   nocturne,
-  lumen: { ...classic, id: "lumen" },
+  lumen,
 };
 
 /** The template for an id from the database or a query string; unknown or missing ids fall back to classic. */
