@@ -3,13 +3,16 @@ import { QRCodeSVG } from "qrcode.react";
 import { useLang } from "@/src/i18n";
 import { Section } from "./bits";
 
-/** The menu QR for the tables (white quiet zone so it scans when printed), then plain links to the site and the menu. */
-export function QrCard({ publicUrl, slug }: { publicUrl: string; slug: string }) {
+/**
+ * The menu QR for the tables (white quiet zone so it scans when printed), then plain links to the site and the menu.
+ * `siteUrl` is the overview's site_url: the deployed site once it is ready, otherwise the hosted /<slug> (both serve /menu).
+ */
+export function QrCard({ siteUrl }: { siteUrl: string }) {
   const { t } = useLang();
-  const menuUrl = `${publicUrl}/menu`;
+  const menuUrl = `${siteUrl}/menu`;
   const links = [
-    { href: `/${slug}`, label: t("admin.site"), shown: publicUrl },
-    { href: `/${slug}/menu`, label: t("admin.menuLink"), shown: menuUrl },
+    { href: siteUrl, label: t("admin.site"), shown: siteUrl },
+    { href: menuUrl, label: t("admin.menuLink"), shown: menuUrl },
   ];
   return (
     <>

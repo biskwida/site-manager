@@ -3,6 +3,7 @@
 import { createElement, type ReactNode } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
+import { QrCard } from "@/app/admin/[slug]/components/QrCard";
 import { SiteCard } from "@/app/admin/[slug]/components/SiteCard";
 import type { DeployInfo, Lang } from "@/src/domain/types";
 import { LangProvider } from "@/src/i18n";
@@ -53,5 +54,20 @@ describe("SiteCard", () => {
   it("keeps Change template disabled while nothing changed on a healthy site", () => {
     const html = render("en", { deploy: ready, site_url: ready.url! });
     expect(html).toMatch(/<button type="submit" disabled=""[^>]*>Change template<\/button>/);
+  });
+});
+
+describe("QrCard", () => {
+  const renderQr = (siteUrl: string) => renderToStaticMarkup(createElement(Provider, { defaultLang: "en" }, createElement(QrCard, { siteUrl })));
+  it("points the QR and the links at the deployed site once it is ready", () => {
+    const html = renderQr("https://agala.vercel.app");
+    expect(html).toContain("https://agala.vercel.app/menu");
+    expect(html).toContain('href="https://agala.vercel.app"');
+    expect(html).toContain('href="https://agala.vercel.app/menu"');
+    expect(html).not.toContain("site.example");
+  });
+  it("uses the hosted URL otherwise", () => {
+    const html = renderQr("https://site.example/agala");
+    expect(html).toContain('href="https://site.example/agala/menu"');
   });
 });

@@ -47,7 +47,7 @@ export function AdminPanel({ slug, adminKey, initial }: { slug: string; adminKey
         <LogList sets={o.log} tz={tz} decide={decide} />
         {/* Hosted mode (no deployer on this server): there is no provider project to attach a domain to. */}
         {!o.hosted && <DomainCard overview={o} post={post} />}
-        <QrCard publicUrl={o.public_url} slug={slug} />
+        <QrCard siteUrl={o.site_url} />
       </main>
     </div>
   );
