@@ -4,6 +4,7 @@
 //   npm run smoke -- --chat <telegram chat id> [--text "…"]  Supabase store + Telegram: the preview really arrives on that phone
 // --chat must belong to a linked member (/start <code> first). Exit 0 unless the turn returned "error".
 import { pickEffort, runTurn } from "../src/agent/run";
+import { ConsoleMessenger } from "../src/channels/console";
 import { makeRef } from "../src/channels/ref";
 import { TelegramMessenger, type Messenger } from "../src/bot/messenger";
 import { loadConfig } from "../src/config";
@@ -21,22 +22,6 @@ const flag = (name: string) => {
 };
 const dry = argv.includes("--dry");
 const text = flag("text") || "Капучиното става 3,20";
-
-class ConsoleMessenger implements Messenger {
-  private next = 1;
-  async send(chatRef: string, t: string) {
-    console.log(`→ [${chatRef}] ${t}`);
-    return String(this.next++);
-  }
-  async sendProposal(chatRef: string, t: string) {
-    console.log(`→ [${chatRef}] ${t}\n   [✅ Приложи] [✏️ Промени] [❌ Откажи]`);
-    return String(this.next++);
-  }
-  async conclude(chatRef: string, messageRef: string | null, _full: string, short: string) {
-    console.log(`✎ [${chatRef}#${messageRef}] ${short}`);
-  }
-  async typing() {}
-}
 
 let store: Store;
 let messenger: Messenger;

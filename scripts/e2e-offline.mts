@@ -3,27 +3,11 @@
 // proposal → approve → applied; instant sold-out; specials; schedule; undo; bulk via the dashboard; tick. Exit 1 on any mismatch.
 import { makeTools } from "../src/agent/tools";
 import { handleDecision } from "../src/bot/approvals";
-import type { Messenger } from "../src/bot/messenger";
+import { ConsoleMessenger } from "../src/channels/console";
 import { seedDemo } from "../src/seed/demo";
 import { adminAction, adminOverview } from "../src/server/admin";
 import { InMemoryStore } from "../src/store/memory";
 import { runTick } from "../src/tick";
-
-class ConsoleMessenger implements Messenger {
-  private next = 1;
-  async send(chatRef: string, text: string) {
-    console.log(`→ [${chatRef}] ${text}`);
-    return String(this.next++);
-  }
-  async sendProposal(chatRef: string, text: string) {
-    console.log(`→ [${chatRef}] ${text}\n   [✅ Приложи] [✏️ Промени] [❌ Откажи]`);
-    return String(this.next++);
-  }
-  async conclude(chatRef: string, messageRef: string | null, _full: string, short: string) {
-    console.log(`✎ [${chatRef}#${messageRef}] ${short}`);
-  }
-  async typing() {}
-}
 
 const store = new InMemoryStore();
 const { venue, items } = await seedDemo(store);

@@ -3,7 +3,12 @@
 import type Anthropic from "@anthropic-ai/sdk";
 import type { Bot } from "grammy";
 import { runTurn } from "../agent/run";
-import { makeRef } from "../channels/ref";
+import { ConsoleMessenger } from "../channels/console";
+import { downloadUrl, downloadWhatsAppMedia, type MediaFetch } from "../channels/meta/graph";
+import { MetaMessenger } from "../channels/meta/send";
+import { makeRef, type Channel } from "../channels/ref";
+import { ChannelRouter } from "../channels/router";
+import { WhatsAppMessenger } from "../channels/whatsapp/send";
 import { createBot, type BotDeps, type RunRequest } from "../bot/bot";
 import { downloadTelegramFile } from "../bot/media";
 import { TelegramMessenger, type Messenger } from "../bot/messenger";
@@ -18,8 +23,15 @@ import { runTick } from "../tick";
 export interface ServerDeps {
   config: Config;
   store: Store;
+  /** The ChannelRouter: dispatches by chat_ref prefix to the per-channel adapters. */
   messenger: Messenger;
   bot: Bot;
+  /** Shared with createBot; the Meta webhook route reuses it for inbound handling. */
+  botDeps: BotDeps;
+  /** WhatsApp media id → bytes (two-step Graph download with the bearer token). */
+  waDownload: MediaFetch;
+  /** Plain URL → bytes (Messenger/Instagram attachment URLs). */
+  fetchUrl: MediaFetch;
   /** Per-venue tick, then the agent turn. Logs and swallows errors. */
   handleRun: (r: RunRequest) => Promise<void>;
   isMemory: boolean;
@@ -71,8 +83,14 @@ export async function makeServerDeps(o: DepsOptions): Promise<ServerDeps> {
     download: (filePath) => downloadTelegramFile(config.telegramToken, filePath),
   };
   const bot = createBot(botDeps);
-  const messenger = new TelegramMessenger(bot.api);
+  const adapters: Partial<Record<Channel, Messenger>> = { tg: new TelegramMessenger(bot.api) };
+  if (config.metaPageToken) adapters.fb = adapters.ig = new MetaMessenger({ pageToken: config.metaPageToken });
+  if (config.whatsappToken && config.whatsappPhoneNumberId) adapters.wa = new WhatsAppMessenger({ token: config.whatsappToken, phoneNumberId: config.whatsappPhoneNumberId });
+  if (isMemory) for (const ch of ["fb", "ig", "wa"] as const) adapters[ch] ??= new ConsoleMessenger(log);
+  const messenger = new ChannelRouter({ store: s, now: () => new Date(), adapters });
   botDeps.messenger = messenger;
+  const waDownload: MediaFetch = (mediaId) => downloadWhatsAppMedia(config.whatsappToken ?? "", mediaId);
+  const fetchUrl: MediaFetch = (url) => downloadUrl(url);
 
   async function handleRun(r: RunRequest): Promise<void> {
     try {
@@ -92,7 +110,7 @@ export async function makeServerDeps(o: DepsOptions): Promise<ServerDeps> {
     }
   }
 
-  return { config, store: s, messenger, bot, handleRun, isMemory };
+  return { config, store: s, messenger, bot, botDeps, waDownload, fetchUrl, handleRun, isMemory };
 }
 
 // On globalThis, not a module variable: `next dev` (HMR, separate route bundles) then shares one in-memory store between pages and API routes.
