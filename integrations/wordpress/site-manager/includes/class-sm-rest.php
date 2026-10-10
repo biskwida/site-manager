@@ -126,9 +126,10 @@ final class SM_Rest
                 $products[] = ['id' => $p->get_id(), 'name' => $p->get_name(), 'regular_price' => (string) $p->get_regular_price(), 'sale_price' => (string) $p->get_sale_price(), 'stock_status' => (string) $p->get_stock_status()];
             }
         }
+        $options = self::option_values();
         return [
-            'name' => (string) get_option('blogname'),
-            'description' => (string) get_option('blogdescription'),
+            'name' => $options['blogname'],
+            'description' => $options['blogdescription'],
             'url' => (string) site_url(),
             'home_url' => (string) home_url(),
             'wp_version' => (string) get_bloginfo('version'),
@@ -138,7 +139,7 @@ final class SM_Rest
             'theme' => ['name' => (string) $theme->get('Name'), 'slug' => (string) $theme->get_stylesheet()],
             'pages' => array_map([SM_Pages::class, 'summary'], $pages),
             'menus' => $menus,
-            'options' => self::option_values(),
+            'options' => $options,
             'woocommerce' => $woo,
             'products' => $products,
             'connected_user' => $user ? ['id' => (int) $user->ID, 'login' => (string) $user->user_login] : null,
@@ -247,7 +248,8 @@ final class SM_Rest
         if ($name === '' || !preg_match('/\.(jpe?g|png|webp|gif)$/i', $name)) {
             $name = 'site-manager-' . substr(md5($source), 0, 8) . '.jpg';
         }
-        $id = media_handle_sideload(['name' => $name, 'tmp_name' => $tmp], 0, sanitize_text_field((string) ($b['title'] ?? '')));
+        $title = sanitize_text_field((string) ($b['title'] ?? ''));
+        $id = media_handle_sideload(['name' => $name, 'tmp_name' => $tmp], 0, $title !== '' ? $title : null); // null: core titles it after the file
         if (is_wp_error($id)) {
             @unlink($tmp);
             return self::error(502, 'sm_upload_failed', $id->get_error_message());
@@ -306,7 +308,8 @@ final class SM_Rest
     {
         $logo = (int) get_theme_mod('custom_logo', 0);
         $icon = (int) get_option('site_icon', 0);
-        return ['blogname' => (string) get_option('blogname'), 'blogdescription' => (string) get_option('blogdescription'), 'custom_logo' => $logo > 0 ? $logo : null, 'site_icon' => $icon > 0 ? $icon : null];
+        // Core stores "&amp;" for "&"; hand back the raw text the agent sent and compares against.
+        return ['blogname' => wp_specialchars_decode((string) get_option('blogname'), ENT_QUOTES), 'blogdescription' => wp_specialchars_decode((string) get_option('blogdescription'), ENT_QUOTES), 'custom_logo' => $logo > 0 ? $logo : null, 'site_icon' => $icon > 0 ? $icon : null];
     }
 
     public static function options(WP_REST_Request $r): array

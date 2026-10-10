@@ -45,9 +45,11 @@ final class SM_Preview
         });
     }
 
-    public static function title(string $title, int $id = 0): string
+    /** Untyped on purpose: third-party code applies `the_title` with a WP_Post, null or a string id. @param mixed $title @param mixed $id */
+    public static function title($title, $id = 0): string
     {
-        return $id === self::$post_id && self::$pending !== null ? (string) self::$pending['title'] : $title;
+        $pid = $id instanceof WP_Post ? (int) $id->ID : (int) $id;
+        return $pid === self::$post_id && self::$pending !== null ? (string) self::$pending['title'] : (string) $title;
     }
 
     public static function content(string $content): string

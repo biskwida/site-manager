@@ -22,6 +22,10 @@ final class SM_Pages
         if (get_post_meta($p->ID, '_et_pb_use_builder', true) === 'on') {
             return 'divi';
         }
+        // Bricks, Oxygen and Beaver Builder keep the page in meta this plugin cannot edit: read-only ("unknown").
+        if (get_post_meta($p->ID, '_bricks_editor_mode', true) === 'bricks' || get_post_meta($p->ID, 'ct_builder_shortcodes', true) !== '' || get_post_meta($p->ID, '_fl_builder_enabled', true)) {
+            return 'unknown';
+        }
         return has_blocks((string) $p->post_content) ? 'gutenberg' : 'classic';
     }
 
@@ -42,7 +46,7 @@ final class SM_Pages
             'url' => (string) get_permalink($p),
             'status' => (string) $p->post_status,
             'builder' => self::builder_of($p),
-            'modified' => mysql2date('c', $p->post_modified_gmt, false),
+            'modified' => (string) get_post_modified_time('c', true, $p),
             'featured_media' => $f['featured_media'],
             'is_front_page' => (int) get_option('page_on_front') === (int) $p->ID,
         ];
@@ -219,13 +223,24 @@ final class SM_Pages
         return ['id' => (int) $id, 'url' => (string) wp_get_attachment_url((int) $id)];
     }
 
-    /** Writes the fields present in $fields (after placeholder resolution) and returns {before, after, revision_id}. */
+    /**
+     * Writes the fields present in $fields (after placeholder resolution) and returns {before, after, revision_id}.
+     * `revision_id` identifies the PRE-edit state (a revision saved before any write, or the latest existing one),
+     * so POST /revert/{page}/{revision_id} undoes this apply; null when the page has no revisions.
+     */
     public static function apply(WP_Post $p, array $fields, array $placeholders): array|WP_Error
     {
         $before = self::fields($p);
         $after = self::compute_after($before, array_intersect_key($fields, array_flip(['title', 'content', 'elementor_data', 'featured_media'])), self::builder_of($p), $placeholders, true);
         if (is_wp_error($after)) {
             return $after;
+        }
+        $pre = wp_save_post_revision($p->ID); // snapshot of the current state; nothing when it equals the latest revision
+        $rev = is_int($pre) && $pre > 0 ? $pre : null;
+        if ($rev === null) {
+            $revisions = wp_get_post_revisions($p->ID, ['posts_per_page' => 1, 'fields' => 'ids']); // a plain list of ids
+            $latest = $revisions ? (int) reset($revisions) : 0;
+            $rev = $latest > 0 ? $latest : null;
         }
         $update = ['ID' => $p->ID];
         if ($after['title'] !== $before['title']) {
@@ -260,8 +275,6 @@ final class SM_Pages
         }
         delete_post_meta($p->ID, self::PENDING_META);
         clean_post_cache($p->ID);
-        $revisions = wp_get_post_revisions($p->ID, ['posts_per_page' => 1, 'fields' => 'ids']);
-        $rev = $revisions ? (int) array_key_first($revisions) : null;
         return ['before' => $before, 'after' => self::fields(get_post($p->ID)), 'revision_id' => $rev];
     }
 }
