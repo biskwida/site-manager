@@ -1,6 +1,6 @@
 import { after } from "next/server";
 import { getServerDeps } from "@/src/server/deps";
-import { loadSite } from "@/src/server/site";
+import { loadSite, publicSiteState } from "@/src/server/site";
 
 export const dynamic = "force-dynamic";
 
@@ -20,5 +20,5 @@ export async function GET(_req: Request, ctx: RouteContext<"/api/site/[slug]">) 
   const deps = await getServerDeps((fn) => after(fn));
   const site = await loadSite(deps.store, slug);
   if (!site) return Response.json({ error: "not found" }, { status: 404, headers: FEED_HEADERS });
-  return Response.json({ state: site.state, now: new Date().toISOString() }, { headers: FEED_HEADERS });
+  return Response.json({ state: publicSiteState(site.state), now: new Date().toISOString() }, { headers: FEED_HEADERS });
 }
