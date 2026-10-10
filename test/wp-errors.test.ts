@@ -13,6 +13,10 @@ describe("wpErrorText", () => {
     expect(wpErrorText("sm_builder_unsupported: Elementor pages take replacements, not full content.", "bg")).toBe("тази страница е направена с редактор, който не поддържаме");
     expect(wpErrorText("sm_builder_unsupported: Elementor pages take replacements, not full content.", "en")).toBe("this page uses an editor we do not support");
   });
+  it("explains a redirect in both languages", () => {
+    expect(wpErrorText("sm_redirect: The site redirected the request; use its final address.", "bg")).toBe("сайтът пренасочи заявката към друг адрес; свържете го отново с крайния му адрес чрез /connect");
+    expect(wpErrorText("sm_redirect: The site redirected the request; use its final address.", "en")).toBe("the site redirected the request to another address; reconnect it with its final address using /connect");
+  });
   it("keeps the message for anything else, and passes old rows without a code through", () => {
     expect(wpErrorText("sm_not_found: No such page.", "bg")).toBe("No such page.");
     expect(wpErrorText("sm_unreachable: WordPress unreachable: fetch failed", "en")).toBe("WordPress unreachable: fetch failed");

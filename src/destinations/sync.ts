@@ -87,29 +87,54 @@ type QueueReport = { done: string[]; retry: string[]; failed: string[] };
 
 /**
  * Pushes one destination's pending rows strictly in order (oldest first), so a late retry can never overwrite a
- * newer set or bring back an undone one. Stops at the first row that does not end `done`; the rows behind it stay
- * pending and wait until that row's next attempt. `force` (the store hook, right after an apply) ignores next_at;
- * without it only due rows run, and an older pending row that is not due yet still blocks the due ones behind it
- * (a plain `dueBefore` filter would let them overtake it).
+ * newer set or bring back an undone one.
+ * - A row that ends `done` or fails for good (`failed`) lets the queue go on: nothing is left to protect behind it.
+ * - A row that will be retried stops the queue; the rows behind it wait until that row's next attempt.
+ * - Without `force` (the tick) only due rows run, and a pending row that is not due yet blocks the rows behind it.
+ * - With `force` (the store hook, right after an apply) next_at is ignored, except for a row another approval is still
+ *   pushing (never attempted, leased into the future, not in `ownIds`): the run leaves it alone, hands its own rows
+ *   back to the queue (due now) and stops; the run that is pushing that row picks them up when it re-reads the queue.
  */
-export async function runDestinationQueue(d: SyncDeps, destinationId: string, now: Date, opts: { force: boolean; venueId?: string }): Promise<QueueReport> {
+export async function runDestinationQueue(d: SyncDeps, destinationId: string, now: Date, opts: { force: boolean; venueId?: string; ownIds?: string[] }): Promise<QueueReport> {
   const report: QueueReport = { done: [], retry: [], failed: [] };
-  const all = (await d.store.listSyncs({ venueId: opts.venueId, status: ["pending"] })).filter((s) => s.destination_id === destinationId);
+  const own = new Set(opts.ownIds ?? []);
   const nowIso = now.toISOString();
-  for (const [i, sync] of all.entries()) {
-    if (!opts.force && sync.next_at > nowIso) break; // the head is not due: nothing behind it may overtake it
-    const r = await runSync(d, sync, now);
-    const fresh = await d.store.getSync(sync.id);
-    if (fresh.status === "done") {
-      report.done.push(sync.id);
-      continue;
+  const pending = async () => (await d.store.listSyncs({ venueId: opts.venueId, status: ["pending"] })).filter((s) => s.destination_id === destinationId);
+  // Re-read the queue after each pass so rows handed back by a concurrent approval are pushed too (bounded).
+  for (let pass = 0; pass < 20; pass++) {
+    const rows = await pending();
+    if (rows.length === 0) break;
+    let stop = false;
+    let progressed = false;
+    for (const [i, sync] of rows.entries()) {
+      const leasedByOther = !own.has(sync.id) && sync.attempts === 0 && sync.next_at > nowIso;
+      if (opts.force ? leasedByOther : sync.next_at > nowIso) {
+        for (const behind of rows.slice(i)) {
+          if (opts.force && own.has(behind.id)) await d.store.updateSync(behind.id, { next_at: nowIso, updated_at: nowIso });
+        }
+        stop = true;
+        break;
+      }
+      const r = await runSync(d, sync, now);
+      progressed = true;
+      const fresh = await d.store.getSync(sync.id);
+      if (fresh.status === "done") {
+        report.done.push(sync.id);
+        continue;
+      }
+      if (r === null || fresh.status === "failed") {
+        report.failed.push(sync.id);
+        continue;
+      }
+      report.retry.push(sync.id);
+      for (const behind of rows.slice(i + 1)) {
+        await d.store.updateSync(behind.id, { next_at: fresh.next_at, updated_at: nowIso });
+        report.retry.push(behind.id);
+      }
+      stop = true;
+      break;
     }
-    (r === null || fresh.status === "failed" ? report.failed : report.retry).push(sync.id);
-    for (const behind of all.slice(i + 1)) {
-      await d.store.updateSync(behind.id, { next_at: fresh.next_at, updated_at: nowIso });
-      report.retry.push(behind.id);
-    }
-    break;
+    if (stop || !progressed) break;
   }
   return report;
 }

@@ -6,6 +6,7 @@ const KNOWN: Record<string, { bg: string; en: string }> = {
   sm_unauthorized: { bg: "връзката с WordPress вече не е валидна; свържете сайта отново с /connect", en: "the WordPress connection is no longer valid; reconnect with /connect" },
   sm_replace_failed: { bg: "текстът на страницата е променен; поискайте промяната отново", en: "the page text has changed; ask for the change again" },
   sm_upload_failed: { bg: "снимката не можа да се качи", en: "the photo could not be uploaded" },
+  sm_redirect: { bg: "сайтът пренасочи заявката към друг адрес; свържете го отново с крайния му адрес чрез /connect", en: "the site redirected the request to another address; reconnect it with its final address using /connect" },
   sm_builder_unsupported: { bg: "тази страница е направена с редактор, който не поддържаме", en: "this page uses an editor we do not support" },
 };
 

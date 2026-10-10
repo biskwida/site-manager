@@ -204,6 +204,54 @@ describe("lease on rows created by the hook", () => {
   });
 });
 
+describe("concurrent approvals and permanently failed rows", () => {
+  const propose = (demo: Awaited<ReturnType<typeof connected>>, changes: Change[]) =>
+    demo.store.createChangeSet({ venue_id: demo.venue.id, chat_id: 1001, summary_bg: "s", summary_en: "s", preview_bg: "p", preview_en: "p", source: "text", status: "proposed", changes });
+  const applies = (demo: Awaited<ReturnType<typeof connected>>) => demo.wp.calls.filter((c) => c.path === "/page/2/apply").map((c) => (c.body as { content: string }).content);
+
+  it("a second approval leaves a row another approval is still pushing alone, and hands its own row back to the queue", async () => {
+    const demo = await connected();
+    const a = await propose(demo, [edit]);
+    const b = await propose(demo, [editB]);
+    // Approval 1 has enqueued A (leased) and is pushing it; approval 2 enqueues B and runs its own forced queue.
+    const [rowA] = await enqueueForChangeSet(demo.d.store, a, T0, { leaseMs: 5 * 60_000 });
+    const [rowB] = await enqueueForChangeSet(demo.d.store, b, at(1_000), { leaseMs: 5 * 60_000 });
+    const second = await runDestinationQueue(demo.d, rowB.destination_id, at(1_000), { force: true, ownIds: [rowB.id] });
+    expect(second).toEqual({ done: [], retry: [], failed: [] });
+    expect(applies(demo)).toEqual([]); // A is not pushed twice, B does not overtake A
+    expect(await demo.store.getSync(rowB.id)).toMatchObject({ status: "pending", attempts: 0, next_at: at(1_000).toISOString() }); // lease released
+    // Approval 1 finishes A and then picks up B, which is due now.
+    const first = await runDestinationQueue(demo.d, rowA.destination_id, at(2_000), { force: true, ownIds: [rowA.id] });
+    expect(first).toEqual({ done: [rowA.id, rowB.id], retry: [], failed: [] });
+    expect(applies(demo)).toEqual([A_CONTENT, B_CONTENT]);
+    expect(demo.wp.pages.get(2)?.content).toBe(B_CONTENT);
+  });
+
+  it("a tick does not overtake a row an approval is still pushing, even when rows behind it were handed back", async () => {
+    const demo = await connected();
+    const a = await propose(demo, [edit]);
+    const b = await propose(demo, [editB]);
+    const [rowA] = await enqueueForChangeSet(demo.d.store, a, T0, { leaseMs: 5 * 60_000 });
+    const [rowB] = await enqueueForChangeSet(demo.d.store, b, at(1_000), { leaseMs: 5 * 60_000 });
+    await runDestinationQueue(demo.d, rowB.destination_id, at(1_000), { force: true, ownIds: [rowB.id] });
+    expect(await runPendingSyncs(demo.d, { venueId: demo.venue.id, now: at(2_000) })).toEqual({ done: [], retry: [], failed: [] });
+    expect(applies(demo)).toEqual([]);
+    expect((await demo.store.getSync(rowA.id)).status).toBe("pending");
+  });
+
+  it("a row that failed for good does not hold back the rows behind it", async () => {
+    const demo = await connected();
+    const bad = await propose(demo, [{ ...edit, entity_id: "999" }]);
+    const good = await propose(demo, [edit]);
+    const [rowBad] = await enqueueForChangeSet(demo.d.store, bad, T0);
+    const [rowGood] = await enqueueForChangeSet(demo.d.store, good, T0);
+    const r = await runPendingSyncs(demo.d, { venueId: demo.venue.id, now: T0 });
+    expect(r).toEqual({ done: [rowGood.id], retry: [], failed: [rowBad.id] });
+    expect(await demo.store.getSync(rowBad.id)).toMatchObject({ status: "failed", attempts: 1 });
+    expect(demo.wp.pages.get(2)?.content).toBe(A_CONTENT);
+  });
+});
+
 describe("runSync error classes and owner-facing lines", () => {
   const propose = (demo: Awaited<ReturnType<typeof connected>>, changes: Change[]) =>
     demo.store.createChangeSet({ venue_id: demo.venue.id, chat_id: 1001, summary_bg: "s", summary_en: "s", preview_bg: "p", preview_en: "p", source: "text", status: "proposed", changes });
