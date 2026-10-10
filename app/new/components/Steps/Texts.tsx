@@ -1,5 +1,5 @@
 "use client";
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { aiUnavailable, api } from "../api";
 import { fieldError } from "../errors";
 import { Button, Note, Status, TextArea, TextField } from "../Field";
@@ -13,6 +13,12 @@ export function Texts({ id, draft, update, aiAvailable, fieldErrors }: StepProps
   const [unavailable, setUnavailable] = useState(!aiAvailable);
   const [error, setError] = useState<string | null>(null);
   const [askOverwrite, setAskOverwrite] = useState(false);
+  // When the confirm group closes (Yes or No), focus would fall to <body>; put it back on the "Write for me" button.
+  const wasAsking = useRef(false);
+  useEffect(() => {
+    if (wasAsking.current && !askOverwrite) document.getElementById(`texts-write-${id}`)?.focus();
+    wasAsking.current = askOverwrite;
+  }, [askOverwrite, id]);
   const hasText = [draft.tagline_bg, draft.tagline_en, draft.about_bg, draft.about_en, draft.texts.welcome.bg, draft.texts.welcome.en, draft.texts.footer_note.bg, draft.texts.footer_note.en].some((v) => v.trim() !== "");
   async function write() {
     setAskOverwrite(false);
@@ -38,7 +44,7 @@ export function Texts({ id, draft, update, aiAvailable, fieldErrors }: StepProps
           <>
             <TextArea label={t("texts.facts")} hint={t("texts.factsHint")} value={facts} rows={4} maxLength={2000} onChange={setFacts} />
             {!askOverwrite ? (
-              <div><Button variant="primary" disabled={busy || facts.trim().length === 0} aria-busy={busy} onClick={() => (hasText ? setAskOverwrite(true) : void write())}>{busy ? t("texts.writing") : t("texts.write")}</Button></div>
+              <div><Button id={`texts-write-${id}`} variant="primary" disabled={busy || facts.trim().length === 0} aria-busy={busy} onClick={() => (hasText ? setAskOverwrite(true) : void write())}>{busy ? t("texts.writing") : t("texts.write")}</Button></div>
             ) : (
               <div role="group" aria-label={t("texts.overwriteAsk")} className="flex flex-wrap items-center gap-2 text-sm">
                 <span aria-live="polite" className="font-semibold">{t("texts.overwriteAsk")}</span>

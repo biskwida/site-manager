@@ -71,6 +71,7 @@ export class Autosave<P extends object> {
     this.disposed = true;
     clearTimeout(this.debounce);
     clearTimeout(this.retry);
+    this.debounce = this.retry = undefined; // resume() after a dispose with a pending retry must still be able to schedule
   }
 
   private set(next: Partial<SaveSnapshot>) {

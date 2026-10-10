@@ -12,7 +12,7 @@ interface Common {
 }
 
 const SHELL = "rounded-xl bg-panel ring-1 ring-line transition-shadow duration-150 ease-out focus-within:ring-2 focus-within:ring-brand";
-const SHELL_ERR = "rounded-xl bg-panel ring-2 ring-danger transition-shadow duration-150 ease-out";
+const SHELL_ERR = "rounded-xl bg-panel ring-2 ring-danger transition-shadow duration-150 ease-out focus-within:ring-[3px] focus-within:ring-offset-2 focus-within:ring-offset-canvas";
 
 export function TextField({ label, hint, error, value, onChange, prefix, className = "", ...rest }: Common & Omit<InputHTMLAttributes<HTMLInputElement>, "value" | "onChange" | "prefix">) {
   const { t } = useT();

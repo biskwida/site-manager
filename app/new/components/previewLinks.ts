@@ -6,9 +6,18 @@ export type PreviewLinkAction = { kind: "page"; page: "home" | "menu" } | { kind
 
 export function previewLinkAction(href: string | null, slug: string): PreviewLinkAction {
   if (!href) return { kind: "ignore" };
-  if (href.startsWith("#")) return href.length > 1 ? { kind: "hash", id: decodeURIComponent(href.slice(1)) } : { kind: "ignore" };
+  if (href.startsWith("#")) return href.length > 1 ? { kind: "hash", id: safeDecode(href.slice(1)) } : { kind: "ignore" };
   const path = href.split(/[?#]/)[0];
   if (path === pageHref(slug, "home")) return { kind: "page", page: "home" };
   if (path === pageHref(slug, "menu")) return { kind: "page", page: "menu" };
   return { kind: "ignore" };
+}
+
+/** A malformed %-escape in a template anchor must not throw inside the frame click listener. */
+function safeDecode(s: string): string {
+  try {
+    return decodeURIComponent(s);
+  } catch {
+    return s;
+  }
 }
