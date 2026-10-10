@@ -1,6 +1,8 @@
 export type Lang = "bg" | "en";
 export const LANGS: readonly Lang[] = ["bg", "en"];
 
+import type { WizardDraft } from "../wizard/schema";
+
 export type Weekday = "mon" | "tue" | "wed" | "thu" | "fri" | "sat" | "sun";
 export const WEEKDAYS: readonly Weekday[] = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"];
 
@@ -21,6 +23,38 @@ export interface Holiday {
   note_en: string;
 }
 
+export type TemplateId = "classic" | "nocturne" | "lumen";
+export const TEMPLATE_IDS: readonly TemplateId[] = ["classic", "nocturne", "lumen"];
+export type BusinessType = "cafe" | "bar" | "restaurant";
+export const BUSINESS_TYPES: readonly BusinessType[] = ["cafe", "bar", "restaurant"];
+export type VenueStatus = "draft" | "live";
+export type DeployStatus = "pending" | "building" | "ready" | "error";
+export interface DeployInfo {
+  provider: "vercel" | "fake";
+  project_id: string;
+  deployment_id: string;
+  /** Real production URL from the provider, with https://; null until the first deployment is ready. */
+  url: string | null;
+  status: DeployStatus;
+  /** Short, secret-free. */
+  error: string | null;
+  /** Template that was deployed. */
+  template: TemplateId;
+  /** ISO; set on every status transition (pollDeployments measures its 20-minute timeout from it). */
+  updated_at: string;
+}
+/** Moved here from src/server/site.ts (which re-exports it) so templates can import it. */
+export interface DraftInfo {
+  id: string;
+  status: string;
+  summary_bg: string;
+  summary_en: string;
+  preview_bg: string;
+  preview_en: string;
+  /** The admin key the preview link carried; the banner's Apply/Reject calls use it. */
+  key: string;
+}
+
 export interface Venue {
   id: string;
   slug: string;
@@ -39,6 +73,12 @@ export interface Venue {
   tz: string;
   default_lang: Lang;
   theme: { accent: string };
+  template: TemplateId;
+  business_type: BusinessType;
+  status: VenueStatus;
+  deploy: DeployInfo | null;
+  /** The wizard's unpublished form; null for every live venue. */
+  wizard_draft: WizardDraft | null;
   created_at: string;
 }
 

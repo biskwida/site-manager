@@ -22,6 +22,40 @@ create table if not exists public.venues (
   created_at timestamptz not null default now()
 );
 
+-- Templates, wizard drafts and deployments (idempotent column adds; constraints re-created so re-runs pick up new ids).
+alter table public.venues add column if not exists template text not null default 'classic';
+alter table public.venues add column if not exists business_type text not null default 'cafe';
+alter table public.venues add column if not exists status text not null default 'live';
+alter table public.venues add column if not exists deploy jsonb;
+alter table public.venues add column if not exists wizard_draft jsonb;
+alter table public.venues add column if not exists draft_token_hash text;
+alter table public.venues drop constraint if exists venues_template_check;
+alter table public.venues add constraint venues_template_check check (template in ('classic', 'nocturne', 'lumen'));
+alter table public.venues drop constraint if exists venues_business_type_check;
+alter table public.venues add constraint venues_business_type_check check (business_type in ('cafe', 'bar', 'restaurant'));
+alter table public.venues drop constraint if exists venues_status_check;
+alter table public.venues add constraint venues_status_check check (status in ('draft', 'live'));
+create unique index if not exists venues_draft_token_idx on public.venues (draft_token_hash) where draft_token_hash is not null;
+create index if not exists venues_status_idx on public.venues (status, created_at);
+
+create table if not exists public.rate_limits (
+  key text primary key,
+  count int not null,
+  window_start timestamptz not null
+);
+
+-- Atomic sliding-window counter; true when the call is allowed (count after increment <= p_max). Service role only (see policies.sql).
+create or replace function public.bump_rate_limit(p_key text, p_window_ms int, p_max int, p_now timestamptz) returns boolean language sql as $$
+  with up as (
+    insert into public.rate_limits as r (key, count, window_start) values (p_key, 1, p_now)
+    on conflict (key) do update set
+      count = case when r.window_start + make_interval(secs => p_window_ms / 1000.0) <= p_now then 1 else r.count + 1 end,
+      window_start = case when r.window_start + make_interval(secs => p_window_ms / 1000.0) <= p_now then p_now else r.window_start end
+    returning r.count as n
+  )
+  select n <= p_max from up;
+$$;
+
 create table if not exists public.venue_members (
   venue_id uuid not null references public.venues(id) on delete cascade,
   tg_chat_id bigint not null,

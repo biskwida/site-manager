@@ -1,7 +1,7 @@
 // src/store/memory.ts
 import { applyChanges } from "../domain/changes";
-import type { Category, ChangeSet, Conversation, Item, Lang, Media, Member, Role, SiteState, SiteTextKey, Venue } from "../domain/types";
-import { DEFAULT_HOURS, extensionFor, newInviteCode, newToken, type ChangeSetPatch, type ExpiredTimer, type NewCategory, type NewChangeSet, type NewItem, type NewVenue, type Store } from "./types";
+import type { Category, ChangeSet, Conversation, DeployInfo, Item, Lang, Media, Member, Role, SiteState, SiteTextKey, Venue, VenueStatus } from "../domain/types";
+import { DEFAULT_HOURS, extensionFor, newInviteCode, newToken, type ChangeSetPatch, type ExpiredTimer, type NewCategory, type NewChangeSet, type NewItem, type NewVenue, type Store, type VenuePatch } from "./types";
 
 const clone = <T>(v: T): T => structuredClone(v);
 
@@ -21,6 +21,8 @@ export class InMemoryStore implements Store {
   sets = new Map<string, ChangeSet>();
   conversations = new Map<string, Conversation>();
   files = new Map<string, Uint8Array>();
+  draftTokens = new Map<string, string>(); // venue id -> sha256 of the draft token
+  rateLimits = new Map<string, { count: number; window_start: number }>();
   private lastTick = 0;
   /** Strictly increasing clock for created_at (so newest-first ordering is stable); tests may override. */
   clock: () => string = () => {
@@ -54,6 +56,11 @@ export class InMemoryStore implements Store {
       tz: v.tz ?? "Europe/Sofia",
       default_lang: v.default_lang ?? "bg",
       theme: clone(v.theme ?? { accent: "#2f6b4f" }),
+      template: v.template ?? "classic",
+      business_type: v.business_type ?? "cafe",
+      status: v.status ?? "live",
+      deploy: null,
+      wizard_draft: v.wizard_draft ? clone(v.wizard_draft) : null,
       created_at: this.clock(),
     };
     if ([...this.sites.values()].some((s) => s.venue.slug === venue.slug)) throw new Error(`slug ${venue.slug} already exists`);
@@ -67,8 +74,41 @@ export class InMemoryStore implements Store {
     const s = [...this.sites.values()].find((x) => x.venue.slug === slug);
     return s ? clone(s.venue) : null;
   }
-  async listVenues() {
-    return [...this.sites.values()].map((s) => clone(s.venue));
+  async listVenues(opts: { status?: VenueStatus; deploying?: boolean } = {}) {
+    return [...this.sites.values()]
+      .map((s) => s.venue)
+      .filter((v) => (!opts.status || v.status === opts.status) && (!opts.deploying || (v.deploy !== null && (v.deploy.status === "pending" || v.deploy.status === "building"))))
+      .sort((a, b) => a.created_at.localeCompare(b.created_at))
+      .map(clone);
+  }
+  async updateVenue(id: string, patch: VenuePatch): Promise<Venue> {
+    const s = this.site(id);
+    if (patch.slug !== undefined && [...this.sites.values()].some((x) => x.venue.id !== id && x.venue.slug === patch.slug)) throw new Error(`slug ${patch.slug} already exists`);
+    for (const [k, v] of Object.entries(patch)) if (v !== undefined) (s.venue as unknown as Record<string, unknown>)[k] = clone(v);
+    return clone(s.venue);
+  }
+  async setDeploy(id: string, deploy: DeployInfo | null) {
+    this.site(id).venue.deploy = deploy ? clone(deploy) : null;
+  }
+  async setDraftToken(id: string, tokenHash: string | null) {
+    this.site(id);
+    if (tokenHash === null) this.draftTokens.delete(id);
+    else this.draftTokens.set(id, tokenHash);
+  }
+  async findVenueByDraftToken(tokenHash: string) {
+    for (const [venueId, h] of this.draftTokens) if (h === tokenHash && this.sites.has(venueId)) return this.getVenue(venueId);
+    return null;
+  }
+  async deleteVenue(id: string) {
+    if (!this.sites.has(id)) return;
+    this.sites.delete(id);
+    this.draftTokens.delete(id);
+    this.tokens.delete(id);
+    for (const [chatId, m] of this.members) if (m.venue_id === id) this.members.delete(chatId);
+    for (const [code, inv] of this.invites) if (inv.venue_id === id) this.invites.delete(code);
+    for (const [setId, cs] of this.sets) if (cs.venue_id === id) this.sets.delete(setId);
+    for (const key of [...this.conversations.keys()]) if (key.startsWith(`${id}:`)) this.conversations.delete(key);
+    for (const path of [...this.files.keys()]) if (path.startsWith(`${id}/`)) this.files.delete(path);
   }
   async getSite(venueId: string) {
     return clone(this.site(venueId));
@@ -123,6 +163,9 @@ export class InMemoryStore implements Store {
   async findMember(chatId: number) {
     const m = this.members.get(chatId);
     return m ? clone(m) : null;
+  }
+  async listMembers(venueId: string) {
+    return [...this.members.values()].filter((m) => m.venue_id === venueId).sort((a, b) => a.created_at.localeCompare(b.created_at)).map(clone);
   }
   async upsertMember(m: Omit<Member, "created_at">) {
     const row: Member = { ...m, created_at: this.members.get(m.tg_chat_id)?.created_at ?? this.clock() };
@@ -281,5 +324,13 @@ export class InMemoryStore implements Store {
   }
   async setConversation(venueId: string, chatId: number, c: Conversation) {
     this.conversations.set(`${venueId}:${chatId}`, clone(c));
+  }
+
+  async bumpRateLimit(key: string, windowMs: number, max: number, now: string) {
+    const t = Date.parse(now);
+    const cur = this.rateLimits.get(key);
+    const row = cur && cur.window_start + windowMs > t ? { count: cur.count + 1, window_start: cur.window_start } : { count: 1, window_start: t };
+    this.rateLimits.set(key, row);
+    return row.count <= max;
   }
 }

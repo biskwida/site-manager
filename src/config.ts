@@ -18,6 +18,14 @@ export interface Config {
   publicBaseUrl: string;
   tickSecret: string;
   demoVenueSlug: string;
+  /** Vercel token scoped to the team that hosts the venue sites; null disables real deploys (FakeDeployer). */
+  vercelToken: string | null;
+  vercelTeamId: string | null;
+  /** Salt for hashed IPs in rate-limit keys. */
+  rateSalt: string;
+  maxSitesPerDay: number;
+  /** For https://t.me/<bot>?start=<code> links on the wizard's done page. */
+  telegramBotUsername: string | null;
 }
 
 type Env = Record<string, string | undefined>;
@@ -35,6 +43,8 @@ export function loadConfig(env: Env = process.env, opts: { lenient?: boolean } =
   const optional = (key: string): string | null => env[key]?.trim() || null;
   const effort = optional("AGENT_EFFORT") ?? "medium";
   if (effort !== "low" && effort !== "medium" && effort !== "high") throw new Error("AGENT_EFFORT must be low, medium or high");
+  const maxSites = Number(optional("MAX_SITES_PER_DAY") ?? 50);
+  if (!Number.isInteger(maxSites) || maxSites < 1) throw new Error("MAX_SITES_PER_DAY must be a positive integer");
   return {
     anthropicApiKey: need("ANTHROPIC_API_KEY"),
     agentModel: optional("AGENT_MODEL") ?? "claude-opus-5-5",
@@ -50,5 +60,10 @@ export function loadConfig(env: Env = process.env, opts: { lenient?: boolean } =
     publicBaseUrl: (need("PUBLIC_BASE_URL") || "http://localhost:3000").replace(/\/+$/, ""),
     tickSecret: need("TICK_SECRET"),
     demoVenueSlug: optional("DEMO_VENUE_SLUG") ?? "agala",
+    vercelToken: optional("VERCEL_TOKEN"),
+    vercelTeamId: optional("VERCEL_TEAM_ID"),
+    rateSalt: optional("RATE_SALT") ?? "dev-salt",
+    maxSitesPerDay: maxSites,
+    telegramBotUsername: optional("TELEGRAM_BOT_USERNAME")?.replace(/^@/, "") ?? null,
   };
 }

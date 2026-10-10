@@ -28,4 +28,9 @@ describe("loadConfig", () => {
     expect(c.telegramToken).toBe("");
     expect(c.publicBaseUrl).toBe("http://localhost:3000");
   });
+  it("reads the deploy and wizard keys with defaults", () => {
+    expect(loadConfig(full)).toMatchObject({ vercelToken: null, vercelTeamId: null, rateSalt: "dev-salt", maxSitesPerDay: 50, telegramBotUsername: null });
+    expect(loadConfig({ ...full, VERCEL_TOKEN: "v", VERCEL_TEAM_ID: "team_1", RATE_SALT: "s", MAX_SITES_PER_DAY: "7", TELEGRAM_BOT_USERNAME: "@site_manager_bot" })).toMatchObject({ vercelToken: "v", vercelTeamId: "team_1", rateSalt: "s", maxSitesPerDay: 7, telegramBotUsername: "site_manager_bot" });
+    expect(() => loadConfig({ ...full, MAX_SITES_PER_DAY: "0" })).toThrow(/MAX_SITES_PER_DAY/);
+  });
 });

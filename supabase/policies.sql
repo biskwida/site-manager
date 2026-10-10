@@ -12,20 +12,25 @@ alter table public.media enable row level security;
 alter table public.change_sets enable row level security;
 alter table public.changes enable row level security;
 alter table public.conversations enable row level security;
+alter table public.rate_limits enable row level security;
 
-revoke all on public.venue_members, public.venue_invites, public.venue_admin_tokens, public.change_sets, public.changes, public.conversations from anon, authenticated;
+revoke all on public.venue_members, public.venue_invites, public.venue_admin_tokens, public.change_sets, public.changes, public.conversations, public.rate_limits from anon, authenticated;
+revoke execute on function public.bump_rate_limit(text, int, int, timestamptz) from anon, authenticated, public;
 revoke insert, update, delete, truncate on public.venues, public.site_texts, public.categories, public.items, public.holidays, public.announcements, public.media from anon, authenticated;
 grant select on public.venues, public.site_texts, public.categories, public.items, public.holidays, public.announcements, public.media to anon, authenticated;
 
+-- Anon sees only live venues and their content; wizard drafts are reachable solely through the server with the draft token.
+drop policy if exists "anon read venues" on public.venues;
+create policy "anon read venues" on public.venues for select to anon, authenticated using (status = 'live');
 do $$
 declare t text;
 begin
-  foreach t in array array['venues', 'site_texts', 'categories', 'items', 'holidays', 'announcements', 'media'] loop
+  foreach t in array array['site_texts', 'categories', 'items', 'holidays', 'announcements', 'media'] loop
     execute format('drop policy if exists "anon read %1$s" on public.%1$I', t);
-    execute format('create policy "anon read %1$s" on public.%1$I for select to anon, authenticated using (true)', t);
+    execute format('create policy "anon read %1$s" on public.%1$I for select to anon, authenticated using (exists (select 1 from public.venues v where v.id = %1$I.venue_id and v.status = ''live''))', t);
   end loop;
 end $$;
--- venue_members, venue_invites, venue_admin_tokens, change_sets, changes, conversations: RLS on, no policies => invisible to anon.
+-- venue_members, venue_invites, venue_admin_tokens, change_sets, changes, conversations, rate_limits: RLS on, no policies => invisible to anon.
 
 -- 2. No RPCs: the owner dashboard and the public site read through the app's server (service-role key, never in the browser).
 

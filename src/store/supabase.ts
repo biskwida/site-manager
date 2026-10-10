@@ -1,7 +1,8 @@
 // src/store/supabase.ts
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
-import type { Announcement, Category, Change, ChangeSet, Conversation, Holiday, Item, Lang, Media, Member, Role, SiteState, SiteText, SiteTextKey, Venue } from "../domain/types";
-import { DEFAULT_HOURS, extensionFor, newInviteCode, newToken, type ChangeSetPatch, type ExpiredTimer, type NewCategory, type NewChangeSet, type NewItem, type NewVenue, type Store } from "./types";
+import type { Announcement, BusinessType, Category, Change, ChangeSet, Conversation, DeployInfo, Holiday, Item, Lang, Media, Member, Role, SiteState, SiteText, SiteTextKey, TemplateId, Venue, VenueStatus } from "../domain/types";
+import type { WizardDraft } from "../wizard/schema";
+import { DEFAULT_HOURS, extensionFor, newInviteCode, newToken, type ChangeSetPatch, type ExpiredTimer, type NewCategory, type NewChangeSet, type NewItem, type NewVenue, type Store, type VenuePatch } from "./types";
 
 type Row = Record<string, unknown>;
 type DbError = { message: string; code?: string } | null;
@@ -32,6 +33,11 @@ export function toVenue(r: Row): Venue {
     tz: str(r.tz) || "Europe/Sofia",
     default_lang: (r.default_lang as Lang) ?? "bg",
     theme: (r.theme as Venue["theme"]) ?? { accent: "#2f6b4f" },
+    template: (r.template as TemplateId) ?? "classic",
+    business_type: (r.business_type as BusinessType) ?? "cafe",
+    status: (r.status as VenueStatus) ?? "live",
+    deploy: (r.deploy as DeployInfo | null) ?? null,
+    wizard_draft: (r.wizard_draft as WizardDraft | null) ?? null,
     created_at: iso(r.created_at),
   };
 }
@@ -137,7 +143,16 @@ export class SupabaseStore implements Store {
   }
 
   async createVenue(v: NewVenue) {
-    const row = { ...v, slug: `${this.slugPrefix}${v.slug}`, hours: v.hours ?? DEFAULT_HOURS, theme: v.theme ?? { accent: "#2f6b4f" } };
+    const row = {
+      ...v,
+      slug: `${this.slugPrefix}${v.slug}`,
+      hours: v.hours ?? DEFAULT_HOURS,
+      theme: v.theme ?? { accent: "#2f6b4f" },
+      template: v.template ?? "classic",
+      business_type: v.business_type ?? "cafe",
+      status: v.status ?? "live",
+      wizard_draft: v.wizard_draft ?? null,
+    };
     return this.venue(await must(this.db.from("venues").insert(row).select("*").single(), "createVenue"));
   }
   async getVenue(id: string) {
@@ -148,8 +163,36 @@ export class SupabaseStore implements Store {
     if (error) throw new Error(`getVenueBySlug: ${error.message}`);
     return data ? this.venue(data) : null;
   }
-  async listVenues() {
-    return (await must(this.db.from("venues").select("*").order("created_at"), "listVenues")).map((r) => this.venue(r));
+  async listVenues(opts: { status?: VenueStatus; deploying?: boolean } = {}) {
+    let q = this.db.from("venues").select("*").order("created_at");
+    if (opts.status) q = q.eq("status", opts.status);
+    if (opts.deploying) q = q.in("deploy->>status", ["pending", "building"]);
+    return (await must(q, "listVenues")).map((r) => this.venue(r));
+  }
+  async updateVenue(id: string, patch: VenuePatch) {
+    const clean: Row = Object.fromEntries(Object.entries(patch).filter(([, v]) => v !== undefined));
+    if (typeof clean.slug === "string") clean.slug = `${this.slugPrefix}${clean.slug}`;
+    if (Object.keys(clean).length === 0) return this.getVenue(id);
+    const { data, error } = await this.db.from("venues").update(clean).eq("id", id).select("*").maybeSingle();
+    if (error) throw new Error(error.code === "23505" ? `slug ${patch.slug} already exists` : `updateVenue ${id}: ${error.message} [${error.code ?? ""}]`);
+    if (!data) throw new Error(`updateVenue ${id}: not found`);
+    return this.venue(data);
+  }
+  async setDeploy(id: string, deploy: DeployInfo | null) {
+    await mustRows(this.db.from("venues").update({ deploy }).eq("id", id).select("id"), `setDeploy ${id}`);
+  }
+  async setDraftToken(id: string, tokenHash: string | null) {
+    await mustRows(this.db.from("venues").update({ draft_token_hash: tokenHash }).eq("id", id).select("id"), `setDraftToken ${id}`);
+  }
+  async findVenueByDraftToken(tokenHash: string) {
+    const { data, error } = await this.db.from("venues").select("*").eq("draft_token_hash", tokenHash).maybeSingle();
+    if (error) throw new Error(`findVenueByDraftToken: ${error.message}`);
+    return data ? this.venue(data) : null;
+  }
+  async deleteVenue(id: string) {
+    if (badVenue(id)) return;
+    const { error } = await this.db.from("venues").delete().eq("id", id);
+    if (error) throw new Error(`deleteVenue ${id}: ${error.message}`);
   }
   async getSite(venueId: string): Promise<SiteState> {
     const [venue, categories, items, holidays, announcements, media, texts] = await Promise.all([
@@ -191,6 +234,10 @@ export class SupabaseStore implements Store {
     const { data, error } = await this.db.from("venue_members").select("*").eq("tg_chat_id", chatId).maybeSingle();
     if (error) throw new Error(`findMember: ${error.message}`);
     return data ? toMember(data) : null;
+  }
+  async listMembers(venueId: string) {
+    if (badVenue(venueId)) return [];
+    return (await must(this.db.from("venue_members").select("*").eq("venue_id", venueId).order("created_at"), "listMembers")).map(toMember);
   }
   async upsertMember(m: Omit<Member, "created_at">) {
     // One venue per chat: drop any previous link first (the unique index on tg_chat_id would reject it).
@@ -367,5 +414,11 @@ export class SupabaseStore implements Store {
   }
   async setConversation(venueId: string, chatId: number, c: Conversation) {
     await must(this.db.from("conversations").upsert({ venue_id: venueId, chat_id: chatId, turns: c.turns, correction_for: c.correction_for, updated_at: c.updated_at }, { onConflict: "venue_id,chat_id" }).select("chat_id"), "setConversation");
+  }
+
+  async bumpRateLimit(key: string, windowMs: number, max: number, now: string) {
+    const { data, error } = await this.db.rpc("bump_rate_limit", { p_key: key, p_window_ms: windowMs, p_max: max, p_now: now });
+    if (error) throw new Error(`bumpRateLimit: ${error.message}`);
+    return data === true;
   }
 }

@@ -1,7 +1,8 @@
 // src/store/types.ts
 import type {
-  Category, Change, ChangeSet, ChangeSetStatus, ChangeSource, Conversation, Item, Lang, Media, Member, Role, SiteState, SiteTextKey, Venue, WeekHours,
+  BusinessType, Category, Change, ChangeSet, ChangeSetStatus, ChangeSource, Conversation, DeployInfo, Item, Lang, Media, Member, Role, SiteState, SiteTextKey, TemplateId, Venue, VenueStatus, WeekHours,
 } from "../domain/types";
+import type { WizardDraft } from "../wizard/schema";
 
 export const DEFAULT_HOURS: WeekHours = {
   mon: { open: "08:00", close: "18:00" },
@@ -28,6 +29,10 @@ export interface NewVenue {
   tz?: string;
   default_lang?: Lang;
   theme?: { accent: string };
+  template?: TemplateId;
+  business_type?: BusinessType;
+  status?: VenueStatus;
+  wizard_draft?: WizardDraft | null;
 }
 export interface NewCategory {
   venue_id: string;
@@ -64,6 +69,9 @@ export interface NewChangeSet {
   changes: Change[];
 }
 export type ChangeSetPatch = Partial<Pick<ChangeSet, "status" | "apply_at" | "reminded_at" | "decided_at" | "applied_at" | "reverted_by" | "tg_message_id" | "preview_bg" | "preview_en">>;
+export type VenuePatch = Partial<Pick<Venue,
+  "slug" | "name" | "tagline_bg" | "tagline_en" | "about_bg" | "about_en" | "address" | "phone" | "maps_url" | "instagram" |
+  "hours" | "tz" | "default_lang" | "theme" | "template" | "business_type" | "status" | "wizard_draft">>;
 
 export interface ExpiredTimer {
   item: Item;
@@ -75,7 +83,16 @@ export interface Store {
   createVenue(v: NewVenue): Promise<Venue>;
   getVenue(id: string): Promise<Venue>;
   getVenueBySlug(slug: string): Promise<Venue | null>;
-  listVenues(): Promise<Venue[]>;
+  /** All venues (oldest first); `status` filters; `deploying: true` keeps only deploy.status in ("pending","building"). */
+  listVenues(opts?: { status?: VenueStatus; deploying?: boolean }): Promise<Venue[]>;
+  /** Throws on an unknown id or a slug that another venue already has. Keys set to undefined are ignored. */
+  updateVenue(id: string, patch: VenuePatch): Promise<Venue>;
+  setDeploy(id: string, deploy: DeployInfo | null): Promise<void>;
+  /** Stores the sha256 of the wizard's draft token (null clears it). */
+  setDraftToken(id: string, tokenHash: string | null): Promise<void>;
+  findVenueByDraftToken(tokenHash: string): Promise<Venue | null>;
+  /** Deletes the venue and everything that hangs off it: content, members, invites, tokens, change sets, media rows (storage objects stay). */
+  deleteVenue(id: string): Promise<void>;
   /** Everything for one venue, including inactive items (the site filters with domain/effective). */
   getSite(venueId: string): Promise<SiteState>;
   insertCategory(c: NewCategory): Promise<Category>;
@@ -86,6 +103,7 @@ export interface Store {
 
   // members and access
   findMember(chatId: number): Promise<Member | null>;
+  listMembers(venueId: string): Promise<Member[]>;
   upsertMember(m: Omit<Member, "created_at">): Promise<Member>;
   setMemberLang(venueId: string, chatId: number, lang: Lang): Promise<void>;
   createInvite(venueId: string, role: Role, expiresAt: string): Promise<string>;
@@ -124,6 +142,10 @@ export interface Store {
   // conversations
   getConversation(venueId: string, chatId: number): Promise<Conversation | null>;
   setConversation(venueId: string, chatId: number, c: Conversation): Promise<void>;
+
+  // rate limits
+  /** Sliding window counter. Returns true when the call is allowed (count after increment <= max). */
+  bumpRateLimit(key: string, windowMs: number, max: number, now: string): Promise<boolean>;
 }
 
 export function newToken(): string {

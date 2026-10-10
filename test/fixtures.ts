@@ -32,6 +32,11 @@ export function venue(over: Partial<Venue> = {}): Venue {
     tz: TZ,
     default_lang: "bg",
     theme: { accent: "#2f6b4f" },
+    template: "classic",
+    business_type: "cafe",
+    status: "live",
+    deploy: null,
+    wizard_draft: null,
     created_at: NOW,
     ...over,
   };

@@ -27,6 +27,12 @@ for (const t of ["venue_members", "venue_invites", "venue_admin_tokens", "change
   const r = await db.from(t).select("*").limit(1);
   check(`anon cannot read ${t}`, !!r.error || (r.data?.length ?? 0) === 0, r.error?.code ?? `${r.data?.length ?? 0} rows`);
 }
+const drafts = await db.from("venues").select("id").eq("status", "draft").limit(1);
+check("anon sees no draft venues", !drafts.error && (drafts.data?.length ?? 0) === 0, drafts.error?.code ?? `${drafts.data?.length ?? 0} rows`);
+const rl = await db.from("rate_limits").select("*").limit(1);
+check("anon cannot read rate_limits", !!rl.error || (rl.data?.length ?? 0) === 0, rl.error?.code ?? `${rl.data?.length ?? 0} rows`);
+const bump = await db.rpc("bump_rate_limit", { p_key: "rls-check", p_window_ms: 1000, p_max: 1, p_now: new Date().toISOString() });
+check("anon cannot call bump_rate_limit", !!bump.error, bump.error?.code ?? "no error");
 // Writes must be refused by the grants themselves (42501 insufficient_privilege), not merely match zero rows.
 const write = await db.from("items").update({ price_eur: 1 }).eq("id", "00000000-0000-0000-0000-000000000000").select("id");
 check("anon cannot update items: permission denied", write.error?.code === "42501", write.error?.code ?? `no error, ${write.data?.length ?? 0} rows`);

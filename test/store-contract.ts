@@ -184,5 +184,115 @@ export function storeContract(name: string, make: () => Promise<Store>) {
       expect(site.categories).toEqual([]);
       expect(await s.findMember(10)).not.toBeNull();
     });
+
+    it("gives new venues the classic template, café type and live status, and accepts overrides", async () => {
+      const s = await make();
+      const v = await s.createVenue({ slug: "t10", name: "Test" });
+      expect(v).toMatchObject({ template: "classic", business_type: "cafe", status: "live", deploy: null, wizard_draft: null });
+      const d = await s.createVenue({ slug: "t10d", name: "Draft", template: "nocturne", business_type: "bar", status: "draft" });
+      expect(d).toMatchObject({ template: "nocturne", business_type: "bar", status: "draft" });
+      expect((await s.listVenues()).map((x) => x.id)).toEqual(expect.arrayContaining([v.id, d.id]));
+      expect((await s.listVenues({ status: "draft" })).map((x) => x.id)).toEqual([d.id]);
+      expect((await s.listVenues({ status: "live" })).map((x) => x.id)).toContain(v.id);
+      expect((await s.listVenues({ status: "live" })).map((x) => x.id)).not.toContain(d.id);
+    });
+
+    it("updates venue fields and refuses a taken slug", async () => {
+      const s = await make();
+      const a = await s.createVenue({ slug: "t11a", name: "A" });
+      await s.createVenue({ slug: "t11b", name: "B" });
+      const u = await s.updateVenue(a.id, { name: "A2", template: "lumen", status: "draft", theme: { accent: "#112233" }, tagline_en: undefined });
+      expect(u).toMatchObject({ id: a.id, name: "A2", template: "lumen", status: "draft", theme: { accent: "#112233" }, tagline_en: "" });
+      expect(await s.getVenue(a.id)).toEqual(u);
+      const renamed = await s.updateVenue(a.id, { slug: "t11c" });
+      expect(renamed.slug).toBe("t11c");
+      expect((await s.getVenueBySlug("t11c"))?.id).toBe(a.id);
+      expect(await s.getVenueBySlug("t11a")).toBeNull();
+      await expect(s.updateVenue(a.id, { slug: "t11b" })).rejects.toThrow(/t11b/);
+      await expect(s.updateVenue("00000000-0000-0000-0000-000000000000", { name: "x" })).rejects.toThrow();
+      await expect(s.updateVenue(a.id, { slug: "t11c" })).resolves.toMatchObject({ slug: "t11c" }); // own slug is fine
+    });
+
+    it("stores the wizard draft JSON and clears it", async () => {
+      const s = await make();
+      const v = await s.createVenue({ slug: "t12", name: "Test", status: "draft" });
+      const draft = {
+        template: "classic" as const, business_type: "cafe" as const, name: "X", slug: "t12", default_lang: "bg" as const,
+        address: "", phone: "", instagram: "", maps_url: "", hours: v.hours, theme: { accent: "#2f6b4f" },
+        tagline_bg: "", tagline_en: "", about_bg: "", about_en: "", texts: { welcome: { bg: "", en: "" }, footer_note: { bg: "", en: "" } },
+        logo_media_id: null, cover_media_id: null, gallery_media_ids: [], categories: [{ key: "c1", name_bg: "Кафе", name_en: "Coffee", items: [] }], step: "menu" as const,
+      };
+      await s.updateVenue(v.id, { wizard_draft: draft });
+      expect((await s.getVenue(v.id)).wizard_draft).toEqual(draft);
+      await s.updateVenue(v.id, { wizard_draft: null, status: "live" });
+      expect(await s.getVenue(v.id)).toMatchObject({ wizard_draft: null, status: "live" });
+    });
+
+    it("tracks deployments and lists the ones in flight", async () => {
+      const s = await make();
+      const a = await s.createVenue({ slug: "t13a", name: "A" });
+      const b = await s.createVenue({ slug: "t13b", name: "B" });
+      const c = await s.createVenue({ slug: "t13c", name: "C" });
+      const base = { provider: "fake" as const, project_id: "p", deployment_id: "d", url: null, error: null, template: "classic" as const, updated_at: NOW };
+      await s.setDeploy(a.id, { ...base, status: "pending" });
+      await s.setDeploy(b.id, { ...base, status: "building" });
+      await s.setDeploy(c.id, { ...base, status: "ready", url: "https://c.example.test" });
+      expect((await s.getVenue(a.id)).deploy).toEqual({ ...base, status: "pending" });
+      expect((await s.listVenues({ deploying: true })).map((x) => x.id).sort()).toEqual([a.id, b.id].sort());
+      await s.setDeploy(a.id, { ...base, status: "error", error: "boom" });
+      expect((await s.listVenues({ deploying: true })).map((x) => x.id)).toEqual([b.id]);
+      await s.setDeploy(b.id, null);
+      expect(await s.listVenues({ deploying: true })).toEqual([]);
+      expect((await s.getVenue(b.id)).deploy).toBeNull();
+    });
+
+    it("finds a draft by its token hash and lists members", async () => {
+      const s = await make();
+      const v = await s.createVenue({ slug: "t14", name: "Test", status: "draft" });
+      expect(await s.findVenueByDraftToken("a".repeat(64))).toBeNull();
+      await s.setDraftToken(v.id, "a".repeat(64));
+      expect((await s.findVenueByDraftToken("a".repeat(64)))?.id).toBe(v.id);
+      await s.setDraftToken(v.id, null);
+      expect(await s.findVenueByDraftToken("a".repeat(64))).toBeNull();
+      await s.upsertMember({ venue_id: v.id, tg_chat_id: 21, role: "owner", lang: "bg" });
+      await s.upsertMember({ venue_id: v.id, tg_chat_id: 22, role: "staff", lang: "en" });
+      const members = await s.listMembers(v.id);
+      expect(members.map((m) => [m.tg_chat_id, m.role]).sort()).toEqual([[21, "owner"], [22, "staff"]]);
+      expect(await s.listMembers("00000000-0000-0000-0000-000000000000")).toEqual([]);
+    });
+
+    it("deletes a venue with everything attached", async () => {
+      const s = await make();
+      const v = await s.createVenue({ slug: "t15", name: "Test" });
+      const c = await s.insertCategory({ venue_id: v.id, name_bg: "Кафе", name_en: "Coffee", position: 0 });
+      await s.insertItem({ venue_id: v.id, category_id: c.id, name_bg: "x", name_en: "x", desc_bg: "", desc_en: "", price_eur: 1, allergens: [], position: 0 });
+      await s.upsertMember({ venue_id: v.id, tg_chat_id: 31, role: "owner", lang: "bg" });
+      const code = await s.createInvite(v.id, "staff", LATER);
+      const token = await s.getAdminToken(v.id);
+      await s.setDraftToken(v.id, "b".repeat(64));
+      await s.createChangeSet({ venue_id: v.id, chat_id: 31, summary_bg: "", summary_en: "", preview_bg: "", preview_en: "", source: "text", status: "proposed", changes: [] });
+      await s.deleteVenue(v.id);
+      expect(await s.getVenueBySlug("t15")).toBeNull();
+      await expect(s.getVenue(v.id)).rejects.toThrow();
+      expect(await s.findMember(31)).toBeNull();
+      expect(await s.redeemInvite(code, 32, "bg", NOW)).toBeNull();
+      expect(await s.findVenueByAdminToken(token)).toBeNull();
+      expect(await s.findVenueByDraftToken("b".repeat(64))).toBeNull();
+      expect(await s.listProposedBefore("2027-01-01T00:00:00.000Z", v.id)).toEqual([]);
+      await expect(s.deleteVenue(v.id)).resolves.toBeUndefined(); // idempotent
+    });
+
+    it("counts rate limits in a sliding window", async () => {
+      const s = await make();
+      const key = `rl-${crypto.randomUUID()}`;
+      const hour = 3_600_000;
+      expect(await s.bumpRateLimit(key, hour, 2, NOW)).toBe(true);
+      expect(await s.bumpRateLimit(key, hour, 2, NOW)).toBe(true);
+      expect(await s.bumpRateLimit(key, hour, 2, NOW)).toBe(false);
+      expect(await s.bumpRateLimit(key, hour, 2, "2026-10-09T09:59:00.000Z")).toBe(false); // still inside the window
+      expect(await s.bumpRateLimit(key, hour, 2, "2026-10-09T10:00:00.000Z")).toBe(true); // window elapsed: count restarts at 1
+      expect(await s.bumpRateLimit(`${key}-other`, hour, 1, NOW)).toBe(true); // keys are independent
+      expect(await s.bumpRateLimit(`${key}-other`, hour, 1, NOW)).toBe(false);
+    });
   });
 }
