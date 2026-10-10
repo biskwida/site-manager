@@ -134,7 +134,7 @@
 .l-draft-badge { border-radius: 999px; padding: 0.125rem 0.625rem; font-size: 0.6875rem; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; background: var(--l-ink); color: var(--l-bg); }
 
 /* Today: one hairline strip under the hero (label, status, holiday note, announcement pills), then specials as photo cards. */
-.l-today { outline: none; }
+.tpl-lumen .l-today:focus-visible { outline: none; } /* skip-link target: the ring would box the whole section */
 .l-strip-today { display: flex; flex-wrap: wrap; align-items: center; gap: 0.5rem 1.25rem; padding-block: 1rem; border-top: 1px solid var(--l-line); border-bottom: 1px solid var(--l-line); }
 .l-status { display: flex; align-items: flex-start; gap: 0.625rem; font-size: 1.0625rem; font-weight: 600; line-height: 1.4; text-wrap: pretty; }
 .l-note { color: var(--l-ink-soft); }
@@ -155,7 +155,7 @@
 .l-btn-ghost { border: 1px solid var(--l-line-strong); color: var(--l-ink); }
 
 /* Menu rows: name and price on one line, description under, sold-out badge and allergen tags last. No leaders, no boxes. */
-.l-row { position: relative; isolation: isolate; padding-block: 0.875rem; }
+.l-row { position: relative; isolation: isolate; padding-block: 0.875rem; break-inside: avoid; }
 .l-row-head { display: flex; align-items: baseline; justify-content: space-between; gap: 1rem; }
 .l-name { min-width: 0; font-size: 1.0625rem; font-weight: 600; line-height: 1.35; overflow-wrap: anywhere; }
 .l-name.is-sold { color: var(--l-ink-soft); }
@@ -183,11 +183,11 @@
 
 /* The menu: two columns from 768 px; a category never splits across columns. */
 .l-menu { margin-top: 0.5rem; }
-.l-columns { margin-top: 1rem; }
+.l-columns { margin-top: 2rem; }
 @media (min-width: 768px) { .l-columns { columns: 2; column-gap: 3.5rem; } }
 .l-cat { break-inside: avoid; page-break-inside: avoid; margin-top: 2rem; }
-.l-cat:first-child { margin-top: 1rem; }
-.l-cat-h { padding-bottom: 0.5rem; border-bottom: 1px solid var(--l-line-strong); font-size: 1.5rem; }
+.l-cat:first-child { margin-top: 0; } /* multicol truncates the top margin at a column break; both columns must start at 0 */
+.l-cat-h { break-after: avoid; padding-bottom: 0.5rem; border-bottom: 1px solid var(--l-line-strong); font-size: 1.5rem; }
 .l-legend { margin-top: 2.5rem; padding-top: 1.25rem; border-top: 1px solid var(--l-line); }
 .l-legend dl { display: grid; grid-template-columns: 1fr; gap: 0.25rem 1.5rem; margin-top: 0.75rem; font-size: 0.875rem; }
 @media (min-width: 640px) { .l-legend dl { grid-template-columns: 1fr 1fr; } }
