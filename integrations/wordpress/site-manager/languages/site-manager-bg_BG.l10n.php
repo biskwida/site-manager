@@ -31,5 +31,6 @@ return [
 	'Site Manager did not answer: %s' => 'Site Manager не отговори: %s',
 	'Site Manager has no venue with the code "%s".' => 'В Site Manager няма заведение с код „%s“.',
 	'Site Manager answered with an unexpected response (HTTP %d).' => 'Site Manager отговори неочаквано (HTTP %d).',
+	'Site Manager could not render this block.' => 'Site Manager не успя да покаже този блок.',
 	],
 ];

@@ -85,3 +85,6 @@ msgstr "В Site Manager няма заведение с код „%s“."
 
 msgid "Site Manager answered with an unexpected response (HTTP %d)."
 msgstr "Site Manager отговори неочаквано (HTTP %d)."
+
+msgid "Site Manager could not render this block."
+msgstr "Site Manager не успя да покаже този блок."

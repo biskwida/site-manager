@@ -8,6 +8,7 @@ $plugin = dirname(__DIR__) . '/site-manager';
 require $plugin . '/includes/class-sm-labels.php';
 require $plugin . '/includes/class-sm-client.php';
 require $plugin . '/includes/class-sm-render.php';
+require $plugin . '/includes/class-sm-shortcodes.php';
 foreach (glob(__DIR__ . '/cases/*.php') ?: [] as $extra) {
     require $extra; // Task 10 adds write-channel cases here
 }
@@ -101,6 +102,9 @@ check('no announcements renders nothing', SM_Render::announcements(array_replace
 // Photos
 $photos = SM_Render::photos($state, $now, 'bg');
 check('gallery in position order, non-gallery excluded', before($photos, 'g1.jpg', 'g2.jpg') && !has($photos, 'cover.jpg') && substr_count($photos, '<figure') === 2);
+$noUrl = $state;
+$noUrl['media'][] = ['id' => 'm-x', 'venue_id' => 'v1', 'storage_path' => 'x', 'is_gallery' => true, 'position' => 3];
+check('gallery skips rows without a URL', substr_count(SM_Render::photos($noUrl, $now, 'bg'), '<figure') === 2);
 
 // Text
 check('text welcome bg', SM_Render::text($state, 'welcome', 'bg') === '<span class="sm sm-text sm-text-welcome">Добре дошли!</span>');
@@ -115,10 +119,20 @@ check('feed url', SM_Client::feed_url() === 'https://site-manager.example/api/si
 $GLOBALS['sm_test_remote'] = ['response' => ['code' => 200], 'body' => json_encode($feed)];
 $fetched = SM_Client::fetch();
 check('fetch parses the feed', is_array($fetched) && $fetched['now'] === $now && $fetched['stale'] === false);
+$cachedKey = 'site_manager_feed_' . md5((string) SM_Client::feed_url());
+$cachedAgain = SM_Client::fetch();
+check('cached copy keeps the clock moving', is_array($cachedAgain) && $cachedAgain['stale'] === false && strtotime($cachedAgain['now']) >= strtotime($now));
+$GLOBALS['sm_test_transients'][$cachedKey]['fetched_at'] -= 120;
+$cachedOld = SM_Client::fetch();
+check('cached copy is advanced by its age', is_array($cachedOld) && strtotime($cachedOld['now']) - strtotime($now) >= 120 && strtotime($cachedOld['now']) - strtotime($now) < 130, is_array($cachedOld) ? $cachedOld['now'] : '');
 $GLOBALS['sm_test_remote'] = new WP_Error('http_request_failed', 'down');
 SM_Client::clear_cache();
 $stale = SM_Client::fetch();
 check('fetch serves the last good copy when the feed is down', is_array($stale) && $stale['stale'] === true);
+$GLOBALS['sm_test_options']['site_manager_feed_last_good']['fetched_at'] -= 3600;
+SM_Client::clear_cache();
+$staleOld = SM_Client::fetch();
+check('stale copy is advanced by its age', is_array($staleOld) && $staleOld['stale'] === true && strtotime($staleOld['now']) > strtotime($now) && strtotime($staleOld['now']) - strtotime($now) >= 3600, is_array($staleOld) ? $staleOld['now'] : '');
 delete_option('site_manager_feed_last_good');
 SM_Client::clear_cache();
 $err = SM_Client::fetch();
@@ -127,6 +141,14 @@ $GLOBALS['sm_test_remote'] = ['response' => ['code' => 404], 'body' => '{"error"
 $err404 = SM_Client::fetch();
 check('404 is an error that names the slug', is_wp_error($err404) && has($err404->get_error_message(), 'agala'));
 check('unavailable comment is safe', has(SM_Render::unavailable($err404), '<!-- Site Manager:') && !has(SM_Render::unavailable($err404), '<script'));
+
+// Shortcodes never break the page
+$broken = $feed;
+$broken['now'] = 'not a date';
+$GLOBALS['sm_test_remote'] = ['response' => ['code' => 200], 'body' => json_encode($broken)];
+SM_Client::clear_cache();
+$rendered = SM_Shortcodes::render('hours', []);
+check('a malformed feed date yields the safe comment, not an exception', has($rendered, '<!-- Site Manager: Site Manager could not render this block. -->'), $rendered);
 
 echo ($fails ? "\n$fails FAILED\n" : "\nALL PASSED\n");
 exit($fails ? 1 : 0);

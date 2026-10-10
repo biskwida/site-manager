@@ -35,6 +35,21 @@ final class SM_Client
         return $s['base_url'] . '/api/site/' . rawurlencode($s['slug']);
     }
 
+    /**
+     * A stored copy with the feed server's clock advanced by the time that has passed since it was fetched,
+     * so open/closed status, sold-out marks and expiries stay correct while a cached or stale copy is served.
+     *
+     * @param array{state: array, now: string, fetched_at?: int} $copy
+     * @return array{state: array, now: string}
+     */
+    private static function aged(array $copy): array
+    {
+        $base = strtotime((string) $copy['now']);
+        $elapsed = max(0, time() - (int) ($copy['fetched_at'] ?? time()));
+        $now = $base === false ? (string) $copy['now'] : gmdate('Y-m-d\TH:i:s\Z', $base + $elapsed);
+        return ['state' => $copy['state'], 'now' => $now];
+    }
+
     private static function cache_key(string $url): string
     {
         return 'site_manager_feed_' . md5($url);
@@ -54,7 +69,7 @@ final class SM_Client
         if (!$bypass_cache) {
             $cached = get_transient($key);
             if (is_array($cached) && isset($cached['state'], $cached['now'])) {
-                return ['state' => $cached['state'], 'now' => (string) $cached['now'], 'stale' => false];
+                return self::aged($cached) + ['stale' => false];
             }
         }
         $res = wp_remote_get($url, ['timeout' => self::TIMEOUT, 'headers' => ['Accept' => 'application/json'], 'user-agent' => 'SiteManagerWP/' . SITE_MANAGER_VERSION]);
@@ -70,14 +85,15 @@ final class SM_Client
                 $error = new WP_Error('site_manager_unavailable', sprintf(__('Site Manager answered with an unexpected response (HTTP %d).', 'site-manager'), (int) $code));
             } else {
                 $value = ['state' => $body['state'], 'now' => (string) $body['now']];
-                set_transient($key, $value, $s['cache_seconds']);
-                update_option(self::LAST_GOOD, ['at' => time(), 'url' => $url] + $value, false);
+                $stored = $value + ['fetched_at' => time()];
+                set_transient($key, $stored, $s['cache_seconds']);
+                update_option(self::LAST_GOOD, ['at' => time(), 'url' => $url] + $stored, false);
                 return $value + ['stale' => false];
             }
         }
         $last = get_option(self::LAST_GOOD, null);
         if (is_array($last) && ($last['url'] ?? '') === $url && isset($last['state'], $last['now'], $last['at']) && (int) $last['at'] + self::STALE_TTL > time()) {
-            return ['state' => $last['state'], 'now' => (string) $last['now'], 'stale' => true];
+            return self::aged($last) + ['stale' => true];
         }
         return $error;
     }

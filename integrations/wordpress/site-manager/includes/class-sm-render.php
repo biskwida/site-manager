@@ -325,7 +325,7 @@ final class SM_Render
 
     public static function photos(array $state, string $now, string $lang): string
     {
-        $gallery = self::by_position(array_filter($state['media'] ?? [], static fn(array $m): bool => !empty($m['is_gallery'])));
+        $gallery = self::by_position(array_filter($state['media'] ?? [], static fn(array $m): bool => !empty($m['is_gallery']) && (string) ($m['public_url'] ?? '') !== ''));
         if (!$gallery) {
             return '';
         }

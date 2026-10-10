@@ -36,6 +36,7 @@ foreach (['class-sm-blocks.php', 'class-sm-auth.php', 'class-sm-pages.php', 'cla
 }
 
 add_action('init', static function (): void {
+    wp_register_style('site-manager', SITE_MANAGER_URL . 'assets/site-manager.css', [], SITE_MANAGER_VERSION);
     load_plugin_textdomain('site-manager', false, dirname(plugin_basename(SITE_MANAGER_FILE)) . '/languages');
     SM_Shortcodes::register();
     if (class_exists('SM_Blocks')) {
@@ -44,9 +45,6 @@ add_action('init', static function (): void {
     if (class_exists('SM_Preview')) {
         SM_Preview::register();
     }
-});
-add_action('wp_enqueue_scripts', static function (): void {
-    wp_register_style('site-manager', SITE_MANAGER_URL . 'assets/site-manager.css', [], SITE_MANAGER_VERSION);
 });
 add_action('admin_menu', ['SM_Settings', 'add_page']);
 add_action('admin_init', ['SM_Settings', 'register']);
