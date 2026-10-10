@@ -85,6 +85,7 @@ export class WordPressClient {
     return this.call<WpMedia>("PUT", `/media/${id}`, patch);
   }
   deleteMedia(by: { id?: number; source_id?: string }) {
+    if (by.id === undefined && !by.source_id) return Promise.reject(new WordPressApiError(400, "sm_invalid", "deleteMedia needs id or source_id"));
     return by.id !== undefined
       ? this.call<{ ok: true; deleted: boolean }>("DELETE", `/media/${by.id}`)
       : this.call<{ ok: true; deleted: boolean }>("DELETE", `/media?source_id=${encodeURIComponent(by.source_id ?? "")}`);
@@ -116,6 +117,13 @@ function isPrivateIp(host: string): boolean {
   if (/^\d+\.\d+\.\d+\.\d+$/.test(host)) return PRIVATE_V4.some((re) => re.test(host));
   if (host.startsWith("[")) {
     const h = host.slice(1, -1).toLowerCase();
+    if (h.startsWith("::ffff:")) {
+      // IPv4-mapped IPv6: URL normalises ::ffff:10.0.0.1 to ::ffff:a00:1; check the embedded IPv4 address.
+      const tail = h.slice(7);
+      const hex = tail.match(/^([0-9a-f]{1,4}):([0-9a-f]{1,4})$/);
+      const v4 = hex ? [parseInt(hex[1], 16) >> 8, parseInt(hex[1], 16) & 255, parseInt(hex[2], 16) >> 8, parseInt(hex[2], 16) & 255].join(".") : tail;
+      return PRIVATE_V4.some((re) => re.test(v4));
+    }
     return h === "::1" || h.startsWith("fc") || h.startsWith("fd") || h.startsWith("fe80") || h === "::";
   }
   return false;

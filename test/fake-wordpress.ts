@@ -193,6 +193,7 @@ export class FakeWordPress {
         this.pending.delete(p.id);
         return Response.json({ ok: true });
       }
+      if (method !== "POST") return err(404, "sm_not_found", `No route ${method} ${path}`);
       const r = this.computeAfter(p, body, false);
       if (r instanceof Response) return r;
       const key = randomBytes(8).toString("hex");
@@ -254,12 +255,13 @@ export class FakeWordPress {
       const before = this.options[k];
       let value = body.value as string | number | null;
       if ((k === "custom_logo" || k === "site_icon")) {
-        if (typeof value === "string" && value.startsWith("{{")) {
+        if (typeof value === "string" && /^\{\{sm_media_id:[^}]+\}\}$/.test(value)) {
           const resolved = this.resolvePlaceholders(value, {});
           if (resolved instanceof Response) return resolved;
           value = Number(resolved);
         }
         value = value === null || value === "" ? null : Number(value);
+        if (value !== null && !Number.isInteger(value)) return err(400, "sm_invalid", "value must be an attachment id or null.");
         (this.options as unknown as Record<string, unknown>)[k] = value;
       } else (this.options as unknown as Record<string, unknown>)[k] = String(value ?? "");
       return Response.json({ key: k, before, after: this.options[k] });

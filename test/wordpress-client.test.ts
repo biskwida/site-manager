@@ -23,7 +23,7 @@ describe("validateSiteUrl", () => {
     if (!r.ok) expect(r.reason.bg).toMatch(/https:\/\//);
   });
   it("refuses credentials, private addresses and junk", () => {
-    for (const bad of ["https://user:pw@cafe.bg", "https://10.0.0.5", "https://192.168.1.10/wp", "https://172.16.0.1", "https://169.254.1.1", "https://[fd00::1]", "ftp://cafe.bg", "not a url", "https://cafe"]) {
+    for (const bad of ["https://user:pw@cafe.bg", "https://10.0.0.5", "https://192.168.1.10/wp", "https://172.16.0.1", "https://169.254.1.1", "https://[fd00::1]", "https://[::ffff:10.0.0.1]", "https://[::ffff:a9fe:a9fe]", "ftp://cafe.bg", "not a url", "https://cafe"]) {
       const r = validateSiteUrl(bad);
       expect(r.ok, bad).toBe(false);
       if (!r.ok) expect(r.reason.en.length, bad).toBeGreaterThan(5);
@@ -120,6 +120,16 @@ describe("WordPressClient against the fake plugin", () => {
     const pr = await client.setProduct(77, { regular_price: "13.5", stock_status: "outofstock" });
     expect(pr.before.regular_price).toBe("12");
     expect(pr.after).toMatchObject({ regular_price: "13.5", stock_status: "outofstock" });
+  });
+
+  it("guards small edge cases: empty media delete, logo option values", async () => {
+    const { wp } = setup();
+    const client = wp.connected();
+    await expect(client.deleteMedia({})).rejects.toMatchObject({ status: 400, code: "sm_invalid" });
+    await client.uploadMedia({ url: "https://cdn.example/l.png", source_id: "logo" });
+    expect(await client.setOption("custom_logo", "{{sm_media_id:logo}}")).toEqual({ key: "custom_logo", before: null, after: 101 });
+    await expect(client.setOption("custom_logo", "{{sm_media_url:logo}}")).rejects.toMatchObject({ status: 400, code: "sm_invalid" });
+    expect(wp.options.custom_logo).toBe(101);
   });
 
   it("maps network failures and server errors to retryable errors", async () => {
