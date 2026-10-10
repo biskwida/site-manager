@@ -1,5 +1,8 @@
 "use client";
-// The moment the owner connects Telegram. Self-contained (no wizard components): brand tokens, Literata headings, Onest body.
+// app/new/[id]/done/DoneStatus.tsx: the moment the owner connects Telegram. Uses no wizard components; it renders inside
+// app/new/layout.tsx, so the .sm-brand scope gives it the brand accent and faces (Commissioner headings, Sofia Sans body)
+// over the shared app tokens (ink, card, paper). Polls GET /api/new/[id]/status every 5 s until live; while publishing it
+// also nudges the tick (app/components/tickNudge.ts). Hosted mode (no deployer): live as soon as the owner joined.
 import { QRCodeSVG } from "qrcode.react";
 import { useEffect, useState } from "react";
 import type { DeployInfo, VenueStatus } from "@/src/domain/types";
