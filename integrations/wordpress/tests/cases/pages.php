@@ -23,6 +23,11 @@ $elOk = SM_Pages::compute_after($el, ['replacements' => [['find' => '19:00', 're
 check('elementor nested replacement', is_array($elOk) && json_decode((string) $elOk['elementor_data'], true)[1]['elements'][0]['settings']['editor'] === '<p>Doors open at 20:00.</p>');
 $elFull = SM_Pages::compute_after($el, ['content' => '<p>x</p>'], 'elementor', [], false);
 check('elementor refuses full content', is_wp_error($elFull) && $elFull->get_error_data()['builder'] === 'elementor');
+$elNew = (string) json_encode([['id' => 'a1', 'elType' => 'widget', 'settings' => ['title' => 'Live jazz on Saturdays']]]);
+$elApply = SM_Pages::compute_after($el, ['title' => 'Events', 'content' => $el['content'], 'elementor_data' => $elNew, 'featured_media' => null], 'elementor', [], true);
+check('elementor apply with unchanged content and new data', is_array($elApply) && $elApply['elementor_data'] === $elNew && $elApply['content'] === '', is_array($elApply) ? '' : $elApply->get_error_code());
+$elChanged = SM_Pages::compute_after($el, ['content' => '<p>changed</p>', 'elementor_data' => $elNew], 'elementor', [], true);
+check('elementor apply with changed content refused', is_wp_error($elChanged) && $elChanged->get_error_code() === 'sm_builder_unsupported');
 check('elementor texts', SM_Pages::elementor_texts($el['elementor_data']) === ['Live jazz on Fridays', '<p>Doors open at 19:00.</p>']);
 check('elementor unicode survives', has((string) $elOk['elementor_data'], 'Live jazz') && !has((string) $elOk['elementor_data'], '\u'));
 

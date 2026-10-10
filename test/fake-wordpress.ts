@@ -298,7 +298,8 @@ export class FakeWordPress {
     if (p.builder === "unknown" && (body.content !== undefined || body.replacements !== undefined)) return err(422, "sm_builder_unsupported", "This page is built with an unsupported editor.", { builder: p.builder });
     if (typeof body.title === "string") after.title = body.title;
     if (typeof body.content === "string") {
-      if (p.builder === "elementor") return err(422, "sm_builder_unsupported", "Elementor pages take replacements, not full content.", { builder: "elementor" });
+      // The adapter always sends all four fields; unchanged content on an Elementor page is not an edit.
+      if (p.builder === "elementor" && body.content !== p.content) return err(422, "sm_builder_unsupported", "Elementor pages take replacements, not full content.", { builder: "elementor" });
       after.content = body.content;
     }
     if (typeof body.elementor_data === "string" || body.elementor_data === null) after.elementor_data = body.elementor_data as string | null;

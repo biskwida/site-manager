@@ -79,6 +79,27 @@ describe("wordpressAdapter", () => {
     expect(wp.media.size).toBe(1); // idempotent upload
   });
 
+  it("pushes an Elementor page edit from a preview and its undo (unchanged content is not refused)", async () => {
+    const wp = new FakeWordPress();
+    const id = wp.addElementorPage("Events", [{ id: "a1", settings: { title: "Live jazz on Fridays" } }, { id: "a2", settings: { editor: "<p>Doors open at 19:00.</p>" } }]);
+    const original = wp.pages.get(id)!.elementor_data;
+    const client = wp.connected();
+    const replacements = [{ find: "19:00", replace: "20:00" }];
+    const preview = await client.previewPage(id, { replacements });
+    const elEdit: Change = {
+      position: 0, op: "wp_edit_page", entity: "wp_page", entity_id: String(id),
+      before: { ...preview.before, page_title: "Events", page_url: "https://cafe.example/events/" },
+      after: { ...preview.after, page_title: "Events", page_url: "https://cafe.example/events/", replacements, preview_url: preview.preview_url },
+    };
+    const token = (client as unknown as { o: { token: string } }).o.token;
+    const r = await wordpressAdapter.push(ctx(wp, token, [elEdit]));
+    expect(r).toMatchObject({ ok: true });
+    expect(wp.pages.get(id)!.elementor_data).toContain("Doors open at 20:00.");
+    const undo = await wordpressAdapter.push(ctx(wp, token, invertChanges([elEdit])));
+    expect(undo).toMatchObject({ ok: true });
+    expect(wp.pages.get(id)!.elementor_data).toBe(original);
+  });
+
   it("reports a non-retryable error with its message", async () => {
     const wp = new FakeWordPress();
     const token = tokenOf(wp);

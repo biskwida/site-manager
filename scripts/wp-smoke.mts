@@ -220,6 +220,27 @@ async function main() {
     console.log("  (revert route not exercised: apply returned no positive revision_id)");
   }
 
+  step("Elementor page: replacement in _elementor_data, apply, undo");
+  const elData = JSON.stringify([{ id: "e1", elType: "widget", widgetType: "text-editor", settings: { editor: "<p>Live jazz every Friday.</p>" }, elements: [] }]);
+  const eventsId = wp("post", "create", "--post_type=page", "--post_status=publish", "--post_title=Events", "--post_name=events", "--post_content=<p>Live jazz every Friday.</p>", "--porcelain");
+  wp("post", "meta", "update", eventsId, "_elementor_edit_mode", "builder");
+  wp("post", "meta", "update", eventsId, "_elementor_data", elData);
+  const elementorData = () => wp("post", "meta", "get", eventsId, "_elementor_data");
+  const elRead = await call("wp_read_page", { page_id: Number(eventsId) });
+  assert(elRead.builder === "elementor", `Events page is not detected as Elementor: ${JSON.stringify(elRead.builder)}`);
+  const elProposal = await call("wp_edit_page", { summary_bg: "Джаз в събота", summary_en: "Jazz on Saturday", page_id: Number(eventsId), replacements: [{ find: "every Friday", replace: "every Saturday" }] });
+  assert(elProposal.status === "proposed", `Elementor proposal failed: ${JSON.stringify(elProposal)}`);
+  const elApplied = await adminAction({ store, messenger, now: () => new Date(), baseUrl: "" }, venue, "apply", String(elProposal.change_set_id));
+  assert(elApplied.ok, `Elementor apply failed: ${elApplied.error}`);
+  const elSync = (await store.listSyncs({ changeSetId: String(elProposal.change_set_id) })).at(-1);
+  assert(elSync?.status === "done", `Elementor sync not done: ${JSON.stringify(elSync)}`);
+  assert(elementorData().includes("every Saturday"), "stored _elementor_data does not contain the new text");
+  const elUndo = await adminAction({ store, messenger, now: () => new Date(), baseUrl: "" }, venue, "undo", String(elProposal.change_set_id));
+  assert(elUndo.ok, `Elementor undo failed: ${elUndo.error}`);
+  const elBack = elementorData();
+  assert(elBack.includes("every Friday") && !elBack.includes("every Saturday"), "undo did not restore _elementor_data");
+  console.log(`  Elementor page ${eventsId}: applied and undone`);
+
   step("options and menus");
   const opt = await call("wp_set_option", { summary_bg: "Име", summary_en: "Name", key: "blogname", value: "Кафене „Ъгъла“" });
   assert(opt.status === "proposed", `option proposal failed: ${JSON.stringify(opt)}`);

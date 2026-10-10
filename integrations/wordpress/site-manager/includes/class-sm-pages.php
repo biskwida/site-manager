@@ -143,7 +143,8 @@ final class SM_Pages
             $after['title'] = $edit['title'];
         }
         if (isset($edit['content']) && is_string($edit['content'])) {
-            if ($builder === 'elementor') {
+            // The adapter always sends all four fields; unchanged content on an Elementor page is not an edit.
+            if ($builder === 'elementor' && $edit['content'] !== (string) $before['content']) {
                 return self::error(422, 'sm_builder_unsupported', 'Elementor pages take replacements, not full content.', ['builder' => 'elementor']);
             }
             $after['content'] = $edit['content'];
