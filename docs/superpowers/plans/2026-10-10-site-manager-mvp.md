@@ -19,7 +19,7 @@
 - Every stored text has `_bg` and `_en`; both must read naturally. Bot replies in the member's `lang`. Previews are rendered in both languages and stored (`preview_bg`, `preview_en`).
 - Prices are EUR with two decimals; range `0.10`–`500.00`; the model never does arithmetic (`bulkPrices`, `roundTo` do).
 - Time zone: venue `tz`, default `Europe/Sofia`; the model sees `nowText` with the UTC offset; helpers resolve `"next_opening"` / `"closing_today"`.
-- Secrets: `SUPABASE_SERVICE_ROLE_KEY`, `SUPABASE_DB_URL`, `TELEGRAM_BOT_TOKEN`, `TICK_SECRET`, `ANTHROPIC_API_KEY`, `STT_API_KEY` are read only in `src/config.ts` (server) and `scripts/`. Nothing under `app/` or `src/i18n`, `src/lib/supabase-browser.ts` imports `src/config.ts`. Telegram file URLs (`https://api.telegram.org/file/bot<token>/…`) are never logged. Admin tokens appear only in the owner's link and RPC parameters.
+- Secrets: `SUPABASE_SERVICE_ROLE_KEY`, `SUPABASE_DB_URL`, `TELEGRAM_BOT_TOKEN`, `TICK_SECRET`, `ANTHROPIC_API_KEY`, `STT_API_KEY` are read only in `src/config.ts` (server) and `scripts/`. Nothing under `app/` or `src/i18n`, `src/lib/supabase-browser.ts` imports `src/config.ts`. Telegram file URLs (`https://api.telegram.org/file/bot<token>/…`) are never logged. Admin tokens appear only in the owner's link and the `key` parameter of admin requests.
 - Agent: model `claude-opus-5-5` (env `AGENT_MODEL`), effort `medium` default (env `AGENT_EFFORT`), `high` for image/bulk/scheduled turns; `tool_choice: { type: "auto", disable_parallel_tool_use: true }`, `betas: ["server-side-fallback-2026-07-01"]`, `fallbacks: "default"`, `max_tokens: 16000`, `max_iterations: 30`, refusal handling.
 - All tests run offline with `InMemoryStore` and fakes: `npm test` must never need network or keys.
 - Next 16 specifics verified in the installed docs (`node_modules/next/dist/docs`): `after` from `next/server`; `export const maxDuration = 300` in a route file; `params`/`searchParams` are Promises; global `PageProps<'/x/[slug]'>` and `RouteContext<'/api/x'>` helpers exist after typegen; `next/font/google` `Literata` and `Onest` both have the `cyrillic` subset.
@@ -2550,14 +2550,14 @@ Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>"
 
 ---
 
-### Task 7: Config, Supabase schema/policies/RPCs, db-apply and check-rls scripts
+### Task 7: Config, Supabase schema/policies, db-apply and check-rls scripts
 
 **Files:**
 - Create: `src/config.ts`, `supabase/schema.sql`, `supabase/policies.sql`, `supabase/cron.sql`, `scripts/db-apply.mts`, `scripts/check-rls.mts`
 - Test: `test/config.test.ts`
 
 **Interfaces:**
-- Produces: `loadConfig(env?): Config` with fields `anthropicApiKey, agentModel, agentEffort, telegramToken, telegramWebhookSecret, sttApiKey (string|null), sttBaseUrl, sttModel, supabaseUrl, supabaseAnonKey, supabaseServiceKey, publicBaseUrl, tickSecret, demoVenueSlug`; `Effort = "low" | "medium" | "high"`. SQL RPCs: `admin_overview(p_key text) → json|null`, `decide_change_set(p_key, p_id uuid, p_decision text) → boolean`, `cancel_change_set(p_key, p_id) → boolean`, `request_undo(p_key, p_id) → uuid|null`.
+- Produces: `loadConfig(env?): Config` with fields `anthropicApiKey, agentModel, agentEffort, telegramToken, telegramWebhookSecret, sttApiKey (string|null), sttBaseUrl, sttModel, supabaseUrl, supabaseAnonKey, supabaseServiceKey, publicBaseUrl, tickSecret, demoVenueSlug`; `Effort = "low" | "medium" | "high"`; `loadConfig(env, { lenient: true })` fills missing keys with `""` for the offline memory-store mode (Task 15). No SQL RPCs: the dashboard talks to server route handlers backed by `Store` (Task 18), so the anon key only ever reads the public tables.
 - Nothing under `app/` imports `src/config.ts` (checked in Task 19).
 
 - [ ] **Step 1: Write the failing config test**
@@ -2588,6 +2588,11 @@ describe("loadConfig", () => {
   });
   it("rejects a bad effort", () => {
     expect(() => loadConfig({ ...full, AGENT_EFFORT: "max" })).toThrow(/AGENT_EFFORT/);
+  });
+  it("fills missing keys with empty strings when lenient", () => {
+    const c = loadConfig({}, { lenient: true });
+    expect(c.telegramToken).toBe("");
+    expect(c.publicBaseUrl).toBe("http://localhost:3000");
   });
 });
 ```
@@ -2621,10 +2626,14 @@ export interface Config {
 
 type Env = Record<string, string | undefined>;
 
-export function loadConfig(env: Env = process.env): Config {
+/** `lenient` (offline memory-store mode) returns "" for missing secrets instead of throwing. */
+export function loadConfig(env: Env = process.env, opts: { lenient?: boolean } = {}): Config {
   const need = (key: string): string => {
     const v = env[key]?.trim();
-    if (!v) throw new Error(`Missing ${key} (set it in .env.local or the Vercel project env; see .env.example)`);
+    if (!v) {
+      if (opts.lenient) return "";
+      throw new Error(`Missing ${key} (set it in .env.local or the Vercel project env; see .env.example)`);
+    }
     return v;
   };
   const optional = (key: string): string | null => env[key]?.trim() || null;
@@ -2642,7 +2651,7 @@ export function loadConfig(env: Env = process.env): Config {
     supabaseUrl: need("NEXT_PUBLIC_SUPABASE_URL"),
     supabaseAnonKey: need("NEXT_PUBLIC_SUPABASE_ANON_KEY"),
     supabaseServiceKey: need("SUPABASE_SERVICE_ROLE_KEY"),
-    publicBaseUrl: need("PUBLIC_BASE_URL").replace(/\/+$/, ""),
+    publicBaseUrl: (need("PUBLIC_BASE_URL") || "http://localhost:3000").replace(/\/+$/, ""),
     tickSecret: need("TICK_SECRET"),
     demoVenueSlug: optional("DEMO_VENUE_SLUG") ?? "agala",
   };
@@ -2822,7 +2831,7 @@ drop trigger if exists items_touch on public.items;
 create trigger items_touch before update on public.items for each row execute function public.touch_updated_at();
 ```
 
-- [ ] **Step 6: Write `supabase/policies.sql`** (idempotent; anon read on public tables only; RPCs keyed by the admin token)
+- [ ] **Step 6: Write `supabase/policies.sql`** (idempotent; anon read on public tables only)
 
 ```sql
 -- 1. Row-level security and grants. Anon (browser) may read the public site tables; everything else is server-only.
@@ -2854,102 +2863,7 @@ begin
 end $$;
 -- venue_members, venue_invites, venue_admin_tokens, change_sets, changes, conversations: RLS on, no policies => invisible to anon.
 
--- 2. Owner dashboard RPCs (security definer, keyed by the admin token).
-create or replace function public.venue_for_key(p_key text) returns uuid
-language sql stable security definer set search_path = public as $$
-  select venue_id from public.venue_admin_tokens where token = p_key;
-$$;
-revoke all on function public.venue_for_key(text) from public, anon, authenticated;
-
-create or replace function public.admin_overview(p_key text) returns json
-language plpgsql stable security definer set search_path = public as $$
-declare
-  v_id uuid := public.venue_for_key(p_key);
-begin
-  if v_id is null then return null; end if;
-  return (
-    select json_build_object(
-      'venue', (select json_build_object('id', id, 'slug', slug, 'name', name, 'tz', tz, 'default_lang', default_lang) from public.venues where id = v_id),
-      'now', now(),
-      'pending', (select coalesce(json_agg(s order by s.created_at desc), '[]'::json) from (
-        select cs.*, (select coalesce(json_agg(c order by c.position), '[]'::json) from public.changes c where c.change_set_id = cs.id) as changes
-        from public.change_sets cs where cs.venue_id = v_id and cs.status = 'proposed') s),
-      'scheduled', (select coalesce(json_agg(s order by s.apply_at), '[]'::json) from (
-        select cs.*, (select coalesce(json_agg(c order by c.position), '[]'::json) from public.changes c where c.change_set_id = cs.id) as changes
-        from public.change_sets cs where cs.venue_id = v_id and cs.status = 'scheduled') s),
-      'log', (select coalesce(json_agg(s order by s.created_at desc), '[]'::json) from (
-        select cs.*, (select coalesce(json_agg(c order by c.position), '[]'::json) from public.changes c where c.change_set_id = cs.id) as changes
-        from public.change_sets cs where cs.venue_id = v_id and cs.status in ('applied', 'reverted', 'rejected', 'expired', 'cancelled')
-        order by cs.created_at desc limit 50) s),
-      'sold_out', (select coalesce(json_agg(json_build_object('id', i.id, 'name_bg', i.name_bg, 'name_en', i.name_en, 'sold_out_until', i.sold_out_until)), '[]'::json)
-        from public.items i where i.venue_id = v_id and i.active and i.sold_out_until is not null and i.sold_out_until > now())
-    )
-  );
-end $$;
-
--- 'apply' turns a proposal into a scheduled set due now; the tick applies it. 'reject' closes it.
-create or replace function public.decide_change_set(p_key text, p_id uuid, p_decision text) returns boolean
-language plpgsql security definer set search_path = public as $$
-declare
-  v_id uuid := public.venue_for_key(p_key);
-  n int;
-begin
-  if v_id is null then return false; end if;
-  if p_decision = 'apply' then
-    update public.change_sets set status = 'scheduled', apply_at = coalesce(apply_at, now()), decided_at = now()
-     where id = p_id and venue_id = v_id and status = 'proposed';
-  elsif p_decision = 'reject' then
-    update public.change_sets set status = 'rejected', decided_at = now()
-     where id = p_id and venue_id = v_id and status = 'proposed';
-  else
-    raise exception 'decision must be apply or reject';
-  end if;
-  get diagnostics n = row_count;
-  return n = 1;
-end $$;
-
-create or replace function public.cancel_change_set(p_key text, p_id uuid) returns boolean
-language plpgsql security definer set search_path = public as $$
-declare
-  v_id uuid := public.venue_for_key(p_key);
-  n int;
-begin
-  if v_id is null then return false; end if;
-  update public.change_sets set status = 'cancelled', decided_at = now()
-   where id = p_id and venue_id = v_id and status in ('proposed', 'scheduled');
-  get diagnostics n = row_count;
-  return n = 1;
-end $$;
-
--- Creates an undo set (inverse changes, reverse order) scheduled now; the tick applies it and marks the target reverted.
-create or replace function public.request_undo(p_key text, p_id uuid) returns uuid
-language plpgsql security definer set search_path = public as $$
-declare
-  v_id uuid := public.venue_for_key(p_key);
-  target public.change_sets%rowtype;
-  new_id uuid;
-begin
-  if v_id is null then return null; end if;
-  select * into target from public.change_sets where id = p_id and venue_id = v_id and status = 'applied';
-  if not found then return null; end if;
-  insert into public.change_sets (venue_id, chat_id, summary_bg, summary_en, preview_bg, preview_en, source, status, apply_at, undoes_id)
-  values (v_id, target.chat_id, 'Отмяна: ' || target.summary_bg, 'Undo: ' || target.summary_en,
-          'Връща: ' || target.summary_bg, 'Reverts: ' || target.summary_en, 'undo', 'scheduled', now(), target.id)
-  returning id into new_id;
-  insert into public.changes (change_set_id, position, op, entity, entity_id, before, after)
-  select new_id, row_number() over (order by position desc) - 1, op, entity, entity_id, after, before
-    from public.changes where change_set_id = target.id;
-  return new_id;
-end $$;
-
-revoke all on function public.admin_overview(text) from public;
-revoke all on function public.decide_change_set(text, uuid, text) from public;
-revoke all on function public.cancel_change_set(text, uuid) from public;
-revoke all on function public.request_undo(text, uuid) from public;
-grant execute on function public.admin_overview(text) to anon, authenticated;
-grant execute on function public.decide_change_set(text, uuid, text) to anon, authenticated;
-grant execute on function public.cancel_change_set(text, uuid) to anon, authenticated;
-grant execute on function public.request_undo(text, uuid) to anon, authenticated;
+-- 2. No RPCs: the owner dashboard and the public site read through the app's server (service-role key, never in the browser).
 
 -- 3. Realtime for the public site and the dashboard.
 do $$
@@ -3036,12 +2950,8 @@ const write = await db.from("items").update({ price_eur: 1 }).eq("id", "00000000
 check("anon cannot update items", (write.data?.length ?? 0) === 0);
 const ins = await db.from("announcements").insert({ venue_id: "00000000-0000-0000-0000-000000000000", text_bg: "x", text_en: "x" }).select("id");
 check("anon cannot insert announcements", !!ins.error || (ins.data?.length ?? 0) === 0, ins.error?.code);
-const overview = await db.rpc("admin_overview", { p_key: "not-a-real-key-at-all-0000000000" });
-check("admin_overview returns null for a bad key", !overview.error && overview.data === null, overview.error?.message);
-const decide = await db.rpc("decide_change_set", { p_key: "bad", p_id: "00000000-0000-0000-0000-000000000000", p_decision: "apply" });
-check("decide_change_set returns false for a bad key", !decide.error && decide.data === false, decide.error?.message);
-const undo = await db.rpc("request_undo", { p_key: "bad", p_id: "00000000-0000-0000-0000-000000000000" });
-check("request_undo returns null for a bad key", !undo.error && undo.data === null, undo.error?.message);
+const tokens = await db.from("venue_admin_tokens").select("token").limit(1);
+check("anon sees no admin tokens", (tokens.data?.length ?? 0) === 0, tokens.error?.code);
 const bucket = await db.storage.from("media").list("", { limit: 1 });
 check("media bucket is readable", !bucket.error, bucket.error?.message);
 
@@ -3054,7 +2964,7 @@ process.exit(failed ? 1 : 0);
 
 ```bash
 git add src/config.ts supabase/ scripts/db-apply.mts scripts/check-rls.mts test/config.test.ts
-git commit -m "Config and Supabase: schema, RLS, admin RPCs, realtime, storage bucket, db scripts
+git commit -m "Config and Supabase: schema, RLS, realtime, storage bucket, db scripts
 
 Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>"
 ```
@@ -4882,3 +4792,2400 @@ Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>"
 ```
 
 ---
+
+### Task 13: Telegram bot: commands, text, approval buttons
+
+**Files:**
+- Create: `src/bot/copy.ts`, `src/bot/approvals.ts`, `src/bot/bot.ts`
+- Test: `test/tg.ts` (helpers), `test/approvals.test.ts`, `test/bot.test.ts`
+
+**Interfaces:**
+- Consumes: `Store`, `Messenger`, `setCorrection` (Task 12), `ImageInput` (Task 12), `proposalKeyboard` (Task 9).
+- Produces: `copy(lang)` strings; `parseCallback(data)`, `handleDecision(d, chatId, decision, setId)`; `RunRequest { venueId; chatId; member; text; source; image?; mediaId? }`, `BotDeps { token; store; messenger; baseUrl; now; startRun; transcribe; download; botInfo? }`, `createBot(d): Bot`, `langFromCode(code?)`. Photo/voice handlers are added in Task 14 via `registerMediaHandlers(bot, d)` (export the hook here).
+
+- [ ] **Step 1: Write `src/bot/copy.ts`**
+
+```ts
+// src/bot/copy.ts
+import type { Lang } from "../domain/types";
+
+export function langFromCode(code?: string): Lang {
+  return (code ?? "").toLowerCase().startsWith("bg") ? "bg" : "en";
+}
+
+const BG = {
+  noAccess: "Този бот управлява сайта на конкретно заведение. Изпратете /start <код> с кода, който получихте от нас.",
+  badCode: "Кодът е невалиден, изтекъл или вече използван. Поискайте нов от нас.",
+  welcome: (name: string, adminUrl: string, publicUrl: string) =>
+    `Свързахте се като собственик на ${name}.\n\nКак работи:\n1. Пишете или пращате гласово: „Капучиното става 3,20“, „Баницата свърши“, „Затворени сме на 24 декември“.\n2. Получавате преглед и го потвърждавате с ✅.\n3. Сайтът се обновява веднага; /undo връща последната промяна.\n\nСайт: ${publicUrl}\nТабло (пазете линка, той е вашият ключ): ${adminUrl}`,
+  welcomeStaff: (name: string, publicUrl: string) =>
+    `Свързахте се като персонал на ${name}. Можете да отбелязвате изчерпани продукти и да добавяте днешните предложения.\n\nСайт: ${publicUrl}`,
+  welcomeBack: (name: string, adminUrl: string) => `Вече сте свързани с ${name}. Табло: ${adminUrl}`,
+  help: "Пишете какво искате да промените, на български или английски. Примери:\n• „Капучиното става 3,20“\n• „Баницата свърши“\n• „Добави шопска салата 7,50“\n• „Затворени сме на 24 и 25 декември“\n• снимка на дъската с предложенията\n• снимка с текст „това е новата корица“\n\nКоманди: /menu линкове към сайта, /lang bg|en език, /undo връща последната промяна.",
+  langSet: "Езикът е български.",
+  langUsage: "Използвайте /lang bg или /lang en.",
+  menu: (publicUrl: string, adminUrl: string | null) => `Сайтът: ${publicUrl}\nМеню: ${publicUrl}/menu${adminUrl ? `\nQR код и табло: ${adminUrl}` : ""}`,
+  changePrompt: "Напишете какво да променя в предложението.",
+  notYours: "Това предложение не е от този чат.",
+  applied: "✅ Приложено",
+  scheduled: (when: string) => `⏰ Насрочено за ${when}`,
+  cancelled: "❌ Отказано",
+  status: {
+    proposed: "Чака решение.",
+    scheduled: "Насрочено.",
+    applied: "Вече е приложено.",
+    rejected: "Отхвърлено.",
+    expired: "Изтекло: не беше потвърдено в рамките на 2 часа.",
+    cancelled: "Отказано.",
+    reverted: "Отменено с по-късна промяна.",
+  },
+  voiceUnavailable: "Гласовите съобщения не са включени на този сървър. Моля, напишете го.",
+  voiceFailed: "Не успях да разпозная записа. Опитайте отново или го напишете.",
+  heard: (text: string) => `🎤 Чух: „${text}“`,
+  photoFailed: "Не успях да изтегля снимката. Опитайте отново.",
+  photoTooBig: "Снимката е над 5 MB. Изпратете я като снимка, не като файл, или по-малка.",
+  error: "Възникна грешка. Опитайте отново.",
+};
+
+const EN: typeof BG = {
+  noAccess: "This bot manages one venue's website. Send /start <code> with the code you received from us.",
+  badCode: "That code is invalid, expired or already used. Ask us for a new one.",
+  welcome: (name, adminUrl, publicUrl) =>
+    `You are linked as the owner of ${name}.\n\nHow it works:\n1. Type or send a voice note: “Cappuccino is 3.20 now”, “Banitsa is sold out”, “We're closed on 24 December”.\n2. You get a preview and confirm it with ✅.\n3. The site updates right away; /undo reverts the last change.\n\nSite: ${publicUrl}\nDashboard (keep this link, it is your key): ${adminUrl}`,
+  welcomeStaff: (name, publicUrl) => `You are linked as staff of ${name}. You can mark items sold out and add today's specials.\n\nSite: ${publicUrl}`,
+  welcomeBack: (name, adminUrl) => `You are already linked to ${name}. Dashboard: ${adminUrl}`,
+  help: "Tell me what to change, in English or Bulgarian. Examples:\n• “Cappuccino is 3.20 now”\n• “Banitsa is sold out”\n• “Add shopska salad 7.50”\n• “We're closed on 24 and 25 December”\n• a photo of the specials board\n• a photo captioned “this is the new cover”\n\nCommands: /menu site links, /lang bg|en language, /undo reverts the last change.",
+  langSet: "Language set to English.",
+  langUsage: "Use /lang bg or /lang en.",
+  menu: (publicUrl, adminUrl) => `Site: ${publicUrl}\nMenu: ${publicUrl}/menu${adminUrl ? `\nQR code and dashboard: ${adminUrl}` : ""}`,
+  changePrompt: "Tell me what to change in the proposal.",
+  notYours: "That proposal is not from this chat.",
+  applied: "✅ Applied",
+  scheduled: (when) => `⏰ Scheduled for ${when}`,
+  cancelled: "❌ Cancelled",
+  status: {
+    proposed: "Waiting for a decision.",
+    scheduled: "Scheduled.",
+    applied: "Already applied.",
+    rejected: "Rejected.",
+    expired: "Expired: not confirmed within 2 hours.",
+    cancelled: "Cancelled.",
+    reverted: "Reverted by a later change.",
+  },
+  voiceUnavailable: "Voice notes are not enabled on this server. Please type it.",
+  voiceFailed: "I couldn't transcribe that. Try again or type it.",
+  heard: (text) => `🎤 Heard: “${text}”`,
+  photoFailed: "I couldn't download the photo. Please try again.",
+  photoTooBig: "The photo is over 5 MB. Send it as a photo, not a file, or a smaller one.",
+  error: "Something went wrong. Please try again.",
+};
+
+export function copy(lang: Lang) {
+  return lang === "bg" ? BG : EN;
+}
+```
+
+- [ ] **Step 2: Write the Telegram test helpers**
+
+```ts
+// test/tg.ts
+import type { Bot } from "grammy";
+import type { Update, UserFromGetMe } from "grammy/types";
+
+export const BOT_INFO: UserFromGetMe = { id: 1, is_bot: true, first_name: "Site", username: "site_manager_bot", can_join_groups: false, can_read_all_group_messages: false, supports_inline_queries: false, can_connect_to_business: false, has_main_web_app: false };
+
+let n = 1;
+const from = (chatId: number, lang: string) => ({ id: chatId, is_bot: false, first_name: "T", language_code: lang });
+const chat = (chatId: number) => ({ id: chatId, type: "private" as const, first_name: "T" });
+
+export function textUpdate(chatId: number, text: string, lang = "bg"): Update {
+  const cmd = text.startsWith("/") ? [{ type: "bot_command" as const, offset: 0, length: text.split(" ")[0].length }] : undefined;
+  return { update_id: n++, message: { message_id: n++, date: 0, chat: chat(chatId), from: from(chatId, lang), text, entities: cmd } } as Update;
+}
+export function callbackUpdate(chatId: number, data: string, messageId: number, lang = "bg"): Update {
+  return { update_id: n++, callback_query: { id: `cq${n}`, from: from(chatId, lang), chat_instance: "ci", data, message: { message_id: messageId, date: 0, chat: chat(chatId), text: "preview" } } } as Update;
+}
+export function photoUpdate(chatId: number, caption?: string, lang = "bg"): Update {
+  return { update_id: n++, message: { message_id: n++, date: 0, chat: chat(chatId), from: from(chatId, lang), caption, photo: [{ file_id: "small", file_unique_id: "s", width: 90, height: 90 }, { file_id: "big", file_unique_id: "b", width: 1280, height: 960 }] } } as Update;
+}
+export function voiceUpdate(chatId: number, lang = "bg"): Update {
+  return { update_id: n++, message: { message_id: n++, date: 0, chat: chat(chatId), from: from(chatId, lang), voice: { file_id: "v1", file_unique_id: "v", duration: 3, mime_type: "audio/ogg" } } } as Update;
+}
+
+/** Intercepts every Bot API call; returns canned results and records the calls. */
+export function captureApi(bot: Bot) {
+  const calls: { method: string; payload: Record<string, unknown> }[] = [];
+  let msgId = 500;
+  bot.api.config.use(async (_prev, method, payload) => {
+    calls.push({ method, payload: payload as Record<string, unknown> });
+    const result: unknown =
+      method === "sendMessage" ? { message_id: msgId++, date: 0, chat: { id: (payload as { chat_id: number }).chat_id, type: "private" }, text: (payload as { text: string }).text }
+      : method === "getFile" ? { file_id: (payload as { file_id: string }).file_id, file_unique_id: "u", file_path: `files/${(payload as { file_id: string }).file_id}.bin` }
+      : true;
+    return { ok: true, result } as never;
+  });
+  return { calls, texts: () => calls.filter((c) => c.method === "sendMessage").map((c) => c.payload.text as string) };
+}
+```
+
+- [ ] **Step 3: Write the failing approvals tests**
+
+```ts
+// test/approvals.test.ts
+import { describe, expect, it } from "vitest";
+import { loadMemory } from "@/src/agent/memory";
+import { handleDecision, parseCallback } from "@/src/bot/approvals";
+import { planChanges } from "@/src/domain/changes";
+import { FakeMessenger, makeDemo } from "./helpers";
+
+const T0 = new Date("2026-10-09T09:00:00.000Z");
+
+async function proposal(applyAt: string | null = null) {
+  const demo = await makeDemo();
+  const site = await demo.store.getSite(demo.venue.id);
+  const cs = await demo.store.createChangeSet({ venue_id: demo.venue.id, chat_id: 1001, summary_bg: "Капучино 3,20 €", summary_en: "Cappuccino €3.20", preview_bg: "• Капучино: 2,90 € → 3,20 €", preview_en: "• Cappuccino: €2.90 → €3.20", source: "text", status: "proposed", apply_at: applyAt, tg_message_id: 42, changes: planChanges(site, [{ op: "set_price", item_id: demo.items.Cappuccino.id, price_eur: 3.2 }], { newId: () => "n", now: T0.toISOString() }) });
+  const messenger = new FakeMessenger();
+  return { ...demo, cs, messenger, d: { store: demo.store, messenger, now: () => T0 } };
+}
+
+describe("parseCallback", () => {
+  it("parses cs:<decision>:<id> and rejects the rest", () => {
+    expect(parseCallback("cs:apply:abc")).toEqual({ decision: "apply", setId: "abc" });
+    expect(parseCallback("cs:nope:abc")).toBeNull();
+    expect(parseCallback("hello")).toBeNull();
+  });
+});
+
+describe("handleDecision", () => {
+  it("applies and edits the message in the member's language", async () => {
+    const { d, cs, store, venue, items } = await proposal();
+    const r = await handleDecision(d, 1001, "apply", cs.id);
+    expect(r).toEqual({ edit: "• Капучино: 2,90 € → 3,20 €\n\n✅ Приложено", toast: "✅ Приложено" });
+    expect((await store.getSite(venue.id)).items.find((i) => i.id === items.Cappuccino.id)?.price_eur).toBe(3.2);
+    const again = await handleDecision(d, 1001, "apply", cs.id);
+    expect(again).toEqual({ edit: "• Капучино: 2,90 € → 3,20 €\n\nВече е приложено.", toast: "Вече е приложено." });
+  });
+  it("schedules instead of applying when apply_at is in the future", async () => {
+    const { d, cs, store } = await proposal("2026-12-20T06:00:00.000Z");
+    const r = await handleDecision(d, 1001, "apply", cs.id);
+    expect(r.edit).toBe("• Капучино: 2,90 € → 3,20 €\n\n⏰ Насрочено за 20.12.2026, 08:00");
+    expect(await store.getChangeSet(cs.id)).toMatchObject({ status: "scheduled", decided_at: T0.toISOString() });
+  });
+  it("cancels", async () => {
+    const { d, cs, store } = await proposal();
+    expect(await handleDecision(d, 1001, "cancel", cs.id)).toEqual({ edit: "• Капучино: 2,90 € → 3,20 €\n\n❌ Отказано", toast: "❌ Отказано" });
+    expect((await store.getChangeSet(cs.id)).status).toBe("cancelled");
+  });
+  it("marks the next message as a correction on change", async () => {
+    const { d, cs, store, venue } = await proposal();
+    expect(await handleDecision(d, 1001, "change", cs.id)).toEqual({ reply: "Напишете какво да променя в предложението.", toast: "✏️" });
+    expect((await loadMemory(store, venue.id, 1001, T0)).correctionFor).toBe(cs.id);
+    expect((await store.getChangeSet(cs.id)).status).toBe("proposed");
+  });
+  it("ignores other chats and unknown ids", async () => {
+    const { d, cs } = await proposal();
+    expect(await handleDecision(d, 1002, "apply", cs.id)).toEqual({ toast: "That proposal is not from this chat." });
+    expect(await handleDecision(d, 1001, "apply", "missing")).toEqual({ toast: "Това предложение не е от този чат." });
+  });
+});
+```
+
+- [ ] **Step 4: Implement `src/bot/approvals.ts`**
+
+```ts
+// src/bot/approvals.ts
+import { setCorrection } from "../agent/memory";
+import type { Lang } from "../domain/types";
+import type { Store } from "../store/types";
+import { formatDateTime } from "../time";
+import { copy } from "./copy";
+import type { Messenger } from "./messenger";
+
+export type Decision = "apply" | "change" | "cancel";
+
+export function parseCallback(data: string): { decision: Decision; setId: string } | null {
+  const m = /^cs:(apply|change|cancel):([A-Za-z0-9-]+)$/.exec(data);
+  return m ? { decision: m[1] as Decision, setId: m[2] } : null;
+}
+
+export interface DecisionDeps {
+  store: Store;
+  messenger: Messenger;
+  now: () => Date;
+}
+export interface DecisionResult {
+  /** New text for the proposal message (buttons removed). */
+  edit?: string;
+  /** A fresh message to send. */
+  reply?: string;
+  /** Short callback-query answer. */
+  toast?: string;
+}
+
+/** Answer the callback first (the caller does), then run this, then edit the message with `edit`. */
+export async function handleDecision(d: DecisionDeps, chatId: number, decision: Decision, setId: string): Promise<DecisionResult> {
+  const member = await d.store.findMember(chatId);
+  const lang: Lang = member?.lang ?? "bg";
+  const c = copy(lang);
+  let cs;
+  try {
+    cs = await d.store.getChangeSet(setId);
+  } catch {
+    return { toast: c.notYours };
+  }
+  if (cs.chat_id !== chatId || !member || member.venue_id !== cs.venue_id) return { toast: c.notYours };
+  const preview = lang === "bg" ? cs.preview_bg : cs.preview_en;
+  const venue = await d.store.getVenue(cs.venue_id);
+  const now = d.now();
+
+  if (cs.status !== "proposed") return { edit: `${preview}\n\n${c.status[cs.status]}`, toast: c.status[cs.status] };
+
+  if (decision === "change") {
+    await setCorrection(d.store, cs.venue_id, chatId, cs.id, now);
+    return { reply: c.changePrompt, toast: "✏️" };
+  }
+  if (decision === "cancel") {
+    await d.store.updateChangeSet(cs.id, { status: "cancelled", decided_at: now.toISOString() });
+    return { edit: `${preview}\n\n${c.cancelled}`, toast: c.cancelled };
+  }
+  if (cs.apply_at && Date.parse(cs.apply_at) > now.getTime()) {
+    await d.store.updateChangeSet(cs.id, { status: "scheduled", decided_at: now.toISOString() });
+    const line = c.scheduled(formatDateTime(cs.apply_at, lang, venue.tz));
+    return { edit: `${preview}\n\n${line}`, toast: line };
+  }
+  const result = await d.store.applyChangeSet(cs.id, now.toISOString());
+  if (result === "skipped") {
+    const fresh = await d.store.getChangeSet(cs.id);
+    return { edit: `${preview}\n\n${c.status[fresh.status]}`, toast: c.status[fresh.status] };
+  }
+  return { edit: `${preview}\n\n${c.applied}`, toast: c.applied };
+}
+```
+
+- [ ] **Step 5: Run** `npx vitest run test/approvals.test.ts` → PASS.
+
+- [ ] **Step 6: Write the failing bot tests**
+
+```ts
+// test/bot.test.ts
+import { describe, expect, it } from "vitest";
+import { createBot, type BotDeps, type RunRequest } from "@/src/bot/bot";
+import { planChanges } from "@/src/domain/changes";
+import { FakeMessenger, makeDemo } from "./helpers";
+import { BOT_INFO, callbackUpdate, captureApi, textUpdate } from "./tg";
+
+const T0 = new Date("2026-10-09T09:00:00.000Z");
+
+async function setup() {
+  const demo = await makeDemo();
+  const runs: RunRequest[] = [];
+  const messenger = new FakeMessenger();
+  const deps: BotDeps = {
+    token: "t", store: demo.store, messenger, baseUrl: "https://site.example", now: () => T0,
+    startRun: (r) => runs.push(r), transcribe: null, download: async () => ({ bytes: new Uint8Array([1]), contentType: "image/jpeg" }), botInfo: BOT_INFO,
+  };
+  const bot = createBot(deps);
+  const api = captureApi(bot);
+  return { ...demo, runs, bot, api, deps };
+}
+
+describe("bot", () => {
+  it("rejects unknown chats in their language and links them with a valid code", async () => {
+    const { bot, api, store, venue } = await setup();
+    await bot.handleUpdate(textUpdate(2000, "/start", "en"));
+    expect(api.texts()[0]).toMatch(/^This bot manages one venue/);
+    await bot.handleUpdate(textUpdate(2000, "/start WRONGCOD", "en"));
+    expect(api.texts()[1]).toMatch(/invalid, expired/);
+    const code = await store.createInvite(venue.id, "owner", "2026-10-10T00:00:00.000Z");
+    await bot.handleUpdate(textUpdate(2000, `/start ${code}`, "bg"));
+    const token = await store.getAdminToken(venue.id);
+    expect(api.texts()[2]).toContain(`Табло (пазете линка, той е вашият ключ): https://site.example/admin/agala?key=${token}`);
+    expect(api.texts()[2]).toContain("Сайт: https://site.example/agala");
+    expect(await store.findMember(2000)).toMatchObject({ role: "owner", lang: "bg" });
+    await bot.handleUpdate(textUpdate(2000, "hello"));
+    expect(api.texts()).toHaveLength(3);
+  });
+  it("handles /lang, /help, /menu and /undo", async () => {
+    const { bot, api, runs, store } = await setup();
+    await bot.handleUpdate(textUpdate(1001, "/lang en"));
+    expect(api.texts().at(-1)).toBe("Language set to English.");
+    expect((await store.findMember(1001))?.lang).toBe("en");
+    await bot.handleUpdate(textUpdate(1001, "/lang"));
+    expect(api.texts().at(-1)).toBe("Use /lang bg or /lang en.");
+    await bot.handleUpdate(textUpdate(1001, "/help"));
+    expect(api.texts().at(-1)).toMatch(/^Tell me what to change/);
+    await bot.handleUpdate(textUpdate(1001, "/menu"));
+    expect(api.texts().at(-1)).toMatch(/^Site: https:\/\/site.example\/agala\nMenu: https:\/\/site.example\/agala\/menu\nQR code and dashboard: https:\/\/site.example\/admin\/agala\?key=/);
+    await bot.handleUpdate(textUpdate(1001, "/undo"));
+    expect(runs.at(-1)).toMatchObject({ chatId: 1001, text: "Undo the last change.", source: "text" });
+  });
+  it("starts a run for a member's text and shows typing", async () => {
+    const { bot, api, runs, venue } = await setup();
+    await bot.handleUpdate(textUpdate(1001, "Капучиното става 3,20"));
+    expect(runs).toHaveLength(1);
+    expect(runs[0]).toMatchObject({ venueId: venue.id, chatId: 1001, text: "Капучиното става 3,20", source: "text" });
+    expect(runs[0].member.role).toBe("owner");
+    expect(api.calls.some((c) => c.method === "sendChatAction")).toBe(true);
+    expect(api.texts()).toEqual([]);
+  });
+  it("answers the callback first, then applies and edits the message", async () => {
+    const { bot, api, store, venue, items } = await setup();
+    const site = await store.getSite(venue.id);
+    const cs = await store.createChangeSet({ venue_id: venue.id, chat_id: 1001, summary_bg: "x", summary_en: "x", preview_bg: "• Капучино: 2,90 € → 3,20 €", preview_en: "p", source: "text", status: "proposed", tg_message_id: 42, changes: planChanges(site, [{ op: "set_price", item_id: items.Cappuccino.id, price_eur: 3.2 }], { newId: () => "n", now: T0.toISOString() }) });
+    await bot.handleUpdate(callbackUpdate(1001, `cs:apply:${cs.id}`, 42));
+    const methods = api.calls.map((c) => c.method);
+    expect(methods.indexOf("answerCallbackQuery")).toBeLessThan(methods.indexOf("editMessageText"));
+    const edit = api.calls.find((c) => c.method === "editMessageText")!.payload;
+    expect(edit).toMatchObject({ chat_id: 1001, message_id: 42, text: "• Капучино: 2,90 € → 3,20 €\n\n✅ Приложено" });
+    expect((await store.getChangeSet(cs.id)).status).toBe("applied");
+    await bot.handleUpdate(callbackUpdate(1001, `cs:change:${cs.id}`, 42));
+    expect(api.texts().at(-1)).toBe("Вече е приложено.".length ? expect.any(String) : "");
+  });
+  it("sends the change prompt on ✏️", async () => {
+    const { bot, api, store, venue } = await setup();
+    const cs = await store.createChangeSet({ venue_id: venue.id, chat_id: 1001, summary_bg: "x", summary_en: "x", preview_bg: "p", preview_en: "p", source: "text", status: "proposed", tg_message_id: 43, changes: [] });
+    await bot.handleUpdate(callbackUpdate(1001, `cs:change:${cs.id}`, 43));
+    expect(api.texts().at(-1)).toBe("Напишете какво да променя в предложението.");
+    expect(api.calls.some((c) => c.method === "editMessageText")).toBe(false);
+  });
+});
+```
+
+- [ ] **Step 7: Implement `src/bot/bot.ts`**
+
+```ts
+// src/bot/bot.ts
+import { Bot, type Context } from "grammy";
+import type { UserFromGetMe } from "grammy/types";
+import type { ImageInput } from "../agent/run";
+import type { Lang, Member } from "../domain/types";
+import type { Store } from "../store/types";
+import { handleDecision, parseCallback } from "./approvals";
+import { copy, langFromCode } from "./copy";
+import type { Messenger } from "./messenger";
+
+export interface RunRequest {
+  venueId: string;
+  chatId: number;
+  member: Member;
+  text: string;
+  source: "text" | "voice" | "photo";
+  image?: ImageInput;
+  mediaId?: string;
+}
+
+export interface BotDeps {
+  token: string;
+  store: Store;
+  messenger: Messenger;
+  baseUrl: string;
+  now: () => Date;
+  /** Schedules the agent turn (after() on Vercel, a floating promise in dev-bot). Must not throw. */
+  startRun: (r: RunRequest) => void;
+  /** null when STT is not configured. */
+  transcribe: ((bytes: Uint8Array, lang: Lang) => Promise<string>) | null;
+  /** Downloads a Telegram file by file_path; the URL (with the bot token) stays inside. */
+  download: (filePath: string) => Promise<{ bytes: Uint8Array; contentType: string }>;
+  /** Tests pass this to skip getMe. */
+  botInfo?: UserFromGetMe;
+}
+
+const INVITE_TTL_MS = 7 * 24 * 3_600_000;
+export { INVITE_TTL_MS };
+
+export function adminUrl(baseUrl: string, slug: string, token: string): string {
+  return `${baseUrl}/admin/${slug}?key=${token}`;
+}
+export function publicUrl(baseUrl: string, slug: string): string {
+  return `${baseUrl}/${slug}`;
+}
+
+/** Resolves the member for a chat, or replies with the no-access hint and returns null. */
+export async function requireMember(d: BotDeps, ctx: Context): Promise<Member | null> {
+  const chatId = ctx.chat?.id;
+  if (chatId === undefined) return null;
+  const member = await d.store.findMember(chatId);
+  if (member) return member;
+  await ctx.reply(copy(langFromCode(ctx.from?.language_code)).noAccess);
+  return null;
+}
+
+export function createBot(d: BotDeps): Bot {
+  const bot = new Bot(d.token, d.botInfo ? { botInfo: d.botInfo } : undefined);
+
+  bot.command("start", async (ctx) => {
+    const chatId = ctx.chat.id;
+    const uiLang = langFromCode(ctx.from?.language_code);
+    const existing = await d.store.findMember(chatId);
+    if (existing) {
+      const venue = await d.store.getVenue(existing.venue_id);
+      const c = copy(existing.lang);
+      if (existing.role === "owner") await ctx.reply(c.welcomeBack(venue.name, adminUrl(d.baseUrl, venue.slug, await d.store.getAdminToken(venue.id))));
+      else await ctx.reply(c.welcomeStaff(venue.name, publicUrl(d.baseUrl, venue.slug)));
+      return;
+    }
+    const code = (ctx.match ?? "").trim().toUpperCase();
+    if (!code) {
+      await ctx.reply(copy(uiLang).noAccess);
+      return;
+    }
+    const member = await d.store.redeemInvite(code, chatId, uiLang, d.now().toISOString());
+    if (!member) {
+      await ctx.reply(copy(uiLang).badCode);
+      return;
+    }
+    const venue = await d.store.getVenue(member.venue_id);
+    const c = copy(member.lang);
+    if (member.role === "owner") await ctx.reply(c.welcome(venue.name, adminUrl(d.baseUrl, venue.slug, await d.store.getAdminToken(venue.id)), publicUrl(d.baseUrl, venue.slug)));
+    else await ctx.reply(c.welcomeStaff(venue.name, publicUrl(d.baseUrl, venue.slug)));
+  });
+
+  bot.command("lang", async (ctx) => {
+    const member = await requireMember(d, ctx);
+    if (!member) return;
+    const arg = (ctx.match ?? "").trim().toLowerCase();
+    if (arg !== "bg" && arg !== "en") {
+      await ctx.reply(copy(member.lang).langUsage);
+      return;
+    }
+    await d.store.setMemberLang(member.venue_id, member.tg_chat_id, arg);
+    await ctx.reply(copy(arg).langSet);
+  });
+
+  bot.command("help", async (ctx) => {
+    const member = await requireMember(d, ctx);
+    if (member) await ctx.reply(copy(member.lang).help);
+  });
+
+  bot.command("menu", async (ctx) => {
+    const member = await requireMember(d, ctx);
+    if (!member) return;
+    const venue = await d.store.getVenue(member.venue_id);
+    const admin = member.role === "owner" ? adminUrl(d.baseUrl, venue.slug, await d.store.getAdminToken(venue.id)) : null;
+    await ctx.reply(copy(member.lang).menu(publicUrl(d.baseUrl, venue.slug), admin));
+  });
+
+  bot.command("undo", async (ctx) => {
+    const member = await requireMember(d, ctx);
+    if (!member) return;
+    d.startRun({ venueId: member.venue_id, chatId: member.tg_chat_id, member, text: "Undo the last change.", source: "text" });
+    await ctx.replyWithChatAction("typing").catch(() => undefined);
+  });
+
+  bot.on("message:text", async (ctx) => {
+    if (ctx.message.text.startsWith("/")) return; // unknown command
+    const member = await requireMember(d, ctx);
+    if (!member) return;
+    // Start first: a failed acknowledgement must not lose the message.
+    d.startRun({ venueId: member.venue_id, chatId: member.tg_chat_id, member, text: ctx.message.text, source: "text" });
+    await ctx.replyWithChatAction("typing").catch(() => undefined);
+  });
+
+  bot.on("callback_query:data", async (ctx) => {
+    const parsed = parseCallback(ctx.callbackQuery.data);
+    const chatId = ctx.chat?.id;
+    if (!parsed || chatId === undefined) {
+      await ctx.answerCallbackQuery().catch(() => undefined);
+      return;
+    }
+    // Answer first so the client stops spinning, then do the work, then edit the message.
+    await ctx.answerCallbackQuery().catch(() => undefined);
+    const r = await handleDecision({ store: d.store, messenger: d.messenger, now: d.now }, chatId, parsed.decision, parsed.setId);
+    const messageId = ctx.callbackQuery.message?.message_id;
+    if (r.edit && messageId !== undefined) await d.messenger.edit(chatId, messageId, r.edit);
+    if (r.reply) await ctx.reply(r.reply);
+  });
+
+  registerMediaHandlers(bot, d);
+
+  bot.catch(async (err) => {
+    console.error("bot error:", err.error instanceof Error ? err.error.message : err.error);
+    const lang = langFromCode(err.ctx.from?.language_code);
+    await err.ctx.reply(copy(lang).error).catch(() => undefined);
+  });
+  return bot;
+}
+
+/** Photo, image-document and voice handlers (Task 14 fills this in). */
+export function registerMediaHandlers(_bot: Bot, _d: BotDeps): void {}
+```
+
+- [ ] **Step 8: Run** `npx vitest run test/bot.test.ts` → PASS. If grammY's `handleUpdate` complains about `botInfo`, pass it exactly as `BOT_INFO`. In the fourth test replace the odd last assertion with `expect(api.calls.filter((c) => c.method === "editMessageText")).toHaveLength(2)` (the second tap edits with the status line) — the intent is "second decision reports the status".
+
+- [ ] **Step 9: Commit**
+
+```bash
+git add src/bot/copy.ts src/bot/approvals.ts src/bot/bot.ts test/tg.ts test/approvals.test.ts test/bot.test.ts
+git commit -m "Bot: /start with invites, /lang /help /menu /undo, text turns, approval buttons
+
+Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>"
+```
+
+---
+
+### Task 14: Photos and voice notes
+
+**Files:**
+- Create: `src/bot/media.ts`, `src/bot/voice.ts`
+- Modify: `src/bot/bot.ts` (`registerMediaHandlers` body, move it to `src/bot/media.ts` and import it)
+- Test: `test/media.test.ts`, `test/voice.test.ts`, `test/bot-media.test.ts`
+
+**Interfaces:**
+- Produces: `downloadTelegramFile(token, filePath, fetchFn?)`, `MAX_IMAGE_BYTES`, `imageMediaType(contentType, filePath)`, `registerMediaHandlers(bot, d)`; `makeTranscriber({ apiKey, baseUrl, model }, clientFactory?)`, `Transcriber`.
+
+- [ ] **Step 1: Write the failing media tests**
+
+```ts
+// test/media.test.ts
+import { describe, expect, it } from "vitest";
+import { downloadTelegramFile, imageMediaType, MAX_IMAGE_BYTES } from "@/src/bot/media";
+
+describe("downloadTelegramFile", () => {
+  it("fetches the file URL built from the token and never puts the URL in an error", async () => {
+    const urls: string[] = [];
+    const ok = (async (url: string) => {
+      urls.push(url);
+      return new Response(new Uint8Array([1, 2, 3]), { status: 200, headers: { "content-type": "image/jpeg" } });
+    }) as unknown as typeof fetch;
+    const r = await downloadTelegramFile("SECRET", "photos/a.jpg", ok);
+    expect(urls).toEqual(["https://api.telegram.org/file/botSECRET/photos/a.jpg"]);
+    expect(r).toEqual({ bytes: new Uint8Array([1, 2, 3]), contentType: "image/jpeg" });
+    const bad = (async () => new Response("nope", { status: 404 })) as unknown as typeof fetch;
+    await expect(downloadTelegramFile("SECRET", "photos/a.jpg", bad)).rejects.toThrow(/^download failed \(HTTP 404\)$/);
+  });
+  it("rejects files over the limit", async () => {
+    const big = (async () => new Response(new Uint8Array(MAX_IMAGE_BYTES + 1), { status: 200, headers: { "content-type": "image/jpeg" } })) as unknown as typeof fetch;
+    await expect(downloadTelegramFile("S", "x", big)).rejects.toThrow(/too large/);
+  });
+});
+
+describe("imageMediaType", () => {
+  it("prefers the header, falls back to the extension, defaults to jpeg", () => {
+    expect(imageMediaType("image/png", "x.bin")).toBe("image/png");
+    expect(imageMediaType("application/octet-stream", "photos/x.webp")).toBe("image/webp");
+    expect(imageMediaType("application/octet-stream", "photos/x")).toBe("image/jpeg");
+    expect(imageMediaType("application/pdf", "doc.pdf")).toBeNull();
+  });
+});
+```
+
+- [ ] **Step 2: Implement `src/bot/media.ts`** (download + handlers)
+
+```ts
+// src/bot/media.ts
+import type { Bot } from "grammy";
+import type { ImageInput } from "../agent/run";
+import type { BotDeps } from "./bot";
+import { requireMember } from "./bot";
+import { copy } from "./copy";
+
+export const MAX_IMAGE_BYTES = 5 * 1024 * 1024;
+
+/** The URL carries the bot token: it is built here, used once, and never logged or put in an error. */
+export async function downloadTelegramFile(token: string, filePath: string, fetchFn: typeof fetch = fetch): Promise<{ bytes: Uint8Array; contentType: string }> {
+  const res = await fetchFn(`https://api.telegram.org/file/bot${token}/${filePath}`, { signal: AbortSignal.timeout(20_000) });
+  if (!res.ok) throw new Error(`download failed (HTTP ${res.status})`);
+  const buf = new Uint8Array(await res.arrayBuffer());
+  if (buf.byteLength > MAX_IMAGE_BYTES) throw new Error(`file too large (${buf.byteLength} bytes)`);
+  return { bytes: buf, contentType: res.headers.get("content-type") ?? "application/octet-stream" };
+}
+
+const IMAGE_TYPES: ImageInput["media_type"][] = ["image/jpeg", "image/png", "image/webp", "image/gif"];
+
+export function imageMediaType(contentType: string, filePath: string): ImageInput["media_type"] | null {
+  const ct = contentType.split(";")[0].trim().toLowerCase();
+  if ((IMAGE_TYPES as string[]).includes(ct)) return ct as ImageInput["media_type"];
+  if (ct.startsWith("image/")) return "image/jpeg";
+  const ext = filePath.split(".").pop()?.toLowerCase();
+  if (ext === "png") return "image/png";
+  if (ext === "webp") return "image/webp";
+  if (ext === "gif") return "image/gif";
+  if (ext === "jpg" || ext === "jpeg" || ext === undefined || !filePath.includes(".")) return "image/jpeg";
+  return null;
+}
+
+function toBase64(bytes: Uint8Array): string {
+  return Buffer.from(bytes).toString("base64");
+}
+
+export function registerMediaHandlers(bot: Bot, d: BotDeps): void {
+  const handleImage = async (ctx: Parameters<Parameters<Bot["on"]>[1]>[0], fileId: string, caption: string | undefined) => {
+    const member = await requireMember(d, ctx);
+    if (!member) return;
+    const c = copy(member.lang);
+    let media_type: ImageInput["media_type"] | null;
+    let bytes: Uint8Array;
+    try {
+      const file = await ctx.api.getFile(fileId);
+      if (!file.file_path) throw new Error("no file_path");
+      const dl = await d.download(file.file_path);
+      bytes = dl.bytes;
+      media_type = imageMediaType(dl.contentType, file.file_path);
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      console.error(`[bot] image download failed: ${msg}`);
+      await ctx.reply(/too large/.test(msg) ? c.photoTooBig : c.photoFailed);
+      return;
+    }
+    if (!media_type) {
+      await ctx.reply(c.photoFailed);
+      return;
+    }
+    const media = await d.store.saveMedia(member.venue_id, bytes, media_type);
+    d.startRun({ venueId: member.venue_id, chatId: member.tg_chat_id, member, text: caption ?? "", source: "photo", image: { data: toBase64(bytes), media_type }, mediaId: media.id });
+    await ctx.replyWithChatAction("typing").catch(() => undefined);
+  };
+
+  bot.on("message:photo", (ctx) => handleImage(ctx, ctx.message.photo.at(-1)!.file_id, ctx.message.caption));
+  bot.on("message:document", async (ctx) => {
+    const doc = ctx.message.document;
+    if (!doc.mime_type?.startsWith("image/")) return;
+    await handleImage(ctx, doc.file_id, ctx.message.caption);
+  });
+
+  const handleVoice = async (ctx: Parameters<Parameters<Bot["on"]>[1]>[0], fileId: string) => {
+    const member = await requireMember(d, ctx);
+    if (!member) return;
+    const c = copy(member.lang);
+    if (!d.transcribe) {
+      await ctx.reply(c.voiceUnavailable);
+      return;
+    }
+    let text: string;
+    try {
+      const file = await ctx.api.getFile(fileId);
+      if (!file.file_path) throw new Error("no file_path");
+      const dl = await d.download(file.file_path);
+      text = (await d.transcribe(dl.bytes, member.lang)).trim();
+    } catch (e) {
+      console.error(`[bot] voice failed: ${e instanceof Error ? e.message : String(e)}`);
+      await ctx.reply(c.voiceFailed);
+      return;
+    }
+    if (!text) {
+      await ctx.reply(c.voiceFailed);
+      return;
+    }
+    d.startRun({ venueId: member.venue_id, chatId: member.tg_chat_id, member, text, source: "voice" });
+    await ctx.reply(c.heard(text)).catch(() => undefined);
+  };
+  bot.on("message:voice", (ctx) => handleVoice(ctx, ctx.message.voice.file_id));
+  bot.on("message:audio", (ctx) => handleVoice(ctx, ctx.message.audio.file_id));
+}
+```
+
+Then in `src/bot/bot.ts`: delete the stub `registerMediaHandlers`, add `import { registerMediaHandlers } from "./media";` (circular import between `bot.ts` and `media.ts` is fine because both only use each other's exports at call time; if TypeScript or the bundler complains, move `requireMember` into a new `src/bot/members.ts` imported by both).
+
+- [ ] **Step 3: Write the failing voice test and implement `src/bot/voice.ts`**
+
+```ts
+// test/voice.test.ts
+import { describe, expect, it } from "vitest";
+import { makeTranscriber } from "@/src/bot/voice";
+
+describe("makeTranscriber", () => {
+  it("sends the bytes as an ogg file with the model and language, trims the result", async () => {
+    const seen: Record<string, unknown>[] = [];
+    const factory = (cfg: { apiKey: string; baseURL: string }) => {
+      expect(cfg).toEqual({ apiKey: "k", baseURL: "https://api.groq.com/openai/v1" });
+      return { audio: { transcriptions: { create: async (p: Record<string, unknown>) => { seen.push(p); return { text: "  Капучиното става три и двайсет " }; } } } };
+    };
+    const t = makeTranscriber({ apiKey: "k", baseUrl: "https://api.groq.com/openai/v1", model: "whisper-large-v3" }, factory as never);
+    expect(await t(new Uint8Array([1, 2]), "bg")).toBe("Капучиното става три и двайсет");
+    expect(seen[0]).toMatchObject({ model: "whisper-large-v3", language: "bg" });
+    expect((seen[0].file as File).name).toBe("voice.ogg");
+  });
+});
+```
+
+```ts
+// src/bot/voice.ts
+import OpenAI, { toFile } from "openai";
+import type { Lang } from "../domain/types";
+
+export type Transcriber = (bytes: Uint8Array, lang: Lang) => Promise<string>;
+
+interface SttClient {
+  audio: { transcriptions: { create(p: { file: File; model: string; language: string }): Promise<{ text: string }> } };
+}
+
+const defaultFactory = (cfg: { apiKey: string; baseURL: string }): SttClient => new OpenAI({ apiKey: cfg.apiKey, baseURL: cfg.baseURL }) as unknown as SttClient;
+
+/** Any OpenAI-compatible transcription endpoint (Groq by default). */
+export function makeTranscriber(cfg: { apiKey: string; baseUrl: string; model: string }, factory: (c: { apiKey: string; baseURL: string }) => SttClient = defaultFactory): Transcriber {
+  const client = factory({ apiKey: cfg.apiKey, baseURL: cfg.baseUrl });
+  return async (bytes, lang) => {
+    const file = await toFile(bytes, "voice.ogg", { type: "audio/ogg" });
+    const r = await client.audio.transcriptions.create({ file, model: cfg.model, language: lang });
+    return (r.text ?? "").trim();
+  };
+}
+```
+
+- [ ] **Step 4: Write the failing bot media tests**
+
+```ts
+// test/bot-media.test.ts
+import { describe, expect, it } from "vitest";
+import { createBot, type BotDeps, type RunRequest } from "@/src/bot/bot";
+import { FakeMessenger, makeDemo } from "./helpers";
+import { BOT_INFO, captureApi, photoUpdate, voiceUpdate } from "./tg";
+
+const T0 = new Date("2026-10-09T09:00:00.000Z");
+
+async function setup(over: Partial<BotDeps> = {}) {
+  const demo = await makeDemo();
+  const runs: RunRequest[] = [];
+  const deps: BotDeps = {
+    token: "t", store: demo.store, messenger: new FakeMessenger(), baseUrl: "https://site.example", now: () => T0,
+    startRun: (r) => runs.push(r), transcribe: null, download: async () => ({ bytes: new Uint8Array([9, 9]), contentType: "image/jpeg" }), botInfo: BOT_INFO, ...over,
+  };
+  const bot = createBot(deps);
+  return { ...demo, runs, bot, api: captureApi(bot) };
+}
+
+describe("photos", () => {
+  it("downloads the largest size, stores it and starts a photo run with the media id", async () => {
+    const { bot, api, runs, store, venue } = await setup();
+    await bot.handleUpdate(photoUpdate(1001, "това е новата корица"));
+    expect(api.calls.find((c) => c.method === "getFile")?.payload).toEqual({ file_id: "big" });
+    expect(runs[0]).toMatchObject({ source: "photo", text: "това е новата корица", image: { media_type: "image/jpeg", data: Buffer.from([9, 9]).toString("base64") } });
+    const media = (await store.getSite(venue.id)).media;
+    expect(media).toHaveLength(1);
+    expect(runs[0].mediaId).toBe(media[0].id);
+  });
+  it("tells the owner when the download fails, without the URL", async () => {
+    const { bot, api, runs } = await setup({ download: async () => { throw new Error("download failed (HTTP 500)"); } });
+    await bot.handleUpdate(photoUpdate(1001));
+    expect(runs).toHaveLength(0);
+    expect(api.texts()[0]).toBe("Не успях да изтегля снимката. Опитайте отново.");
+  });
+});
+
+describe("voice", () => {
+  it("says voice is unavailable without a transcriber", async () => {
+    const { bot, api } = await setup();
+    await bot.handleUpdate(voiceUpdate(1001));
+    expect(api.texts()[0]).toBe("Гласовите съобщения не са включени на този сървър. Моля, напишете го.");
+  });
+  it("echoes what it heard and starts a voice run", async () => {
+    const { bot, api, runs } = await setup({ transcribe: async (_b, lang) => `heard in ${lang}` });
+    await bot.handleUpdate(voiceUpdate(1001));
+    expect(runs[0]).toMatchObject({ source: "voice", text: "heard in bg" });
+    expect(api.texts()[0]).toBe("🎤 Чух: „heard in bg“");
+  });
+});
+```
+
+- [ ] **Step 5: Run** `npx vitest run test/media.test.ts test/voice.test.ts test/bot-media.test.ts test/bot.test.ts` → PASS; `npx tsc --noEmit` clean.
+
+- [ ] **Step 6: Commit**
+
+```bash
+git add src/bot/media.ts src/bot/voice.ts src/bot/bot.ts test/media.test.ts test/voice.test.ts test/bot-media.test.ts
+git commit -m "Bot: photos to storage with image blocks, voice notes through an OpenAI-compatible STT
+
+Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>"
+```
+
+---
+
+### Task 15: Server wiring: deps, memory-store mode, webhook and tick routes, dev bot, webhook script
+
+**Files:**
+- Create: `src/server/deps.ts`, `src/server/telegram.ts`, `src/server/tick.ts`, `app/api/telegram/route.ts`, `app/api/tick/route.ts`, `vercel.json`, `scripts/dev-bot.mts`, `scripts/set-webhook.mts`
+- Modify: `package.json` (add `"dev:offline": "SITE_MANAGER_STORE=memory next dev"`), `next.config.ts` (images)
+- Test: `test/server-telegram.test.ts`, `test/server-tick.test.ts`, `test/server-deps.test.ts`
+
+**Interfaces:**
+- Produces: `ServerDeps { config; store; messenger; bot; handleRun(r: RunRequest): Promise<void>; isMemory: boolean }`, `makeServerDeps(opts: { defer; env?; store?; transcribe?; client? })`, `getServerDeps(defer)` (process singleton; `SITE_MANAGER_STORE=memory` → `InMemoryStore` seeded with the demo venue, owner chat from `DEMO_OWNER_CHAT_ID` if set, admin link logged once); `handleTelegramRequest(req, deps)`, `handleTickRequest(req, deps, now?)`.
+
+- [ ] **Step 1: Write the failing deps/telegram/tick tests**
+
+```ts
+// test/server-deps.test.ts
+import { describe, expect, it } from "vitest";
+import { makeServerDeps } from "@/src/server/deps";
+
+describe("makeServerDeps (memory mode)", () => {
+  it("seeds the demo venue and a demo owner, and never needs secrets", async () => {
+    const logs: string[] = [];
+    const deps = await makeServerDeps({ defer: (fn) => void fn(), env: { SITE_MANAGER_STORE: "memory", DEMO_OWNER_CHAT_ID: "777" }, log: (s) => logs.push(s) });
+    expect(deps.isMemory).toBe(true);
+    const venue = await deps.store.getVenueBySlug("agala");
+    expect(venue?.name).toBe("Кафене „Ъгъла“");
+    expect((await deps.store.getSite(venue!.id)).items.length).toBe(12);
+    expect(await deps.store.findMember(777)).toMatchObject({ role: "owner" });
+    expect(logs.join("\n")).toMatch(/admin link: http:\/\/localhost:3000\/admin\/agala\?key=/);
+  });
+});
+```
+
+```ts
+// test/server-telegram.test.ts
+import { describe, expect, it } from "vitest";
+import { createBot, type RunRequest } from "@/src/bot/bot";
+import { handleTelegramRequest } from "@/src/server/telegram";
+import { FakeMessenger, makeDemo } from "./helpers";
+import { BOT_INFO, captureApi, textUpdate } from "./tg";
+
+describe("handleTelegramRequest", () => {
+  it("rejects a missing or wrong secret and accepts a valid update", async () => {
+    const demo = await makeDemo();
+    const runs: RunRequest[] = [];
+    const bot = createBot({ token: "t", store: demo.store, messenger: new FakeMessenger(), baseUrl: "http://x", now: () => new Date(), startRun: (r) => runs.push(r), transcribe: null, download: async () => ({ bytes: new Uint8Array(), contentType: "" }), botInfo: BOT_INFO });
+    captureApi(bot);
+    const deps = { config: { telegramWebhookSecret: "s3cret" }, bot };
+    const body = JSON.stringify(textUpdate(1001, "здрасти"));
+    const mk = (headers: Record<string, string>) => new Request("http://localhost/api/telegram", { method: "POST", headers: { "content-type": "application/json", ...headers }, body });
+    expect((await handleTelegramRequest(mk({}), deps)).status).toBe(401);
+    expect((await handleTelegramRequest(mk({ "x-telegram-bot-api-secret-token": "wrong" }), deps)).status).toBe(401);
+    const ok = await handleTelegramRequest(mk({ "x-telegram-bot-api-secret-token": "s3cret" }), deps);
+    expect(ok.status).toBe(200);
+    expect(runs).toHaveLength(1);
+  });
+});
+```
+
+```ts
+// test/server-tick.test.ts
+import { describe, expect, it } from "vitest";
+import { handleTickRequest } from "@/src/server/tick";
+import { FakeMessenger, makeDemo } from "./helpers";
+
+const T0 = new Date("2026-10-09T09:00:00.000Z");
+
+describe("handleTickRequest", () => {
+  it("authorises by header, bearer token or admin key, and scopes by venue for a key", async () => {
+    const demo = await makeDemo();
+    const other = await demo.store.createVenue({ slug: "other", name: "Other" });
+    const a = await demo.store.createChangeSet({ venue_id: demo.venue.id, chat_id: null, summary_bg: "", summary_en: "", preview_bg: "", preview_en: "", source: "text", status: "scheduled", apply_at: "2026-10-09T08:00:00.000Z", changes: [] });
+    const b = await demo.store.createChangeSet({ venue_id: other.id, chat_id: null, summary_bg: "", summary_en: "", preview_bg: "", preview_en: "", source: "text", status: "scheduled", apply_at: "2026-10-09T08:00:00.000Z", changes: [] });
+    const deps = { config: { tickSecret: "tick" }, store: demo.store, messenger: new FakeMessenger() };
+    expect((await handleTickRequest(new Request("http://x/api/tick"), deps, T0)).status).toBe(401);
+    expect((await handleTickRequest(new Request("http://x/api/tick?key=nope"), deps, T0)).status).toBe(401);
+    const key = await demo.store.getAdminToken(demo.venue.id);
+    const scoped = await handleTickRequest(new Request(`http://x/api/tick?key=${key}`), deps, T0);
+    expect(scoped.status).toBe(200);
+    expect(await scoped.json()).toMatchObject({ applied: [a.id] });
+    const all = await handleTickRequest(new Request("http://x/api/tick", { headers: { authorization: "Bearer tick" } }), deps, T0);
+    expect(await all.json()).toMatchObject({ applied: [b.id] });
+    const hdr = await handleTickRequest(new Request("http://x/api/tick", { headers: { "x-tick-secret": "tick" } }), deps, T0);
+    expect(hdr.status).toBe(200);
+  });
+});
+```
+
+- [ ] **Step 2: Implement `src/server/deps.ts`**
+
+```ts
+// src/server/deps.ts
+import type Anthropic from "@anthropic-ai/sdk";
+import type { Bot } from "grammy";
+import { runTurn } from "../agent/run";
+import { createBot, type RunRequest } from "../bot/bot";
+import { downloadTelegramFile } from "../bot/media";
+import { TelegramMessenger, type Messenger } from "../bot/messenger";
+import { makeTranscriber, type Transcriber } from "../bot/voice";
+import { loadConfig, type Config } from "../config";
+import { seedDemo } from "../seed/demo";
+import { InMemoryStore } from "../store/memory";
+import { SupabaseStore } from "../store/supabase";
+import type { Store } from "../store/types";
+import { runTick } from "../tick";
+
+export interface ServerDeps {
+  config: Config;
+  store: Store;
+  messenger: Messenger;
+  bot: Bot;
+  /** Per-venue tick, then the agent turn. Logs and swallows errors. */
+  handleRun: (r: RunRequest) => Promise<void>;
+  isMemory: boolean;
+}
+
+export interface DepsOptions {
+  /** Runs a background job after the response (after() on Vercel; a floating promise elsewhere). */
+  defer: (fn: () => Promise<void>) => void;
+  env?: Record<string, string | undefined>;
+  store?: Store;
+  transcribe?: Transcriber | null;
+  client?: Anthropic;
+  log?: (line: string) => void;
+}
+
+export async function makeServerDeps(o: DepsOptions): Promise<ServerDeps> {
+  const env = o.env ?? process.env;
+  const isMemory = env.SITE_MANAGER_STORE === "memory";
+  const config = loadConfig(env, { lenient: isMemory });
+  const log = o.log ?? ((s: string) => console.log(s));
+
+  let store = o.store;
+  if (!store) {
+    if (isMemory) {
+      const mem = new InMemoryStore();
+      const { venue } = await seedDemo(mem, config.demoVenueSlug);
+      const chat = Number(env.DEMO_OWNER_CHAT_ID);
+      if (Number.isInteger(chat) && chat > 0) await mem.upsertMember({ venue_id: venue.id, tg_chat_id: chat, role: "owner", lang: "bg" });
+      log(`[memory store] demo venue "${venue.slug}" seeded; admin link: ${config.publicBaseUrl}/admin/${venue.slug}?key=${await mem.getAdminToken(venue.id)}`);
+      store = mem;
+    } else {
+      store = new SupabaseStore(config.supabaseUrl, config.supabaseServiceKey);
+    }
+  }
+  const s = store;
+  const transcribe = o.transcribe !== undefined ? o.transcribe : config.sttApiKey ? makeTranscriber({ apiKey: config.sttApiKey, baseUrl: config.sttBaseUrl, model: config.sttModel }) : null;
+
+  const handleRun = async (r: RunRequest) => {
+    try {
+      await runTick({ store: s, messenger, now: new Date(), venueId: r.venueId });
+    } catch (e) {
+      console.error("[tick] per-webhook tick failed:", e instanceof Error ? e.message : e);
+    }
+    try {
+      await runTurn(
+        { store: s, venueId: r.venueId, chatId: r.chatId, member: r.member, messenger, now: () => new Date(), baseUrl: config.publicBaseUrl },
+        { text: r.text, source: r.source, image: r.image, mediaId: r.mediaId },
+        { model: config.agentModel, effort: config.agentEffort, apiKey: config.anthropicApiKey || undefined },
+        o.client,
+      );
+    } catch (e) {
+      console.error("[agent] run failed:", e instanceof Error ? e.message : e);
+    }
+  };
+
+  const bot = createBot({
+    token: config.telegramToken || "memory-mode-no-token",
+    store: s,
+    messenger: null as unknown as Messenger, // replaced below (the messenger needs bot.api)
+    baseUrl: config.publicBaseUrl,
+    now: () => new Date(),
+    startRun: (r) => o.defer(() => handleRun(r)),
+    transcribe,
+    download: (filePath) => downloadTelegramFile(config.telegramToken, filePath),
+  });
+  const messenger = new TelegramMessenger(bot.api);
+  // createBot captured `d.messenger` by reference through `d`; set it now.
+  (bot as unknown as { __deps?: { messenger: Messenger } }).__deps = { messenger };
+  return { config, store: s, messenger, bot, handleRun, isMemory };
+}
+```
+
+Important: `createBot` reads `d.messenger` lazily at callback time, so build the deps object once, pass it to `createBot`, then assign `deps.messenger = new TelegramMessenger(bot.api)` on that same object. Implement it that way (a mutable `botDeps` object) and drop the `__deps` trick above:
+
+```ts
+  const botDeps: BotDeps = { token: ..., store: s, messenger: undefined as unknown as Messenger, ... };
+  const bot = createBot(botDeps);
+  const messenger = new TelegramMessenger(bot.api);
+  botDeps.messenger = messenger;
+```
+
+Add the singleton:
+
+```ts
+let cached: Promise<ServerDeps> | null = null;
+/** One set of deps per server process (Vercel function instance or dev server). */
+export function getServerDeps(defer: DepsOptions["defer"]): Promise<ServerDeps> {
+  cached ??= makeServerDeps({ defer });
+  return cached;
+}
+```
+
+- [ ] **Step 3: Implement `src/server/telegram.ts` and `src/server/tick.ts`**
+
+```ts
+// src/server/telegram.ts
+import { webhookCallback, type Bot } from "grammy";
+
+const handlers = new WeakMap<Bot, (req: Request) => Promise<Response>>();
+
+/** Verifies Telegram's secret header, then hands the update to grammY. The bot's handlers only schedule work, so this returns fast. */
+export async function handleTelegramRequest(req: Request, deps: { config: { telegramWebhookSecret: string }; bot: Bot }): Promise<Response> {
+  const secret = deps.config.telegramWebhookSecret;
+  if (!secret || req.headers.get("x-telegram-bot-api-secret-token") !== secret) return new Response("unauthorized", { status: 401 });
+  let handler = handlers.get(deps.bot);
+  if (!handler) {
+    handler = webhookCallback(deps.bot, "std/http", { timeoutMilliseconds: 25_000, onTimeout: "return" }) as unknown as (req: Request) => Promise<Response>;
+    handlers.set(deps.bot, handler);
+  }
+  try {
+    return await handler(req);
+  } catch (e) {
+    console.error("[telegram] webhook failed:", e instanceof Error ? e.message : e);
+    return new Response("ok", { status: 200 }); // never make Telegram retry
+  }
+}
+```
+
+```ts
+// src/server/tick.ts
+import type { Messenger } from "../bot/messenger";
+import type { Store } from "../store/types";
+import { runTick } from "../tick";
+
+/** Auth: x-tick-secret header, Authorization: Bearer <TICK_SECRET> (Vercel Cron with CRON_SECRET), or ?key=<admin token> (one venue). */
+export async function handleTickRequest(req: Request, deps: { config: { tickSecret: string }; store: Store; messenger: Messenger }, now = new Date()): Promise<Response> {
+  const url = new URL(req.url);
+  const secret = deps.config.tickSecret;
+  const bearer = req.headers.get("authorization")?.replace(/^Bearer\s+/i, "");
+  const global = !!secret && (req.headers.get("x-tick-secret") === secret || bearer === secret);
+  let venueId: string | undefined;
+  if (!global) {
+    const key = url.searchParams.get("key");
+    const venue = key ? await deps.store.findVenueByAdminToken(key) : null;
+    if (!venue) return new Response("unauthorized", { status: 401 });
+    venueId = venue.id;
+  }
+  const report = await runTick({ store: deps.store, messenger: deps.messenger, now, venueId });
+  return Response.json({ ok: true, at: now.toISOString(), ...report });
+}
+```
+
+- [ ] **Step 4: Write the routes, `vercel.json`, `next.config.ts`**
+
+```ts
+// app/api/telegram/route.ts
+import { after } from "next/server";
+import { getServerDeps } from "@/src/server/deps";
+import { handleTelegramRequest } from "@/src/server/telegram";
+
+export const dynamic = "force-dynamic";
+export const maxDuration = 300;
+
+export async function POST(req: Request) {
+  const deps = await getServerDeps((fn) => after(fn));
+  return handleTelegramRequest(req, deps);
+}
+```
+
+```ts
+// app/api/tick/route.ts
+import { after } from "next/server";
+import { getServerDeps } from "@/src/server/deps";
+import { handleTickRequest } from "@/src/server/tick";
+
+export const dynamic = "force-dynamic";
+export const maxDuration = 60;
+
+async function handle(req: Request) {
+  const deps = await getServerDeps((fn) => after(fn));
+  return handleTickRequest(req, deps);
+}
+export const GET = handle;
+export const POST = handle;
+```
+
+```json
+// vercel.json
+{ "crons": [{ "path": "/api/tick", "schedule": "0 3 * * *" }] }
+```
+
+```ts
+// next.config.ts
+import type { NextConfig } from "next";
+
+const supabaseHost = (() => {
+  try {
+    return process.env.NEXT_PUBLIC_SUPABASE_URL ? new URL(process.env.NEXT_PUBLIC_SUPABASE_URL).hostname : null;
+  } catch {
+    return null;
+  }
+})();
+
+const nextConfig: NextConfig = {
+  turbopack: { rules: { "*.css": { loaders: ["@tailwindcss/turbopack"], as: "*.css" } } },
+  images: {
+    remotePatterns: [
+      { protocol: "https", hostname: "*.supabase.co" },
+      ...(supabaseHost ? [{ protocol: "https" as const, hostname: supabaseHost }] : []),
+    ],
+  },
+};
+export default nextConfig;
+```
+
+- [ ] **Step 5: Write `scripts/dev-bot.mts` and `scripts/set-webhook.mts`**
+
+```ts
+// scripts/dev-bot.mts
+// Long polling for local development. Never run while a webhook is set (Telegram allows one or the other):
+//   npm run telegram:set-webhook -- --delete   then   npm run bot:dev
+import { makeServerDeps } from "../src/server/deps";
+
+const deps = await makeServerDeps({ defer: (fn) => void fn().catch((e) => console.error("[run]", e instanceof Error ? e.message : e)) });
+if (!deps.config.telegramToken) throw new Error("Missing TELEGRAM_BOT_TOKEN in .env.local (npm run env:set -- TELEGRAM_BOT_TOKEN)");
+const info = await deps.bot.api.getWebhookInfo();
+if (info.url) throw new Error(`A webhook is set (${info.url}). Run: npm run telegram:set-webhook -- --delete`);
+console.log(`[bot:dev] polling as @${(await deps.bot.api.getMe()).username}; store=${deps.isMemory ? "memory" : "supabase"}; base=${deps.config.publicBaseUrl}`);
+setInterval(() => void deps.handleRun, 0); // keep the event loop explicit
+await deps.bot.start({ onStart: () => console.log("[bot:dev] started; Ctrl-C to stop") });
+```
+
+(Drop the `setInterval` line; `bot.start()` keeps the process alive on its own.)
+
+```ts
+// scripts/set-webhook.mts
+// npm run telegram:set-webhook -- https://your-deployment.vercel.app   |   npm run telegram:set-webhook -- --delete
+import { Api } from "grammy";
+
+const token = process.env.TELEGRAM_BOT_TOKEN?.trim();
+const secret = process.env.TELEGRAM_WEBHOOK_SECRET?.trim();
+if (!token || !secret) throw new Error("Missing TELEGRAM_BOT_TOKEN or TELEGRAM_WEBHOOK_SECRET in .env.local");
+const api = new Api(token);
+const arg = process.argv[2]?.trim();
+if (arg === "--delete") {
+  await api.deleteWebhook({ drop_pending_updates: true });
+  console.log("webhook deleted; bot:dev (long polling) can run now");
+} else {
+  const base = (arg || process.env.PUBLIC_BASE_URL || "").replace(/\/+$/, "");
+  if (!/^https:\/\//.test(base)) throw new Error("Give the https deployment URL: npm run telegram:set-webhook -- https://<deployment>");
+  await api.setWebhook(`${base}/api/telegram`, { secret_token: secret, drop_pending_updates: true, allowed_updates: ["message", "callback_query"] });
+  console.log(`webhook set to ${base}/api/telegram`);
+}
+const info = await api.getWebhookInfo();
+console.log(`url=${info.url || "(none)"} pending=${info.pending_update_count}${info.last_error_message ? ` last_error=${info.last_error_message}` : ""}`);
+```
+
+Add to `package.json` scripts: `"dev:offline": "SITE_MANAGER_STORE=memory next dev"`.
+
+- [ ] **Step 6: Run** `npx vitest run test/server-deps.test.ts test/server-telegram.test.ts test/server-tick.test.ts` → PASS; `npx tsc --noEmit` clean; `npx next build` → green (routes compile; no env needed because config loads lazily per request). Then, with `.env.local` filled: `npm run telegram:set-webhook -- --delete` is **not** run now (nothing is deployed); instead run `npm run bot:dev` for 20 s in the background, confirm it prints "polling as @…", stop it. Record the result in the commit body (or "skipped: no TELEGRAM_BOT_TOKEN").
+
+- [ ] **Step 7: Commit**
+
+```bash
+git add src/server app/api vercel.json next.config.ts scripts/dev-bot.mts scripts/set-webhook.mts package.json test/server-*.test.ts
+git commit -m "Server: deps with memory-store mode, Telegram webhook with after(), tick endpoint, cron, dev bot
+
+Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>"
+```
+
+---
+
+### Task 16: i18n layer, global styles, fonts, root layout, landing page
+
+**Files:**
+- Create: `src/i18n/dicts.ts`, `src/i18n/index.tsx`, `app/not-found.tsx`, `app/components/Landing.tsx`
+- Modify: `app/globals.css`, `app/layout.tsx`, `app/page.tsx`
+- Test: `test/i18n.test.ts` (dictionary completeness)
+
+**Interfaces:**
+- Produces: `MessageKey`, `DICTS`, `LangProvider({ defaultLang, children })`, `useLang() → { lang, setLang, t, locale }`, `LangToggle`, `SITE_NAME = "Site Manager"`. CSS tokens: `--color-paper`, `--color-paper-deep`, `--color-card`, `--color-ink`, `--color-ink-soft`, `--color-accent` (defaults to leaf green; venue pages override `--accent`), `--color-amber`, `--color-clay`, animations `rise`, `flash`, `line-in`.
+
+- [ ] **Step 1: Write the dictionary test**
+
+```ts
+// test/i18n.test.ts
+import { describe, expect, it } from "vitest";
+import { DICTS } from "@/src/i18n/dicts";
+
+describe("dictionaries", () => {
+  it("have the same keys in both languages and no empty strings", () => {
+    const en = Object.keys(DICTS.en).sort();
+    const bg = Object.keys(DICTS.bg).sort();
+    expect(bg).toEqual(en);
+    for (const k of en) {
+      expect(DICTS.en[k as keyof typeof DICTS.en].length, `en ${k}`).toBeGreaterThan(0);
+      expect(DICTS.bg[k as keyof typeof DICTS.bg].length, `bg ${k}`).toBeGreaterThan(0);
+    }
+  });
+});
+```
+
+- [ ] **Step 2: Write `src/i18n/dicts.ts`** (landing, site chrome, admin; both languages must read naturally)
+
+```ts
+// src/i18n/dicts.ts
+export const SITE_NAME = "Site Manager";
+
+const en = {
+  "lang.group": "Language",
+  "nav.demo": "See the demo café",
+  // Landing
+  "landing.title": "Site Manager: your café's website, run from Telegram",
+  "landing.eyebrow": "For cafés and small restaurants",
+  "landing.h1": "Your café's website, managed by chat.",
+  "landing.lead": "We build your site and give you a Telegram bot. Text it, send a voice note or a photo, in Bulgarian or English, and the site changes: prices, sold-out dishes, today's specials, hours, holidays, photos. Every change is previewed, approved with one tap, logged and undoable.",
+  "landing.cta": "Open the demo café →",
+  "landing.ctaNote": "A fictional café, Кафене „Ъгъла“, that we change live during the demo.",
+  "landing.how": "How it works",
+  "landing.step1.title": "You message the bot",
+  "landing.step1.body": "“Капучиното става 3,20”, a voice note, or a photo of the specials board.",
+  "landing.step2.title": "You see the change before it goes live",
+  "landing.step2.body": "The bot shows exactly what will change, in your language. ✅ Apply, ✏️ Change, or ❌ Cancel.",
+  "landing.step3.title": "The site updates in seconds",
+  "landing.step3.body": "Sold-out dishes grey out and come back on their own. Specials expire at closing. Everything is in a log you can undo.",
+  "landing.what": "What the bot can do",
+  "landing.feat1": "Prices and texts, one dish or all of them at once, with rounding",
+  "landing.feat2": "Sold out until tomorrow's opening, automatically back",
+  "landing.feat3": "Today's specials from a photo of the board",
+  "landing.feat4": "Opening hours, holidays and announcements, scheduled in advance",
+  "landing.feat5": "Cover, logo, dish and gallery photos",
+  "landing.feat6": "New dishes with bilingual descriptions and an allergen check",
+  "landing.price": "25 € a month per venue",
+  "landing.priceNote": "Website hosting and the agent, setup included.",
+  "landing.evidence": "Before we had a product, three venues told us what they would pay a month: Bar and Dinner Central 30 €, Coffique 20 €, Family House 50 €.",
+  "landing.built": "Built for the “AI That Does the Work” hackathon with Claude. The AI reads casual Bulgarian, voice and handwriting; we built the site, the content model, the approval step, the scheduler, the log and the multi-venue plumbing.",
+  "landing.footer": "Site Manager · a website your café runs from Telegram",
+  // Public site
+  "site.menu": "Menu",
+  "site.home": "Home",
+  "site.openUntil": "Open until {time}",
+  "site.opensAt": "Opens today at {time}",
+  "site.closedToday": "Closed today",
+  "site.closedUntil": "Closed · opens {when}",
+  "site.specials": "Today's specials",
+  "site.specialUntil": "until {time}",
+  "site.highlights": "From the menu",
+  "site.fullMenu": "See the full menu →",
+  "site.about": "About us",
+  "site.hours": "Opening hours",
+  "site.closedDay": "closed",
+  "site.holidays": "Upcoming closures",
+  "site.findUs": "Find us",
+  "site.map": "Open in Maps",
+  "site.call": "Call",
+  "site.gallery": "Gallery",
+  "site.soldOut": "Sold out",
+  "site.soldOutUntil": "Sold out until {when}",
+  "site.allergens": "Allergens",
+  "site.allergenLegend": "Allergen codes (EU 1169/2011)",
+  "site.updated": "updated",
+  "site.poweredBy": "Site by Site Manager",
+  "site.noItems": "The menu is being prepared.",
+  "site.draft": "Draft preview, not live",
+  "site.draftApply": "Apply",
+  "site.draftReject": "Reject",
+  "site.draftBack": "Back to the dashboard",
+  "site.draftApplied": "Applied. This page now shows the live site.",
+  // Admin
+  "admin.title": "Dashboard",
+  "admin.invalid": "This link is not valid. Ask the bot for a new one with /menu.",
+  "admin.qr": "QR code for the menu",
+  "admin.qrNote": "Print it for the tables. It opens {url}.",
+  "admin.pending": "Waiting for your decision",
+  "admin.none": "Nothing here right now.",
+  "admin.apply": "Apply",
+  "admin.reject": "Reject",
+  "admin.cancel": "Cancel",
+  "admin.undo": "Undo",
+  "admin.preview": "Preview on the site",
+  "admin.scheduled": "Scheduled",
+  "admin.scheduledFor": "applies on {when}",
+  "admin.log": "Change log",
+  "admin.soldOut": "Sold out right now",
+  "admin.backAt": "back {when}",
+  "admin.links": "Links",
+  "admin.site": "Public site",
+  "admin.menuLink": "Menu page",
+  "admin.source.text": "text",
+  "admin.source.voice": "voice",
+  "admin.source.photo": "photo",
+  "admin.source.dashboard": "dashboard",
+  "admin.source.auto": "automatic",
+  "admin.source.undo": "undo",
+  "admin.status.proposed": "proposed",
+  "admin.status.scheduled": "scheduled",
+  "admin.status.applied": "applied",
+  "admin.status.rejected": "rejected",
+  "admin.status.expired": "expired",
+  "admin.status.cancelled": "cancelled",
+  "admin.status.reverted": "reverted",
+  "admin.busy": "Working…",
+  "admin.failed": "That did not work. Try again.",
+};
+export type MessageKey = keyof typeof en;
+
+const bg: Record<MessageKey, string> = {
+  "lang.group": "Език",
+  "nav.demo": "Вижте демо кафенето",
+  "landing.title": "Site Manager: сайтът на вашето кафене, управляван от Telegram",
+  "landing.eyebrow": "За кафенета и малки ресторанти",
+  "landing.h1": "Сайтът на вашето кафене, управляван с едно съобщение.",
+  "landing.lead": "Правим ви сайт и ви даваме Telegram бот. Пишете му, пратете гласово или снимка, на български или английски, и сайтът се променя: цени, изчерпани ястия, днешни предложения, работно време, почивни дни, снимки. Всяка промяна се вижда предварително, потвърждава се с едно докосване, записва се и може да се върне.",
+  "landing.cta": "Отворете демо кафенето →",
+  "landing.ctaNote": "Измислено кафене, Кафене „Ъгъла“, което променяме на живо по време на демото.",
+  "landing.how": "Как работи",
+  "landing.step1.title": "Пишете на бота",
+  "landing.step1.body": "„Капучиното става 3,20“, гласово съобщение или снимка на дъската с предложенията.",
+  "landing.step2.title": "Виждате промяната, преди да е на сайта",
+  "landing.step2.body": "Ботът показва точно какво ще се промени, на вашия език. ✅ Приложи, ✏️ Промени или ❌ Откажи.",
+  "landing.step3.title": "Сайтът се обновява за секунди",
+  "landing.step3.body": "Изчерпаните ястия посивяват и се връщат сами. Предложенията изтичат при затваряне. Всичко е в дневник, който може да се върне назад.",
+  "landing.what": "Какво може ботът",
+  "landing.feat1": "Цени и текстове, едно ястие или всички наведнъж, със закръгляне",
+  "landing.feat2": "Изчерпано до утрешното отваряне, връща се автоматично",
+  "landing.feat3": "Днешните предложения от снимка на дъската",
+  "landing.feat4": "Работно време, почивни дни и съобщения, насрочени предварително",
+  "landing.feat5": "Корица, лого, снимки на ястия и галерия",
+  "landing.feat6": "Нови ястия с описания на два езика и проверка за алергени",
+  "landing.price": "25 € на месец за обект",
+  "landing.priceNote": "Хостинг на сайта и агентът, настройката е включена.",
+  "landing.evidence": "Преди да имаме продукт, три заведения ни казаха колко биха плащали на месец: Bar and Dinner Central 30 €, Coffique 20 €, Family House 50 €.",
+  "landing.built": "Създадено за хакатона „AI That Does the Work“ с Claude. Изкуственият интелект разбира разговорен български, глас и почерк; ние направихме сайта, модела на съдържанието, стъпката за одобрение, насрочването, дневника и инфраструктурата за много обекти.",
+  "landing.footer": "Site Manager · сайт, който кафенето ви управлява от Telegram",
+  "site.menu": "Меню",
+  "site.home": "Начало",
+  "site.openUntil": "Отворено до {time}",
+  "site.opensAt": "Отваря днес в {time}",
+  "site.closedToday": "Днес е почивен ден",
+  "site.closedUntil": "Затворено · отваря {when}",
+  "site.specials": "Специални предложения днес",
+  "site.specialUntil": "до {time}",
+  "site.highlights": "От менюто",
+  "site.fullMenu": "Вижте цялото меню →",
+  "site.about": "За нас",
+  "site.hours": "Работно време",
+  "site.closedDay": "почивен ден",
+  "site.holidays": "Предстоящи почивни дни",
+  "site.findUs": "Къде сме",
+  "site.map": "Отвори в картата",
+  "site.call": "Обади се",
+  "site.gallery": "Галерия",
+  "site.soldOut": "Изчерпано",
+  "site.soldOutUntil": "Изчерпано до {when}",
+  "site.allergens": "Алергени",
+  "site.allergenLegend": "Кодове на алергените (ЕС 1169/2011)",
+  "site.updated": "обновено",
+  "site.poweredBy": "Сайт от Site Manager",
+  "site.noItems": "Менюто се подготвя.",
+  "site.draft": "Чернова, не е публикувана",
+  "site.draftApply": "Приложи",
+  "site.draftReject": "Отхвърли",
+  "site.draftBack": "Обратно към таблото",
+  "site.draftApplied": "Приложено. Страницата вече показва живия сайт.",
+  "admin.title": "Табло",
+  "admin.invalid": "Този линк не е валиден. Поискайте нов от бота с /menu.",
+  "admin.qr": "QR код за менюто",
+  "admin.qrNote": "Разпечатайте го за масите. Отваря {url}.",
+  "admin.pending": "Чакат вашето решение",
+  "admin.none": "В момента няма нищо.",
+  "admin.apply": "Приложи",
+  "admin.reject": "Отхвърли",
+  "admin.cancel": "Откажи",
+  "admin.undo": "Върни",
+  "admin.preview": "Преглед на сайта",
+  "admin.scheduled": "Насрочени",
+  "admin.scheduledFor": "прилага се на {when}",
+  "admin.log": "Дневник на промените",
+  "admin.soldOut": "Изчерпани в момента",
+  "admin.backAt": "връща се {when}",
+  "admin.links": "Линкове",
+  "admin.site": "Публичен сайт",
+  "admin.menuLink": "Страница с менюто",
+  "admin.source.text": "текст",
+  "admin.source.voice": "глас",
+  "admin.source.photo": "снимка",
+  "admin.source.dashboard": "табло",
+  "admin.source.auto": "автоматично",
+  "admin.source.undo": "връщане",
+  "admin.status.proposed": "предложено",
+  "admin.status.scheduled": "насрочено",
+  "admin.status.applied": "приложено",
+  "admin.status.rejected": "отхвърлено",
+  "admin.status.expired": "изтекло",
+  "admin.status.cancelled": "отказано",
+  "admin.status.reverted": "върнато",
+  "admin.busy": "Изпълнява се…",
+  "admin.failed": "Не се получи. Опитайте отново.",
+};
+
+export const DICTS = { en, bg } as const;
+```
+
+- [ ] **Step 3: Write `src/i18n/index.tsx`** (client; adapted from the donation repo: URL `?lang=`, localStorage, `document.documentElement.lang`; no `useSearchParams` so no Suspense boundary is needed)
+
+```tsx
+// src/i18n/index.tsx
+"use client";
+import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from "react";
+import type { Lang } from "../domain/types";
+import { DICTS, type MessageKey } from "./dicts";
+
+const STORAGE_KEY = "site-manager.lang";
+type Vars = Record<string, string | number>;
+
+function interpolate(s: string, vars?: Vars) {
+  return vars ? s.replace(/\{(\w+)\}/g, (m, k: string) => (k in vars ? String(vars[k]) : m)) : s;
+}
+function isLang(v: unknown): v is Lang {
+  return v === "bg" || v === "en";
+}
+function readOverride(): Lang | null {
+  try {
+    const fromUrl = new URLSearchParams(window.location.search).get("lang");
+    if (isLang(fromUrl)) {
+      window.localStorage.setItem(STORAGE_KEY, fromUrl);
+      return fromUrl;
+    }
+    const saved = window.localStorage.getItem(STORAGE_KEY);
+    return isLang(saved) ? saved : null;
+  } catch {
+    return null;
+  }
+}
+
+interface LangContextValue {
+  lang: Lang;
+  setLang: (lang: Lang) => void;
+  t: (key: MessageKey, vars?: Vars) => string;
+  locale: string;
+}
+const LangContext = createContext<LangContextValue | null>(null);
+
+/** `defaultLang` is the server-known default (venue default_lang or "en" for the landing); the visitor's choice overrides it after mount. */
+export function LangProvider({ defaultLang, children }: { defaultLang: Lang; children: ReactNode }) {
+  const [lang, setLangState] = useState<Lang>(defaultLang);
+  useEffect(() => {
+    const o = readOverride();
+    if (o) setLangState(o);
+  }, []);
+  useEffect(() => {
+    document.documentElement.lang = lang;
+  }, [lang]);
+  const setLang = useCallback((next: Lang) => {
+    setLangState(next);
+    try {
+      window.localStorage.setItem(STORAGE_KEY, next);
+      const url = new URL(window.location.href);
+      if (url.searchParams.has("lang")) {
+        url.searchParams.set("lang", next);
+        window.history.replaceState(window.history.state, "", url);
+      }
+    } catch {
+      // storage blocked: the choice just won't survive a reload
+    }
+  }, []);
+  const value = useMemo<LangContextValue>(() => ({ lang, setLang, t: (k, v) => interpolate(DICTS[lang][k], v), locale: lang === "bg" ? "bg-BG" : "en-GB" }), [lang, setLang]);
+  return <LangContext.Provider value={value}>{children}</LangContext.Provider>;
+}
+
+export function useLang() {
+  const ctx = useContext(LangContext);
+  if (!ctx) throw new Error("useLang must be used inside <LangProvider>");
+  return ctx;
+}
+
+/** EN / БГ segmented control; each language named in itself. */
+export function LangToggle({ className = "" }: { className?: string }) {
+  const { lang, setLang, t } = useLang();
+  const options: { value: Lang; label: string; name: string }[] = [
+    { value: "bg", label: "БГ", name: "български" },
+    { value: "en", label: "EN", name: "English" },
+  ];
+  return (
+    <div role="group" aria-label={t("lang.group")} className={`inline-flex shrink-0 rounded-full bg-card p-1 ring-1 ring-ink/10 ${className}`}>
+      {options.map((o) => {
+        const active = lang === o.value;
+        return (
+          <button key={o.value} type="button" lang={o.value} aria-pressed={active} onClick={() => setLang(o.value)}
+            className={`min-h-8 min-w-10 rounded-full px-2.5 text-sm font-semibold transition-colors ${active ? "bg-ink text-paper" : "text-ink/70 hover:bg-ink/5 hover:text-ink"}`}>
+            {o.label}
+            <span className="sr-only">, {o.name}</span>
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+```
+
+- [ ] **Step 4: Replace `app/globals.css`** (tokens, fonts via CSS variables set by `next/font`, animations, reduced motion, projector scale)
+
+```css
+@import "tailwindcss";
+
+@theme {
+  --color-paper: #faf7f2;
+  --color-paper-deep: #f1ebe1;
+  --color-card: #fffdf9;
+  --color-ink: #1d2a24;
+  --color-ink-soft: #4b5a53;
+  --color-accent: var(--accent, #2f6b4f);
+  --color-accent-soft: color-mix(in oklab, var(--accent, #2f6b4f) 14%, white);
+  --color-amber: #8f5c10;
+  --color-amber-soft: #fbf0dc;
+  --color-clay: #a4442c;
+  --color-clay-soft: #f7e4dc;
+  --font-sans: var(--font-onest), ui-sans-serif, system-ui, sans-serif;
+  --font-display: var(--font-literata), ui-serif, Georgia, serif;
+  --animate-rise: rise 520ms cubic-bezier(0.2, 0.7, 0.2, 1) both;
+  --animate-flash: flash 2.2s ease-out both;
+  --animate-line-in: line-in 700ms cubic-bezier(0.2, 0.7, 0.2, 1) both;
+
+  @keyframes rise { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: none; } }
+  /* Held for ~1.5 s, then fades: readable as "this just changed" from the back of a room. */
+  @keyframes flash { 0%, 65% { opacity: 1; } 100% { opacity: 0; } }
+  @keyframes line-in { 0% { opacity: 0; transform: translateX(-8px); background-color: var(--color-amber-soft); } 40% { opacity: 1; transform: none; background-color: var(--color-amber-soft); } 100% { background-color: transparent; } }
+}
+
+html { -webkit-text-size-adjust: 100%; }
+body { background: var(--color-paper); color: var(--color-ink); font-family: var(--font-sans); -webkit-font-smoothing: antialiased; text-rendering: optimizeLegibility; }
+h1, h2, h3, .font-display { font-family: var(--font-display); font-variation-settings: "opsz" 48; }
+/* Faint tinted grain so the off-white does not read as flat on a projector. */
+body::before { content: ""; position: fixed; inset: 0; z-index: -1; pointer-events: none;
+  background-image: radial-gradient(1200px 600px at 85% -10%, color-mix(in oklab, var(--accent, #2f6b4f) 9%, transparent), transparent 60%),
+    radial-gradient(900px 500px at -10% 110%, rgb(183 121 31 / 0.06), transparent 60%); }
+:focus-visible { outline: 3px solid var(--color-accent); outline-offset: 3px; border-radius: 6px; }
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation-duration: 1ms !important; animation-delay: 0ms !important; animation-iteration-count: 1 !important; transition-duration: 1ms !important; }
+}
+@media (min-width: 1600px) { html { font-size: 112.5%; } }
+```
+
+- [ ] **Step 5: Replace `app/layout.tsx`, write `app/page.tsx`, `app/components/Landing.tsx`, `app/not-found.tsx`**
+
+```tsx
+// app/layout.tsx
+import type { Metadata } from "next";
+import { Literata, Onest } from "next/font/google";
+import "./globals.css";
+
+const literata = Literata({ subsets: ["latin", "cyrillic"], variable: "--font-literata", display: "swap", axes: ["opsz"] });
+const onest = Onest({ subsets: ["latin", "cyrillic"], variable: "--font-onest", display: "swap" });
+
+export const metadata: Metadata = {
+  title: "Site Manager",
+  description: "A café website its owner runs from Telegram.",
+};
+
+export default function RootLayout({ children }: LayoutProps<"/">) {
+  return (
+    <html lang="bg" className={`${literata.variable} ${onest.variable} h-full`}>
+      <body className="min-h-full flex flex-col">{children}</body>
+    </html>
+  );
+}
+```
+
+```tsx
+// app/page.tsx
+import { LangProvider } from "@/src/i18n";
+import { Landing } from "./components/Landing";
+
+export default function Page() {
+  return (
+    <LangProvider defaultLang="en">
+      <Landing demoSlug={process.env.DEMO_VENUE_SLUG?.trim() || "agala"} />
+    </LangProvider>
+  );
+}
+```
+
+```tsx
+// app/components/Landing.tsx
+"use client";
+import Link from "next/link";
+import { LangToggle, useLang } from "@/src/i18n";
+import { SITE_NAME } from "@/src/i18n/dicts";
+
+export function Landing({ demoSlug }: { demoSlug: string }) {
+  const { t } = useLang();
+  const steps = [1, 2, 3] as const;
+  const feats = [1, 2, 3, 4, 5, 6] as const;
+  return (
+    <main className="mx-auto w-full max-w-4xl px-4 pb-16 sm:px-6">
+      <header className="flex items-center justify-between py-5">
+        <span className="font-display text-lg font-semibold">{SITE_NAME}</span>
+        <LangToggle />
+      </header>
+      <section className="animate-rise pt-8 sm:pt-16">
+        <p className="text-sm font-semibold uppercase tracking-wide text-accent">{t("landing.eyebrow")}</p>
+        <h1 className="mt-3 text-4xl font-semibold leading-tight sm:text-6xl">{t("landing.h1")}</h1>
+        <p className="mt-5 max-w-2xl text-lg text-ink-soft">{t("landing.lead")}</p>
+        <div className="mt-8 flex flex-col items-start gap-2">
+          <Link href={`/${demoSlug}`} className="rounded-full bg-accent px-6 py-3 text-base font-semibold text-white shadow-sm transition hover:brightness-110">{t("landing.cta")}</Link>
+          <span className="text-sm text-ink-soft">{t("landing.ctaNote")}</span>
+        </div>
+      </section>
+      <section className="mt-16">
+        <h2 className="text-2xl font-semibold">{t("landing.how")}</h2>
+        <ol className="mt-6 grid gap-4 sm:grid-cols-3">
+          {steps.map((n) => (
+            <li key={n} className="rounded-3xl bg-card p-5 ring-1 ring-ink/10">
+              <span className="font-display text-3xl text-accent">{n}</span>
+              <h3 className="mt-2 text-lg font-semibold">{t(`landing.step${n}.title`)}</h3>
+              <p className="mt-1 text-ink-soft">{t(`landing.step${n}.body`)}</p>
+            </li>
+          ))}
+        </ol>
+      </section>
+      <section className="mt-16">
+        <h2 className="text-2xl font-semibold">{t("landing.what")}</h2>
+        <ul className="mt-6 grid gap-3 sm:grid-cols-2">
+          {feats.map((n) => (
+            <li key={n} className="flex gap-3 rounded-2xl bg-paper-deep px-4 py-3"><span aria-hidden="true" className="text-accent">●</span><span>{t(`landing.feat${n}`)}</span></li>
+          ))}
+        </ul>
+      </section>
+      <section className="mt-16 rounded-3xl bg-ink p-6 text-paper sm:p-10">
+        <p className="font-display text-3xl font-semibold sm:text-4xl">{t("landing.price")}</p>
+        <p className="mt-2 text-paper/80">{t("landing.priceNote")}</p>
+        <p className="mt-6 border-t border-paper/20 pt-6 text-paper/90">{t("landing.evidence")}</p>
+      </section>
+      <section className="mt-12 text-ink-soft">
+        <p>{t("landing.built")}</p>
+      </section>
+      <footer className="mt-16 text-sm text-ink-soft">{t("landing.footer")}</footer>
+    </main>
+  );
+}
+```
+
+```tsx
+// app/not-found.tsx
+import Link from "next/link";
+export default function NotFound() {
+  return (
+    <main className="mx-auto flex min-h-[60vh] w-full max-w-xl flex-col items-center justify-center px-4 text-center">
+      <h1 className="text-3xl font-semibold">Page not found · Страницата не е намерена</h1>
+      <Link href="/" className="mt-6 text-accent underline">Site Manager</Link>
+    </main>
+  );
+}
+```
+
+- [ ] **Step 6: Verify**
+
+Run: `npx vitest run test/i18n.test.ts` → PASS; `npx tsc --noEmit`; `npx next build` → green (fonts download at build; if the network blocks Google Fonts, the build fails with a clear message: then switch to `next/font/local` with `@fontsource` files and note it). Then start `npx next dev -p 3100` in the background, `curl -s http://localhost:3100/ | grep -o "Your café's website, managed by chat."`, confirm, stop the server.
+
+- [ ] **Step 7: Commit**
+
+```bash
+git add src/i18n app/globals.css app/layout.tsx app/page.tsx app/components/Landing.tsx app/not-found.tsx test/i18n.test.ts
+git commit -m "Web: bilingual i18n layer, design tokens and fonts, landing page with the pitch
+
+Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>"
+```
+
+---
+
+### Task 17: Public site: home and menu with live updates and draft preview
+
+**Files:**
+- Create: `src/server/site.ts`, `src/lib/supabase-browser.ts`, `app/api/site/[slug]/route.ts`, `app/[slug]/page.tsx`, `app/[slug]/menu/page.tsx`, `app/[slug]/components/{SiteView,useLiveSite,SiteHeader,TodayStatus,Specials,MenuList,Highlights,AboutHours,Gallery,DraftBanner,SiteFooter}.tsx`
+- Test: `test/site-server.test.ts`
+
+**Interfaces:**
+- Consumes: `getServerDeps` (Task 15), `applyChanges` (Task 4), `visibleItems`/`isSoldOut`/`liveAnnouncements` (Task 5), `todayStatus` (Task 1), `LangProvider` (Task 16).
+- Produces: `loadSite(store, slug, opts?: { draftId?, key? }): Promise<{ state: SiteState; draft: DraftInfo | null } | null>` where `DraftInfo = { id; status; summary_bg; summary_en; preview_bg; preview_en }`; `GET /api/site/[slug]` → `{ state: SiteState; now: string }`; `useLiveSite(initial, slug, live: boolean)` → `{ state, now, changed: Set<string> }`; `SiteView({ state, slug, page: "home" | "menu", draft, live })`.
+
+- [ ] **Step 1: Write the failing server test**
+
+```ts
+// test/site-server.test.ts
+import { describe, expect, it } from "vitest";
+import { planChanges } from "@/src/domain/changes";
+import { loadSite } from "@/src/server/site";
+import { makeDemo } from "./helpers";
+
+describe("loadSite", () => {
+  it("returns the live state, null for an unknown slug, and ignores draft without a valid key", async () => {
+    const { store, venue, items } = await makeDemo();
+    const site = await store.getSite(venue.id);
+    const cs = await store.createChangeSet({ venue_id: venue.id, chat_id: 1001, summary_bg: "Капучино 3,20 €", summary_en: "Cappuccino €3.20", preview_bg: "p", preview_en: "p", source: "text", status: "proposed", changes: planChanges(site, [{ op: "set_price", item_id: items.Cappuccino.id, price_eur: 3.2 }], { newId: () => "n", now: "2026-10-09T09:00:00.000Z" }) });
+    expect(await loadSite(store, "nope")).toBeNull();
+    const live = await loadSite(store, "agala");
+    expect(live?.draft).toBeNull();
+    expect(live?.state.items.find((i) => i.id === items.Cappuccino.id)?.price_eur).toBe(2.9);
+    const noKey = await loadSite(store, "agala", { draftId: cs.id, key: "wrong" });
+    expect(noKey?.draft).toBeNull();
+    const key = await store.getAdminToken(venue.id);
+    const draft = await loadSite(store, "agala", { draftId: cs.id, key });
+    expect(draft?.draft).toMatchObject({ id: cs.id, status: "proposed", summary_en: "Cappuccino €3.20" });
+    expect(draft?.state.items.find((i) => i.id === items.Cappuccino.id)?.price_eur).toBe(3.2);
+    await store.applyChangeSet(cs.id, "2026-10-09T09:00:00.000Z");
+    const applied = await loadSite(store, "agala", { draftId: cs.id, key });
+    expect(applied?.draft).toMatchObject({ status: "applied" }); // banner says it is live now; state is not re-applied
+    expect(applied?.state.items.find((i) => i.id === items.Cappuccino.id)?.price_eur).toBe(3.2);
+  });
+});
+```
+
+- [ ] **Step 2: Implement `src/server/site.ts`, the browser client and the site route**
+
+```ts
+// src/server/site.ts
+import { applyChanges } from "../domain/changes";
+import type { SiteState } from "../domain/types";
+import type { Store } from "../store/types";
+
+export interface DraftInfo {
+  id: string;
+  status: string;
+  summary_bg: string;
+  summary_en: string;
+  preview_bg: string;
+  preview_en: string;
+}
+
+/** Live state for a slug; with a valid admin key and a pending draft id, the state with that draft applied on top. */
+export async function loadSite(store: Store, slug: string, opts: { draftId?: string | null; key?: string | null } = {}): Promise<{ state: SiteState; draft: DraftInfo | null } | null> {
+  const venue = await store.getVenueBySlug(slug);
+  if (!venue) return null;
+  let state = await store.getSite(venue.id);
+  let draft: DraftInfo | null = null;
+  if (opts.draftId && opts.key) {
+    const owner = await store.findVenueByAdminToken(opts.key);
+    if (owner && owner.id === venue.id) {
+      try {
+        const cs = await store.getChangeSet(opts.draftId);
+        if (cs.venue_id === venue.id) {
+          draft = { id: cs.id, status: cs.status, summary_bg: cs.summary_bg, summary_en: cs.summary_en, preview_bg: cs.preview_bg, preview_en: cs.preview_en };
+          if (cs.status === "proposed" || cs.status === "scheduled") {
+            try {
+              state = applyChanges(state, cs.changes);
+            } catch (e) {
+              console.error("[site] draft apply failed:", e instanceof Error ? e.message : e);
+            }
+          }
+        }
+      } catch {
+        draft = null;
+      }
+    }
+  }
+  return { state, draft };
+}
+```
+
+```ts
+// src/lib/supabase-browser.ts
+"use client";
+import { createClient, type SupabaseClient } from "@supabase/supabase-js";
+
+// Only NEXT_PUBLIC_* here: this file ships to the browser.
+const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
+const anon = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+export const realtimeConfigured = !!url && !!anon;
+let client: SupabaseClient | null = null;
+export function supabaseBrowser(): SupabaseClient | null {
+  if (!realtimeConfigured) return null;
+  client ??= createClient(url as string, anon as string, { auth: { persistSession: false } });
+  return client;
+}
+```
+
+```ts
+// app/api/site/[slug]/route.ts
+import { after } from "next/server";
+import { getServerDeps } from "@/src/server/deps";
+import { loadSite } from "@/src/server/site";
+
+export const dynamic = "force-dynamic";
+
+export async function GET(_req: Request, ctx: RouteContext<"/api/site/[slug]">) {
+  const { slug } = await ctx.params;
+  const deps = await getServerDeps((fn) => after(fn));
+  const site = await loadSite(deps.store, slug);
+  if (!site) return Response.json({ error: "not found" }, { status: 404 });
+  return Response.json({ state: site.state, now: new Date().toISOString() }, { headers: { "cache-control": "no-store" } });
+}
+```
+
+- [ ] **Step 3: Pages**
+
+```tsx
+// app/[slug]/page.tsx
+import type { Metadata } from "next";
+import { notFound } from "next/navigation";
+import { after } from "next/server";
+import { LangProvider } from "@/src/i18n";
+import { getServerDeps } from "@/src/server/deps";
+import { loadSite } from "@/src/server/site";
+import { SiteView } from "./components/SiteView";
+
+export const dynamic = "force-dynamic";
+
+async function load(slug: string, sp: Record<string, string | string[] | undefined>) {
+  const deps = await getServerDeps((fn) => after(fn));
+  const one = (v: string | string[] | undefined) => (Array.isArray(v) ? v[0] : v) ?? null;
+  return loadSite(deps.store, slug, { draftId: one(sp.draft), key: one(sp.key) });
+}
+
+export async function generateMetadata(props: PageProps<"/[slug]">): Promise<Metadata> {
+  const { slug } = await props.params;
+  const site = await load(slug, {});
+  return site ? { title: site.state.venue.name, description: site.state.venue.default_lang === "bg" ? site.state.venue.tagline_bg : site.state.venue.tagline_en } : { title: "Site Manager" };
+}
+
+export default async function Page(props: PageProps<"/[slug]">) {
+  const { slug } = await props.params;
+  const site = await load(slug, await props.searchParams);
+  if (!site) notFound();
+  return (
+    <LangProvider defaultLang={site.state.venue.default_lang}>
+      <SiteView state={site.state} slug={slug} page="home" draft={site.draft} live={site.draft === null} />
+    </LangProvider>
+  );
+}
+```
+
+`app/[slug]/menu/page.tsx` is identical with `page="menu"` and `PageProps<"/[slug]/menu">`; share `load` by moving it to `app/[slug]/load.ts`.
+
+- [ ] **Step 4: Components** (client; mobile-first; the accent is set as a CSS variable on the wrapper)
+
+```tsx
+// app/[slug]/components/useLiveSite.tsx
+"use client";
+import { useEffect, useRef, useState } from "react";
+import type { SiteState } from "@/src/domain/types";
+import { supabaseBrowser } from "@/src/lib/supabase-browser";
+
+const TABLES = ["items", "categories", "venues", "holidays", "announcements", "site_texts", "media"];
+
+function signature(s: SiteState): Map<string, string> {
+  const m = new Map<string, string>();
+  for (const i of s.items) m.set(i.id, JSON.stringify([i.name_bg, i.name_en, i.desc_bg, i.desc_en, i.price_eur, i.allergens, i.image_media_id, i.sold_out_until, i.is_special, i.special_expires_at, i.active]));
+  m.set("venue", JSON.stringify(s.venue));
+  return m;
+}
+
+/** Polls every 5 s and refetches on realtime events (when configured). `changed` holds ids whose content just changed, for the flash. */
+export function useLiveSite(initial: SiteState, slug: string, live: boolean) {
+  const [state, setState] = useState(initial);
+  const [now, setNow] = useState(() => Date.now());
+  const [changed, setChanged] = useState<Map<string, number>>(new Map());
+  const seq = useRef(0);
+  const prev = useRef(signature(initial));
+
+  useEffect(() => {
+    if (!live) return;
+    let stop = false;
+    const load = async () => {
+      const mine = ++seq.current;
+      try {
+        const res = await fetch(`/api/site/${slug}`, { cache: "no-store" });
+        if (!res.ok || mine !== seq.current || stop) return; // a newer request already started; drop this stale response
+        const data = (await res.json()) as { state: SiteState };
+        const sig = signature(data.state);
+        const at = Date.now();
+        const diff = new Map<string, number>();
+        for (const [id, v] of sig) if (prev.current.get(id) !== v) diff.set(id, at);
+        prev.current = sig;
+        if (diff.size) setChanged((c) => new Map([...c, ...diff]));
+        setState(data.state);
+      } catch {
+        // keep the last good state; the next poll retries
+      }
+    };
+    const poll = window.setInterval(() => void load(), 5000); // safety net if realtime is off
+    const clock = window.setInterval(() => setNow(Date.now()), 15000);
+    let timer: number | undefined;
+    const refresh = () => {
+      window.clearTimeout(timer);
+      timer = window.setTimeout(() => void load(), 250);
+    };
+    const sb = supabaseBrowser();
+    const channel = sb ? TABLES.reduce((ch, table) => ch.on("postgres_changes", { event: "*", schema: "public", table, filter: `venue_id=eq.${initial.venue.id}` }, refresh), sb.channel(`site-${initial.venue.id}`)).subscribe() : null;
+    return () => {
+      stop = true;
+      window.clearInterval(poll);
+      window.clearInterval(clock);
+      window.clearTimeout(timer);
+      if (sb && channel) void sb.removeChannel(channel);
+    };
+  }, [slug, live, initial.venue.id]);
+
+  return { state, now, changed };
+}
+```
+
+`venues` has `id`, not `venue_id`: subscribe to it with `filter: \`id=eq.${initial.venue.id}\`` (special-case the table name in the reduce).
+
+```tsx
+// app/[slug]/components/SiteView.tsx
+"use client";
+import type { SiteState } from "@/src/domain/types";
+import type { DraftInfo } from "@/src/server/site";
+import { DraftBanner } from "./DraftBanner";
+import { Gallery } from "./Gallery";
+import { AboutHours } from "./AboutHours";
+import { Highlights } from "./Highlights";
+import { MenuList } from "./MenuList";
+import { SiteFooter } from "./SiteFooter";
+import { SiteHeader } from "./SiteHeader";
+import { Specials } from "./Specials";
+import { TodayStatus } from "./TodayStatus";
+import { useLiveSite } from "./useLiveSite";
+
+export function SiteView({ state: initial, slug, page, draft, live }: { state: SiteState; slug: string; page: "home" | "menu"; draft: DraftInfo | null; live: boolean }) {
+  const { state, now, changed } = useLiveSite(initial, slug, live);
+  const accent = /^#[0-9a-f]{6}$/i.test(state.venue.theme.accent) ? state.venue.theme.accent : "#2f6b4f";
+  return (
+    <div style={{ "--accent": accent } as React.CSSProperties} className="flex min-h-full flex-col">
+      {draft && <DraftBanner draft={draft} slug={slug} />}
+      <SiteHeader state={state} slug={slug} page={page} />
+      <main className="mx-auto w-full max-w-3xl flex-1 px-4 pb-12 sm:px-6">
+        <TodayStatus state={state} now={now} />
+        {page === "home" ? (
+          <>
+            <Specials state={state} now={now} changed={changed} />
+            <Highlights state={state} now={now} slug={slug} changed={changed} />
+            <AboutHours state={state} now={now} />
+            <Gallery state={state} />
+          </>
+        ) : (
+          <MenuList state={state} now={now} changed={changed} />
+        )}
+      </main>
+      <SiteFooter state={state} />
+    </div>
+  );
+}
+```
+
+Write the remaining components with these responsibilities (each a small client component using `useLang()`; prices via `formatPrice`; names via `itemName`/`categoryName`; images via `next/image` with `fill`/`sizes` from `media.public_url`, or a neutral tile `bg-paper-deep` when there is no image):
+
+- `SiteHeader`: cover image (`venue.cover_media_id` → media `public_url`) as a 40vh hero with the logo circle, name (`font-display`), tagline in the current language, `LangToggle`, nav links Home / Menu. Without a cover: a solid accent-tinted band.
+- `TodayStatus`: `todayStatus(hours, holidays, new Date(now), tz)` → "Open until 18:00" / "Opens today at 08:00" / "Closed today" / "Closed · opens 12.10.2026, 08:00"; a holiday note when `holiday` is set; live announcements (`liveAnnouncements`) as amber chips.
+- `Specials`: `visibleItems` ∩ `is_special` → cards "Today's specials" with "until 18:00" from `special_expires_at` in the venue tz (`localTime`); hidden when none. Changed ids get the `animate-flash` overlay (`key={changed.get(id)}` so it re-triggers).
+- `Highlights`: first 4 visible non-special items with images first, link "See the full menu →".
+- `MenuList`: categories in order, each with its visible items: name, description (current language), price, allergen codes as small chips with `title` = name, sold-out badge (`isSoldOut`) with "Sold out until 10.10.2026, 09:00" and `opacity-50 line-through` on the price; the allergen legend at the end listing only codes used on this menu. Empty menu → `site.noItems`.
+- `AboutHours`: about text, hours table (`weekdayLabel`, today's row bold), upcoming holidays (date ≥ today), address with map link, phone `tel:`, Instagram link.
+- `Gallery`: `media.is_gallery` sorted by position; hidden when empty.
+- `DraftBanner`: sticky top bar "Draft preview, not live · {summary}" with Apply / Reject buttons that `POST /api/admin/{slug}?key={key}` with `{ action, change_set_id }` (key read from `window.location.search`), then `router.replace(\`/${slug}\`)`; when `draft.status !== "proposed"` show the status instead of buttons and the "Back to the dashboard" link.
+- `SiteFooter`: footer_note text, "Site by Site Manager" link to `/`.
+
+- [ ] **Step 5: Verify**
+
+`npx vitest run test/site-server.test.ts` → PASS; `npx tsc --noEmit`; `npx next build` green. Then `SITE_MANAGER_STORE=memory npx next dev -p 3100` in the background and check with curl: `/agala` contains "Кафене „Ъгъла“" and "Отворено до" or "Затворено" (depending on the clock), `/agala/menu` contains "Капучино" and "2,90 €", `/nope` returns 404, `/api/site/agala` returns JSON with 12 items. Open the preview in the browser pane (`preview_start` with a `.claude/launch.json` entry `{"name":"offline","runtimeExecutable":"npm","runtimeArgs":["run","dev:offline"],"port":3000}`) and take one screenshot of `/agala` at mobile width and one of `/agala/menu`; fix anything that looks broken (overflow, unreadable contrast) before committing.
+
+- [ ] **Step 6: Commit**
+
+```bash
+git add src/server/site.ts src/lib/supabase-browser.ts app/api/site app/[slug] test/site-server.test.ts .claude/launch.json
+git commit -m "Web: public café site (home, menu) with live updates, read-time availability and draft preview
+
+Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>"
+```
+
+---
+
+### Task 18: Owner dashboard (approvals, drafts, schedule, log, undo, QR)
+
+**Files:**
+- Create: `src/server/admin.ts`, `app/api/admin/[slug]/route.ts`, `app/admin/[slug]/page.tsx`, `app/admin/[slug]/components/AdminPanel.tsx`
+- Test: `test/admin-server.test.ts`
+
+**Interfaces:**
+- Produces: `adminOverview(store, venue, now): Promise<AdminOverview>` with `{ venue: { id, slug, name, tz, default_lang }, now, public_url, pending: ChangeSet[], scheduled: ChangeSet[], log: ChangeSet[], sold_out: { id, name_bg, name_en, sold_out_until }[] }`; `adminAction(d: { store; messenger; now; baseUrl }, venue, action: "apply" | "reject" | "cancel" | "undo", setId): Promise<{ ok: boolean; status?: string; change_set_id?: string; error?: string }>`; `GET /api/admin/[slug]?key=` → overview or 401; `POST /api/admin/[slug]?key=` body `{ action, change_set_id }`.
+
+- [ ] **Step 1: Write the failing test**
+
+```ts
+// test/admin-server.test.ts
+import { describe, expect, it } from "vitest";
+import { planChanges } from "@/src/domain/changes";
+import { adminAction, adminOverview } from "@/src/server/admin";
+import { FakeMessenger, makeDemo } from "./helpers";
+
+const T0 = new Date("2026-10-09T09:00:00.000Z");
+
+describe("admin", () => {
+  it("builds the overview and applies, rejects, cancels and undoes with the Telegram message edited", async () => {
+    const { store, venue, items } = await makeDemo();
+    const messenger = new FakeMessenger();
+    const d = { store, messenger, now: () => T0, baseUrl: "https://site.example" };
+    const site = await store.getSite(venue.id);
+    const mk = (status: "proposed" | "scheduled", price: number, applyAt: string | null = null) =>
+      store.createChangeSet({ venue_id: venue.id, chat_id: 1001, summary_bg: `Капучино ${price}`, summary_en: `Cappuccino ${price}`, preview_bg: "p", preview_en: "p", source: "text", status, apply_at: applyAt, tg_message_id: 42, changes: planChanges(site, [{ op: "set_price", item_id: items.Cappuccino.id, price_eur: price }], { newId: () => "n", now: T0.toISOString() }) });
+    const p1 = await mk("proposed", 3.2);
+    const p2 = await mk("proposed", 3.3);
+    const s1 = await mk("scheduled", 3.4, "2026-12-01T08:00:00.000Z");
+    const o = await adminOverview(store, venue, T0);
+    expect(o.public_url).toBe("https://site.example/agala");
+    expect(o.pending.map((x) => x.id)).toEqual([p2.id, p1.id]);
+    expect(o.scheduled.map((x) => x.id)).toEqual([s1.id]);
+    expect(o.log).toEqual([]);
+
+    expect(await adminAction(d, venue, "apply", p1.id)).toEqual({ ok: true, status: "applied", change_set_id: p1.id });
+    expect(messenger.edits[0]).toMatchObject({ chatId: 1001, messageId: 42 });
+    expect(messenger.edits[0].text).toContain("✅");
+    expect((await store.getSite(venue.id)).items.find((i) => i.id === items.Cappuccino.id)?.price_eur).toBe(3.2);
+    expect(await adminAction(d, venue, "reject", p2.id)).toEqual({ ok: true, status: "rejected", change_set_id: p2.id });
+    expect(await adminAction(d, venue, "cancel", s1.id)).toEqual({ ok: true, status: "cancelled", change_set_id: s1.id });
+    expect(await adminAction(d, venue, "apply", p2.id)).toEqual({ ok: false, error: 'Change set is "rejected".' });
+
+    const u = await adminAction(d, venue, "undo", p1.id);
+    expect(u.ok).toBe(true);
+    expect((await store.getSite(venue.id)).items.find((i) => i.id === items.Cappuccino.id)?.price_eur).toBe(2.9);
+    expect((await store.getChangeSet(p1.id)).status).toBe("reverted");
+    const after = await adminOverview(store, venue, T0);
+    expect(after.log.map((x) => x.status)).toEqual(["applied", "cancelled", "rejected", "reverted"]);
+    expect(after.log[0]).toMatchObject({ source: "undo", undoes_id: p1.id });
+  });
+  it("lists sold-out items with return times", async () => {
+    const { store, venue, items } = await makeDemo();
+    const site = await store.getSite(venue.id);
+    const cs = await store.createChangeSet({ venue_id: venue.id, chat_id: null, summary_bg: "", summary_en: "", preview_bg: "", preview_en: "", source: "text", status: "proposed", changes: planChanges(site, [{ op: "set_sold_out", item_id: items["Cheese banitsa"].id, until: "2026-10-10T06:00:00.000Z" }], { newId: () => "n", now: T0.toISOString() }) });
+    await store.applyChangeSet(cs.id, T0.toISOString());
+    const o = await adminOverview(store, venue, T0);
+    expect(o.sold_out).toEqual([{ id: items["Cheese banitsa"].id, name_bg: "Баница със сирене", name_en: "Cheese banitsa", sold_out_until: "2026-10-10T06:00:00.000Z" }]);
+  });
+});
+```
+
+- [ ] **Step 2: Implement `src/server/admin.ts`**
+
+```ts
+// src/server/admin.ts
+import type { Messenger } from "../bot/messenger";
+import { invertChanges } from "../domain/changes";
+import { isSoldOut } from "../domain/effective";
+import { renderPreview } from "../domain/preview";
+import type { ChangeSet, Venue } from "../domain/types";
+import type { Store } from "../store/types";
+import { formatDateTime } from "../time";
+
+export interface AdminOverview {
+  venue: Pick<Venue, "id" | "slug" | "name" | "tz" | "default_lang">;
+  now: string;
+  public_url: string;
+  pending: ChangeSet[];
+  scheduled: ChangeSet[];
+  log: ChangeSet[];
+  sold_out: { id: string; name_bg: string; name_en: string; sold_out_until: string }[];
+}
+
+export async function adminOverview(store: Store, venue: Venue, now: Date, baseUrl = ""): Promise<AdminOverview> {
+  const [pending, scheduled, log, site] = await Promise.all([
+    store.listChangeSets(venue.id, { status: ["proposed"], limit: 20 }),
+    store.listChangeSets(venue.id, { status: ["scheduled"], limit: 50 }),
+    store.listChangeSets(venue.id, { status: ["applied", "reverted", "rejected", "expired", "cancelled"], limit: 50 }),
+    store.getSite(venue.id),
+  ]);
+  const nowMs = now.getTime();
+  return {
+    venue: { id: venue.id, slug: venue.slug, name: venue.name, tz: venue.tz, default_lang: venue.default_lang },
+    now: now.toISOString(),
+    public_url: `${baseUrl}/${venue.slug}`,
+    pending,
+    scheduled: [...scheduled].sort((a, b) => (a.apply_at ?? "").localeCompare(b.apply_at ?? "")),
+    log,
+    sold_out: site.items.filter((i) => i.active && isSoldOut(i, nowMs)).map((i) => ({ id: i.id, name_bg: i.name_bg, name_en: i.name_en, sold_out_until: i.sold_out_until as string })),
+  };
+}
+
+export type AdminActionName = "apply" | "reject" | "cancel" | "undo";
+export interface AdminDeps {
+  store: Store;
+  messenger: Messenger;
+  now: () => Date;
+  baseUrl: string;
+}
+
+async function editTelegram(d: AdminDeps, cs: ChangeSet, mark: { bg: string; en: string }) {
+  if (cs.chat_id === null || cs.tg_message_id === null) return;
+  const member = await d.store.findMember(cs.chat_id);
+  const lang = member?.lang ?? "bg";
+  await d.messenger.edit(cs.chat_id, cs.tg_message_id, `${lang === "bg" ? cs.preview_bg : cs.preview_en}\n\n${lang === "bg" ? mark.bg : mark.en}`);
+}
+
+/** The owner's dashboard decisions. The owner's key is the authority, so "apply" applies at once (or schedules a future apply_at). */
+export async function adminAction(d: AdminDeps, venue: Venue, action: AdminActionName, setId: string): Promise<{ ok: boolean; status?: string; change_set_id?: string; error?: string }> {
+  let cs: ChangeSet;
+  try {
+    cs = await d.store.getChangeSet(setId);
+  } catch {
+    return { ok: false, error: "Change set not found." };
+  }
+  if (cs.venue_id !== venue.id) return { ok: false, error: "Change set not found." };
+  const now = d.now();
+  const nowIso = now.toISOString();
+  if (action === "undo") {
+    if (cs.status !== "applied") return { ok: false, error: `Change set is "${cs.status}".` };
+    const site = await d.store.getSite(venue.id);
+    const changes = invertChanges(cs.changes);
+    const undo = await d.store.createChangeSet({
+      venue_id: venue.id, chat_id: cs.chat_id, summary_bg: `Отмяна: ${cs.summary_bg}`, summary_en: `Undo: ${cs.summary_en}`,
+      preview_bg: renderPreview(site, changes, "bg", venue.tz), preview_en: renderPreview(site, changes, "en", venue.tz),
+      source: "undo", status: "proposed", undoes_id: cs.id, changes,
+    });
+    await d.store.applyChangeSet(undo.id, nowIso);
+    if (cs.chat_id !== null) await d.messenger.send(cs.chat_id, (await d.store.findMember(cs.chat_id))?.lang === "en" ? `↩️ Reverted from the dashboard: ${cs.summary_en}` : `↩️ Отменено от таблото: ${cs.summary_bg}`);
+    return { ok: true, status: "applied", change_set_id: undo.id };
+  }
+  if (action === "cancel") {
+    if (cs.status !== "proposed" && cs.status !== "scheduled") return { ok: false, error: `Change set is "${cs.status}".` };
+    await d.store.updateChangeSet(cs.id, { status: "cancelled", decided_at: nowIso });
+    await editTelegram(d, cs, { bg: "❌ Отказано от таблото.", en: "❌ Cancelled from the dashboard." });
+    return { ok: true, status: "cancelled", change_set_id: cs.id };
+  }
+  if (cs.status !== "proposed") return { ok: false, error: `Change set is "${cs.status}".` };
+  if (action === "reject") {
+    await d.store.updateChangeSet(cs.id, { status: "rejected", decided_at: nowIso });
+    await editTelegram(d, cs, { bg: "❌ Отхвърлено от таблото.", en: "❌ Rejected from the dashboard." });
+    return { ok: true, status: "rejected", change_set_id: cs.id };
+  }
+  if (cs.apply_at && Date.parse(cs.apply_at) > now.getTime()) {
+    await d.store.updateChangeSet(cs.id, { status: "scheduled", decided_at: nowIso });
+    await editTelegram(d, cs, { bg: `⏰ Насрочено от таблото за ${formatDateTime(cs.apply_at, "bg", venue.tz)}`, en: `⏰ Scheduled from the dashboard for ${formatDateTime(cs.apply_at, "en", venue.tz)}` });
+    return { ok: true, status: "scheduled", change_set_id: cs.id };
+  }
+  const r = await d.store.applyChangeSet(cs.id, nowIso);
+  if (r === "skipped") return { ok: false, error: `Change set is "${(await d.store.getChangeSet(cs.id)).status}".` };
+  await editTelegram(d, cs, { bg: "✅ Приложено от таблото.", en: "✅ Applied from the dashboard." });
+  return { ok: true, status: "applied", change_set_id: cs.id };
+}
+```
+
+- [ ] **Step 3: Route and page**
+
+```ts
+// app/api/admin/[slug]/route.ts
+import { after } from "next/server";
+import { adminAction, adminOverview, type AdminActionName } from "@/src/server/admin";
+import { getServerDeps } from "@/src/server/deps";
+
+export const dynamic = "force-dynamic";
+
+async function auth(req: Request, slug: string) {
+  const deps = await getServerDeps((fn) => after(fn));
+  const key = new URL(req.url).searchParams.get("key");
+  const venue = key ? await deps.store.findVenueByAdminToken(key) : null;
+  if (!venue || venue.slug !== slug) return { deps, venue: null };
+  return { deps, venue };
+}
+
+export async function GET(req: Request, ctx: RouteContext<"/api/admin/[slug]">) {
+  const { slug } = await ctx.params;
+  const { deps, venue } = await auth(req, slug);
+  if (!venue) return Response.json({ error: "unauthorized" }, { status: 401 });
+  return Response.json(await adminOverview(deps.store, venue, new Date(), deps.config.publicBaseUrl), { headers: { "cache-control": "no-store" } });
+}
+
+export async function POST(req: Request, ctx: RouteContext<"/api/admin/[slug]">) {
+  const { slug } = await ctx.params;
+  const { deps, venue } = await auth(req, slug);
+  if (!venue) return Response.json({ error: "unauthorized" }, { status: 401 });
+  const body = (await req.json().catch(() => ({}))) as { action?: string; change_set_id?: string };
+  const actions: AdminActionName[] = ["apply", "reject", "cancel", "undo"];
+  if (!actions.includes(body.action as AdminActionName) || typeof body.change_set_id !== "string") return Response.json({ error: "bad request" }, { status: 400 });
+  const r = await adminAction({ store: deps.store, messenger: deps.messenger, now: () => new Date(), baseUrl: deps.config.publicBaseUrl }, venue, body.action as AdminActionName, body.change_set_id);
+  return Response.json(r, { status: r.ok ? 200 : 409 });
+}
+```
+
+```tsx
+// app/admin/[slug]/page.tsx
+import { after } from "next/server";
+import { LangProvider } from "@/src/i18n";
+import { adminOverview } from "@/src/server/admin";
+import { getServerDeps } from "@/src/server/deps";
+import { AdminPanel } from "./components/AdminPanel";
+import { InvalidKey } from "./components/InvalidKey";
+
+export const dynamic = "force-dynamic";
+
+export default async function Page(props: PageProps<"/admin/[slug]">) {
+  const { slug } = await props.params;
+  const sp = await props.searchParams;
+  const key = (Array.isArray(sp.key) ? sp.key[0] : sp.key) ?? "";
+  const deps = await getServerDeps((fn) => after(fn));
+  const venue = key ? await deps.store.findVenueByAdminToken(key) : null;
+  if (!venue || venue.slug !== slug) {
+    return (
+      <LangProvider defaultLang="bg"><InvalidKey /></LangProvider>
+    );
+  }
+  const overview = await adminOverview(deps.store, venue, new Date(), deps.config.publicBaseUrl);
+  return (
+    <LangProvider defaultLang={venue.default_lang}>
+      <AdminPanel slug={slug} adminKey={key} initial={overview} />
+    </LangProvider>
+  );
+}
+```
+
+`InvalidKey`: a client component showing `admin.invalid` with the `LangToggle`.
+
+`AdminPanel` (client): polls `GET /api/admin/${slug}?key=` every 3 s with the same sequence guard as `useLiveSite`; sections in this order: header (venue name, `LangToggle`), **Waiting for your decision** (each pending set: summary, preview as `<pre class="whitespace-pre-wrap">`, source chip, buttons Apply / Reject / "Preview on the site" → `/${slug}?draft=${id}&key=${key}` opened in a new tab), **Scheduled** (summary, "applies on {when}", Cancel), **Sold out right now** (name, "back {when}"), **Change log** (summary, status chip, source, time, expandable before → after per change rendered from `preview_*`, Undo button only for `applied`), **QR code** (`QRCodeSVG` from `qrcode.react`, `value={public_url}/menu`, size 200, with `admin.qrNote`), **Links** (site, menu). Buttons POST and then refetch immediately; disable the button while busy; show `admin.failed` on a non-OK response. Times with `formatDateTime(iso, lang, venue.tz)`.
+
+- [ ] **Step 4: Verify**
+
+`npx vitest run test/admin-server.test.ts` → PASS; `npx tsc --noEmit`; `npx next build` green. Offline run: `SITE_MANAGER_STORE=memory npx next dev -p 3100`, read the admin link from the dev server log, `curl` it and check "Табло"/"Dashboard" renders and `/admin/agala?key=wrong` renders the invalid-key page. In the browser pane: open the admin link, create a proposal through the API (there is no bot in memory mode without Telegram) by calling the offline e2e script from Task 19 **or** by temporarily POSTing to nothing; simplest: after Task 19's `e2e-offline` exists, re-check. For now, screenshot the dashboard with the demo data (log empty, QR visible) at mobile width.
+
+- [ ] **Step 5: Commit**
+
+```bash
+git add src/server/admin.ts app/api/admin app/admin test/admin-server.test.ts
+git commit -m "Web: owner dashboard with approvals, draft preview links, schedule, log with undo, QR
+
+Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>"
+```
+
+---
+
+### Task 19: Venue scripts, offline e2e, smoke, README, final checks
+
+**Files:**
+- Create: `scripts/venue-create.mts`, `scripts/demo-reset.mts`, `scripts/e2e-offline.mts`, `scripts/smoke.mts`
+- Modify: `README.md` (replace the scaffold README), `package.json` (`e2e` script already points to `scripts/e2e-offline.mts`)
+
+- [ ] **Step 1: `scripts/venue-create.mts`**
+
+```ts
+// npm run venue:create -- --name "Кафене „Ъгъла“" --slug agala --lang bg [--seed demo] [--tz Europe/Sofia]
+// Prints the owner invite code, a staff invite code and the admin link ONCE. Keep them.
+import { DEMO_VENUE, seedDemo } from "../src/seed/demo";
+import { makeServerDeps } from "../src/server/deps";
+import { INVITE_TTL_MS } from "../src/bot/bot";
+
+const args = new Map<string, string>();
+for (let i = 2; i < process.argv.length; i += 2) args.set(process.argv[i].replace(/^--/, ""), process.argv[i + 1] ?? "");
+const slug = args.get("slug");
+const name = args.get("name");
+if (!slug || !name) throw new Error('Usage: npm run venue:create -- --name "Name" --slug my-cafe [--lang bg|en] [--seed demo]');
+const lang = args.get("lang") === "en" ? "en" : "bg";
+
+const deps = await makeServerDeps({ defer: (fn) => void fn() });
+if (await deps.store.getVenueBySlug(slug)) throw new Error(`slug "${slug}" already exists (use npm run demo:reset to wipe the demo venue's content)`);
+const venue = args.get("seed") === "demo"
+  ? (await seedDemo(deps.store, slug)).venue
+  : await deps.store.createVenue({ ...DEMO_VENUE, slug, name, default_lang: lang, tagline_bg: "", tagline_en: "", about_bg: "", about_en: "", address: "", phone: "", maps_url: "", instagram: "", tz: args.get("tz") || "Europe/Sofia" });
+if (args.get("seed") === "demo" && venue.name !== name) await deps.store.createVenue; // demo keeps its own name; the flag wins
+const expires = new Date(Date.now() + INVITE_TTL_MS).toISOString();
+const owner = await deps.store.createInvite(venue.id, "owner", expires);
+const staff = await deps.store.createInvite(venue.id, "staff", expires);
+const token = await deps.store.getAdminToken(venue.id);
+console.log(`venue ${venue.slug} created (${venue.id})`);
+console.log(`site:        ${deps.config.publicBaseUrl}/${venue.slug}`);
+console.log(`admin link:  ${deps.config.publicBaseUrl}/admin/${venue.slug}?key=${token}`);
+console.log(`owner code:  /start ${owner}   (valid 7 days, one use)`);
+console.log(`staff code:  /start ${staff}   (valid 7 days, one use)`);
+```
+
+(Delete the nonsense `if (... ) await deps.store.createVenue;` line; with `--seed demo` the demo name is used and `--name` is ignored, say so in the usage text.)
+
+- [ ] **Step 2: `scripts/demo-reset.mts`** — clears the demo venue's content and re-seeds the demo menu and texts, keeping members and the admin token; prints the counts. Uses `store.clearVenueContent(venue.id)` then re-inserts categories/items/texts with the same loop as `seedDemo` (extract `seedMenu(store, venueId)` from `seedDemo` so both share it). Also deletes the webhook? No. Also resets `cover_media_id`/`logo_media_id` (done by `clearVenueContent`).
+
+- [ ] **Step 3: `scripts/e2e-offline.mts`** — the demo sequence against the memory store, no network:
+
+```ts
+// npm run e2e  — the demo flow offline: proposal → approve → applied; instant sold-out; schedule; undo; tick. Exit 1 on any mismatch.
+import { makeTools } from "../src/agent/tools";
+import { handleDecision } from "../src/bot/approvals";
+import type { Messenger } from "../src/bot/messenger";
+import { seedDemo } from "../src/seed/demo";
+import { InMemoryStore } from "../src/store/memory";
+import { runTick } from "../src/tick";
+import { adminAction, adminOverview } from "../src/server/admin";
+
+class ConsoleMessenger implements Messenger {
+  lastSetId: string | null = null;
+  async send(chatId: number, text: string) { console.log(`→ [${chatId}] ${text}`); return 1; }
+  async sendProposal(chatId: number, text: string, setId: string) { this.lastSetId = setId; console.log(`→ [${chatId}] ${text}\n   [✅ Приложи] [✏️ Промени] [❌ Откажи]`); return 2; }
+  async edit(chatId: number, messageId: number, text: string) { console.log(`✎ [${chatId}#${messageId}] ${text.split("\n").pop()}`); }
+}
+
+const store = new InMemoryStore();
+const { venue, items } = await seedDemo(store);
+await store.upsertMember({ venue_id: venue.id, tg_chat_id: 1, role: "owner", lang: "bg" });
+const member = (await store.findMember(1))!;
+const messenger = new ConsoleMessenger();
+let now = new Date("2026-10-09T09:00:00.000Z");
+const tools = makeTools({ store, venueId: venue.id, chatId: 1, member, messenger, now: () => now, baseUrl: "http://localhost:3000" });
+const call = async (name: string, input: unknown) => { const t = tools.find((x) => x.name === name)!; return JSON.parse(await (t.run as (i: unknown) => Promise<string>)(t.inputSchema.parse(input))); };
+const assert = (cond: unknown, msg: string) => { if (!cond) { console.error(`FAIL ${msg}`); process.exit(1); } console.log(`PASS ${msg}`); };
+const price = async (id: string) => (await store.getSite(venue.id)).items.find((i) => i.id === id)!.price_eur;
+const cap = items.find((i) => i.name_en === "Cappuccino")!;
+const ban = items.find((i) => i.name_en === "Cheese banitsa")!;
+
+console.log("\n1. „Капучиното става 3,20“");
+const p = await call("propose_changes", { summary_bg: "Капучино 3,20 €", summary_en: "Cappuccino €3.20", changes: [{ op: "set_price", item_id: cap.id, price_eur: 3.2 }] });
+assert(p.status === "proposed" && (await price(cap.id)) === 2.9, "proposal sent, nothing applied yet");
+await handleDecision({ store, messenger, now: () => now }, 1, "apply", p.change_set_id);
+assert((await price(cap.id)) === 3.2, "✅ applies the price");
+
+console.log("\n2. „Баницата свърши“");
+const so = await call("propose_changes", { summary_bg: "Баницата свърши", summary_en: "Banitsa sold out", changes: [{ op: "set_sold_out", item_id: ban.id, until: "next_opening" }] });
+assert(so.status === "applied" && so.sold_out_until === "2026-10-10T06:00:00.000Z", "sold out instantly until tomorrow 09:00");
+
+console.log("\n3. Снимка на дъската → специални предложения");
+const sp = await call("propose_changes", { summary_bg: "Днешни предложения", summary_en: "Today's specials", changes: [{ op: "add_item", item: { category_id: items[0].category_id, name_bg: "Супа топчета", name_en: "Meatball soup", desc_bg: "", desc_en: "", price_eur: 4.5, allergens: [1, 3], is_special: true, special_expires_at: "closing_today" } }] });
+await handleDecision({ store, messenger, now: () => now }, 1, "apply", sp.change_set_id);
+assert((await store.getSite(venue.id)).items.some((i) => i.is_special && i.name_bg === "Супа топчета"), "special on the menu until closing");
+
+console.log("\n4. „Затворени сме на 24 и 25 декември“ (scheduled)");
+const sc = await call("schedule_changes", { summary_bg: "Коледни почивни дни", summary_en: "Christmas closure", apply_at: "2026-12-20T08:00:00+02:00", changes: [{ op: "add_holiday", date: "2026-12-24", note_bg: "Бъдни вечер", note_en: "Christmas Eve" }, { op: "add_holiday", date: "2026-12-25", note_bg: "Коледа", note_en: "Christmas" }] });
+await handleDecision({ store, messenger, now: () => now }, 1, "apply", sc.change_set_id);
+assert((await store.getChangeSet(sc.change_set_id)).status === "scheduled", "approved → scheduled");
+
+console.log("\n5. „Върни цената на капучиното“");
+const u = await call("undo", { change_set_id: p.change_set_id });
+await handleDecision({ store, messenger, now: () => now }, 1, "apply", u.change_set_id);
+assert((await price(cap.id)) === 2.9 && (await store.getChangeSet(p.change_set_id)).status === "reverted", "undo reverts and marks the original");
+
+console.log("\n6. Bulk: „Вдигни всички кафета с 10%“");
+const coffee = (await store.getSite(venue.id)).categories[0];
+const b = await call("propose_bulk_price_change", { category_id: coffee.id, percent: 10, rounding: "0.10" });
+assert(Array.isArray(b.rows) && b.rows.length === 4, "table preview with 4 rows");
+const dash = await adminAction({ store, messenger, now: () => now, baseUrl: "http://x" }, venue, "apply", b.change_set_id);
+assert(dash.ok && (await price(cap.id)) === 3.2, "dashboard approval applies the bulk change");
+
+console.log("\n7. Next morning: the tick writes the auto set and applies the scheduled set at its time");
+now = new Date("2026-10-10T06:30:00.000Z");
+const t1 = await runTick({ store, messenger, now });
+assert(t1.auto.length === 2, "banitsa back in stock + special expired, logged as auto sets");
+now = new Date("2026-12-20T06:30:00.000Z");
+const t2 = await runTick({ store, messenger, now });
+assert(t2.applied.includes(sc.change_set_id) && (await store.getSite(venue.id)).holidays.length === 2, "scheduled holidays applied on time");
+
+const o = await adminOverview(store, venue, now, "http://x");
+console.log(`\nlog: ${o.log.map((s) => `${s.status}:${s.summary_en}`).join(" | ")}`);
+console.log("\nOFFLINE E2E OK");
+```
+
+- [ ] **Step 4: `scripts/smoke.mts`** (live; needs keys) — loads deps (Supabase), finds the demo venue and its first owner member (`store.listChangeSets` is not needed; add `listMembers(venueId)` to `Store` if required, or require `--chat <id>`), prints which model/effort it will use, then runs `runTurn` with `--text` (default "Капучиното става 3,20") and the `TelegramMessenger` (so the preview really arrives on the phone) or a console messenger with `--dry`. Exits 0 when the turn returns anything but "error".
+
+- [ ] **Step 5: README** — replace the scaffold README with these sections, in this order; write them for a reader who has never seen the repo: 
+  1. **Site Manager** one-paragraph pitch (what it is, what the owner does, what the AI does), the price line (25 €/venue/month) and the evidence line (three venues, 20–50 €, named), link to the design spec.
+  2. **Demo** (2 minutes): the eight steps from the spec, as a table "You say / What happens".
+  3. **How it works**: change sets, approval policy, read-time effectiveness and the tick, bilingual content, allergens, multi-venue; the architecture block from the spec.
+  4. **Run locally**: `npm install`, `.env.local` from `.env.example` (table of every key: name, where to get it, required?), `npm run env:set`, offline mode (`npm run dev:offline` and `npm run e2e`), real mode (`npm run db:apply`, `npm run check:rls`, `npm run venue:create -- --name … --slug agala --lang bg --seed demo`, `npm run dev` + `npm run bot:dev`, `/start <code>` on the phone).
+  5. **Deploy to Vercel** step by step: `vercel login`, `vercel link`, `vercel env add` for each key (or the dashboard), set `CRON_SECRET` equal to `TICK_SECRET`, `vercel --prod`, set `PUBLIC_BASE_URL` to the deployment URL and redeploy, `npm run telegram:set-webhook -- https://<deployment>`, check `curl -H "x-tick-secret: …" https://<deployment>/api/tick`, note Hobby cron is daily (`vercel.json`) and Pro can use `*/5 * * * *` or `supabase/cron.sql`.
+  6. **Demo-day checklist**: webhook set (or bot:dev running, never both), `npm run demo:reset`, phone on Telegram with the bot open, projector on `/agala`, admin page in a second tab, backup: typed messages if voice fails, `/undo`.
+  7. **Security notes**: what the anon key can read, where the service key lives, admin link = key, webhook secret, no file-URL logging.
+  8. **Known gaps** (from the spec) and **what is verified** (tests, build, offline e2e) vs **not verified** (fill in at the end).
+
+- [ ] **Step 6: Final checks** (run all; paste outputs in the commit body)
+
+```bash
+npm test
+npx tsc --noEmit
+npm run lint
+npm run e2e
+npx next build
+grep -rl "SUPABASE_SERVICE_ROLE\|service_role" .next/static && echo "LEAK" || echo "no service key in client bundle"
+grep -rl "TELEGRAM_BOT_TOKEN\|api.telegram.org/file" .next/static && echo "LEAK" || echo "no bot token in client bundle"
+grep -rn "src/config" app src/i18n src/lib/supabase-browser.ts app/[slug]/components app/admin/[slug]/components | grep -v "^app/api" && echo "config imported from a client path" || echo "config only on the server"
+```
+
+Then the live steps, each only if its keys are present (otherwise print "skipped: <key> missing" in the report):
+- `npm run db:apply`, `npm run check:rls`
+- `npm run venue:create -- --name "Кафене „Ъгъла“" --slug agala --lang bg --seed demo` (if the slug exists already, `npm run demo:reset` instead) → keep the printed codes for the report (the invite codes and admin link are secrets of the demo venue; put them in the final message to the user, not in git)
+- `npm run smoke -- --dry` (real Anthropic call, console messenger)
+- `npm run dev` + browser pane on `/agala` and the admin link: screenshot both.
+
+- [ ] **Step 7: Commit**
+
+```bash
+git add scripts README.md src package.json
+git commit -m "Scripts: venue create/reset, offline e2e, smoke; README with pitch, deploy guide and checklist
+
+Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>"
+git push
+```
+
+---
+
+## Deviations from the spec (decided while planning; see the final report)
+
+- No SQL RPCs: the dashboard and the public site read through server route handlers backed by `Store`, so the whole web layer runs offline with the memory store (`SITE_MANAGER_STORE=memory`). The anon key is used only for realtime "refetch now" triggers and plain reads.
+- Dashboard "apply" applies immediately (the owner's key is the authority) instead of waiting for the tick.
+- `change_sets.undoes_id` added so an undo set knows its target; `conversations.correction_for` added for the ✏️ button.
+- `seed.sql` dropped: the demo menu lives once, in `src/seed/demo.ts`, used by `venue:create --seed demo`, `demo:reset`, the memory mode and the tests.
+- `/menu` in the bot sends the public link, the menu link and the dashboard link (where the QR lives) instead of a QR image.
+- Speech-to-text is any OpenAI-compatible endpoint (`STT_*` keys, Groq by default), per the updated spec.
+- Draft preview on the public pages (`?draft=&key=`) added at the user's request.
+- TypeScript stays at 5.9 (create-next-app's pin) rather than 7.0.2; Tailwind uses `@tailwindcss/turbopack` (the create-next-app 16.4 default) instead of PostCSS.
