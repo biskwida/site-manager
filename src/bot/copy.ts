@@ -37,6 +37,11 @@ const BG = {
   photoFailed: "Не успях да изтегля снимката. Опитайте отново.",
   photoTooBig: "Снимката е над 5 MB. Изпратете по-малка или я пратете като снимка, а не като файл.",
   error: "Възникна грешка. Опитайте отново.",
+  connectUsage: "Свържете сайта си на WordPress: инсталирайте плъгина Site Manager, отворете Настройки → Site Manager, натиснете „Генерирай код“ и изпратете тук реда, който плъгинът показва:\n/connect https://вашият-сайт.bg КОД",
+  connectOwnerOnly: "Само собственикът може да свързва сайта.",
+  connectUnavailable: "Свързването на сайтове не е включено на този сървър.",
+  connectOk: (name: string, url: string) => `✅ Свързах WordPress сайта „${name}“ (${url}). Вече мога да редактирам страниците, снимките и менютата му; всяка промяна първо ще ви покажа за одобрение.`,
+  connectFailed: (reason: string) => `Не успях да свържа сайта. ${reason}`,
 };
 
 const EN: typeof BG = {
@@ -70,6 +75,11 @@ const EN: typeof BG = {
   photoFailed: "I couldn't download the photo. Please try again.",
   photoTooBig: "The photo is over 5 MB. Send a smaller one, or send it as a photo rather than a file.",
   error: "Something went wrong. Please try again.",
+  connectUsage: "Connect your WordPress site: install the Site Manager plugin, open Settings → Site Manager, press “Generate code” and send me the line the plugin shows:\n/connect https://your-site.com CODE",
+  connectOwnerOnly: "Only the owner can connect the site.",
+  connectUnavailable: "Connecting sites is not enabled on this server.",
+  connectOk: (name, url) => `✅ Connected the WordPress site “${name}” (${url}). I can now edit its pages, photos and menus; every change is shown to you for approval first.`,
+  connectFailed: (reason) => `I could not connect the site. ${reason}`,
 };
 
 export function copy(lang: Lang) {

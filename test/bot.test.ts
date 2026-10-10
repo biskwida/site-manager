@@ -100,4 +100,25 @@ describe("bot", () => {
     expect(api.texts().at(-1)).toBe("Напишете какво да променя в предложението.");
     expect(api.calls.some((c) => c.method === "editMessageText")).toBe(false);
   });
+  it("handles /connect: usage, owner-only, feature off, success and failure", async () => {
+    const { bot, api, deps } = await setup();
+    await bot.handleUpdate(textUpdate(1001, "/connect"));
+    expect(api.texts().at(-1)).toMatch(/^Свържете сайта си на WordPress/);
+    await bot.handleUpdate(textUpdate(1002, "/connect https://cafe.example ABC", "en"));
+    expect(api.texts().at(-1)).toBe("Only the owner can connect the site.");
+    await bot.handleUpdate(textUpdate(1001, "/connect https://cafe.example ABC"));
+    expect(api.texts().at(-1)).toBe("Свързването на сайтове не е включено на този сървър.");
+    const calls: unknown[] = [];
+    deps.connect = async (venueId, siteUrl, code) => {
+      calls.push([venueId, siteUrl, code]);
+      return code === "GOOD"
+        ? { ok: true, site: { name: "Smoke Café" } as never, destination: { config: { site_url: "https://cafe.example" } } as never }
+        : { ok: false, reason: { bg: "Кодът е грешен.", en: "The code is wrong." } };
+    };
+    await bot.handleUpdate(textUpdate(1001, "/connect https://cafe.example/ GOOD"));
+    expect(calls[0]).toEqual([(await deps.store.findMember(1001))!.venue_id, "https://cafe.example/", "GOOD"]);
+    expect(api.texts().at(-1)).toMatch(/^✅ Свързах WordPress сайта „Smoke Café“ \(https:\/\/cafe\.example\)/);
+    await bot.handleUpdate(textUpdate(1001, "/connect https://cafe.example BAD", "en"));
+    expect(api.texts().at(-1)).toBe("Не успях да свържа сайта. Кодът е грешен."); // the member's language is bg; a Latin command text keeps it
+  });
 });

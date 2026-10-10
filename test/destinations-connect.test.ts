@@ -1,0 +1,62 @@
+// test/destinations-connect.test.ts
+import { describe, expect, it } from "vitest";
+import { connectWordPress, disconnectWordPress, wordPressClientFor } from "@/src/destinations/connect";
+import { decryptSecrets, parseSecretKey } from "@/src/destinations/secrets";
+import { FakeWordPress } from "./fake-wordpress";
+import { makeDemo } from "./helpers";
+
+const KEY = parseSecretKey("ab".repeat(32));
+const T0 = new Date("2026-10-09T09:00:00.000Z");
+
+describe("connectWordPress", () => {
+  it("validates the URL, handshakes, stores the encrypted token and the site info", async () => {
+    const { store, venue } = await makeDemo();
+    const wp = new FakeWordPress();
+    const d = { store, secretKey: KEY, fetch: wp.fetch, now: () => T0 };
+    const bad = await connectWordPress(d, venue.id, "http://cafe.example", "X");
+    expect(bad).toMatchObject({ ok: false });
+    if (!bad.ok) expect(bad.reason.en).toMatch(/https/);
+    const code = wp.issueCode();
+    const wrong = await connectWordPress(d, venue.id, "https://cafe.example/", "NOPE");
+    expect(wrong.ok).toBe(false);
+    if (!wrong.ok) expect(wrong.reason.bg).toMatch(/код/i);
+    expect(await store.getDestination(venue.id, "wordpress")).toBeNull();
+    const r = await connectWordPress(d, venue.id, "https://cafe.example/", code);
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    expect(r.site.name).toBe("Smoke Café");
+    expect(r.destination).toMatchObject({ kind: "wordpress", status: "connected", config: { site_url: "https://cafe.example", site_name: "Smoke Café", wp_version: "6.8", plugin_version: "0.1.0", connected_at: T0.toISOString(), connected_user: "admin" } });
+    expect(r.destination).not.toHaveProperty("secrets");
+    const row = await store.getDestination(venue.id, "wordpress");
+    expect(row?.secrets).not.toContain(wp.calls[0].body);
+    const token = decryptSecrets(row!.secrets, KEY).token;
+    expect(token).toHaveLength(64);
+    const got = await wordPressClientFor(d, venue.id);
+    expect(got?.destination.config.site_url).toBe("https://cafe.example");
+    expect((await got!.client.site()).connected_user).toEqual({ id: 1, login: "admin" });
+  });
+  it("explains an unreachable site and refuses without a secret key", async () => {
+    const { store, venue } = await makeDemo();
+    const wp = new FakeWordPress();
+    wp.unreachable = true;
+    const r = await connectWordPress({ store, secretKey: KEY, fetch: wp.fetch }, venue.id, "https://cafe.example", "ABC");
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.reason.en).toMatch(/could not reach/i);
+    const noKey = await connectWordPress({ store, secretKey: null, fetch: wp.fetch }, venue.id, "https://cafe.example", "ABC");
+    expect(noKey.ok).toBe(false);
+    if (!noKey.ok) expect(noKey.reason.en).toMatch(/DESTINATION_SECRET_KEY/);
+  });
+  it("disconnects and reconnects with a fresh token", async () => {
+    const { store, venue } = await makeDemo();
+    const wp = new FakeWordPress();
+    const d = { store, secretKey: KEY, fetch: wp.fetch };
+    await connectWordPress(d, venue.id, "https://cafe.example", wp.issueCode());
+    const first = decryptSecrets((await store.getDestination(venue.id, "wordpress"))!.secrets, KEY).token;
+    expect(await disconnectWordPress(d, venue.id)).toBe(true);
+    expect(await disconnectWordPress(d, venue.id)).toBe(false);
+    expect(await wordPressClientFor(d, venue.id)).toBeNull();
+    await connectWordPress(d, venue.id, "https://cafe.example", wp.issueCode());
+    const second = decryptSecrets((await store.getDestination(venue.id, "wordpress"))!.secrets, KEY).token;
+    expect(second).not.toBe(first);
+  });
+});

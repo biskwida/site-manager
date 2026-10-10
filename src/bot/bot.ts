@@ -4,6 +4,7 @@ import type { UserFromGetMe } from "grammy/types";
 import type { ImageInput } from "../agent/run";
 import { detectLang } from "../domain/format";
 import type { Lang, Member } from "../domain/types";
+import type { ConnectResult } from "../destinations/connect";
 import type { Store } from "../store/types";
 import { handleDecision, parseCallback } from "./approvals";
 import { copy, langFromCode } from "./copy";
@@ -34,6 +35,8 @@ export interface BotDeps {
   download: (filePath: string) => Promise<{ bytes: Uint8Array; contentType: string }>;
   /** Tests pass this to skip getMe. */
   botInfo?: UserFromGetMe;
+  /** Connects the venue to its WordPress site (src/destinations/connect.ts); undefined = the feature is off. */
+  connect?: (venueId: string, siteUrl: string, code: string) => Promise<ConnectResult>;
 }
 
 const INVITE_TTL_MS = 7 * 24 * 3_600_000;
@@ -117,6 +120,28 @@ export function createBot(d: BotDeps): Bot {
     const lang = detectLang(ctx.message?.text ?? "") ?? member.lang;
     d.startRun({ venueId: member.venue_id, chatId: member.tg_chat_id, member: { ...member, lang }, text: "Undo the last change.", source: "text" });
     await ctx.replyWithChatAction("typing").catch(() => undefined);
+  });
+
+  bot.command("connect", async (ctx) => {
+    const member = await requireMember(d, ctx);
+    if (!member) return;
+    const lang = detectLang(ctx.message?.text ?? "") ?? member.lang;
+    const c = copy(lang);
+    if (member.role !== "owner") {
+      await ctx.reply(c.connectOwnerOnly);
+      return;
+    }
+    const [siteUrl, code] = (ctx.match ?? "").trim().split(/\s+/);
+    if (!siteUrl || !code) {
+      await ctx.reply(c.connectUsage);
+      return;
+    }
+    if (!d.connect) {
+      await ctx.reply(c.connectUnavailable);
+      return;
+    }
+    const r = await d.connect(member.venue_id, siteUrl, code);
+    await ctx.reply(r.ok ? c.connectOk(r.site.name, String(r.destination.config.site_url)) : c.connectFailed(lang === "bg" ? r.reason.bg : r.reason.en));
   });
 
   bot.on("message:text", async (ctx) => {
