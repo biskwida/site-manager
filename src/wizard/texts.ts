@@ -4,7 +4,7 @@
 import type Anthropic from "@anthropic-ai/sdk";
 import { z } from "zod";
 import type { Lang } from "../domain/types";
-import { wireSchema } from "./extract";
+import { errorSummary, wireSchema } from "./tool-schema";
 
 export const TEXTS_MAX_FACTS = 2000;
 
@@ -70,7 +70,7 @@ export async function draftTexts(client: Anthropic, cfg: { model: string }, fact
       messages: [{ role: "user", content: [{ type: "text", text }] }],
     });
   } catch (e) {
-    console.error("[wizard] texts call failed:", e instanceof Error ? e.message : "unknown error");
+    console.error("[wizard] texts call failed:", errorSummary(e));
     return "error";
   }
   if (res.stop_reason === "refusal") return "refused";

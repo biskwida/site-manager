@@ -5,6 +5,7 @@ import type Anthropic from "@anthropic-ai/sdk";
 import { z } from "zod";
 import { ALLERGENS, isAllergenCode, suggestAllergens } from "../domain/allergens";
 import { clampPrice, round2 } from "../domain/pricing";
+import { errorSummary, wireSchema } from "./tool-schema";
 
 export const BGN_PER_EUR = 1.95583;
 export const EXTRACT_MAX_FILES = 6;
@@ -18,9 +19,11 @@ export interface ExtractFile {
   /** base64, no data: prefix */
   data: string;
 }
+/** Standard base64 alphabet with optional padding, no whitespace or "data:" prefix; the body is parsed, never decoded, on the server. */
+export const BASE64_RE = /^[A-Za-z0-9+/]+={0,2}$/;
 export const ExtractFilesSchema = z.object({
   files: z
-    .array(z.object({ media_type: z.enum([...IMAGE_MEDIA_TYPES, "application/pdf"]), data: z.string().min(1) }))
+    .array(z.object({ media_type: z.enum([...IMAGE_MEDIA_TYPES, "application/pdf"]), data: z.string().regex(BASE64_RE, "base64 without a data: prefix") }))
     .min(1)
     .max(EXTRACT_MAX_FILES),
 });
@@ -61,16 +64,6 @@ export const ExtractResultSchema = z.object({
   notes_bg: z.string().describe("Anything the owner should check, in Bulgarian; empty when nothing"),
   notes_en: z.string().describe("The same in English"),
 }) satisfies z.ZodType<ExtractResult>;
-
-/**
- * JSON Schema for a strict tool input, from a zod object: nested inline (no $defs/$ref — the SDK's betaZodTool uses
- * `reused: "ref"`, which hoists every described array item into $defs), without the "$schema" key. The zod schema itself
- * must carry no numeric or length constraints; the tests check the result for the keywords the API rejects.
- */
-export function wireSchema(schema: z.ZodType): Anthropic.Beta.BetaTool["input_schema"] {
-  const json = z.toJSONSchema(schema, { reused: "inline" });
-  return Object.fromEntries(Object.entries(json).filter(([k]) => k !== "$schema")) as Anthropic.Beta.BetaTool["input_schema"];
-}
 
 const TOOL_NAME = "extract_menu";
 /** The wire definition: one tool, strict so the model's input always matches the schema (additionalProperties: false, all keys required). */
@@ -117,6 +110,7 @@ export function postProcessExtract(r: ExtractResult): ExtractResult {
       name_en: c.name_en.trim(),
       items: c.items.map((it) => {
         const raw = Number.isFinite(it.price_eur) ? it.price_eur : 0;
+        // "unknown" (no currency printed) is treated as EUR: menus are EUR-first since 2026 and the owner reviews every price anyway.
         const eur = it.currency_seen === "BGN" ? raw / BGN_PER_EUR : raw;
         const text = `${it.name_en} ${it.desc_en} ${it.name_bg} ${it.desc_bg}`;
         // The tool schema cannot bound the codes (see above): drop anything that is not a whole number 1–14.
@@ -170,7 +164,7 @@ export async function extractMenu(client: Anthropic, cfg: { model: string }, fil
       messages: [{ role: "user", content: contentBlocks(files) }],
     });
   } catch (e) {
-    console.error("[wizard] extract call failed:", e instanceof Error ? e.message : "unknown error");
+    console.error("[wizard] extract call failed:", errorSummary(e));
     return "error";
   }
   if (res.stop_reason === "refusal") return "refused";

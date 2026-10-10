@@ -1,6 +1,6 @@
 // test/wizard-extract.test.ts
 import Anthropic from "@anthropic-ai/sdk";
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   base64Bytes,
   checkExtractFiles,
@@ -11,7 +11,7 @@ import {
   postProcessExtract,
   type ExtractResult,
 } from "@/src/wizard/extract";
-import { forbiddenSchemaKeys } from "./helpers";
+import { toolSchemaViolations } from "./helpers";
 
 const PNG_1x1 = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==";
 const PDF_STUB = Buffer.from("%PDF-1.4\n%stub\n").toString("base64");
@@ -98,7 +98,7 @@ describe("extractMenu request shape", () => {
     const { client, calls } = fakeClient(toolUse(RAW));
     await extractMenu(client, { model: "m" }, [{ media_type: "image/png", data: PNG_1x1 }]);
     const schema = (calls[0].tools as { input_schema: Record<string, unknown> }[])[0].input_schema;
-    expect(forbiddenSchemaKeys(JSON.parse(JSON.stringify(schema)))).toEqual([]);
+    expect(toolSchemaViolations(JSON.parse(JSON.stringify(schema)))).toEqual([]);
     const at = (o: unknown, ...path: string[]) => path.reduce<unknown>((cur, k) => (cur as Record<string, unknown>)[k], o);
     const item = at(schema, "properties", "categories", "items", "properties", "items", "items", "properties") as Record<string, Record<string, unknown>>;
     expect(item.allergens).toMatchObject({ type: "array", items: { type: "number" } });
@@ -144,6 +144,7 @@ describe("postProcessExtract", () => {
 
 describe("extractMenu outcomes", () => {
   const files = [{ media_type: "image/jpeg" as const, data: PNG_1x1 }];
+  afterEach(() => vi.restoreAllMocks());
   it("returns the post-processed result on tool_use", async () => {
     const { client } = fakeClient(toolUse(RAW));
     const r = await extractMenu(client, { model: "m" }, files);
@@ -165,6 +166,19 @@ describe("extractMenu outcomes", () => {
     expect(await extractMenu(fakeClient(toolUse({ categories: "nope" })).client, { model: "m" }, files)).toBe("error");
     expect(await extractMenu(fakeClient(toolUse({ ...RAW, notes_en: 1 })).client, { model: "m" }, files)).toBe("error");
     expect(await extractMenu(fakeClient(new Error("boom")).client, { model: "m" }, files)).toBe("error");
+  });
+  it("logs only the status and type of a failed call, never the message or response body", async () => {
+    const log = vi.spyOn(console, "error").mockImplementation(() => {});
+    const apiError = new Anthropic.APIError(400, { type: "error", error: { type: "invalid_request_error", message: "tools.0.custom: secret body" } }, "400 secret body", undefined, "invalid_request_error");
+    expect(await extractMenu(fakeClient(apiError).client, { model: "m" }, files)).toBe("error");
+    expect(await extractMenu(fakeClient(new Error("boom secret")).client, { model: "m" }, files)).toBe("error");
+    const logged = log.mock.calls.map((args) => args.map(String).join(" "));
+    expect(logged).toHaveLength(2);
+    expect(logged[0]).toContain("400 invalid_request_error");
+    expect(logged[0]).not.toContain("secret");
+    expect(logged[1]).toContain("Error");
+    expect(logged[1]).not.toContain("boom");
+    expect(logged[1]).not.toContain("secret");
   });
   it("enforces the file limits before calling the model", async () => {
     const { client, calls } = fakeClient(toolUse(RAW));
@@ -192,6 +206,10 @@ describe("extractMenu outcomes", () => {
     expect(ExtractFilesSchema.safeParse({ files: [{ media_type: "application/pdf", data: "QUJD" }] }).success).toBe(true);
     expect(ExtractFilesSchema.safeParse({ files: [{ media_type: "text/plain", data: "QUJD" }] }).success).toBe(false);
     expect(ExtractFilesSchema.safeParse({ files: [{ media_type: "image/png", data: "" }] }).success).toBe(false);
+    expect(ExtractFilesSchema.safeParse({ files: [{ media_type: "image/png", data: PNG_1x1 }] }).success).toBe(true);
+    expect(ExtractFilesSchema.safeParse({ files: [{ media_type: "image/png", data: `data:image/png;base64,${PNG_1x1}` }] }).success).toBe(false);
+    expect(ExtractFilesSchema.safeParse({ files: [{ media_type: "image/png", data: "QU JD" }] }).success).toBe(false);
+    expect(ExtractFilesSchema.safeParse({ files: [{ media_type: "image/png", data: "QUJD===" }] }).success).toBe(false);
     expect(ExtractFilesSchema.safeParse({ files: [] }).success).toBe(false);
     expect(ExtractFilesSchema.safeParse({ files: Array(7).fill({ media_type: "image/png", data: "QUJD" }) }).success).toBe(false);
     expect(ExtractFilesSchema.safeParse({}).success).toBe(false);

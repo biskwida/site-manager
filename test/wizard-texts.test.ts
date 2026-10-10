@@ -1,8 +1,8 @@
 // test/wizard-texts.test.ts
 import Anthropic from "@anthropic-ai/sdk";
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { draftTexts, DraftTextsSchema, TEXTS_MAX_FACTS, type DraftTexts } from "@/src/wizard/texts";
-import { forbiddenSchemaKeys } from "./helpers";
+import { toolSchemaViolations } from "./helpers";
 
 type Reply = { stop_reason: string; content: unknown[] } | Error;
 /** Records the request params and answers with the scripted message (or throws). */
@@ -34,6 +34,7 @@ const TEXTS: DraftTexts = {
 const toolUse = (input: unknown): Reply => ({ stop_reason: "tool_use", content: [{ type: "tool_use", id: "tu_1", name: "draft_texts", input }] });
 
 describe("draftTexts", () => {
+  afterEach(() => vi.restoreAllMocks());
   it("sends the facts and the owner's language, one strict tool, auto tool choice", async () => {
     const { client, calls } = fakeClient(toolUse(TEXTS));
     const r = await draftTexts(client, { model: "claude-opus-5-5" }, "Кафене в Лозенец, печем баница сутрин, кучета добре дошли", "bg");
@@ -73,7 +74,7 @@ describe("draftTexts", () => {
     const { client, calls } = fakeClient(toolUse(TEXTS));
     await draftTexts(client, { model: "m" }, "f", "bg");
     const schema = (calls[0].tools as { input_schema: Record<string, unknown> }[])[0].input_schema;
-    expect(forbiddenSchemaKeys(JSON.parse(JSON.stringify(schema)))).toEqual([]);
+    expect(toolSchemaViolations(JSON.parse(JSON.stringify(schema)))).toEqual([]);
     const props = schema.properties as Record<string, Record<string, unknown>>;
     for (const key of Object.keys(TEXTS)) {
       expect(props[key]).toMatchObject({ type: "string" });
@@ -101,6 +102,17 @@ describe("draftTexts", () => {
     expect(await draftTexts(fakeClient(toolUse({ ...TEXTS, welcome_bg: 42 })).client, { model: "m" }, "f", "en")).toBe("error");
     expect(await draftTexts(fakeClient(toolUse({ tagline_bg: "a" })).client, { model: "m" }, "f", "en")).toBe("error");
     expect(await draftTexts(fakeClient(new Error("boom")).client, { model: "m" }, "f", "en")).toBe("error");
+  });
+  it("logs only the status and type of a failed call, never the message or response body", async () => {
+    const log = vi.spyOn(console, "error").mockImplementation(() => {});
+    const apiError = new Anthropic.APIError(529, { type: "error", error: { type: "overloaded_error", message: "secret body" } }, "529 secret body", undefined, "overloaded_error");
+    expect(await draftTexts(fakeClient(apiError).client, { model: "m" }, "f", "en")).toBe("error");
+    expect(await draftTexts(fakeClient(new Error("boom secret")).client, { model: "m" }, "f", "en")).toBe("error");
+    const logged = log.mock.calls.map((args) => args.map(String).join(" "));
+    expect(logged).toHaveLength(2);
+    expect(logged[0]).toContain("529 overloaded_error");
+    expect(logged[0]).not.toContain("secret");
+    expect(logged[1]).not.toContain("boom");
   });
   it("accepts an empty footer note and trims every field", async () => {
     const r = await draftTexts(fakeClient(toolUse({ ...TEXTS, footer_note_bg: " ", footer_note_en: "", welcome_en: "  Welcome!  " })).client, { model: "m" }, "f", "bg");
