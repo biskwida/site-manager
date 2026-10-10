@@ -1,13 +1,15 @@
 // src/bot/inbound.ts
 // Channel-agnostic owner messages. Telegram (bot.ts) and the Meta webhook (server/meta.ts) both translate into InboundMessage and call handleInbound.
 import type { ImageInput } from "../agent/run";
-import { channelOf, type Channel } from "../channels/ref";
+import { channelOf, isMetaChannel, maskRef, type Channel } from "../channels/ref";
 import { detectLang } from "../domain/format";
 import type { Lang, Member } from "../domain/types";
 import { handleDecision, parseCallback } from "./approvals";
-import { adminUrl, publicUrl, type BotDeps } from "./bot";
+import type { BotDeps } from "./bot";
 import { copy } from "./copy";
+import { adminUrl, publicUrl } from "./links";
 import { imageMediaType, MAX_IMAGE_BYTES } from "./media";
+import { audioContentType } from "./voice";
 
 export interface InboundMedia {
   download: () => Promise<{ bytes: Uint8Array; contentType: string; name?: string }>;
@@ -30,17 +32,18 @@ export interface InboundMessage {
 
 const CODE = /^[A-Z0-9-]{8,}$/;
 const COMMANDS = new Set(["lang", "help", "menu", "undo"]);
+/** Command words for Meta channels, where there is no command menu. No word for undo: a plain "отмени" may be meant for a proposal, not the last applied change; "/undo" or asking the agent ("върни последната промяна") still works. */
 const WORDS: [RegExp, string][] = [
   [/^(menu|меню)$/i, "/menu"],
   [/^(help|помощ)$/i, "/help"],
-  [/^(undo|отмени|отмяна)$/i, "/undo"],
   [/^(language|език)\s+(bg|en)$/i, "/lang $2"],
 ];
 
-/** Slash commands pass through; command words ("меню", "language en", …) become their slash form; anything else is null. */
-export function normalizeCommand(text: string): string | null {
+/** Slash commands pass through; on Meta channels command words ("меню", "language en", …) become their slash form; anything else is null. On Telegram plain words stay text for the agent. */
+export function normalizeCommand(text: string, channel: Channel): string | null {
   const t = text.trim();
   if (t.startsWith("/")) return t;
+  if (!isMetaChannel(channel)) return null;
   for (const [re, cmd] of WORDS) {
     const m = re.exec(t);
     if (m) return cmd.replace("$2", (m[2] ?? "").toLowerCase());
@@ -65,7 +68,7 @@ function startCode(text: string, isMember: boolean): string | null {
 export async function handleInbound(d: BotDeps, m: InboundMessage): Promise<void> {
   const channel: Channel = channelOf(m.chatRef);
   const now = d.now();
-  await d.store.touchMember(m.chatRef, now.toISOString());
+  await touch(d, m.chatRef, now);
   const member = await d.store.findMember(m.chatRef);
   const text = (m.text ?? "").trim();
   const say = (t: string) => d.messenger.send(m.chatRef, t);
@@ -98,20 +101,20 @@ export async function handleInbound(d: BotDeps, m: InboundMessage): Promise<void
       await say(copy(uiLang).badCode);
       return;
     }
-    await d.store.touchMember(m.chatRef, now.toISOString());
+    await touch(d, m.chatRef, now);
     await welcome(d, linked);
     return;
   }
 
   if (!member) {
-    const cmd = m.kind === "text" ? normalizeCommand(text) : null;
+    const cmd = m.kind === "text" ? normalizeCommand(text, channel) : null;
     if (cmd && !COMMANDS.has(splitCommand(cmd).name)) return; // unknown command: silent, as before
     await say(copy(uiLang).noAccess(channel));
     return;
   }
 
   if (m.kind === "text") {
-    const cmd = normalizeCommand(text);
+    const cmd = normalizeCommand(text, channel);
     if (cmd) {
       await runCommand(d, member, channel, cmd);
       return;
@@ -129,10 +132,19 @@ export async function handleInbound(d: BotDeps, m: InboundMessage): Promise<void
   if (m.kind === "voice") await handleVoice(d, member, m);
 }
 
+/** Records the owner's last message for Meta's 24-hour window. Best-effort: a failure costs at most a skipped reminder, never the message. */
+async function touch(d: BotDeps, chatRef: string, now: Date) {
+  try {
+    await d.store.touchMember(chatRef, now.toISOString());
+  } catch (e) {
+    console.error(`[bot] touchMember failed for ${maskRef(chatRef)}: ${e instanceof Error ? e.message : String(e)}`);
+  }
+}
+
 async function welcome(d: BotDeps, member: Member) {
   const venue = await d.store.getVenue(member.venue_id);
   const c = copy(member.lang);
-  if (member.role === "owner") await d.messenger.send(member.chat_ref, c.welcome(venue.name, adminUrl(d.baseUrl, venue.slug, await d.store.getAdminToken(venue.id)), publicUrl(d.baseUrl, venue.slug)));
+  if (member.role === "owner") await d.messenger.send(member.chat_ref, c.welcome(venue.name, adminUrl(d.baseUrl, venue.slug, await d.store.getAdminToken(venue.id)), publicUrl(d.baseUrl, venue.slug), channelOf(member.chat_ref)));
   else await d.messenger.send(member.chat_ref, c.welcomeStaff(venue.name, publicUrl(d.baseUrl, venue.slug)));
 }
 
@@ -150,7 +162,7 @@ async function runCommand(d: BotDeps, member: Member, channel: Channel, cmd: str
     case "lang": {
       const l = arg.toLowerCase();
       if (l !== "bg" && l !== "en") {
-        await d.messenger.send(member.chat_ref, c.langUsage);
+        await d.messenger.send(member.chat_ref, c.langUsage(channel));
         return;
       }
       await d.store.setMemberLang(member.venue_id, member.chat_ref, l);
@@ -213,7 +225,7 @@ async function handleVoice(d: BotDeps, member: Member, m: InboundMessage) {
   try {
     if (!m.media) throw new Error("no media");
     const dl = await m.media.download();
-    text = (await d.transcribe(dl.bytes, member.lang, dl.contentType)).trim();
+    text = (await d.transcribe(dl.bytes, member.lang, audioContentType(dl.contentType, dl.name))).trim();
   } catch (e) {
     console.error(`[bot] voice failed: ${e instanceof Error ? e.message : String(e)}`);
     await d.messenger.send(member.chat_ref, c.voiceFailed);

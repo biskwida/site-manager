@@ -97,7 +97,7 @@ Behaviour, moved out of `bot.ts` and `media.ts` without change:
 
 - `touchMember(chatRef, now)` first (keeps `last_seen_at` fresh for the 24 h rule).
 - **Linking.** `/start CODE`, a bare message that is only an invite code (`^[A-Z0-9-]{8,}$` after trim and upper-case), or `referralCode` → `redeemInvite`. A non-member who sends anything else gets `noAccess(channel)`. Telegram copy keeps "Send /start <code>"; Meta copy says "Send the code you received from us".
-- **Commands** `/lang bg|en`, `/help`, `/menu`, `/undo` work on every channel when typed. `help(channel)` lists them only for Telegram; Meta help says "write 'language en'/'език bg' to switch" and the agent handles those phrases as today (plain text).
+- **Commands** `/lang bg|en`, `/help`, `/menu`, `/undo` work on every channel when typed. `help(channel)` lists them only for Telegram; Meta help says "write 'language en'/'език bg' to switch". On Meta channels only, the words "меню"/"menu", "помощ"/"help" and "език bg"/"language en" are read as the matching command (`normalizeCommand`); there is deliberately no word for undo (a plain "отмени" may be meant for an open proposal), so undo is `/undo` or plain language for the agent ("върни последната промяна"). On Telegram plain words always go to the agent as text.
 - **Text** → `startRun`; **photo** → download, `imageMediaType`, 5 MB cap, `saveMedia`, `startRun` with the image; **voice** → download, `transcribe(bytes, lang, contentType)`, `heard(text)`, `startRun`. `langHint ?? detectLang(text) ?? member.lang`.
 - **Button** → `parseCallback(text)` → `handleDecision` → `messenger.conclude(...)` (below) and the optional reply.
 - Acknowledgement: `messenger.typing(chatRef)` best-effort after `startRun`.

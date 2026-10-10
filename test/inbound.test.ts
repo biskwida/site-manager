@@ -16,15 +16,20 @@ async function setup(over: Partial<BotDeps> = {}) {
 const texts = (m: FakeMessenger) => m.sent.map((s) => s.text);
 
 describe("normalizeCommand", () => {
-  it("maps plain words to slash commands in both languages", () => {
-    expect(normalizeCommand("меню")).toBe("/menu");
-    expect(normalizeCommand("Menu")).toBe("/menu");
-    expect(normalizeCommand("помощ")).toBe("/help");
-    expect(normalizeCommand("language en")).toBe("/lang en");
-    expect(normalizeCommand("език bg")).toBe("/lang bg");
-    expect(normalizeCommand("отмени")).toBe("/undo");
-    expect(normalizeCommand("/undo")).toBe("/undo");
-    expect(normalizeCommand("Капучиното става 3,20")).toBeNull();
+  it("maps plain words to slash commands in both languages on Meta channels", () => {
+    expect(normalizeCommand("меню", "fb")).toBe("/menu");
+    expect(normalizeCommand("Menu", "wa")).toBe("/menu");
+    expect(normalizeCommand("помощ", "ig")).toBe("/help");
+    expect(normalizeCommand("language en", "fb")).toBe("/lang en");
+    expect(normalizeCommand("език bg", "fb")).toBe("/lang bg");
+    expect(normalizeCommand("/undo", "fb")).toBe("/undo");
+    expect(normalizeCommand("Капучиното става 3,20", "fb")).toBeNull();
+  });
+  it("has no word for undo, and leaves plain words alone on Telegram", () => {
+    for (const w of ["отмени", "отмяна", "undo"]) expect(normalizeCommand(w, "fb")).toBeNull();
+    expect(normalizeCommand("меню", "tg")).toBeNull();
+    expect(normalizeCommand("language en", "tg")).toBeNull();
+    expect(normalizeCommand("/menu", "tg")).toBe("/menu");
   });
 });
 
@@ -74,6 +79,39 @@ describe("handleInbound", () => {
     await handleInbound(d, { chatRef: "wa:359888", kind: "text", text: "help" });
     expect(texts(messenger).at(-1)).not.toContain("/lang");
     expect(texts(messenger).at(-1)).toContain("language bg");
+    expect(texts(messenger).at(-1)).toContain("/undo");
+    expect(texts(messenger).at(-1)).not.toContain("“undo” –");
+    await handleInbound(d, { chatRef: "wa:359888", kind: "text", text: "/lang xx" });
+    expect(texts(messenger).at(-1)).toBe("Write “language bg” or “language en”.");
+  });
+  it("sends 'отмени' from a Meta member to the agent as text, not as undo", async () => {
+    const { d, runs, store, venue } = await setup();
+    await store.upsertMember({ venue_id: venue.id, chat_ref: "fb:900", role: "owner", lang: "bg" });
+    await handleInbound(d, { chatRef: "fb:900", kind: "text", text: "отмени" });
+    expect(runs).toHaveLength(1);
+    expect(runs[0]).toMatchObject({ chatRef: "fb:900", text: "отмени", source: "text" });
+    await handleInbound(d, { chatRef: "fb:900", kind: "text", text: "/undo" });
+    expect(runs[1]).toMatchObject({ text: "Undo the last change." });
+  });
+  it("sends 'меню' from a Telegram member to the agent; '/menu' still works on Telegram", async () => {
+    const { d, messenger, runs } = await setup();
+    await handleInbound(d, { chatRef: "tg:1001", kind: "text", text: "меню" });
+    expect(runs).toHaveLength(1);
+    expect(runs[0]).toMatchObject({ chatRef: "tg:1001", text: "меню", source: "text" });
+    expect(texts(messenger)).toEqual([]);
+    await handleInbound(d, { chatRef: "tg:1001", kind: "text", text: "/menu" });
+    expect(runs).toHaveLength(1);
+    expect(texts(messenger).at(-1)).toMatch(/https:\/\/site.example\/agala\/menu/);
+  });
+  it("still starts the run when touchMember fails", async () => {
+    const { d, runs } = await setup();
+    const errs: string[] = []; const orig = console.error; console.error = (...a: unknown[]) => { errs.push(a.join(" ")); };
+    try {
+      d.store.touchMember = async () => { throw new Error("db down"); };
+      await handleInbound(d, { chatRef: "tg:1001", kind: "text", text: "Баницата свърши" });
+    } finally { console.error = orig; }
+    expect(runs[0]).toMatchObject({ text: "Баницата свърши" });
+    expect(errs.some((e) => e.includes("db down"))).toBe(true);
   });
   it("downloads a photo, stores it and starts a photo run; reports a failed download", async () => {
     const { d, runs, store, venue } = await setup();
@@ -92,6 +130,14 @@ describe("handleInbound", () => {
     expect(seen).toEqual(["audio/mp4"]);
     expect(runs[0]).toMatchObject({ source: "voice", text: "Капучиното става три и двайсет" });
     expect(texts(messenger)[0]).toBe("🎤 Чух: „Капучиното става три и двайсет“");
+  });
+  it("guesses the voice type from the file name when the download's content type is uninformative", async () => {
+    const seen: string[] = [];
+    const { d } = await setup({ transcribe: async (_b, _l, ct) => { seen.push(ct ?? ""); return "x"; } });
+    await handleInbound(d, { chatRef: "fb:1", kind: "voice", media: { download: async () => ({ bytes: new Uint8Array([1]), contentType: "application/octet-stream", name: "audioclip.mp4" }) } });
+    expect(seen).toEqual([]); // fb:1 is not a member: nothing transcribed
+    await handleInbound(d, { chatRef: "tg:1001", kind: "voice", media: { download: async () => ({ bytes: new Uint8Array([1]), contentType: "application/octet-stream", name: "audioclip.mp4" }) } });
+    expect(seen).toEqual(["audio/mp4"]);
   });
   it("applies a button tap and concludes the proposal message", async () => {
     const { d, messenger, store, venue, items } = await setup();

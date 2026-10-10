@@ -36,15 +36,7 @@ export interface BotDeps {
   botInfo?: UserFromGetMe;
 }
 
-const INVITE_TTL_MS = 7 * 24 * 3_600_000;
-export { INVITE_TTL_MS };
-
-export function adminUrl(baseUrl: string, slug: string, token: string): string {
-  return `${baseUrl}/admin/${slug}?key=${token}`;
-}
-export function publicUrl(baseUrl: string, slug: string): string {
-  return `${baseUrl}/${slug}`;
-}
+export { adminUrl, INVITE_TTL_MS, publicUrl } from "./links";
 
 export function createBot(d: BotDeps): Bot {
   const bot = new Bot(d.token, d.botInfo ? { botInfo: d.botInfo } : undefined);
