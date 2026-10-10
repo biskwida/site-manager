@@ -96,22 +96,34 @@ curl -s "https://site-manager-channels-biskwida.vercel.app/api/meta?hub.mode=sub
 curl -s -o /dev/null -w '%{http_code}\n' -X POST "https://site-manager-channels-biskwida.vercel.app/api/meta" -d '{}'                                   # → 401
 ```
 
-**Deployment Protection.** The Vercel project has Vercel Authentication on for every deployment except custom domains, so a preview URL answers `302` to Vercel's login page, and Meta cannot reach the webhook. Before step 5 choose one, in Vercel → Project → Settings → Deployment Protection:
+### Vercel Deployment Protection
 
-- turn Vercel Authentication off for previews (the webhook is protected by its own HMAC signature check, the admin pages by their key), or
-- create a "Protection Bypass for Automation" secret and use `<preview URL>/api/meta?x-vercel-protection-bypass=<secret>` as the callback URL in all three webhook settings (and in the curl checks above).
+Meta cannot reach a preview protected by Vercel Authentication: this project has it on for every deployment except custom domains, so a preview URL answers `302` to Vercel's login page and the webhook verification fails. Before step 5, in Vercel → Project → Settings → Deployment Protection, either
+
+- set Vercel Authentication to **"Only Production Deployments"** (the webhook is protected by its own HMAC signature check, the admin pages by their key), or
+- create a **"Protection Bypass for Automation"** secret and append `?x-vercel-protection-bypass=<secret>` to the callback URL in the Meta app (all three webhook settings, and the curl checks above).
+
+### Replace the placeholder app secret
+
+The preview's `META_APP_SECRET` is currently a random value made for `npm run meta:sim`; Meta's signatures will not verify until it is the real App secret (App settings → Basic). Set it in `.env.local` with `npm run env:set -- META_APP_SECRET` and on the preview with
+
+```bash
+printf '%s' "<secret>" | vercel env add META_APP_SECRET preview --force   # or: grep '^META_APP_SECRET=' .env.local | cut -d= -f2- | tr -d '\n' | vercel env add META_APP_SECRET preview --force
+```
+
+then redeploy (`vercel --yes`) and move the alias. Never type or paste the secret into chat.
 
 ### Current preview
 
 - Stable URL: https://site-manager-channels-biskwida.vercel.app (alias), webhook `https://site-manager-channels-biskwida.vercel.app/api/meta`.
 - Deployment on 2026-10-10: https://site-manager-k0m6uxem4-biskwida-dev.vercel.app (`PUBLIC_BASE_URL` for Preview = the stable URL).
-- Behind Deployment Protection (see above): the public URL answers `302` until protection is changed. The same build run locally with `next start` answered the handshake with `ping`, a wrong verify token with `403` and an unsigned POST with `401`.
+- Behind Deployment Protection (see "Vercel Deployment Protection"): the public URL answers `302` until protection is changed. The same build run locally with `next start` answered the handshake with `ping`, a wrong verify token with `403` and an unsigned POST with `401`.
 
 ## Database migration
 
 The Supabase project is shared with production, which still runs the Telegram-only code. Phase 1 of the identity change (`chat_ref` = `tg:<id>`, `fb:<PSID>`, `ig:<id>`, `wa:<digits>`) is additive: it adds `chat_ref`, `message_ref` and `last_seen_at`, moves the primary keys to `chat_ref`, keeps the old bigint columns with unique indexes for production's upserts, and adds a `fill_chat_ref` trigger that fills `chat_ref` from the old columns when production writes a row. Production keeps working before and after.
 
-Order (from this worktree, `SUPABASE_DB_URL` in `.env.local`):
+Order (from this worktree, `SUPABASE_DB_URL` in `.env.local`). Always start with the dry run; apply only when it ends with `DRY RUN OK`:
 
 ```bash
 npm run db:dry-run      # runs the migration inside a transaction and ROLLS BACK; must end with "DRY RUN OK"
@@ -122,7 +134,7 @@ npm run check:rls       # every line PASS
 
 `npm run db:dry-run` (`scripts/db-dry-run.mts`) takes file arguments like `db:apply` (`npm run db:dry-run -- supabase/migrations/2026-10-10-chat-ref.sql schema.sql policies.sql` tries the whole sequence) and checks, before rolling back: no `venue_members` row without `chat_ref`, the `fill_chat_ref` trigger present on the three tables, and production's two upserts (`on conflict (venue_id, tg_chat_id)` and `on conflict (venue_id, chat_id)`) still working and filling `chat_ref`.
 
-Status on 2026-10-10: **not applied.** The dry run against the shared database failed with `column "tg_chat_id" is in a primary key`: the migration drops `not null` on `tg_chat_id` (and `conversations.chat_id`) before it swaps the primary key. With those two `drop not null` lines moved after the primary-key blocks, the dry run passes (migration alone, and migration + schema.sql + policies.sql). Fix the file, run the dry run, then apply in the order above.
+Status on 2026-10-10: **applied to the shared database.** The first dry run found a defect (`column "tg_chat_id" is in a primary key`: `drop not null` ran before the primary-key swap); the two `drop not null` lines now follow the key-swap blocks. Then `db:dry-run` passed (alone and with `schema.sql` + `policies.sql`), the migration, `db:apply` and `check:rls` (16 × PASS) ran, and the live database has 0 rows without `chat_ref` in `venue_members` and `conversations`, both primary keys on `(venue_id, chat_ref)` and the `fill_chat_ref` trigger on all three tables.
 
 ### Phase 2 (after merge)
 
@@ -152,6 +164,6 @@ npm run meta:sim -- wa text "menu" --sender 4242        # --sender <id>, --url <
 До App Review ботът отговаря само на тестери; собственикът трябва да приеме поканата (Facebook и Instagram).
 App Review отнема около 20 дни за всеки опит; WhatsApp тестовият номер праща само до 5 потвърдени номера.
 Webhook-ът живее на preview в Vercel (https://site-manager-channels-biskwida.vercel.app); production и Telegram webhook-ът не се пипат.
-Preview-то е зад Vercel Authentication: изключете я за preview или ползвайте bypass секрет, иначе Meta не стига до webhook-а.
-Базата: първо `npm run db:dry-run`, после миграцията, после `npm run db:apply` и `npm run check:rls`; миграцията още не е приложена (грешка в реда на командите, описана по-горе).
+Preview-то е зад Vercel Authentication: изберете „Only Production Deployments“ или bypass секрет, иначе Meta не стига до webhook-а; сменете и META_APP_SECRET с истинския.
+Базата: първо `npm run db:dry-run`, после миграцията, после `npm run db:apply` и `npm run check:rls`; миграцията е приложена на 2026-10-10.
 Офлайн: `DEMO_OWNER_CHAT_REF=fb:4242`, `npm run dev:offline` и `npm run meta:sim` пускат целия път без акаунт в Meta.
