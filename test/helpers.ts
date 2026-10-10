@@ -46,3 +46,17 @@ export class FakeMessenger implements Messenger {
     return this.sent[this.sent.length - 1];
   }
 }
+
+/** JSON Schema keywords the Messages API rejects inside a tool's input_schema (HTTP 400), plus zod's "$schema"/"$defs"/"$ref". */
+export const FORBIDDEN_TOOL_SCHEMA_KEYS = ["minimum", "maximum", "exclusiveMinimum", "exclusiveMaximum", "minLength", "maxLength", "minItems", "maxItems", "pattern", "format", "default", "nullable", "$schema", "$defs", "$ref"] as const;
+
+/** Paths (dot-joined) of every forbidden keyword anywhere in the schema; empty when the schema is safe to send. */
+export function forbiddenSchemaKeys(schema: unknown, path: string[] = []): string[] {
+  if (Array.isArray(schema)) return schema.flatMap((v, i) => forbiddenSchemaKeys(v, [...path, String(i)]));
+  if (!schema || typeof schema !== "object") return [];
+  return Object.entries(schema).flatMap(([k, v]) => {
+    const here = [...path, k];
+    const own = (FORBIDDEN_TOOL_SCHEMA_KEYS as readonly string[]).includes(k) ? [here.join(".")] : [];
+    return [...own, ...forbiddenSchemaKeys(v, here)];
+  });
+}

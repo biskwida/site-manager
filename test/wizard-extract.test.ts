@@ -11,6 +11,7 @@ import {
   postProcessExtract,
   type ExtractResult,
 } from "@/src/wizard/extract";
+import { forbiddenSchemaKeys } from "./helpers";
 
 const PNG_1x1 = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==";
 const PDF_STUB = Buffer.from("%PDF-1.4\n%stub\n").toString("base64");
@@ -50,15 +51,10 @@ const RAW: ExtractResult = {
   notes_bg: "Една цена не се чете.",
   notes_en: "One price is unreadable.",
 };
-/** What the model can actually send: strict mode keeps every allergen code within 1–14. */
-const VALID: ExtractResult = {
-  ...RAW,
-  categories: [{ ...RAW.categories[0], items: RAW.categories[0].items.map((it) => ({ ...it, allergens: it.allergens.filter((a) => a <= 14) })) }],
-};
 
 describe("extractMenu request shape", () => {
   it("sends image and document blocks, one strict tool, auto tool choice and the agent's beta flags", async () => {
-    const { client, calls } = fakeClient(toolUse(VALID));
+    const { client, calls } = fakeClient(toolUse(RAW));
     const r = await extractMenu(client, { model: "claude-opus-5-5" }, [
       { media_type: "image/png", data: PNG_1x1 },
       { media_type: "application/pdf", data: PDF_STUB },
@@ -97,6 +93,18 @@ describe("extractMenu request shape", () => {
     expect(msg.content[2].type).toBe("text");
     expect(msg.content[2].text).toContain("extract_menu");
     expect(msg.content).toHaveLength(3);
+  });
+  it("sends a tool input schema without numeric or length constraints (the API rejects them), without $schema, and with the ranges described", async () => {
+    const { client, calls } = fakeClient(toolUse(RAW));
+    await extractMenu(client, { model: "m" }, [{ media_type: "image/png", data: PNG_1x1 }]);
+    const schema = (calls[0].tools as { input_schema: Record<string, unknown> }[])[0].input_schema;
+    expect(forbiddenSchemaKeys(JSON.parse(JSON.stringify(schema)))).toEqual([]);
+    const at = (o: unknown, ...path: string[]) => path.reduce<unknown>((cur, k) => (cur as Record<string, unknown>)[k], o);
+    const item = at(schema, "properties", "categories", "items", "properties", "items", "items", "properties") as Record<string, Record<string, unknown>>;
+    expect(item.allergens).toMatchObject({ type: "array", items: { type: "number" } });
+    expect(item.allergens.description).toMatch(/1 to 14/);
+    expect(item.price_eur).toMatchObject({ type: "number" });
+    expect(item.currency_seen).toMatchObject({ type: "string", enum: ["EUR", "BGN", "unknown"] });
   });
 });
 
@@ -137,12 +145,17 @@ describe("postProcessExtract", () => {
 describe("extractMenu outcomes", () => {
   const files = [{ media_type: "image/jpeg" as const, data: PNG_1x1 }];
   it("returns the post-processed result on tool_use", async () => {
-    const { client } = fakeClient(toolUse(VALID));
+    const { client } = fakeClient(toolUse(RAW));
     const r = await extractMenu(client, { model: "m" }, files);
     expect(r).not.toBe("refused");
     expect(r).not.toBe("error");
     expect((r as ExtractResult).categories[0].items[0].price_eur).toBe(2.56);
-    expect((r as ExtractResult).categories[0].items[1].allergens).toEqual([7]);
+    expect((r as ExtractResult).categories[0].items[1].allergens).toEqual([7]); // 99 is dropped after the call, not rejected by the schema
+  });
+  it("drops allergen codes that are not whole numbers 1–14 instead of failing the extraction", async () => {
+    const odd = { ...RAW, categories: [{ ...RAW.categories[0], items: [{ ...RAW.categories[0].items[1], allergens: [0, 7.5, 15, -1, 3] }] }] };
+    const r = await extractMenu(fakeClient(toolUse(odd)).client, { model: "m" }, files);
+    expect((r as ExtractResult).categories[0].items[0].allergens).toEqual([3]);
   });
   it("maps refusal, max_tokens, a missing tool call, invalid input and a thrown error", async () => {
     expect(await extractMenu(fakeClient({ stop_reason: "refusal", content: [] }).client, { model: "m" }, files)).toBe("refused");
@@ -150,11 +163,11 @@ describe("extractMenu outcomes", () => {
     expect(await extractMenu(fakeClient({ stop_reason: "end_turn", content: [{ type: "text", text: "I cannot see a menu." }] }).client, { model: "m" }, files)).toBe("error");
     expect(await extractMenu(fakeClient({ stop_reason: "tool_use", content: [{ type: "tool_use", id: "tu_1", name: "other_tool", input: RAW }] }).client, { model: "m" }, files)).toBe("error");
     expect(await extractMenu(fakeClient(toolUse({ categories: "nope" })).client, { model: "m" }, files)).toBe("error");
-    expect(await extractMenu(fakeClient(toolUse(RAW)).client, { model: "m" }, files)).toBe("error"); // allergen code 99 is outside the schema
+    expect(await extractMenu(fakeClient(toolUse({ ...RAW, notes_en: 1 })).client, { model: "m" }, files)).toBe("error");
     expect(await extractMenu(fakeClient(new Error("boom")).client, { model: "m" }, files)).toBe("error");
   });
   it("enforces the file limits before calling the model", async () => {
-    const { client, calls } = fakeClient(toolUse(VALID));
+    const { client, calls } = fakeClient(toolUse(RAW));
     expect(base64Bytes(PNG_1x1)).toBe(70);
     expect(base64Bytes("QUJD")).toBe(3);
     expect(base64Bytes("QUI=")).toBe(2);

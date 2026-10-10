@@ -2,6 +2,7 @@
 import Anthropic from "@anthropic-ai/sdk";
 import { describe, expect, it } from "vitest";
 import { draftTexts, DraftTextsSchema, TEXTS_MAX_FACTS, type DraftTexts } from "@/src/wizard/texts";
+import { forbiddenSchemaKeys } from "./helpers";
 
 type Reply = { stop_reason: string; content: unknown[] } | Error;
 /** Records the request params and answers with the scripted message (or throws). */
@@ -67,6 +68,18 @@ describe("draftTexts", () => {
     expect(messages[0].content[0].text).toContain("Лозенец");
     expect(messages[0].content[0].text).toContain("Bulgarian");
     expect(messages[0].content[0].text).toContain("draft_texts");
+  });
+  it("sends a tool input schema of plain described strings: no length constraints, no $schema", async () => {
+    const { client, calls } = fakeClient(toolUse(TEXTS));
+    await draftTexts(client, { model: "m" }, "f", "bg");
+    const schema = (calls[0].tools as { input_schema: Record<string, unknown> }[])[0].input_schema;
+    expect(forbiddenSchemaKeys(JSON.parse(JSON.stringify(schema)))).toEqual([]);
+    const props = schema.properties as Record<string, Record<string, unknown>>;
+    for (const key of Object.keys(TEXTS)) {
+      expect(props[key]).toMatchObject({ type: "string" });
+      expect(typeof props[key].description).toBe("string");
+    }
+    expect(props.about_bg.description).toMatch(/40.{1,3}120 words/);
   });
   it("names English when the owner writes in English and cuts the facts at the limit", async () => {
     const { client, calls } = fakeClient(toolUse(TEXTS));

@@ -2,9 +2,9 @@
 // "Write for me": tagline, about, welcome and footer note in both languages from a few facts the owner typed.
 // Pure helper: the HTTP route (src/server/wizard-ai.ts) validates the body, injects the client and maps the outcomes to statuses.
 import type Anthropic from "@anthropic-ai/sdk";
-import { betaZodTool } from "@anthropic-ai/sdk/helpers/beta/zod";
 import { z } from "zod";
 import type { Lang } from "../domain/types";
+import { wireSchema } from "./extract";
 
 export const TEXTS_MAX_FACTS = 2000;
 
@@ -19,6 +19,8 @@ export interface DraftTexts {
   footer_note_en: string;
 }
 
+// Tool input schema = plain strings with descriptions only; the Messages API rejects length constraints in a tool's input_schema
+// (lengths are described in the prompt and blank required texts are caught after the call).
 export const DraftTextsSchema = z.object({
   tagline_bg: z.string().describe("Up to 12 words, Bulgarian"),
   tagline_en: z.string().describe("Up to 12 words, English"),
@@ -30,15 +32,14 @@ export const DraftTextsSchema = z.object({
   footer_note_en: z.string().describe("The same line in English; may be empty"),
 }) satisfies z.ZodType<DraftTexts>;
 
-const tool = betaZodTool({
-  name: "draft_texts",
-  description: "Returns the venue's website texts in Bulgarian and English.",
-  inputSchema: DraftTextsSchema,
-  run: async () => "ok", // never executed: we read the tool_use block ourselves
-}) as Anthropic.Beta.BetaTool; // betaZodTool always builds a custom tool (name + input_schema); its union type cannot say so
-
+const TOOL_NAME = "draft_texts";
 /** The wire definition: one tool, strict so the model's input always matches the schema (additionalProperties: false, all keys required). */
-const TOOL_DEF: Anthropic.Beta.BetaTool = { name: tool.name, description: tool.description, input_schema: tool.input_schema, strict: true };
+const TOOL_DEF: Anthropic.Beta.BetaTool = {
+  name: TOOL_NAME,
+  description: "Returns the venue's website texts in Bulgarian and English.",
+  input_schema: wireSchema(DraftTextsSchema),
+  strict: true,
+};
 
 const SYSTEM = `You write the short texts for a small café, bar or restaurant website in Bulgaria, from facts the owner typed. Reply by calling the draft_texts tool exactly once; no prose. The only valid reply is that single tool call.
 Rules:
@@ -74,7 +75,7 @@ export async function draftTexts(client: Anthropic, cfg: { model: string }, fact
   }
   if (res.stop_reason === "refusal") return "refused";
   if (res.stop_reason === "max_tokens") return "error";
-  const call = res.content.find((b): b is Anthropic.Beta.BetaToolUseBlock => b.type === "tool_use" && b.name === tool.name);
+  const call = res.content.find((b): b is Anthropic.Beta.BetaToolUseBlock => b.type === "tool_use" && b.name === TOOL_NAME);
   if (!call) return "error";
   const parsed = DraftTextsSchema.safeParse(call.input);
   if (!parsed.success) {

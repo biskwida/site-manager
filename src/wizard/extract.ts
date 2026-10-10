@@ -2,7 +2,6 @@
 // Reads menu photos / a PDF with Claude and returns structured items for the owner to review. Nothing is inserted here.
 // Pure helper: the HTTP route (src/server/wizard-ai.ts) checks the limits, injects the client and maps the outcomes to statuses.
 import type Anthropic from "@anthropic-ai/sdk";
-import { betaZodTool } from "@anthropic-ai/sdk/helpers/beta/zod";
 import { z } from "zod";
 import { ALLERGENS, isAllergenCode, suggestAllergens } from "../domain/allergens";
 import { clampPrice, round2 } from "../domain/pricing";
@@ -45,6 +44,9 @@ export interface ExtractResult {
   notes_en: string;
 }
 
+// Tool input schema = plain types, enums and descriptions only. The Messages API rejects minimum/maximum/minLength/
+// minItems/pattern… inside a tool's input_schema (HTTP 400), and zod's .int() emits safe-integer bounds, so ranges are
+// stated in the descriptions and enforced afterwards by postProcessExtract (isAllergenCode drops bad codes, clampPrice bounds prices).
 const ExtractedItem = z.object({
   name_bg: z.string().describe("Dish name in natural Bulgarian"),
   name_en: z.string().describe("Dish name in natural English"),
@@ -52,7 +54,7 @@ const ExtractedItem = z.object({
   desc_en: z.string().describe("One short sentence in English, or empty"),
   price_eur: z.number().describe("The number printed on the menu, unchanged. The server converts BGN to EUR. 0 when unreadable"),
   currency_seen: z.enum(["EUR", "BGN", "unknown"]).describe("The currency shown next to the price"),
-  allergens: z.array(z.number().int().min(1).max(14)).describe("EU allergen codes 1–14 you can tell from the name or description; empty when unsure"),
+  allergens: z.array(z.number()).describe("Whole EU allergen codes from 1 to 14 you can tell from the name or description; empty when unsure"),
 });
 export const ExtractResultSchema = z.object({
   categories: z.array(z.object({ name_bg: z.string(), name_en: z.string(), items: z.array(ExtractedItem) })),
@@ -60,15 +62,24 @@ export const ExtractResultSchema = z.object({
   notes_en: z.string().describe("The same in English"),
 }) satisfies z.ZodType<ExtractResult>;
 
-const tool = betaZodTool({
-  name: "extract_menu",
-  description: "Returns the menu read from the attached photos or PDF pages, grouped by the menu's own sections, in Bulgarian and English.",
-  inputSchema: ExtractResultSchema,
-  run: async () => "ok", // never executed: we read the tool_use block ourselves
-}) as Anthropic.Beta.BetaTool; // betaZodTool always builds a custom tool (name + input_schema); its union type cannot say so
+/**
+ * JSON Schema for a strict tool input, from a zod object: nested inline (no $defs/$ref — the SDK's betaZodTool uses
+ * `reused: "ref"`, which hoists every described array item into $defs), without the "$schema" key. The zod schema itself
+ * must carry no numeric or length constraints; the tests check the result for the keywords the API rejects.
+ */
+export function wireSchema(schema: z.ZodType): Anthropic.Beta.BetaTool["input_schema"] {
+  const json = z.toJSONSchema(schema, { reused: "inline" });
+  return Object.fromEntries(Object.entries(json).filter(([k]) => k !== "$schema")) as Anthropic.Beta.BetaTool["input_schema"];
+}
 
+const TOOL_NAME = "extract_menu";
 /** The wire definition: one tool, strict so the model's input always matches the schema (additionalProperties: false, all keys required). */
-const TOOL_DEF: Anthropic.Beta.BetaTool = { name: tool.name, description: tool.description, input_schema: tool.input_schema, strict: true };
+const TOOL_DEF: Anthropic.Beta.BetaTool = {
+  name: TOOL_NAME,
+  description: "Returns the menu read from the attached photos or PDF pages, grouped by the menu's own sections, in Bulgarian and English.",
+  input_schema: wireSchema(ExtractResultSchema),
+  strict: true,
+};
 
 const SYSTEM = `You read photos or PDF pages of a café, bar or restaurant menu and transcribe them as structured data by calling the extract_menu tool exactly once. Do not answer in prose; the only valid reply is that single tool call.
 Rules:
@@ -108,6 +119,7 @@ export function postProcessExtract(r: ExtractResult): ExtractResult {
         const raw = Number.isFinite(it.price_eur) ? it.price_eur : 0;
         const eur = it.currency_seen === "BGN" ? raw / BGN_PER_EUR : raw;
         const text = `${it.name_en} ${it.desc_en} ${it.name_bg} ${it.desc_bg}`;
+        // The tool schema cannot bound the codes (see above): drop anything that is not a whole number 1–14.
         const allergens = [...new Set([...it.allergens.filter(isAllergenCode), ...suggestAllergens(text)])].sort((a, b) => a - b);
         return {
           name_bg: it.name_bg.trim(),
@@ -163,7 +175,7 @@ export async function extractMenu(client: Anthropic, cfg: { model: string }, fil
   }
   if (res.stop_reason === "refusal") return "refused";
   if (res.stop_reason === "max_tokens") return "error";
-  const call = res.content.find((b): b is Anthropic.Beta.BetaToolUseBlock => b.type === "tool_use" && b.name === tool.name);
+  const call = res.content.find((b): b is Anthropic.Beta.BetaToolUseBlock => b.type === "tool_use" && b.name === TOOL_NAME);
   if (!call) return "error";
   const parsed = ExtractResultSchema.safeParse(call.input);
   if (!parsed.success) {
