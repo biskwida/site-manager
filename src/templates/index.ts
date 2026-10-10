@@ -15,6 +15,10 @@ export const TEMPLATES: Record<TemplateId, TemplateDef> = {
   classic,
   nocturne,
   lumen,
+  // Placeholders until each template's own task lands (same pattern as R9): the classic design under the new id.
+  furna: { ...classic, id: "furna" },
+  mehana: { ...classic, id: "mehana" },
+  kvartal: { ...classic, id: "kvartal" },
 };
 
 /** The template for an id from the database or a query string; unknown or missing ids fall back to classic. */

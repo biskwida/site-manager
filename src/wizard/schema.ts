@@ -34,6 +34,9 @@ export const TEMPLATE_ACCENT_DEFAULTS: Record<TemplateId, string> = {
   classic: "#2f6b4f",
   nocturne: "#d9a05b",
   lumen: "#2e5e4e",
+  furna: "#2f6b4f",
+  mehana: "#2f6b4f",
+  kvartal: "#2f6b4f",
 };
 
 export type WizardStep = "template" | "basics" | "look" | "hours" | "menu" | "texts" | "photos" | "review" | "done";

@@ -23,8 +23,8 @@ export interface Holiday {
   note_en: string;
 }
 
-export type TemplateId = "classic" | "nocturne" | "lumen";
-export const TEMPLATE_IDS: readonly TemplateId[] = ["classic", "nocturne", "lumen"];
+export type TemplateId = "classic" | "nocturne" | "lumen" | "furna" | "mehana" | "kvartal";
+export const TEMPLATE_IDS: readonly TemplateId[] = ["classic", "nocturne", "lumen", "furna", "mehana", "kvartal"];
 export type BusinessType = "cafe" | "bar" | "restaurant";
 export const BUSINESS_TYPES: readonly BusinessType[] = ["cafe", "bar", "restaurant"];
 export type VenueStatus = "draft" | "live";
