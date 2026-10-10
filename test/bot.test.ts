@@ -88,6 +88,13 @@ describe("bot", () => {
     await bot.handleUpdate(textUpdate(1002, `/start ${await store.createInvite(third.id, "owner", "2026-10-10T00:00:00.000Z")}`, "en"));
     expect(api.texts()[3]).toBe("You now manage Third.");
   });
+  it("an owner who taps a staff code for their own venue stays owner", async () => {
+    const { bot, store, venue } = await setup();
+    const staffCode = await store.createInvite(venue.id, "staff", "2026-10-20T00:00:00.000Z");
+    await bot.handleUpdate(textUpdate(1001, `/start ${staffCode}`, "bg")); // 1001 is the demo venue's owner
+    expect(await store.findMember(1001)).toMatchObject({ venue_id: venue.id, role: "owner" });
+  });
+
   it("a linked chat with no code or an invalid code gets the welcome-back, not the bad-code reply", async () => {
     const { bot, api, store, venue } = await setup();
     const token = await store.getAdminToken(venue.id);

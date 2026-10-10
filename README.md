@@ -238,7 +238,7 @@ Checked on 2026-10-11 on `build/templates`:
 - `npx tsc --noEmit` and `npm run lint`: clean.
 - `SITE_MANAGER_STORE=memory npm run build`: succeeds; no service-role key, Vercel token or bot token in `.next/static`.
 - `npm run e2e`: the demo sequence offline (proposal and approve, instant sold-out, a special until closing, scheduled holidays, undo, a bulk change applied from the dashboard, the tick writing auto sets and applying the schedule): `OFFLINE E2E OK`.
-- Live against the real Supabase project (on `2a75740`, before the final fixes): `db:apply`, `check:rls` 19/19, the store contract (`SUPABASE_CONTRACT=1`) 21/21. The final fixes add store operations (`deleteVenue` with storage, `findOpenInvite`, `claimDeploy` by deployment id) whose live contract run is pending.
+- Live against the real Supabase project (on `64cdf1f`, after the final fixes): `db:apply`, `check:rls` 19/19, the store contract (`SUPABASE_CONTRACT=1`) 23/23, including `deleteVenue` with storage, `findOpenInvite` and `claimDeploy` by deployment id.
 - `npm run test:templates`: the classic, nocturne and lumen venue shells build standalone (on `2a75740`; classic rebuilt after the `<html lang>` change).
 - Live Claude calls: menu extraction from a photo and "Write for me" return usable bilingual results; `npm run smoke -- --dry` turned "Капучиното става 3,20" into a `set_price` proposal 2,90 € → 3,20 €.
 - `npm run dev:offline`: the chooser offers "Continue your draft" after a reload, and the Look step switches the preview between templates.

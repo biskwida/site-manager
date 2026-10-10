@@ -142,7 +142,9 @@ export const WATCH_MAX_MS = 240_000;
 export async function watchDeploy(d: Omit<PollDeps, "venueId"> & { sleep?: (ms: number) => Promise<void>; log?: (s: string) => void }, venueId: string): Promise<void> {
   const sleep = d.sleep ?? ((ms: number) => new Promise<void>((r) => setTimeout(r, ms)));
   try {
-    for (let waited = 0; waited + WATCH_INTERVAL_MS <= WATCH_MAX_MS; waited += WATCH_INTERVAL_MS) {
+    // Bounded by both the iteration count and a wall clock: a slow provider call must not carry the job past the function's maxDuration.
+    const deadline = Date.now() + WATCH_MAX_MS;
+    for (let waited = 0; waited + WATCH_INTERVAL_MS <= WATCH_MAX_MS && Date.now() + WATCH_INTERVAL_MS <= deadline; waited += WATCH_INTERVAL_MS) {
       if (!inFlight((await d.store.getVenue(venueId)).deploy)) return;
       await sleep(WATCH_INTERVAL_MS);
       await pollDeployments({ store: d.store, deployer: d.deployer, messenger: d.messenger, now: d.now, venueId });

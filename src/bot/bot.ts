@@ -69,6 +69,10 @@ export function createBot(d: BotDeps): Bot {
     // A code is tried first, even from a linked chat: the owner may be setting up another venue (the demo phone, a second
     // café). redeemInvite moves the chat to the code's venue. Only without a usable code does a linked chat get welcome-back.
     const member = code ? await d.store.redeemInvite(code, chatId, uiLang, d.now().toISOString()) : null;
+    // An owner tapping a staff code for their own venue must not demote themselves (the code is still used up).
+    if (member && existing && existing.venue_id === member.venue_id && existing.role === "owner" && member.role !== "owner") {
+      Object.assign(member, await d.store.upsertMember({ venue_id: existing.venue_id, tg_chat_id: chatId, role: "owner", lang: existing.lang }));
+    }
     if (!member) {
       if (existing) {
         const venue = await d.store.getVenue(existing.venue_id);
