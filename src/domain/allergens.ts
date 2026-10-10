@@ -27,16 +27,19 @@ export function allergenName(code: number, lang: Lang): string {
   return a ? a[lang] : String(code);
 }
 
-/** Lower-case stems; a stem matches when it is a substring of the lower-cased text. Advisory only. */
+/**
+ * Lower-case stems; a stem matches at the start of a word in the lower-cased text. Advisory only.
+ * A stem ending in a space ("тон ", "cod ") means the whole word.
+ */
 const KEYWORDS: readonly { code: number; stems: string[] }[] = [
-  { code: 1, stems: ["хляб", "брашно", "тесто", "баниц", "кроасан", "паста", "пица", "питк", "кори", "козунак", "бисквит", "браун", "кекс", "торта", "пшениц", "ръж", "ечемик", "овес", "сандвич", "тост", "bread", "flour", "dough", "croissant", "pasta", "pizza", "wheat", "rye", "barley", "oat", "biscuit", "brownie", "cake", "sandwich", "toast", "bun", "pastry", "banitsa"] },
-  { code: 2, stems: ["скарид", "рак", "омар", "лангуст", "shrimp", "prawn", "crab", "lobster", "crayfish"] },
+  { code: 1, stems: ["хляб", "брашно", "тесто", "баниц", "кроасан", "паста", "пица", "питк", "кори ", "козунак", "бисквит", "браун", "кекс", "торта", "пшениц", "ръж", "ечемик", "овес", "сандвич", "тост", "bread", "flour", "dough", "croissant", "pasta", "pizza", "wheat", "rye", "barley", "oats", "oatmeal", "biscuit", "brownie", "cake", "sandwich", "toast", "bun", "pastry", "banitsa"] },
+  { code: 2, stems: ["скарид", "раци", "рачешк", "ракообразн", "омар", "лангуст", "shrimp", "prawn", "crab", "lobster", "crayfish"] },
   { code: 3, stems: ["яйц", "майонез", "омлет", "egg", "mayonnaise", "omelet", "meringue"] },
-  { code: 4, stems: ["риба", "сьомга", "тон ", "риба тон", "скумрия", "пъстърва", "аншоа", "fish", "salmon", "tuna", "mackerel", "trout", "anchov", "cod"] },
+  { code: 4, stems: ["риба", "сьомга", "тон ", "скумрия", "пъстърва", "аншоа", "fish", "salmon", "tuna", "mackerel", "trout", "anchov", "cod "] },
   { code: 5, stems: ["фъстъ", "peanut"] },
   { code: 6, stems: ["соя", "соев", "тофу", "soy", "tofu", "edamame"] },
   { code: 7, stems: ["мляко", "млечн", "сирене", "кашкавал", "масло", "сметана", "йогурт", "кисело мляко", "капучино", "лате", "моцарела", "извара", "milk", "cheese", "butter", "cream", "yogurt", "yoghurt", "cappuccino", "latte", "mozzarella", "ricotta", "whey"] },
-  { code: 8, stems: ["орех", "бадем", "лешни", "шам", "кашу", "пекан", "ядки", "walnut", "almond", "hazelnut", "pistachio", "cashew", "pecan", "nuts"] },
+  { code: 8, stems: ["орех", "бадем", "лешни", "шамфъст", "кашу", "пекан", "ядки", "walnut", "almond", "hazelnut", "pistachio", "cashew", "pecan", "nuts"] },
   { code: 9, stems: ["целина", "celery"] },
   { code: 10, stems: ["горчиц", "mustard"] },
   { code: 11, stems: ["сусам", "тахан", "sesame", "tahini"] },
@@ -50,11 +53,17 @@ export function suggestAllergens(text: string): number[] {
   return matches(text).map((m) => m.code);
 }
 
+function startsWord(text: string, stem: string): boolean {
+  const escaped = stem.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  return new RegExp(`(^|\\P{L})${escaped}`, "u").test(text);
+}
+
 function matches(text: string): { code: number; keyword: string }[] {
+  // Pad with spaces so a whole-word stem ("тон ") also matches at the very end of the text.
   const t = ` ${text.toLowerCase()} `;
   const out: { code: number; keyword: string }[] = [];
   for (const k of KEYWORDS) {
-    const stem = k.stems.find((s) => t.includes(s));
+    const stem = k.stems.find((s) => startsWord(t, s));
     if (stem !== undefined) out.push({ code: k.code, keyword: stem.trim() });
   }
   return out;

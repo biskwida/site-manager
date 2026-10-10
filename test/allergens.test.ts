@@ -21,6 +21,15 @@ describe("allergens", () => {
     expect(suggestAllergens("Shrimp salad with sesame")).toEqual([2, 11]);
   });
 
+  it("does not fire on look-alike words", () => {
+    expect(suggestAllergens("Пица с шампиньони")).toEqual([1]);
+    expect(suggestAllergens("Ракия")).toEqual([]);
+    expect(suggestAllergens("Donuts")).toEqual([]);
+    expect(suggestAllergens("Veggie bowl")).toEqual([]);
+    expect(suggestAllergens("Goat cheese")).toEqual([7]);
+    expect(suggestAllergens("Сандвич с тон")).toEqual([1, 4]);
+  });
+
   it("warns only about suggested codes that are not declared", () => {
     expect(allergenWarnings([1], "Кроасан с масло")).toEqual([{ code: 7, keyword: "масло" }]);
     expect(allergenWarnings([1, 7], "Кроасан с масло")).toEqual([]);
