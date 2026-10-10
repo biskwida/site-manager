@@ -14,6 +14,7 @@ import type { ChangeOp, ChangeSet, ChangeSource, Lang, Member, SiteState } from 
 import type { Store } from "../store/types";
 import { formatDateTime, nowText } from "../time";
 import { BulkSchema, CancelSchema, CheckAllergensSchema, ListSchema, ProposeSchema, ScheduleSchema, UndoSchema, type ChangeInput } from "./tool-schemas";
+import { wpTools } from "./wp-tools";
 
 export interface AgentDeps {
   store: Store;
@@ -253,7 +254,8 @@ export function makeTools(d: AgentDeps) {
   });
 
   // Task 11 appends schedule_changes, propose_bulk_price_change, check_allergens, undo here.
-  return [getSite, getMenu, proposeChanges, cancelChangeSet, listChanges, ...extraTools(d, { attempt, site, ctx, previews, mine, propose, getSet, ensureNoPending, lang })];
+  const kit: ToolKit = { attempt, site, ctx, previews, mine, propose, getSet, ensureNoPending, lang };
+  return [getSite, getMenu, proposeChanges, cancelChangeSet, listChanges, ...extraTools(d, kit), ...wpTools(d, kit)];
 }
 
 /** What the shared helpers of makeTools expose to the second group of tools. */
