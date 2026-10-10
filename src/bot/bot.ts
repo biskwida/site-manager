@@ -34,6 +34,8 @@ export interface BotDeps {
   download: (filePath: string) => Promise<{ bytes: Uint8Array; contentType: string }>;
   /** Tests pass this to skip getMe. */
   botInfo?: UserFromGetMe;
+  /** Called after a successful owner redeem; deps wire it to startDeploy (which is a no-op when a site already exists). Must not throw. */
+  onOwnerJoined?: (venueId: string) => void;
 }
 
 const INVITE_TTL_MS = 7 * 24 * 3_600_000;
@@ -82,8 +84,18 @@ export function createBot(d: BotDeps): Bot {
     }
     const venue = await d.store.getVenue(member.venue_id);
     const c = copy(member.lang);
-    if (member.role === "owner") await ctx.reply(c.welcome(venue.name, adminUrl(d.baseUrl, venue.slug, await d.store.getAdminToken(venue.id)), publicUrl(d.baseUrl, venue.slug)));
-    else await ctx.reply(c.welcomeStaff(venue.name, publicUrl(d.baseUrl, venue.slug)));
+    if (member.role === "owner") {
+      await ctx.reply(c.welcome(venue.name, adminUrl(d.baseUrl, venue.slug, await d.store.getAdminToken(venue.id)), publicUrl(d.baseUrl, venue.slug)));
+      if (d.onOwnerJoined) {
+        // The first owner join is the human check that publishes the site; startDeploy ignores venues that already have one.
+        if (venue.status === "live" && venue.deploy === null) await ctx.reply(c.publishing);
+        try {
+          d.onOwnerJoined(venue.id);
+        } catch (e) {
+          console.error("[bot] onOwnerJoined failed:", e instanceof Error ? e.message : e);
+        }
+      }
+    } else await ctx.reply(c.welcomeStaff(venue.name, publicUrl(d.baseUrl, venue.slug)));
   });
 
   bot.command("lang", async (ctx) => {
