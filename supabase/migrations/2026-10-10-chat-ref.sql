@@ -2,6 +2,25 @@
 -- Additive: production code that still uses the bigint columns keeps working. Idempotent.
 alter table public.venue_members add column if not exists chat_ref text, add column if not exists last_seen_at timestamptz;
 update public.venue_members set chat_ref = 'tg:' || tg_chat_id where chat_ref is null;
+-- Legacy bridge: production (Telegram-only) still writes the bigint columns. Dropped by migrations/2026-10-11-drop-legacy-chat-ids.sql.
+create or replace function public.fill_chat_ref() returns trigger language plpgsql as $$
+begin
+  if tg_table_name = 'venue_members' then
+    if new.chat_ref is null and new.tg_chat_id is not null then new.chat_ref := 'tg:' || new.tg_chat_id; end if;
+  elsif tg_table_name = 'change_sets' then
+    if new.chat_ref is null and new.chat_id is not null then new.chat_ref := 'tg:' || new.chat_id; end if;
+    if new.message_ref is null and new.tg_message_id is not null then new.message_ref := new.tg_message_id::text; end if;
+  elsif tg_table_name = 'conversations' then
+    if new.chat_ref is null and new.chat_id is not null then new.chat_ref := 'tg:' || new.chat_id; end if;
+  end if;
+  return new;
+end $$;
+drop trigger if exists fill_chat_ref on public.venue_members;
+create trigger fill_chat_ref before insert or update on public.venue_members for each row execute function public.fill_chat_ref();
+drop trigger if exists fill_chat_ref on public.change_sets;
+create trigger fill_chat_ref before insert or update on public.change_sets for each row execute function public.fill_chat_ref();
+drop trigger if exists fill_chat_ref on public.conversations;
+create trigger fill_chat_ref before insert or update on public.conversations for each row execute function public.fill_chat_ref();
 alter table public.venue_members alter column chat_ref set not null;
 alter table public.venue_members alter column tg_chat_id drop not null;
 do $$ begin

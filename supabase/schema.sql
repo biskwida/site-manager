@@ -173,6 +173,7 @@ create table if not exists public.change_sets (
 );
 create index if not exists change_sets_venue_idx on public.change_sets (venue_id, created_at desc);
 create index if not exists change_sets_status_idx on public.change_sets (status, apply_at);
+create index if not exists change_sets_chat_ref_idx on public.change_sets (venue_id, chat_ref) where status = 'proposed';
 
 create table if not exists public.changes (
   id uuid primary key default gen_random_uuid(),
@@ -196,6 +197,25 @@ create table if not exists public.conversations (
   primary key (venue_id, chat_ref)
 );
 create unique index if not exists conversations_chat_id_key on public.conversations (venue_id, chat_id);
+-- Legacy bridge: production (Telegram-only) still writes the bigint columns. Dropped by migrations/2026-10-11-drop-legacy-chat-ids.sql.
+create or replace function public.fill_chat_ref() returns trigger language plpgsql as $$
+begin
+  if tg_table_name = 'venue_members' then
+    if new.chat_ref is null and new.tg_chat_id is not null then new.chat_ref := 'tg:' || new.tg_chat_id; end if;
+  elsif tg_table_name = 'change_sets' then
+    if new.chat_ref is null and new.chat_id is not null then new.chat_ref := 'tg:' || new.chat_id; end if;
+    if new.message_ref is null and new.tg_message_id is not null then new.message_ref := new.tg_message_id::text; end if;
+  elsif tg_table_name = 'conversations' then
+    if new.chat_ref is null and new.chat_id is not null then new.chat_ref := 'tg:' || new.chat_id; end if;
+  end if;
+  return new;
+end $$;
+drop trigger if exists fill_chat_ref on public.venue_members;
+create trigger fill_chat_ref before insert or update on public.venue_members for each row execute function public.fill_chat_ref();
+drop trigger if exists fill_chat_ref on public.change_sets;
+create trigger fill_chat_ref before insert or update on public.change_sets for each row execute function public.fill_chat_ref();
+drop trigger if exists fill_chat_ref on public.conversations;
+create trigger fill_chat_ref before insert or update on public.conversations for each row execute function public.fill_chat_ref();
 
 -- items.updated_at maintenance
 create or replace function public.touch_updated_at() returns trigger language plpgsql as $$
