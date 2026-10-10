@@ -1,0 +1,285 @@
+/* src/templates/mehana/styles.css
+   Mehana: a traditional Bulgarian tavern. Parchment page, the venue's accent as a wine-red header band, an embroidery (шевица)
+   zig-zag border in the accent and ochre, the menu as numbered courses, a dark "come on in" section at the foot.
+   Palette from the approved mockup (docs/design/template-mocks/Mehana.dc.html); nothing is pure black or white.
+   Tokens live on the wrapper only, so the main app's theme is untouched. Self-contained: cover images, hidden text, layout and
+   motion are all here (no load-bearing Tailwind utilities), so the standalone shell ships it as is.
+   Motion: transform/opacity only (one hero entrance, the change flash, press feedback), 160-300 ms, one curve; colour changes on
+   hover are instant; everything off under prefers-reduced-motion. */
+.tpl-mehana {
+  --me-paper: #f3eadb;       /* page */
+  --me-paper-2: #e7d8bd;     /* dish-of-the-day block, photo wells */
+  --me-line: #cdb894;        /* row rules */
+  --me-ink: #2b1b14;         /* text, 13.9:1 on paper, 11.8:1 on paper-2; the dark section */
+  --me-ink-soft: #6b4a2f;    /* secondary text, 6.7:1 on paper, 5.7:1 on paper-2 */
+  --me-red: #8e2a22;         /* "sold out", 7.0:1 on paper */
+  --me-ochre: #c9902f;       /* embroidery and the call button (ink on it 5.9:1) */
+  --me-gold: #e8c98b;        /* links and holidays on the band (>= 5.1:1) and on ink (10.4:1) */
+  --me-green: #9bd39b;       /* "open" dot on the band (>= 4.7:1) */
+  --me-on-band: #f3eadb;
+  /* The band is the owner's accent. Cap lightness at 0.42 and chroma at 0.13 in OKLCH so parchment text on it stays >= 6.8:1 and
+     the gold link >= 5.1:1 for any accent, including a light one (#e8b4b8 becomes #6a3f43). The four mockup options pass unchanged
+     except green #2f5d46, which deepens slightly to #2a5841. Browsers without relative colour syntax keep the plain accent. */
+  --me-wine: var(--accent, #6e1f1b);
+  --me-wine: oklch(from var(--accent, #6e1f1b) min(l, 0.42) min(c, 0.13) h);
+  --me-on-band-soft: color-mix(in oklab, var(--me-on-band) 90%, var(--me-wine));
+  --me-band-line: color-mix(in oklab, var(--me-on-band) 50%, var(--me-wine));
+  --me-on-dark-soft: color-mix(in oklab, var(--me-paper) 80%, var(--me-ink)); /* 9.2:1 on ink */
+  --me-dark-line: color-mix(in oklab, var(--me-line) 22%, var(--me-ink));
+  --me-ease: cubic-bezier(0.23, 1, 0.32, 1);
+  --me-radius: 4px;          /* boxes and photos */
+  --me-radius-btn: 8px;      /* buttons and the language toggle */
+  --me-gutter: clamp(1rem, 4vw, 3rem);
+  --me-wrap: 75rem;
+  color-scheme: light;
+  background: var(--me-paper);
+  color: var(--me-ink);
+  font-family: var(--font-body), ui-sans-serif, system-ui, sans-serif;
+  font-size: 1rem;
+  line-height: 1.55;
+  min-height: 100dvh;
+  display: flex;
+  flex-direction: column;
+  overflow-x: clip;
+  isolation: isolate;
+  -webkit-font-smoothing: antialiased;
+}
+@media (min-width: 768px) { .tpl-mehana { font-size: 1.0625rem; line-height: 1.6; } }
+/* The main app's globals.css puts every h1-h3 in its own display face; inside the template headings start from the body face. */
+.tpl-mehana h1, .tpl-mehana h2, .tpl-mehana h3, .tpl-mehana h4 { font-family: inherit; font-variation-settings: normal; font-weight: 700; margin: 0; }
+.tpl-mehana p, .tpl-mehana ul, .tpl-mehana dl, .tpl-mehana dd { margin: 0; }
+.tpl-mehana ul { list-style: none; padding: 0; }
+/* The serif is the page's one voice for names and headings: title, section and course headings, the dish of the day. */
+.tpl-mehana .me-title, .tpl-mehana .me-h-section, .tpl-mehana .me-h-box, .tpl-mehana .me-course-h, .tpl-mehana .me-dish-name,
+.tpl-mehana .me-h-visit, .tpl-mehana .me-numeral {
+  font-family: var(--font-display), ui-serif, Georgia, serif;
+  font-variation-settings: normal;
+}
+.tpl-mehana a { color: inherit; }
+.tpl-mehana a, .tpl-mehana button { -webkit-tap-highlight-color: transparent; }
+/* next/image `fill` positions the img; this crops it to the box. */
+.me-cover { object-fit: cover; }
+/* Visually hidden, still read by screen readers. */
+.me-sr { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }
+.me-nowrap { white-space: nowrap; }
+.me-soft { color: var(--me-ink-soft); }
+
+/* Layout */
+.me-wrap { width: 100%; max-width: var(--me-wrap); margin-inline: auto; padding-inline: var(--me-gutter); }
+.me-main { flex: 1; }
+
+/* Buttons: 44 px minimum, 8 px corners (boxes and photos are 4 px), press feedback on transform only. */
+.me-btn { min-height: 44px; display: inline-flex; align-items: center; justify-content: center; padding-inline: 1.125rem; border-radius: var(--me-radius-btn); font-weight: 700; line-height: 1.2; text-align: center; text-decoration: none; white-space: nowrap; transition: transform 160ms var(--me-ease); }
+.me-btn:active { transform: scale(0.97); }
+.tpl-mehana .me-btn-ochre { background: var(--me-ochre); color: var(--me-ink); }
+.tpl-mehana .me-btn-ink { background: var(--me-ink); color: var(--me-paper); }
+.tpl-mehana .me-btn-ghost { box-shadow: inset 0 0 0 1px var(--me-ink-soft); color: var(--me-ink); }
+.tpl-mehana .me-btn-outline { box-shadow: inset 0 0 0 1px var(--me-line); color: var(--me-paper); }
+
+/* Skip link: lands on the open/closed answer in the band. */
+.tpl-mehana .me-skip { position: absolute; left: var(--me-gutter); top: -100%; z-index: 20; padding: 0.75rem 1rem; border-radius: var(--me-radius-btn); background: var(--me-paper); color: var(--me-ink); font-weight: 700; }
+.tpl-mehana .me-skip:focus-visible { top: 1rem; }
+
+/* Passive draft note (the page renders the real Apply/Reject banner outside the template). */
+.me-draft { background: var(--me-paper-2); color: var(--me-ink-soft); font-size: 0.875rem; }
+.me-draft-inner { display: flex; flex-wrap: wrap; align-items: center; gap: 0.5rem 0.75rem; padding-block: 0.75rem; }
+.me-draft-badge { border-radius: var(--me-radius); padding: 0.125rem 0.5rem; font-size: 0.75rem; font-weight: 700; background: var(--me-ink); color: var(--me-paper); }
+
+/* ── The band: the accent as a wall of colour, parchment type on it. ── */
+.me-band { position: relative; background: var(--me-wine); color: var(--me-on-band); }
+.me-topbar { display: flex; align-items: center; justify-content: space-between; gap: 0.5rem 1rem; padding-block: 0.75rem; }
+@media (min-width: 768px) { .me-topbar { padding-block: 1.25rem; } }
+.me-brand { display: flex; align-items: center; gap: 0.5rem; min-width: 0; }
+.me-logo { position: relative; display: block; width: 2.75rem; height: 2.75rem; flex: none; overflow: hidden; border-radius: 999px; background: var(--me-paper-2); box-shadow: 0 0 0 2px var(--me-band-line); }
+.me-nav { display: flex; }
+.me-navlink { display: inline-flex; align-items: center; min-height: 44px; padding-inline: 0.75rem; font-weight: 600; text-decoration: none; }
+.me-navlink.is-current { font-weight: 700; text-decoration: underline; text-decoration-thickness: 2px; text-underline-offset: 6px; }
+.me-topbar-end { display: flex; align-items: center; gap: 0.75rem; flex: none; }
+/* On a phone the call button lives in the bottom action bar instead. */
+.me-reserve-top { display: none; }
+@media (min-width: 768px) { .me-reserve-top { display: inline-flex; } }
+
+/* Language toggle (shared component) restyled for the band. No transition: the client may flip the language right after
+   hydration, and an animated swap would leave both buttons half-way for a moment on every load. Selected is a parchment tile with
+   accent text (the same pair as the band, >= 6.8:1); unselected is parchment text on the band with a soft outline. */
+.tpl-mehana .me-lang { gap: 0.375rem; padding: 0; background: transparent; box-shadow: none; border-radius: 0; }
+.tpl-mehana .me-lang button { min-height: 44px; min-width: 44px; padding-inline: 0.5rem; border-radius: var(--me-radius-btn); font-size: 0.9375rem; font-weight: 700; color: var(--me-on-band); background: transparent; box-shadow: inset 0 0 0 1px var(--me-band-line); transition: none; }
+.tpl-mehana .me-lang button[aria-pressed="true"] { background: var(--me-on-band); color: var(--me-wine); box-shadow: none; }
+
+/* Hero: the venue's name in the big serif, the tagline, the welcome line, then the status and the menu link. The text column is a
+   size container: the title is sized from the column (cqi), so a nine-letter Cyrillic name stays on one line at 1024 and 1280
+   whether or not a cover photo takes the right-hand side. Browsers without cqi keep the vw clamp. */
+.me-hero { display: grid; grid-template-columns: minmax(0, 1fr); gap: 1.75rem; align-items: end; padding-block: 1.5rem 2.25rem; }
+.me-hero-home { padding-block: clamp(1.5rem, 6vw, 5.5rem) clamp(2.25rem, 6vw, 5rem); }
+.me-hero-text { container-type: inline-size; display: flex; flex-direction: column; align-items: flex-start; gap: clamp(0.75rem, 2.2vw, 1.5rem); min-width: 0; }
+.me-title { font-weight: 500; line-height: 0.98; letter-spacing: -0.01em; text-wrap: balance; overflow-wrap: anywhere; font-size: clamp(2.75rem, 7.5vw, 6.5rem); font-size: clamp(2.75rem, 13cqi, 6.5rem); }
+.me-hero-home.has-cover .me-title { font-size: clamp(2.75rem, 7.5vw, 6rem); font-size: clamp(2.75rem, 16cqi, 6rem); }
+.me-hero-menu .me-title { font-size: clamp(2.25rem, 6vw, 4rem); font-size: clamp(2.25rem, 10cqi, 4rem); }
+.me-lead { max-width: 52ch; font-size: 1.125rem; line-height: 1.5; text-wrap: pretty; color: var(--me-on-band-soft); }
+.me-welcome { max-width: 58ch; text-wrap: pretty; color: var(--me-on-band-soft); }
+@media (min-width: 768px) { .me-lead { font-size: 1.25rem; } }
+.me-hero-menu .me-lead { font-size: 1.0625rem; }
+.me-hero-foot { display: flex; flex-wrap: wrap; align-items: center; gap: 0.25rem 1.5rem; margin-top: 0.25rem; }
+.tpl-mehana .me-status-wrap:focus-visible { outline: none; } /* skip-link target: the ring would box the whole block */
+.me-status { display: flex; align-items: flex-start; gap: 0.625rem; font-weight: 700; line-height: 1.4; text-wrap: pretty; }
+.me-status-note { margin-top: 0.125rem; padding-left: 1.25rem; color: var(--me-on-band-soft); }
+.tpl-mehana .me-hero-link { display: inline-flex; align-items: center; min-height: 44px; font-weight: 700; color: var(--me-gold); text-decoration: underline; text-underline-offset: 4px; }
+/* Status: the one semantic dot on the page. Open is green, opens-later gold, closed a hollow parchment ring (a red dot would
+   vanish into a wine band). The text always says it in words too. */
+.me-dot { display: inline-block; width: 0.625rem; height: 0.625rem; margin-top: 0.4em; border-radius: 999px; flex: none; }
+.me-dot-open { background: var(--me-green); }
+.me-dot-opens_later { background: var(--me-gold); }
+.me-dot-closed { box-shadow: inset 0 0 0 2px var(--me-on-band); }
+
+/* Cover photo (home only): stacked under the text on a phone, framed on the right from 1024 px. */
+.me-frame { padding: 0.5rem; border-radius: var(--me-radius); box-shadow: inset 0 0 0 1px var(--me-band-line); }
+.me-frame-photo { position: relative; aspect-ratio: 3 / 2; overflow: hidden; border-radius: 2px; background: color-mix(in oklab, var(--me-wine) 70%, var(--me-ink)); }
+@media (min-width: 1024px) {
+  .me-hero.has-cover { grid-template-columns: minmax(0, 1.3fr) minmax(0, 0.85fr); gap: 3.5rem; }
+  .me-frame-photo { aspect-ratio: 4 / 5; }
+}
+
+/* Шевица: the embroidery border under the band. Two rows of triangles, accent above and ochre below, as in the mockup. */
+.me-shevitsa {
+  height: 20px;
+  background-color: var(--me-paper);
+  background-image:
+    linear-gradient(45deg, var(--me-wine) 25%, transparent 25%),
+    linear-gradient(-45deg, var(--me-wine) 25%, transparent 25%),
+    linear-gradient(45deg, transparent 75%, var(--me-ochre) 75%),
+    linear-gradient(-45deg, transparent 75%, var(--me-ochre) 75%);
+  background-size: 20px 20px;
+}
+@media (min-width: 768px) { .me-shevitsa { height: 28px; background-size: 28px 28px; } }
+
+/* ── Tonight + dish of the day ── */
+.me-tonight { display: flex; flex-wrap: wrap; align-items: stretch; gap: 1rem 1.5rem; padding-top: clamp(1rem, 4vw, 3rem); }
+.me-tonight-box { flex: 2 1 34rem; min-width: 0; display: grid; gap: 0.5rem; align-content: start; padding: 0.875rem 1rem; border: 2px solid var(--me-ink); border-radius: var(--me-radius); }
+.me-h-box { font-size: 1.375rem; line-height: 1.2; }
+.me-news-item { font-size: 1.0625rem; text-wrap: pretty; }
+.me-news-item + .me-news-item { padding-top: 0.5rem; border-top: 1px solid var(--me-line); }
+.me-dish { position: relative; isolation: isolate; flex: 1 1 18rem; min-width: 0; display: grid; gap: 0.375rem; align-content: start; padding: 0.875rem 1rem; border-radius: var(--me-radius); background: var(--me-paper-2); }
+.me-dish.is-alone { flex-grow: 0; flex-basis: 40rem; }
+/* The one small-caps label on the page, straight from the mockup. */
+.me-label { font-size: 0.8125rem; font-weight: 700; letter-spacing: 0.12em; text-transform: uppercase; color: var(--me-ink-soft); }
+.me-dish-main { display: flex; align-items: center; gap: 1rem; }
+.me-dish-text { display: grid; gap: 0.125rem; min-width: 0; }
+.me-dish-name { font-size: 1.375rem; font-weight: 700; line-height: 1.2; overflow-wrap: anywhere; }
+.me-dish-desc { color: var(--me-ink-soft); font-size: 0.9375rem; }
+.me-dish-meta { font-variant-numeric: tabular-nums; }
+.me-also { margin-top: 0.75rem; }
+.me-also-h { font-size: 0.9375rem; font-weight: 700; color: var(--me-ink-soft); }
+.me-also-row { position: relative; isolation: isolate; display: flex; justify-content: space-between; align-items: baseline; gap: 0.75rem; padding-block: 0.5rem; border-top: 1px solid var(--me-line); }
+.me-also-name { min-width: 0; overflow-wrap: anywhere; }
+@media (min-width: 768px) {
+  .me-tonight-box, .me-dish { padding: 1.5rem 1.75rem; }
+  .me-h-box { font-size: 1.75rem; }
+  .me-news-item { font-size: 1.25rem; }
+  .me-dish-name { font-size: 1.625rem; }
+}
+
+/* Round "plate" photos beside a dish: a parchment rim and a hairline, like a plate on a tablecloth. */
+.me-plate { position: relative; display: block; flex: none; width: 3.5rem; height: 3.5rem; overflow: hidden; border-radius: 999px; background: var(--me-paper-2); box-shadow: 0 0 0 2px var(--me-paper), 0 0 0 3px var(--me-line); }
+.me-plate-lg { width: 4.5rem; height: 4.5rem; box-shadow: 0 0 0 3px var(--me-paper), 0 0 0 4px var(--me-line); }
+@media (min-width: 768px) { .me-plate { width: 4rem; height: 4rem; } .me-plate-lg { width: 5.5rem; height: 5.5rem; } }
+
+/* ── The menu, course by course ── */
+.me-menu-home { padding-block: clamp(2.5rem, 6vw, 3.5rem); }
+.me-menu-full .me-wrap { padding-block: 1.5rem 3.5rem; }
+.me-menu-head { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: end; gap: 0.5rem 1rem; margin-bottom: clamp(1.25rem, 3vw, 2rem); }
+.me-h-section { font-weight: 500; font-size: clamp(2.25rem, 5vw, 4rem); line-height: 1; letter-spacing: -0.01em; text-wrap: balance; }
+.me-courses-home { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 18rem), 1fr)); gap: 2rem 3.5rem; }
+/* The full menu flows into up to three columns; a course never splits across columns. */
+.me-courses-full { columns: 18rem 3; column-gap: 3.5rem; }
+.me-courses-full .me-course { break-inside: avoid; page-break-inside: avoid; padding-bottom: 2.5rem; scroll-margin-top: 4.5rem; }
+.me-course-h { display: flex; align-items: baseline; gap: 0.75rem; margin-bottom: 0.25rem; font-size: 1.5rem; line-height: 1.2; break-after: avoid; }
+.me-numeral { flex: none; min-width: 1.5em; font-size: 1rem; font-weight: 700; letter-spacing: 0.04em; color: var(--me-wine); }
+@media (min-width: 768px) { .me-course-h { font-size: 1.875rem; gap: 0.875rem; } .me-numeral { font-size: 1.125rem; } }
+.me-rows > li { border-top: 1px solid var(--me-line); }
+.me-rows > li:last-child { border-bottom: 1px solid var(--me-line); }
+.me-row { position: relative; isolation: isolate; display: flex; align-items: flex-start; gap: 0.875rem; padding-block: 0.875rem; }
+.me-row.has-photo { align-items: center; }
+.me-row-body { flex: 1; min-width: 0; }
+.me-row-head { display: flex; align-items: baseline; justify-content: space-between; gap: 0.75rem; }
+.tpl-mehana .me-name { min-width: 0; font-size: 1em; font-weight: 700; line-height: 1.35; overflow-wrap: anywhere; }
+.me-price { flex: none; font-weight: 700; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.me-sold { flex: none; font-weight: 700; white-space: nowrap; color: var(--me-red); }
+.tpl-mehana s { color: var(--me-ink-soft); text-decoration-thickness: 1.5px; }
+.me-row-sub { margin-top: 0.125rem; font-size: 0.9375rem; line-height: 1.5; color: var(--me-ink-soft); text-wrap: pretty; }
+.me-menu-more { margin-top: 2rem; min-height: 48px; padding-inline: 1.5rem; }
+.me-totop { margin-top: 0.5rem; }
+.me-empty { padding-block: 3rem; text-align: center; }
+
+/* Course links on the menu page: sticky, numbered, scrolling sideways inside the bar (no page overflow). A solid band; the fade
+   below it is a blurred box-shadow in the page colour, drawn outside the box, so the scroller neither clips it nor counts it in
+   its scrollHeight (a pseudo-element inside would be both, and would add a hidden vertical scroll). */
+.me-jump { position: sticky; top: 0; z-index: 2; background: var(--me-paper); box-shadow: 0 0.5rem 0.75rem var(--me-paper); }
+.me-jump-inner { display: flex; gap: 1.25rem; overflow-x: auto; overscroll-behavior-x: contain; scrollbar-width: none; }
+.me-jump-inner::-webkit-scrollbar { display: none; }
+.tpl-mehana .me-jumplink { flex: none; min-height: 44px; display: inline-flex; align-items: baseline; gap: 0.375rem; padding-top: 0.75rem; font-size: 0.9375rem; font-weight: 600; color: var(--me-ink-soft); white-space: nowrap; text-decoration: underline; text-decoration-thickness: 1px; text-underline-offset: 0.4em; text-decoration-color: var(--me-line); }
+.me-jumplink .me-numeral { min-width: 0; font-size: 0.875rem; }
+
+/* Gallery: plain 4:3 photos, as in the mockup. */
+.me-gallery { padding-bottom: 3.5rem; }
+.me-gallery-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 14rem), 1fr)); gap: 0.75rem; }
+.me-gallery-photo { position: relative; aspect-ratio: 4 / 3; overflow: hidden; border-radius: var(--me-radius); background: var(--me-paper-2); }
+
+/* ── Заповядайте: the dark foot of the page ── */
+.me-visit { background: var(--me-ink); color: var(--me-paper); }
+.me-visit-inner { display: grid; gap: 2rem 2.5rem; padding-block: 3.5rem 2.5rem; }
+@media (min-width: 768px) { .me-visit-inner { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); } }
+.me-visit-contact { display: flex; flex-direction: column; align-items: flex-start; gap: 0.5rem; }
+.tpl-mehana .me-h-visit { margin-bottom: 0.5rem; font-weight: 500; font-size: clamp(2.25rem, 5vw, 2.75rem); line-height: 1; }
+.me-about { max-width: 52ch; color: var(--me-on-dark-soft); text-wrap: pretty; }
+.me-address { display: inline-flex; align-items: center; min-height: 44px; }
+.me-dark-link { display: inline-flex; align-items: center; min-height: 44px; text-decoration: underline; text-underline-offset: 4px; text-decoration-color: color-mix(in oklab, var(--me-paper) 45%, var(--me-ink)); }
+.tpl-mehana .me-phone { display: inline-flex; align-items: center; min-height: 44px; font-size: 1.375rem; font-weight: 700; color: var(--me-gold); font-variant-numeric: tabular-nums; }
+.me-hours { display: grid; gap: 0.625rem; }
+.me-hours > div { display: grid; grid-template-columns: minmax(6.5rem, max-content) 1fr; gap: 1.5rem; color: var(--me-on-dark-soft); }
+.me-hours > div[aria-current="date"] { color: var(--me-paper); }
+.me-hours > div[aria-current="date"] dd { font-weight: 700; }
+.me-hours dt { font-weight: 700; }
+.me-hours dd { font-variant-numeric: tabular-nums; }
+.me-holidays { margin-top: 1rem; padding-top: 1rem; border-top: 1px solid var(--me-dark-line); }
+.me-holidays > div { color: var(--me-gold); }
+
+/* Footer: the last dark line. On the home page it continues the visit section without a seam. */
+.me-footer { background: var(--me-ink); color: var(--me-line); font-size: 0.9375rem; }
+.me-footer-inner { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 0.5rem 1rem; padding-block: 1rem 1.5rem; border-top: 1px solid var(--me-dark-line); }
+.me-footer-inner p { display: flex; flex-wrap: wrap; gap: 0.25rem 0.75rem; }
+.me-footer-name { font-weight: 700; color: var(--me-paper); }
+.me-powered { display: inline-flex; min-height: 44px; align-items: center; text-decoration: underline; text-underline-offset: 4px; text-decoration-color: color-mix(in oklab, var(--me-line) 50%, var(--me-ink)); }
+
+/* Phones: the bottom action bar (menu + call). Last in the flow and sticky, so it never covers the footer at the end. */
+.me-actionbar { position: sticky; bottom: 0; z-index: 3; display: grid; grid-template-columns: 1fr 1fr; gap: 0.5rem; padding: 0.75rem var(--me-gutter) calc(0.75rem + env(safe-area-inset-bottom)); background: var(--me-ink); box-shadow: 0 -1px 0 var(--me-dark-line); }
+.me-actionbar .me-btn { min-height: 52px; }
+@media (min-width: 768px) { .me-actionbar { display: none; } }
+
+/* Focus: accent ring on parchment, gold ring on the band and the dark sections. */
+.tpl-mehana :focus-visible { outline: 3px solid var(--me-wine); outline-offset: 3px; }
+.tpl-mehana .me-band :focus-visible, .tpl-mehana .me-visit :focus-visible, .tpl-mehana .me-footer :focus-visible, .tpl-mehana .me-actionbar :focus-visible { outline-color: var(--me-gold); }
+.tpl-mehana .me-jumplink:focus-visible { outline-offset: -3px; }
+
+/* Hover states only where a pointer exists (touch would latch them). Colour changes are instant; only transform animates. */
+@media (hover: hover) {
+  .me-navlink:not(.is-current):hover { text-decoration: underline; text-underline-offset: 6px; }
+  .tpl-mehana .me-lang button:not([aria-pressed="true"]):hover { box-shadow: inset 0 0 0 1px var(--me-on-band); }
+  .tpl-mehana .me-btn-ochre:hover { background: color-mix(in oklab, var(--me-ochre) 88%, var(--me-paper)); }
+  .tpl-mehana .me-btn-ink:hover { background: color-mix(in oklab, var(--me-ink) 85%, var(--me-wine)); }
+  .tpl-mehana .me-btn-ghost:hover { box-shadow: inset 0 0 0 2px var(--me-ink); }
+  .tpl-mehana .me-jumplink:hover { color: var(--me-ink); text-decoration-color: var(--me-wine); }
+  .me-dark-link:hover, .me-powered:hover { color: var(--me-paper); }
+}
+
+/* Motion: one hero entrance, the change flash, press feedback. */
+.me-rise { animation: me-rise 300ms var(--me-ease) both; }
+@keyframes me-rise { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
+.me-flash { position: absolute; inset: 0; z-index: -1; pointer-events: none; border-radius: inherit; background: color-mix(in oklab, var(--me-ochre) 28%, var(--me-paper)); animation: me-flash 2.2s ease-out both; }
+@keyframes me-flash { 0%, 65% { opacity: 1; } 100% { opacity: 0; } }
+@media (prefers-reduced-motion: reduce) {
+  .tpl-mehana *, .tpl-mehana *::before, .tpl-mehana *::after { animation: none !important; transition: none !important; scroll-behavior: auto !important; }
+  /* The flash must still reach its final frame (opacity 0): `useLiveSite` never clears `changed`, so `animation: none` would leave
+     a permanent ochre wash on every row that ever changed. A 1 ms run with `both` fill lands on the end state at once.
+     test/template-mehana.test.ts asserts this rule stays inside the reduced-motion block. */
+  .tpl-mehana .me-flash { animation: me-flash 1ms linear both !important; }
+}

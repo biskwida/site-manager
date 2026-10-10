@@ -35,7 +35,7 @@ export const TEMPLATE_ACCENT_DEFAULTS: Record<TemplateId, string> = {
   nocturne: "#d9a05b",
   lumen: "#2e5e4e",
   furna: "#2f6b4f",
-  mehana: "#2f6b4f",
+  mehana: "#6E1F1B",
   kvartal: "#2f6b4f",
 };
 

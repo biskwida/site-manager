@@ -6,6 +6,7 @@ import { TEMPLATE_IDS, type TemplateId } from "@/src/domain/types";
 import type { TemplateDef } from "./shared/types";
 import { def as classic } from "./classic";
 import { def as lumen } from "./lumen";
+import { def as mehana } from "./mehana";
 import { def as nocturne } from "./nocturne";
 
 // Defined in shared/types.ts so a deployed venue site (which ships only the type-only stand-in) can type-check the templates.
@@ -17,7 +18,7 @@ export const TEMPLATES: Record<TemplateId, TemplateDef> = {
   lumen,
   // Placeholders until each template's own task lands (same pattern as R9): the classic design under the new id.
   furna: { ...classic, id: "furna" },
-  mehana: { ...classic, id: "mehana" },
+  mehana,
   kvartal: { ...classic, id: "kvartal" },
 };
 
