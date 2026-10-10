@@ -63,7 +63,7 @@ Written as `supabase/migrations/2026-10-10-chat-ref.sql`, idempotent (guards wit
 
 The Supabase store on this branch reads and writes `chat_ref` / `message_ref` and, **only for `tg:` refs**, also writes the legacy `tg_chat_id` / `chat_id` / `tg_message_id` columns (three lines in the mappers, each marked `// legacy: remove in phase 2`). Production code keeps finding members by `tg_chat_id`, so a Telegram owner linked through the preview deployment also works in production and vice versa.
 
-Phase 2 (after merge to main and the production deploy): `supabase/migrations/2026-10-11-drop-legacy-chat-ids.sql` drops `tg_chat_id`, `change_sets.chat_id`, `tg_message_id`, `conversations.chat_id` and the two legacy unique indexes; the three mapper lines go. Listed in the plan as the last task, run by hand after the merge.
+Phase 2 (after merge to main and the production deploy): `supabase/migrations/2026-10-11-drop-legacy-chat-ids.sql` drops `tg_chat_id`, `change_sets.chat_id`, `tg_message_id`, `conversations.chat_id` and the two legacy unique indexes; the mapper lines go first. Order: merge and deploy production, move the Meta keys and callback URLs to production, deploy the code cleanup (no legacy writes, legacy parts of `schema.sql` removed), and only then run the migration; dropping the columns while the code still sends them would make PostgREST reject every write (see `docs/CHANNELS.md`, "Phase 2"). Listed in the plan as the last task, run by hand after the merge.
 
 ## Architecture
 

@@ -20,7 +20,7 @@ export function channelOf(ref: string): Channel {
 export function isMetaChannel(c: Channel): boolean {
   return c !== "tg";
 }
-/** The numeric Telegram id for the legacy bigint columns; null for every other channel. Remove with the phase-2 migration. */
+/** The numeric Telegram id for the legacy bigint columns; null for every other channel. Remove in the phase-2 code cleanup, before the migration runs. */
 export function legacyTelegramId(ref: string | null): number | null {
   if (ref === null) return null;
   const { channel, id } = parseRef(ref);

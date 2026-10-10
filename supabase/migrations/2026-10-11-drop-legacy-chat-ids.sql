@@ -1,4 +1,8 @@
--- Phase 2 of the channel identity change. Run ONLY after main carries build/channels and production is redeployed.
+-- Phase 2 of the channel identity change. Run order (docs/CHANNELS.md, "Phase 2"):
+--   1) merge build/channels and deploy production; 2) move the Meta keys to Production, repoint the three Meta callback URLs, retire the preview;
+--   3) deploy the code cleanup (no more legacy writes, legacyTelegramId/legacyColumns gone, legacy parts of schema.sql gone);
+--   4) only then run this file. Running it before step 3 makes PostgREST reject every write that still sends the legacy fields (PGRST204).
+-- After this has run, never run a bare `npm run db:apply` until the schema.sql cleanup has landed: the old schema.sql re-adds the bridge.
 -- Removes the legacy bridge (trigger function and triggers), then the bigint columns the Telegram-only build used.
 -- Order matters: the bridge function references the legacy columns, so it goes first. Idempotent.
 drop trigger if exists fill_chat_ref on public.venue_members;

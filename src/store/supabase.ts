@@ -105,7 +105,7 @@ export function toChangeSet(r: Row): ChangeSet {
     changes: ((r.changes as Row[]) ?? []).map(toChange).sort((a, b) => a.position - b.position),
   };
 }
-/** Legacy bigint columns, written only for Telegram refs so the production build (Telegram only) keeps working until the phase-2 migration. */
+/** Legacy bigint columns, written only for Telegram refs so the production build (Telegram only) keeps working; removed in the phase-2 code cleanup, before the migration runs. */
 export function legacyColumns(chatRef: string | null, messageRef?: string | null): { chat_id: number | null; tg_message_id: number | null } {
   const chat_id = legacyTelegramId(chatRef); // legacy
   const tg_message_id = chat_id !== null && messageRef && /^-?\d+$/.test(messageRef) ? Number(messageRef) : null; // legacy
