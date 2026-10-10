@@ -47,7 +47,9 @@ if (again !== slug) {
   console.error("Slug did not match; nothing deleted.");
   process.exit(1);
 }
-if (deploy) {
+if (deploy && !deploy.project_id) {
+  console.log(`deploy record has no provider project id (status ${deploy.status}); nothing to delete at the provider`);
+} else if (deploy) {
   if (deploy.provider === deps.deployer.provider) {
     try {
       await deps.deployer.deleteSite(deploy.project_id);
