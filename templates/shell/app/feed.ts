@@ -24,3 +24,8 @@ export async function loadFeed(): Promise<SiteState | null> {
     return null;
   }
 }
+
+/** <html lang> for this site: the venue's main language; "bg" when the feed is unavailable. */
+export function htmlLang(state: SiteState | null): "bg" | "en" {
+  return state?.venue.default_lang === "en" ? "en" : "bg";
+}
