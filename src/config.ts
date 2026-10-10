@@ -26,6 +26,8 @@ export interface Config {
   maxSitesPerDay: number;
   /** For https://t.me/<bot>?start=<code> links on the wizard's done page. */
   telegramBotUsername: string | null;
+  /** 32-byte key for destination secrets (WordPress plugin tokens); null = destinations cannot be connected (memory mode falls back to a dev key). */
+  destinationSecretKey: string | null;
 }
 
 type Env = Record<string, string | undefined>;
@@ -65,5 +67,6 @@ export function loadConfig(env: Env = process.env, opts: { lenient?: boolean } =
     rateSalt: optional("RATE_SALT") ?? "dev-salt",
     maxSitesPerDay: maxSites,
     telegramBotUsername: optional("TELEGRAM_BOT_USERNAME")?.replace(/^@/, "") ?? null,
+    destinationSecretKey: optional("DESTINATION_SECRET_KEY"),
   };
 }
