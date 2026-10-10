@@ -1,7 +1,9 @@
 // test/tick.test.ts
 import { describe, expect, it } from "vitest";
+import { encryptSecrets, parseSecretKey } from "@/src/destinations/secrets";
 import { planChanges } from "@/src/domain/changes";
 import { runTick } from "@/src/tick";
+import { FakeWordPress } from "./fake-wordpress";
 import { FakeMessenger, makeDemo } from "./helpers";
 
 const T0 = new Date("2026-10-09T09:00:00.000Z");
@@ -75,5 +77,20 @@ describe("runTick", () => {
     const r = await runTick({ store, messenger: null, now: T0, venueId: other.id });
     expect(r.applied).toEqual([b.id]);
     expect((await store.getChangeSet(a.id)).status).toBe("scheduled");
+  });
+  it("retries due destination pushes when a sync dependency is given", async () => {
+    const { store, venue } = await makeDemo();
+    const wp = new FakeWordPress();
+    const token = (wp.connected() as unknown as { o: { token: string } }).o.token;
+    const key = parseSecretKey("ab".repeat(32));
+    const dest = await store.upsertDestination({ venue_id: venue.id, kind: "wordpress", config: { site_url: wp.siteUrl }, secrets: encryptSecrets({ token }, key) });
+    const cs = await store.createChangeSet({ venue_id: venue.id, chat_id: null, summary_bg: "s", summary_en: "s", preview_bg: "p", preview_en: "p", source: "text", status: "proposed", changes: [{ position: 0, op: "wp_set_option", entity: "wp_option", entity_id: "blogname", before: { value: "Smoke Café" }, after: { value: "Ъгъла" } }] });
+    await store.applyChangeSet(cs.id, T0.toISOString());
+    const sync = await store.createSync({ venue_id: venue.id, destination_id: dest.id, change_set_id: cs.id, payload: { kind: "wordpress" }, next_at: T0.toISOString() });
+    const report = await runTick({ store, messenger: null, now: T0, sync: { store, secretKey: key, fetch: wp.fetch, log: () => undefined } });
+    expect(report.pushed).toEqual([sync.id]);
+    expect(wp.options.blogname).toBe("Ъгъла");
+    const without = await runTick({ store, messenger: null, now: T0 });
+    expect(without.pushed).toBeUndefined();
   });
 });

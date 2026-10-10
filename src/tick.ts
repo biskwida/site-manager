@@ -1,5 +1,6 @@
 // src/tick.ts
 import type { Messenger } from "./bot/messenger";
+import { runPendingSyncs, type SyncDeps } from "./destinations/sync";
 import { planChange } from "./domain/changes";
 import { itemName, tr } from "./domain/format";
 import type { Lang } from "./domain/types";
@@ -12,12 +13,16 @@ export interface TickDeps {
   now: Date;
   /** Restrict to one venue (the per-webhook tick). */
   venueId?: string;
+  /** Destination pushes to retry (src/destinations/sync.ts); null/undefined = skip. */
+  sync?: SyncDeps | null;
 }
 export interface TickReport {
   applied: string[];
   auto: string[];
   reminded: string[];
   expired: string[];
+  /** Destination sync rows pushed by this tick. */
+  pushed?: string[];
 }
 
 const HOUR = 3_600_000;
@@ -85,6 +90,16 @@ export async function runTick(d: TickDeps): Promise<TickReport> {
       const { lang, tz } = await langFor(d.store, cs.venue_id, cs.chat_id);
       const summary = lang === "bg" ? cs.summary_bg : cs.summary_en;
       await d.messenger.send(cs.chat_id, `${tr(lang, "⏰ Напомняне: на", "⏰ Reminder: on")} ${formatDateTime(cs.apply_at, lang, tz)} ${tr(lang, "ще се приложи", "this will be applied")}: ${summary}`);
+    }
+  }
+
+  // 5. Destination pushes that failed earlier (WordPress etc.), with backoff.
+  if (d.sync) {
+    try {
+      const r = await runPendingSyncs(d.sync, { venueId: d.venueId, now: d.now });
+      report.pushed = r.done;
+    } catch (e) {
+      console.error("[tick] destination syncs failed:", e instanceof Error ? e.message : e);
     }
   }
   return report;
