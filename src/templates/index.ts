@@ -1,39 +1,15 @@
 // Single source for site designs: app/[slug] (preview, drafts, fallback) renders through here; a deployed venue site gets one
 // template through the generated src/templates/current.ts instead.
-// Runtime imports of this module are for app/** only; templates import only its types (the shell manifest does not ship this file).
-import type { ComponentType } from "react";
-import { TEMPLATE_IDS, type BusinessType, type DraftInfo, type SiteState, type TemplateId } from "@/src/domain/types";
+// Runtime imports of this module are for app/** only; templates import only its types (the shell manifest ships a type-only
+// stand-in, templates/shell/src/templates/index.d.ts, instead of this file).
+import { TEMPLATE_IDS, type TemplateId } from "@/src/domain/types";
+import type { TemplateDef } from "./shared/types";
 import { def as classic } from "./classic";
 import { def as lumen } from "./lumen";
 import { def as nocturne } from "./nocturne";
 
-export interface TemplateProps {
-  state: SiteState;
-  /** Server time in ms when the page rendered; templates tick from it with useNow. */
-  now: number;
-  slug: string;
-  page: "home" | "menu";
-  draft: DraftInfo | null;
-  /** Poll the feed (false for draft previews and the wizard preview). */
-  live: boolean;
-  /** Absolute or site-relative URL of the public feed (`/api/site/<slug>` in the main app, `${SITE_MANAGER_URL}/api/site/<slug>` in a deployed site). */
-  feedUrl: string;
-  /** Wizard preview: allows blob:/data: media URLs. */
-  preview?: boolean;
-}
-
-export interface TemplateDef {
-  id: TemplateId;
-  name_bg: string;
-  name_en: string;
-  tagline_bg: string;
-  tagline_en: string;
-  business_types: BusinessType[];
-  accentDefault: string;
-  /** CSS class string from next/font that sets --font-display and --font-body (and any extra vars). */
-  fontVars: string;
-  Component: ComponentType<TemplateProps>;
-}
+// Defined in shared/types.ts so a deployed venue site (which ships only the type-only stand-in) can type-check the templates.
+export type { TemplateDef, TemplateProps } from "./shared/types";
 
 export const TEMPLATES: Record<TemplateId, TemplateDef> = {
   classic,

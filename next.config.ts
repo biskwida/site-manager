@@ -18,5 +18,9 @@ const nextConfig: NextConfig = {
       ...(supabaseHost ? [{ protocol: "https" as const, hostname: supabaseHost }] : []),
     ],
   },
+  // The deployer inlines these files into each venue's Vercel deployment; without this they would not exist in the serverless functions.
+  outputFileTracingIncludes: {
+    "/api/**": ["./templates/shell/**/*", "./src/templates/**/*", "./src/domain/**/*", "./src/time.ts", "./src/i18n/**/*"],
+  },
 };
 export default nextConfig;
