@@ -1,0 +1,6 @@
+-- Optional: call the tick every 5 minutes from Postgres (Supabase: enable pg_cron and pg_net in Database → Extensions).
+-- Replace <BASE_URL> and <TICK_SECRET>, then run in the SQL editor.
+-- select cron.schedule('site-manager-tick', '*/5 * * * *', $$
+--   select net.http_post(url := '<BASE_URL>/api/tick', headers := '{"x-tick-secret": "<TICK_SECRET>"}'::jsonb, body := '{}'::jsonb);
+-- $$);
+-- To remove: select cron.unschedule('site-manager-tick');
