@@ -9,9 +9,7 @@ require $plugin . '/includes/class-sm-labels.php';
 require $plugin . '/includes/class-sm-client.php';
 require $plugin . '/includes/class-sm-render.php';
 require $plugin . '/includes/class-sm-shortcodes.php';
-foreach (glob(__DIR__ . '/cases/*.php') ?: [] as $extra) {
-    require $extra; // Task 10 adds write-channel cases here
-}
+require $plugin . '/includes/class-sm-pages.php';
 
 $feed = json_decode((string) file_get_contents(__DIR__ . '/fixtures/feed.json'), true, 512, JSON_THROW_ON_ERROR);
 $state = $feed['state'];
@@ -149,6 +147,11 @@ $GLOBALS['sm_test_remote'] = ['response' => ['code' => 200], 'body' => json_enco
 SM_Client::clear_cache();
 $rendered = SM_Shortcodes::render('hours', []);
 check('a malformed feed date yields the safe comment, not an exception', has($rendered, '<!-- Site Manager: Site Manager could not render this block. -->'), $rendered);
+
+// Write-channel cases (Task 10) run after the helpers and the counter exist, so their failures count.
+foreach (glob(__DIR__ . '/cases/*.php') ?: [] as $extra) {
+    require $extra;
+}
 
 echo ($fails ? "\n$fails FAILED\n" : "\nALL PASSED\n");
 exit($fails ? 1 : 0);

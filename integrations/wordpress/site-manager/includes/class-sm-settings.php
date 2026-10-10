@@ -34,6 +34,9 @@ final class SM_Settings
             echo '</select><p class="description">' . esc_html__('Each shortcode or block can override this with lang="bg" or lang="en".', 'site-manager') . '</p>';
         }, self::PAGE, 'site_manager_feed');
         add_action('admin_post_site_manager_check', [self::class, 'handle_check']);
+        add_action('admin_post_site_manager_code', [self::class, 'handle_code']);
+        add_action('admin_post_site_manager_disconnect', [self::class, 'handle_disconnect']);
+        add_action('site_manager_settings_after_form', [self::class, 'connect_box']);
     }
 
     private static function field(string $key, string $label, string $type, string $placeholder): void
@@ -102,5 +105,68 @@ final class SM_Settings
         echo '<p>' . esc_html__('Add lang="bg" or lang="en" to any of them to force the language.', 'site-manager') . '</p>';
         do_action('site_manager_settings_after_form', $s);
         echo '</div>';
+    }
+
+    public static function handle_code(): void
+    {
+        if (!current_user_can('manage_options')) {
+            wp_die(esc_html__('You are not allowed to do that.', 'site-manager'));
+        }
+        check_admin_referer('site_manager_code');
+        $code = SM_Auth::new_code(get_current_user_id());
+        set_transient('site_manager_show_code_' . get_current_user_id(), $code, 900);
+        wp_safe_redirect(add_query_arg(['page' => self::PAGE], admin_url('options-general.php')) . '#connect');
+        exit;
+    }
+
+    public static function handle_disconnect(): void
+    {
+        if (!current_user_can('manage_options')) {
+            wp_die(esc_html__('You are not allowed to do that.', 'site-manager'));
+        }
+        check_admin_referer('site_manager_disconnect');
+        SM_Auth::disconnect();
+        wp_safe_redirect(add_query_arg(['page' => self::PAGE, 'sm_check' => 'success', 'sm_msg' => rawurlencode(__('Disconnected. The blocks keep working; the agent can no longer edit this site.', 'site-manager'))], admin_url('options-general.php')));
+        exit;
+    }
+
+    public static function connect_box(array $settings): void
+    {
+        $conn = SM_Auth::connection();
+        $code = get_transient('site_manager_show_code_' . get_current_user_id());
+        echo '<h2 id="connect">' . esc_html__('Let the Site Manager agent edit this site', 'site-manager') . '</h2>';
+        if ($conn) {
+            $user = get_user_by('id', $conn['user_id']);
+            echo '<p>' . esc_html(sprintf(__('Connected to venue "%1$s" since %2$s, acting as %3$s (token %4$s…).', 'site-manager'), $conn['venue_slug'], wp_date(get_option('date_format') . ' ' . get_option('time_format'), $conn['connected_at']), $user ? $user->user_login : '?', $conn['prefix'])) . '</p>';
+            echo '<form method="post" action="' . esc_url(admin_url('admin-post.php')) . '">';
+            wp_nonce_field('site_manager_disconnect');
+            echo '<input type="hidden" name="action" value="site_manager_disconnect">';
+            submit_button(__('Disconnect', 'site-manager'), 'delete', 'submit', false);
+            echo '</form>';
+        } else {
+            echo '<p>' . esc_html__('Generate a one-time code, then send the line below to the Site Manager bot in Telegram. The code is valid for 15 minutes. Nothing changes on this site until you approve each edit in Telegram.', 'site-manager') . '</p>';
+            if (is_string($code) && $code !== '' && SM_Auth::code_info() !== null) {
+                $line = '/connect ' . home_url('/') . ' ' . $code;
+                echo '<p><input type="text" readonly class="large-text code" id="sm-connect-line" value="' . esc_attr($line) . '" onclick="this.select()"> ';
+                echo '<button type="button" class="button" onclick="navigator.clipboard&&navigator.clipboard.writeText(document.getElementById(\'sm-connect-line\').value)">' . esc_html__('Copy', 'site-manager') . '</button></p>';
+                echo '<p class="description">' . esc_html(sprintf(__('Expires at %s.', 'site-manager'), wp_date(get_option('time_format'), SM_Auth::code_info()['expires']))) . '</p>';
+            }
+            echo '<form method="post" action="' . esc_url(admin_url('admin-post.php')) . '">';
+            wp_nonce_field('site_manager_code');
+            echo '<input type="hidden" name="action" value="site_manager_code">';
+            submit_button(__('Generate code', 'site-manager'), 'primary', 'submit', false);
+            echo '</form>';
+        }
+        $log = SM_Auth::recent_log(20);
+        echo '<h2>' . esc_html__('Recent API calls', 'site-manager') . '</h2>';
+        if (!$log) {
+            echo '<p class="description">' . esc_html__('None yet.', 'site-manager') . '</p>';
+            return;
+        }
+        echo '<table class="widefat striped"><thead><tr><th>' . esc_html__('When', 'site-manager') . '</th><th>IP</th><th>' . esc_html__('Call', 'site-manager') . '</th><th>' . esc_html__('Status', 'site-manager') . '</th><th>ms</th></tr></thead><tbody>';
+        foreach ($log as $e) {
+            echo '<tr><td>' . esc_html(wp_date(get_option('date_format') . ' ' . get_option('time_format'), (int) $e['t'])) . '</td><td>' . esc_html((string) $e['ip']) . '</td><td><code>' . esc_html($e['m'] . ' ' . $e['r']) . '</code></td><td>' . (int) $e['s'] . '</td><td>' . (int) $e['ms'] . '</td></tr>';
+        }
+        echo '</tbody></table>';
     }
 }

@@ -97,3 +97,44 @@ msgstr "Език"
 
 msgid "Text"
 msgstr "Текст"
+
+# Settings page: connect box and the API log (Task 10)
+
+msgid "Let the Site Manager agent edit this site"
+msgstr "Позволете на агента на Site Manager да редактира този сайт"
+
+msgid "Connected to venue \"%1$s\" since %2$s, acting as %3$s (token %4$s…)."
+msgstr "Свързано със заведение „%1$s“ от %2$s, като потребител %3$s (токен %4$s…)."
+
+msgid "Disconnect"
+msgstr "Прекъсни връзката"
+
+msgid "Generate a one-time code, then send the line below to the Site Manager bot in Telegram. The code is valid for 15 minutes. Nothing changes on this site until you approve each edit in Telegram."
+msgstr "Генерирайте еднократен код и изпратете реда по-долу на бота на Site Manager в Telegram. Кодът важи 15 минути. Нищо на този сайт не се променя, докато не одобрите всяка редакция в Telegram."
+
+msgid "Copy"
+msgstr "Копирай"
+
+msgid "Expires at %s."
+msgstr "Изтича в %s."
+
+msgid "Generate code"
+msgstr "Генерирай код"
+
+msgid "Recent API calls"
+msgstr "Последни API заявки"
+
+msgid "None yet."
+msgstr "Още няма."
+
+msgid "When"
+msgstr "Кога"
+
+msgid "Call"
+msgstr "Заявка"
+
+msgid "Status"
+msgstr "Статус"
+
+msgid "Disconnected. The blocks keep working; the agent can no longer edit this site."
+msgstr "Връзката е прекъсната. Блоковете продължават да работят; агентът вече не може да редактира този сайт."

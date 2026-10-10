@@ -54,3 +54,9 @@ function esc_url_raw(string $s): string { return $s; }
 function wp_remote_get(string $url, array $args = []): mixed { return $GLOBALS['sm_test_remote'] ?? new WP_Error('http_request_failed', 'no network in tests'); }
 function wp_remote_retrieve_response_code(mixed $r): int { return is_array($r) ? ($r['response']['code'] ?? 0) : 0; }
 function wp_remote_retrieve_body(mixed $r): string { return is_array($r) ? ($r['body'] ?? '') : ''; }
+function wp_slash(mixed $v): mixed { return $v; }
+function wp_unslash(mixed $v): mixed { return $v; }
+function has_blocks(string $content): bool { return str_contains($content, '<!-- wp:'); }
+function wp_hash_password(string $p): string { return password_hash($p, PASSWORD_DEFAULT); }
+$GLOBALS['sm_test_attachments'] = []; // source_id => ['id' => int, 'url' => string]
+function sm_test_find_attachment(string $source_id): ?array { return $GLOBALS['sm_test_attachments'][$source_id] ?? null; }
