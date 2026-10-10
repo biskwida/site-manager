@@ -1,16 +1,16 @@
 "use client";
 import Link from "next/link";
-import { useRouter, useSearchParams } from "next/navigation";
+import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { useLang } from "@/src/i18n";
 import type { MessageKey } from "@/src/i18n/dicts";
-import type { DraftInfo } from "@/src/server/site";
+import type { DraftInfo } from "@/src/domain/types";
 
 /** Sticky "not live" bar over a draft preview; Apply/Reject call the admin API, then show the live site. */
 export function DraftBanner({ draft, slug }: { draft: DraftInfo; slug: string }) {
   const { lang, t } = useLang();
   const router = useRouter();
-  const key = useSearchParams().get("key") ?? "";
+  const key = draft.key;
   const [busy, setBusy] = useState(false);
   const [failed, setFailed] = useState(false);
   const summary = lang === "bg" ? draft.summary_bg : draft.summary_en;

@@ -4,6 +4,7 @@ import { isSoldOut, visibleItems } from "@/src/domain/effective";
 import { formatPrice, itemName } from "@/src/domain/format";
 import type { SiteState } from "@/src/domain/types";
 import { useLang } from "@/src/i18n";
+import { pageHref } from "../shared/links";
 import { Flash, mediaUrl, SiteImage, type Changed } from "./bits";
 
 export function Highlights({ state, now, slug, changed }: { state: SiteState; now: number; slug: string; changed: Changed }) {
@@ -39,7 +40,7 @@ export function Highlights({ state, now, slug, changed }: { state: SiteState; no
           );
         })}
       </ul>
-      <Link href={`/${slug}/menu`} className="mt-4 inline-block rounded-full bg-ink px-5 py-2.5 text-sm font-semibold text-paper transition hover:bg-ink/90">
+      <Link href={pageHref(slug, "menu")} className="mt-4 inline-block rounded-full bg-ink px-5 py-2.5 text-sm font-semibold text-paper transition hover:bg-ink/90">
         {t("site.fullMenu")}
       </Link>
     </section>

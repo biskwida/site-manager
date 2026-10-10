@@ -2,6 +2,7 @@
 import Link from "next/link";
 import type { SiteState } from "@/src/domain/types";
 import { LangToggle, useLang } from "@/src/i18n";
+import { pageHref } from "../shared/links";
 import { mediaUrl, SiteImage } from "./bits";
 
 export function SiteHeader({ state, slug, page }: { state: SiteState; slug: string; page: "home" | "menu" }) {
@@ -13,8 +14,8 @@ export function SiteHeader({ state, slug, page }: { state: SiteState; slug: stri
   const welcome = state.texts.find((x) => x.key === "welcome");
   const welcomeText = welcome ? (lang === "bg" ? welcome.text_bg : welcome.text_en) || welcome.text_bg : "";
   const links = [
-    { href: `/${slug}`, label: t("site.home"), current: page === "home" },
-    { href: `/${slug}/menu`, label: t("site.menu"), current: page === "menu" },
+    { href: pageHref(slug, "home"), label: t("site.home"), current: page === "home" },
+    { href: pageHref(slug, "menu"), label: t("site.menu"), current: page === "menu" },
   ];
   return (
     <header className={`relative isolate overflow-hidden ${cover ? "min-h-[40vh] text-white" : "bg-accent-soft text-ink"}`}>

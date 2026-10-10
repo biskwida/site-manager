@@ -1,27 +1,13 @@
 "use client";
 import Image from "next/image";
 import type { SiteState } from "@/src/domain/types";
+import { findMedia, mediaUrl as sharedMediaUrl } from "../shared/media";
 
-export type Changed = ReadonlyMap<string, number>;
-
-const SUPABASE_HOST = (() => {
-  try {
-    return process.env.NEXT_PUBLIC_SUPABASE_URL ? new URL(process.env.NEXT_PUBLIC_SUPABASE_URL).hostname : null;
-  } catch {
-    return null;
-  }
-})();
+export type { Changed } from "../shared/types";
 
 /** The media's public URL when next/image may load it (https on a Supabase host, as in next.config remotePatterns); otherwise null. */
 export function mediaUrl(state: SiteState, id: string | null): string | null {
-  const m = id ? state.media.find((x) => x.id === id) : undefined;
-  if (!m) return null;
-  try {
-    const u = new URL(m.public_url);
-    return u.protocol === "https:" && (u.hostname.endsWith(".supabase.co") || u.hostname === SUPABASE_HOST) ? m.public_url : null;
-  } catch {
-    return null;
-  }
+  return sharedMediaUrl(findMedia(state.media, id));
 }
 
 /** A cover-cropped image filling its box, or a neutral tile. Put it inside a sized box. */
