@@ -30,6 +30,11 @@ describe("nextOpening", () => {
     // Sat 24 Oct 2026 20:00 Sofia (+03); Sun closed; Mon 26 Oct 08:00 is +02 → 06:00Z
     expect(nextOpening(H, [], new Date("2026-10-24T17:00:00Z"), TZ)).toBe("2026-10-26T06:00:00.000Z");
   });
+  it("does not skip the Sunday of the spring DST change", () => {
+    // Sat 27 Mar 2027 23:30 Sofia (+02); Sun 28 Mar opens 10:00, after the change, so +03 → 07:00Z
+    const sundayOpen: WeekHours = { ...H, sun: { open: "10:00", close: "16:00" } };
+    expect(nextOpening(sundayOpen, [], new Date("2027-03-27T21:30:00Z"), TZ)).toBe("2027-03-28T07:00:00.000Z");
+  });
   it("returns null when closed for the next 14 days", () => {
     const closed: WeekHours = { ...H, mon: null, tue: null, wed: null, thu: null, fri: null, sat: null };
     expect(nextOpening(closed, [], new Date("2026-10-09T09:00:00Z"), TZ)).toBeNull();

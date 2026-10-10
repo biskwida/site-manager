@@ -14,6 +14,7 @@ describe("time", () => {
   it("converts wall-clock time to ISO across the DST change", () => {
     expect(zonedToIso("2026-10-24", "08:00", TZ)).toBe("2026-10-24T05:00:00.000Z"); // summer, UTC+3
     expect(zonedToIso("2026-10-26", "08:00", TZ)).toBe("2026-10-26T06:00:00.000Z"); // winter, UTC+2
+    expect(zonedToIso("2027-03-29", "08:00", TZ)).toBe("2027-03-29T05:00:00.000Z"); // after the spring change, UTC+3
   });
 
   it("describes now with the UTC offset for the model", () => {

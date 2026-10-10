@@ -1,8 +1,18 @@
 import { localDate, localTime, localWeekday, zonedToIso } from "../time";
-import { WEEKDAYS, type Holiday, type WeekHours } from "./types";
+import { WEEKDAYS, type Holiday, type Weekday, type WeekHours } from "./types";
 
-const DAY_MS = 86_400_000;
 const LOOKAHEAD_DAYS = 14;
+
+/** The local calendar date `days` after `date` (both YYYY-MM-DD). Steps by date, not by 24h, so DST never skips or repeats a day. */
+function addDays(date: string, days: number): string {
+  const [y, m, d] = date.split("-").map(Number);
+  return new Date(Date.UTC(y, m - 1, d + days)).toISOString().slice(0, 10);
+}
+
+/** Weekday of a YYYY-MM-DD calendar date. */
+function weekdayOf(date: string): Weekday {
+  return WEEKDAYS[(new Date(`${date}T00:00:00Z`).getUTCDay() + 6) % 7];
+}
 
 function isHoliday(date: string, holidays: Holiday[]): boolean {
   return holidays.some((h) => h.date === date);
@@ -10,10 +20,10 @@ function isHoliday(date: string, holidays: Holiday[]): boolean {
 
 /** The first opening instant strictly after `from`, within 14 days; null if the venue never opens in that window. */
 export function nextOpening(hours: WeekHours, holidays: Holiday[], from: Date, tz: string): string | null {
+  const start = localDate(from, tz);
   for (let i = 0; i < LOOKAHEAD_DAYS; i++) {
-    const day = new Date(from.getTime() + i * DAY_MS);
-    const date = localDate(day, tz);
-    const dh = hours[localWeekday(day, tz)];
+    const date = addDays(start, i);
+    const dh = hours[weekdayOf(date)];
     if (!dh || isHoliday(date, holidays)) continue;
     const iso = zonedToIso(date, dh.open, tz);
     if (new Date(iso).getTime() > from.getTime()) return iso;
