@@ -9,8 +9,11 @@ const ctx = { newId: () => crypto.randomUUID(), now: NOW };
 /** Ids from a store-wide listing, narrowed to the venues one test created (a live store holds other venues too), in listing order. */
 const only = (venues: { id: string }[], ...ids: string[]) => venues.map((v) => v.id).filter((id) => ids.includes(id));
 
-/** Behaviour every Store must have. Call with a factory that yields an empty store. */
-export function storeContract(name: string, make: () => Promise<Store>) {
+/**
+ * Behaviour every Store must have. Call with a factory that yields an empty store, and a probe that says whether a storage
+ * object exists at a media row's storage_path in that store (used by the draft-cleanup storage test).
+ */
+export function storeContract(name: string, make: () => Promise<Store>, storageHas: (s: Store, path: string) => Promise<boolean>) {
   describe(`${name} store`, () => {
     it("creates a venue with defaults and reads it back by id and slug", async () => {
       const s = await make();
@@ -313,6 +316,29 @@ export function storeContract(name: string, make: () => Promise<Store>) {
       } finally {
         await s.deleteVenue(v.id);
       }
+    });
+
+    it("deleteVenue with storage removes the venue's stored files too, and only that venue's", async () => {
+      const s = await make();
+      const a = await s.createVenue({ slug: "t14a", name: "A", status: "draft" });
+      const b = await s.createVenue({ slug: "t14b", name: "B", status: "draft" });
+      const ma = [await s.saveMedia(a.id, new Uint8Array([1]), "image/png"), await s.saveMedia(a.id, new Uint8Array([2]), "image/jpeg")];
+      const mb = await s.saveMedia(b.id, new Uint8Array([3]), "image/png");
+      try {
+        expect(await storageHas(s, ma[0].storage_path)).toBe(true);
+        await s.deleteVenue(a.id, { withStorage: true });
+        await expect(s.getVenue(a.id)).rejects.toThrow();
+        for (const m of ma) {
+          expect(await s.getMedia(m.id)).toBeNull();
+          expect(await storageHas(s, m.storage_path)).toBe(false);
+        }
+        expect(await storageHas(s, mb.storage_path)).toBe(true);
+        expect(await s.getMedia(mb.id)).not.toBeNull();
+      } finally {
+        await s.deleteVenue(a.id, { withStorage: true });
+        await s.deleteVenue(b.id, { withStorage: true });
+      }
+      expect(await storageHas(s, mb.storage_path)).toBe(false);
     });
 
     it("lets one publish claim a draft; the claim expires so a crashed publish does not block a retry", async () => {

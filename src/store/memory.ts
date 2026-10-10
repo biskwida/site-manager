@@ -118,7 +118,8 @@ export class InMemoryStore implements Store {
     for (const [venueId, h] of this.draftTokens) if (h === tokenHash && this.sites.has(venueId)) return this.getVenue(venueId);
     return null;
   }
-  async deleteVenue(id: string) {
+  async deleteVenue(id: string, opts: { withStorage?: boolean } = {}) {
+    if (opts.withStorage) for (const path of [...this.files.keys()]) if (path.startsWith(`${id}/`)) this.files.delete(path);
     if (!this.sites.has(id)) return;
     this.sites.delete(id);
     this.draftTokens.delete(id);
@@ -128,7 +129,6 @@ export class InMemoryStore implements Store {
     for (const [code, inv] of this.invites) if (inv.venue_id === id) this.invites.delete(code);
     for (const [setId, cs] of this.sets) if (cs.venue_id === id) this.sets.delete(setId);
     for (const key of [...this.conversations.keys()]) if (key.startsWith(`${id}:`)) this.conversations.delete(key);
-    for (const path of [...this.files.keys()]) if (path.startsWith(`${id}/`)) this.files.delete(path);
   }
   async getSite(venueId: string) {
     return clone(this.site(venueId));

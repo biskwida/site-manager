@@ -192,10 +192,11 @@ describe("media upload checks", () => {
   it("caps the number of uploads per draft", async () => {
     const { deps, store } = await setup();
     const { id } = await newDraft(deps);
+    expect(MAX_DRAFT_MEDIA).toBe(30); // bounds what one anonymous draft can put in shared storage
     for (let i = 0; i < MAX_DRAFT_MEDIA; i++) await store.saveMedia(id, new Uint8Array([1]), "image/png");
     // checked before the body is read: even a body that is not multipart gets too_many
     const early = await handleMedia(new Request(`https://site.example/api/new/${id}/media`, { method: "POST", body: "not a form" }), deps, await store.getVenue(id));
-    expect(await early.json()).toMatchObject({ error: { code: "too_many" } });
+    expect(await early.json()).toMatchObject({ error: { code: "too_many", bg: "Една чернова може да има до 30 снимки.", en: "A draft can have up to 30 images." } });
     const f = new FormData();
     f.append("file", new File([new Uint8Array([137, 80, 78, 71])], "one-more.png", { type: "image/png" }));
     const res = await handleMedia(new Request(`https://site.example/api/new/${id}/media`, { method: "POST", body: f }), deps, await store.getVenue(id));

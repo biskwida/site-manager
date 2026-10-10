@@ -115,12 +115,18 @@ export async function runTick(d: TickDeps): Promise<TickReport> {
   return report;
 }
 
-/** Deletes draft venues created more than DRAFT_TTL_MS ago (cookie-only drafts nobody published). Never touches a live venue. Returns the deleted ids. */
+/**
+ * Deletes draft venues created more than DRAFT_TTL_MS ago (cookie-only drafts nobody published), with their stored images.
+ * Never touches a live venue. Runs only on the global tick (cron): a per-venue tick (webhook, ?key=) skips it entirely.
+ * Returns the deleted ids.
+ */
 export async function cleanupDrafts(d: { store: Store; now: Date; venueId?: string }): Promise<string[]> {
+  if (d.venueId) return [];
   const cutoff = d.now.getTime() - DRAFT_TTL_MS;
   const out: string[] = [];
   for (const v of await d.store.listVenues({ status: "draft" })) {
     if (v.status !== "draft") continue; // belt and braces: a store that ignores the filter must still never lose a live venue
+    if (Date.parse(v.created_at) >= cutoff) continue;
     // Fresh read right before the delete: a draft published between the list and this point must survive (R10).
     let fresh;
     try {
@@ -129,10 +135,8 @@ export async function cleanupDrafts(d: { store: Store; now: Date; venueId?: stri
       continue;
     }
     if (fresh.status !== "draft") continue;
-    if (d.venueId && v.id !== d.venueId) continue;
-    if (Date.parse(v.created_at) >= cutoff) continue;
     try {
-      await d.store.deleteVenue(v.id);
+      await d.store.deleteVenue(v.id, { withStorage: true });
       out.push(v.id);
     } catch (e) {
       console.error(`[tick] delete draft ${v.id} failed:`, e instanceof Error ? e.message : e);

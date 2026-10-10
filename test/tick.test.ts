@@ -121,4 +121,30 @@ describe("runTick", () => {
     expect(await store.getVenueBySlug("boundary")).not.toBeNull();
     expect(await store.getVenueBySlug("agala")).not.toBeNull();
   });
+
+  it("cleanupDrafts removes the draft's stored images, and does nothing on a per-venue tick", async () => {
+    const { store } = await makeDemo();
+    store.clock = () => new Date(T0.getTime() - DRAFT_TTL_MS - 1).toISOString();
+    const stale = await store.createVenue({ slug: "stale", name: "Stale", status: "draft" });
+    const m = await store.saveMedia(stale.id, new Uint8Array([1]), "image/png");
+    store.clock = () => T0.toISOString();
+    expect(await cleanupDrafts({ store, now: T0, venueId: stale.id })).toEqual([]); // per-webhook / per-key ticks skip cleanup
+    expect(store.files.has(m.storage_path)).toBe(true);
+    expect(await cleanupDrafts({ store, now: T0 })).toEqual([stale.id]);
+    expect(store.files.has(m.storage_path)).toBe(false);
+    expect(await store.getMedia(m.id)).toBeNull();
+  });
+
+  it("cleanupDrafts reads a draft again only when it is old enough", async () => {
+    const { store } = await makeDemo();
+    for (let i = 0; i < 3; i++) await store.createVenue({ slug: `fresh-${i}`, name: "F", status: "draft" });
+    let reads = 0;
+    const getVenue = store.getVenue.bind(store);
+    store.getVenue = async (id: string) => {
+      reads++;
+      return getVenue(id);
+    };
+    expect(await cleanupDrafts({ store, now: T0 })).toEqual([]);
+    expect(reads).toBe(0);
+  });
 });

@@ -214,12 +214,24 @@ export class SupabaseStore implements Store {
     if (error) throw new Error(`findVenueByDraftToken: ${error.message}`);
     return data ? this.venue(data) : null;
   }
-  async deleteVenue(id: string) {
+  async deleteVenue(id: string, opts: { withStorage?: boolean } = {}) {
     if (badVenue(id)) return;
+    if (opts.withStorage) await this.removeVenueObjects(id);
     const { error } = await this.db.from("venues").delete().eq("id", id);
     if (error) throw new Error(`deleteVenue ${id}: ${error.message}`);
   }
-  async getSite(venueId: string): Promise<SiteState> {
+  /** Removes every object under `<venueId>/` in the media bucket (saveMedia's layout), page by page. */
+  private async removeVenueObjects(venueId: string) {
+    for (let round = 0; round < 50; round++) {
+      const { data, error } = await this.db.storage.from("media").list(venueId, { limit: 100 });
+      if (error) throw new Error(`deleteVenue storage list ${venueId}: ${error.message}`);
+      const paths = (data ?? []).filter((o) => o.id !== null).map((o) => `${venueId}/${o.name}`);
+      if (paths.length === 0) return;
+      const { error: removeError } = await this.db.storage.from("media").remove(paths);
+      if (removeError) throw new Error(`deleteVenue storage remove ${venueId}: ${removeError.message}`);
+    }
+  }
+    async getSite(venueId: string): Promise<SiteState> {
     const [venue, categories, items, holidays, announcements, media, texts] = await Promise.all([
       this.getVenue(venueId),
       must(this.db.from("categories").select("*").eq("venue_id", venueId).order("position"), "categories"),

@@ -109,8 +109,12 @@ export interface Store {
   /** Stores the sha256 of the wizard's draft token (null clears it). */
   setDraftToken(id: string, tokenHash: string | null): Promise<void>;
   findVenueByDraftToken(tokenHash: string): Promise<Venue | null>;
-  /** Deletes the venue and everything that hangs off it: content, members, invites, tokens, change sets, media rows (storage objects stay). */
-  deleteVenue(id: string): Promise<void>;
+  /**
+   * Deletes the venue and everything that hangs off it: content, members, invites, tokens, change sets, media rows.
+   * Storage objects stay unless `withStorage` (abandoned wizard drafts): then every object under `<id>/` in the media
+   * bucket is removed first, so a failed storage call leaves the rows for the next attempt.
+   */
+  deleteVenue(id: string, opts?: { withStorage?: boolean }): Promise<void>;
   /** Everything for one venue, including inactive items (the site filters with domain/effective). */
   getSite(venueId: string): Promise<SiteState>;
   insertCategory(c: NewCategory): Promise<Category>;

@@ -263,8 +263,8 @@ export interface WizardDeps {
 const HOUR_MS = 3_600_000;
 const DAY_MS = 24 * HOUR_MS;
 export const NEW_PER_IP_PER_HOUR = 5;
-/** Uploads per draft (logo, cover, gallery up to 40, dish photos): bounds storage a single anonymous draft can use. */
-export const MAX_DRAFT_MEDIA = 100;
+/** Uploads per draft (logo, cover, gallery, dish photos): bounds the shared storage one anonymous draft can use (30 × 4 MB). */
+export const MAX_DRAFT_MEDIA = 30;
 
 /** First x-forwarded-for value (the client on Vercel), else "unknown". Only its salted hash is ever stored. */
 function clientIp(req: Request): string {
