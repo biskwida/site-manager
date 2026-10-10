@@ -24,6 +24,7 @@ export type WizardErrorCode =
   | "not_found"
   | "slug_taken"
   | "already_published"
+  | "publish_in_progress"
   | "rate_limited"
   | "too_large"
   | "too_many"
@@ -71,6 +72,7 @@ export function wizardErrorResponse(e: unknown): Response {
 
 const INVALID = (errors: PublishError[] = []) => new WizardError("invalid", 400, "Някои полета не са попълнени правилно.", "Some fields are not filled in correctly.", errors);
 const SLUG_TAKEN = () => new WizardError("slug_taken", 409, "Този адрес вече е зает. Изберете друг.", "This address is already taken. Choose another.");
+export const PUBLISH_IN_PROGRESS = () => new WizardError("publish_in_progress", 409, "Сайтът се публикува в момента. Изчакайте малко.", "This site is being published right now. Please wait a moment.");
 export const ALREADY_PUBLISHED = (slug: string) => new WizardError("already_published", 409, "Сайтът вече е създаден.", "This site has already been created.", [], { slug });
 
 export function rateLimitKeys(ipHash: string): { ip: string; global: string } {
@@ -145,6 +147,18 @@ export async function publishDraft(store: Store, venue: Venue, now: Date): Promi
   const v = validateForPublish(d);
   if (!v.ok) throw INVALID(v.errors);
   await assertSlugFree(store, d.slug, venue.id);
+  const nowIso = now.toISOString();
+  // R24: one publisher at a time; a crashed publish releases itself after PUBLISH_CLAIM_TTL_MS, a failed one right away (below).
+  if (!(await store.claimPublish(venue.id, nowIso))) throw PUBLISH_IN_PROGRESS();
+  try {
+    return await publishClaimed(store, venue, d, now);
+  } catch (e) {
+    await store.releasePublish(venue.id).catch(() => {});
+    throw e;
+  }
+}
+
+async function publishClaimed(store: Store, venue: Venue, d: WizardDraft, now: Date): Promise<{ venue: Venue; inviteCode: string; adminToken: string }> {
   const nowIso = now.toISOString();
 
   // Only media uploaded to this draft may be referenced (media rows key on the venue id, so uploads made before the slug was chosen count).

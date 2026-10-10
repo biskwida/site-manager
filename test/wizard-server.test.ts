@@ -50,6 +50,36 @@ describe("rateLimitKeys", () => {
   });
 });
 
+describe("publish claim (R24)", () => {
+  it("refuses a second publisher while the claim is held, and retries after a failed publish", async () => {
+    const { store } = await makeDemo();
+    const { venue } = await createDraft(store, "classic", T0);
+    await updateDraft(store, venue, {
+      name: "Claimed", slug: "claimed-cafe", default_lang: "bg", address: "ул. Пример 2", phone: "+359 2 222 2222", instagram: "", maps_url: "",
+      hours: emptyDraft("classic").hours, theme: { accent: "#2f6b4f" },
+      tagline_bg: "Кафе", tagline_en: "Coffee", about_bg: "За нас", about_en: "About us",
+      texts: { welcome: { bg: "Здравейте", en: "Hello" }, footer_note: { bg: "", en: "" } },
+      logo_media_id: null, cover_media_id: null, gallery_media_ids: [],
+      categories: [{ key: "c", name_bg: "Кафе", name_en: "Coffee", items: [{ key: "e", name_bg: "Еспресо", name_en: "Espresso", desc_bg: "", desc_en: "", price_eur: 1.8, allergens: [], image_media_id: null }] }],
+      step: "review",
+    });
+    const fresh = await store.getVenue(venue.id);
+    expect(await store.claimPublish(fresh.id, T0.toISOString())).toBe(true); // someone else is publishing
+    await expect(publishDraft(store, fresh, T0)).rejects.toMatchObject({ code: "publish_in_progress", status: 409 });
+    await store.releasePublish(fresh.id);
+    const failing = Object.create(store) as typeof store;
+    let once = true;
+    failing.insertItem = async (i) => {
+      if (once) { once = false; throw new Error("boom"); }
+      return store.insertItem(i);
+    };
+    await expect(publishDraft(failing, fresh, T0)).rejects.toThrow("boom");
+    // the failed attempt released its claim, so the retry wins the claim and publishes
+    const done = await publishDraft(store, await store.getVenue(venue.id), T0);
+    expect(done.venue.status).toBe("live");
+  });
+});
+
 describe("createDraft → updateDraft → publishDraft", () => {
   it("creates a draft venue with a placeholder slug and a hashed token", async () => {
     const { store } = await makeDemo();

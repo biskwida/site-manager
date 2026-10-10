@@ -313,6 +313,9 @@ export function storeContract(name: string, make: () => Promise<Store>) {
         expect(await s.claimPublish(live.id, NOW)).toBe(false); // only drafts publish
         expect(await s.claimPublish("00000000-0000-0000-0000-000000000000", NOW)).toBe(false);
         expect(await s.claimPublish(draft.id, NOW)).toBe(true);
+        expect(await s.claimPublish(draft.id, NOW)).toBe(false); // held
+        await s.releasePublish(draft.id);
+        expect(await s.claimPublish(draft.id, NOW)).toBe(true); // released → claimable again
         expect(await s.claimPublish(draft.id, NOW)).toBe(false);
         expect(await s.claimPublish(draft.id, "2026-10-09T09:04:00.000Z")).toBe(false); // 4 min later: still held
         expect(await s.claimPublish(draft.id, "2026-10-09T09:06:00.000Z")).toBe(true); // past PUBLISH_CLAIM_TTL_MS: stale claim is taken over

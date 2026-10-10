@@ -105,6 +105,9 @@ export class InMemoryStore implements Store {
     this.publishing.set(id, now);
     return true;
   }
+  async releasePublish(id: string) {
+    this.publishing.delete(id);
+  }
   async setDraftToken(id: string, tokenHash: string | null) {
     this.site(id);
     if (tokenHash === null) this.draftTokens.delete(id);

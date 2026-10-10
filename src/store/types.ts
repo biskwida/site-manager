@@ -102,6 +102,8 @@ export interface Store {
    * publish claimed it in the last PUBLISH_CLAIM_TTL_MS (a crashed publish releases itself). True when this call won the claim.
    */
   claimPublish(id: string, now?: string): Promise<boolean>;
+  /** Drops a publish claim so a failed publish can be retried at once (a successful one ends with status live, where the claim is moot). */
+  releasePublish(id: string): Promise<void>;
   /** Stores the sha256 of the wizard's draft token (null clears it). */
   setDraftToken(id: string, tokenHash: string | null): Promise<void>;
   findVenueByDraftToken(tokenHash: string): Promise<Venue | null>;

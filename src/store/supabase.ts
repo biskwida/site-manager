@@ -198,6 +198,11 @@ export class SupabaseStore implements Store {
     if (error) throw new Error(`claimPublish ${id}: ${error.message}`);
     return (data?.length ?? 0) === 1;
   }
+  async releasePublish(id: string) {
+    if (badVenue(id)) return;
+    const { error } = await this.db.from("venues").update({ publishing_at: null }).eq("id", id);
+    if (error) throw new Error(`releasePublish ${id}: ${error.message}`);
+  }
   async setDraftToken(id: string, tokenHash: string | null) {
     await mustRows(this.db.from("venues").update({ draft_token_hash: tokenHash }).eq("id", id).select("id"), `setDraftToken ${id}`);
   }
