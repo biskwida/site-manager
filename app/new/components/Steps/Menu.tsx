@@ -5,7 +5,7 @@ import { blankCategory, blankItem, mergeExtracted, moveIndex } from "@/src/wizar
 import { EXTRACT_MAX_FILES, IMAGE_MEDIA_TYPES, type ExtractFile, type ExtractResult } from "@/src/wizard/extract";
 import type { WizardCategory, WizardItem } from "@/src/wizard/schema";
 import { aiUnavailable, api, EXTRACT_MAX_TOTAL_BYTES, fileToBase64 } from "../api";
-import { Button, FileButton, Note, Status, TextField } from "../Field";
+import { Button, FileButton, Note, PriceField, Status, TextField } from "../Field";
 import { shrinkImage } from "../image";
 import type { StepProps } from "../types";
 import { useT } from "../useWizardText";
@@ -14,6 +14,7 @@ import { ExtractReview } from "./ExtractReview";
 const MB = 1024 * 1024;
 const TAB = "min-h-11 rounded-full px-4 text-sm font-semibold transition-[background-color,color,box-shadow] duration-150 ease-out";
 const ROW = "grid gap-4 rounded-xl bg-panel p-4 ring-1 ring-line";
+const ARROW = "min-w-11 px-0 text-base";
 
 /** Images shrink to 1600 px / JPEG 0.8 before encoding; PDFs go as-is. Null when the batch cannot fit the extraction budget. */
 export async function prepareExtractFiles(files: File[]): Promise<{ files: ExtractFile[] } | { error: "pdfTooBig" | "tooBig" }> {
@@ -95,8 +96,8 @@ export function Menu({ id, draft, update, aiAvailable }: StepProps) {
               <TextField label={t("menu.category.nameEn")} value={active.name_en} maxLength={80} onChange={(name_en) => patchCat(active.key, { name_en })} />
             </div>
             <div className="flex flex-wrap items-center gap-1">
-              <Button variant="quiet" disabled={ci <= 0} onClick={() => setCats(moveIndex(cats, ci, ci - 1))}>{t("menu.moveUp")}</Button>
-              <Button variant="quiet" disabled={ci >= cats.length - 1} onClick={() => setCats(moveIndex(cats, ci, ci + 1))}>{t("menu.moveDown")}</Button>
+              <Button variant="quiet" className={ARROW} disabled={ci <= 0} title={t("menu.moveUp")} aria-label={`${t("menu.moveUp")}: ${catName(active, ci)}`} onClick={() => setCats(moveIndex(cats, ci, ci - 1))}><span aria-hidden="true">↑</span></Button>
+              <Button variant="quiet" className={ARROW} disabled={ci >= cats.length - 1} title={t("menu.moveDown")} aria-label={`${t("menu.moveDown")}: ${catName(active, ci)}`} onClick={() => setCats(moveIndex(cats, ci, ci + 1))}><span aria-hidden="true">↓</span></Button>
               {!askRemove ? (
                 <Button variant="quiet" onClick={() => (active.items.length ? setAskRemove(true) : setCats(cats.filter((c) => c.key !== active.key)))}>{t("menu.removeCategory")}</Button>
               ) : (
@@ -122,7 +123,7 @@ export function Menu({ id, draft, update, aiAvailable }: StepProps) {
                 <div className="grid gap-4 sm:grid-cols-[1fr_1fr_6.5rem]">
                   <TextField label={t("menu.item.nameBg")} value={it.name_bg} maxLength={120} onChange={(name_bg) => patchItem(active.key, it.key, { name_bg })} />
                   <TextField label={t("menu.item.nameEn")} value={it.name_en} maxLength={120} onChange={(name_en) => patchItem(active.key, it.key, { name_en })} />
-                  <TextField label={t("menu.item.price")} value={String(it.price_eur)} type="number" inputMode="decimal" step="0.01" min="0.10" max="500" onChange={(v) => patchItem(active.key, it.key, { price_eur: Math.round(Number(v) * 100) / 100 || 0 })} />
+                  <PriceField label={t("menu.item.price")} value={it.price_eur} onChange={(price_eur) => patchItem(active.key, it.key, { price_eur })} />
                 </div>
                 <details className="group">
                   <summary className="inline-flex min-h-11 cursor-pointer list-none items-center gap-2 text-sm font-semibold text-fg-soft hover:text-fg [&::-webkit-details-marker]:hidden">
@@ -151,9 +152,9 @@ export function Menu({ id, draft, update, aiAvailable }: StepProps) {
                     </fieldset>
                   </div>
                 </details>
-                <div className="-mb-1 flex flex-wrap gap-1 border-t border-line pt-3">
-                  <Button variant="quiet" disabled={ii === 0} aria-label={`${t("menu.moveUp")}: ${itemName(it, ii)}`} onClick={() => patchCat(active.key, { items: moveIndex(active.items, ii, ii - 1) })}>{t("menu.moveUp")}</Button>
-                  <Button variant="quiet" disabled={ii === active.items.length - 1} aria-label={`${t("menu.moveDown")}: ${itemName(it, ii)}`} onClick={() => patchCat(active.key, { items: moveIndex(active.items, ii, ii + 1) })}>{t("menu.moveDown")}</Button>
+                <div className="-mb-1 flex items-center gap-1 border-t border-line pt-3">
+                  <Button variant="quiet" className={ARROW} disabled={ii === 0} title={t("menu.moveUp")} aria-label={`${t("menu.moveUp")}: ${itemName(it, ii)}`} onClick={() => patchCat(active.key, { items: moveIndex(active.items, ii, ii - 1) })}><span aria-hidden="true">↑</span></Button>
+                  <Button variant="quiet" className={ARROW} disabled={ii === active.items.length - 1} title={t("menu.moveDown")} aria-label={`${t("menu.moveDown")}: ${itemName(it, ii)}`} onClick={() => patchCat(active.key, { items: moveIndex(active.items, ii, ii + 1) })}><span aria-hidden="true">↓</span></Button>
                   <Button variant="quiet" className="ml-auto" aria-label={`${t("menu.item.remove")}: ${itemName(it, ii)}`} onClick={() => patchCat(active.key, { items: active.items.filter((x) => x.key !== it.key) })}>{t("menu.item.remove")}</Button>
                 </div>
               </li>

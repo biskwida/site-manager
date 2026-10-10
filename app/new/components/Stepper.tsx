@@ -12,7 +12,7 @@ export function Stepper({ current, onSelect }: { current: WizardStep; onSelect: 
   return (
     <nav aria-label={t("nav.steps")} className="grid gap-2">
       <p className="text-sm text-fg-soft">{t("nav.stepOf", { n: idx + 1, total: FORM_STEPS.length })}</p>
-      <ol className="sm-scroll-x -mx-4 flex gap-1.5 px-4 sm:mx-0 sm:flex-wrap sm:px-0">
+      <ol className="sm-scroll-x relative -mx-4 flex gap-1.5 px-4 sm:mx-0 sm:flex-wrap sm:px-0">
         {FORM_STEPS.map((s, i) => {
           const label = t(`step.${s}` as StepKey);
           const done = i < idx;

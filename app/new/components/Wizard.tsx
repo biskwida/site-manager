@@ -131,7 +131,7 @@ export function Wizard({ id, initialDraft, initialMedia, baseUrl, aiAvailable, n
         </nav>
       </div>
       <Preview draft={draft} media={shownMedia} now={now} open={previewOpen} onClose={closePreview} />
-      <div className="fixed inset-x-0 bottom-0 z-40 border-t border-line bg-canvas/90 p-3 backdrop-blur lg:hidden" style={{ paddingBottom: "max(0.75rem, env(safe-area-inset-bottom))" }}>
+      <div className="sm-bottom-bar fixed inset-x-0 bottom-0 z-40 border-t border-line bg-canvas/90 p-3 backdrop-blur lg:hidden" style={{ paddingBottom: "max(0.75rem, env(safe-area-inset-bottom))" }}>
         <Button variant="secondary" className="w-full" aria-haspopup="dialog" aria-expanded={previewOpen} onClick={() => setPreviewOpen(true)}>{t("preview.open")}</Button>
       </div>
     </div>

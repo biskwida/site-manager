@@ -33,8 +33,8 @@ export function Preview({ draft, media, now, open, onClose }: { draft: WizardDra
 
   const body = (sheet: boolean) => (
     <div className="flex h-full flex-col">
-      <div className="flex items-center gap-2 px-4 py-3">
-        <span className="mr-auto text-sm font-semibold">{t("preview.title")}</span>
+      <div className="flex items-center gap-2 px-3 py-3 lg:px-4">
+        <span className={`mr-auto text-sm font-semibold ${sheet ? "sr-only" : ""}`}>{t("preview.title")}</span>
         <div role="group" aria-label={t("preview.title")} className="inline-flex rounded-full bg-sunken p-0.5 ring-1 ring-line">
           {(["home", "menu"] as const).map((p) => (
             <button key={p} type="button" aria-pressed={page === p} onClick={() => setPage(p)}
@@ -43,7 +43,7 @@ export function Preview({ draft, media, now, open, onClose }: { draft: WizardDra
             </button>
           ))}
         </div>
-        {sheet && <Button ref={closeRef} variant="quiet" onClick={onClose}>{t("preview.close")}</Button>}
+        {sheet && <Button ref={closeRef} variant="quiet" className="ml-auto" onClick={onClose}>{t("preview.close")}</Button>}
       </div>
       <div className="mx-3 mb-3 min-h-0 flex-1 overflow-hidden rounded-2xl bg-sunken ring-1 ring-line lg:mx-4">
         <FrameDoc title={t("preview.title")} lang={lang}>

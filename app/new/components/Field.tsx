@@ -1,5 +1,5 @@
 "use client";
-import { useId, type ComponentPropsWithRef, type InputHTMLAttributes, type ReactNode, type TextareaHTMLAttributes } from "react";
+import { useId, useState, type ComponentPropsWithRef, type InputHTMLAttributes, type ReactNode, type TextareaHTMLAttributes } from "react";
 import { useT } from "./useWizardText";
 
 interface Common {
@@ -48,6 +48,24 @@ export function TextArea({ label, hint, error, value, onChange, className = "", 
       {hint && <p id={hintId} className="text-sm leading-snug text-fg-soft">{hint}</p>}
       {error && <p id={errId} role="alert" className="text-sm font-semibold text-danger">{error}</p>}
     </div>
+  );
+}
+
+/** Price in euro as text with a decimal keyboard: a number input drops "1." mid-typing and refuses "1,80", which is how Bulgarians write it. */
+export function PriceField({ label, value, onChange, className = "" }: { label: string; value: number; onChange: (v: number) => void; className?: string }) {
+  const [text, setText] = useState(String(value));
+  const [focused, setFocused] = useState(false);
+  const shown = focused ? text : String(value);
+  return (
+    <TextField label={label} value={shown} inputMode="decimal" autoComplete="off" className={className}
+      onFocus={() => { setText(String(value)); setFocused(true); }}
+      onBlur={() => setFocused(false)}
+      onChange={(v) => {
+        const clean = v.replace(/[^0-9.,]/g, "");
+        setText(clean);
+        const n = Number(clean.replace(",", "."));
+        if (clean !== "" && Number.isFinite(n)) onChange(Math.round(n * 100) / 100);
+      }} />
   );
 }
 

@@ -3,7 +3,7 @@ import { useState } from "react";
 import { allergenName } from "@/src/domain/allergens";
 import { formatPrice } from "@/src/domain/format";
 import type { ExtractResult } from "@/src/wizard/extract";
-import { Button, TextField } from "../Field";
+import { Button, PriceField, TextField } from "../Field";
 import { useT } from "../useWizardText";
 
 type Row = ExtractResult["categories"][number]["items"][number] & { on: boolean };
@@ -40,7 +40,7 @@ export function ExtractReview({ result, onAccept, onDiscard }: { result: Extract
                 <div className="grid gap-3 sm:grid-cols-[1fr_1fr_6.5rem]">
                   <TextField label={t("menu.item.nameBg")} value={it.name_bg} onChange={(name_bg) => patch(ci, ii, { name_bg })} />
                   <TextField label={t("menu.item.nameEn")} value={it.name_en} onChange={(name_en) => patch(ci, ii, { name_en })} />
-                  <TextField label={t("menu.item.price")} value={String(it.price_eur)} type="number" inputMode="decimal" step="0.01" onChange={(v) => patch(ci, ii, { price_eur: Math.round(Number(v) * 100) / 100 || 0 })} />
+                  <PriceField label={t("menu.item.price")} value={it.price_eur} onChange={(price_eur) => patch(ci, ii, { price_eur })} />
                 </div>
                 {(it.currency_seen === "BGN" || it.allergens.length > 0) && (
                   <p className="flex flex-wrap items-center gap-2 text-xs text-fg-soft">

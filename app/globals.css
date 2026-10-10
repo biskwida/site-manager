@@ -72,6 +72,8 @@ body:has(.sm-brand)::before { background-image: radial-gradient(1100px 520px at 
 /* Horizontal step strip on phones: scrolls, no visible bar. */
 .sm-scroll-x { overflow-x: auto; scrollbar-width: none; -webkit-overflow-scrolling: touch; }
 .sm-scroll-x::-webkit-scrollbar { display: none; }
+/* The phone layout has a fixed bottom bar (Preview); scrollIntoView and anchor jumps must land above it. */
+@media (max-width: 1023px) { html:has(.sm-bottom-bar) { scroll-padding-bottom: 6rem; } }
 .sm-sheet { animation: var(--animate-sheet-up); }
 .sm-step { animation: var(--animate-step-in); }
 

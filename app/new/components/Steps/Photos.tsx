@@ -36,9 +36,9 @@ export function Photos({ id, draft, media, update, addMedia }: StepProps) {
         {ids.map((mid, i) => (
           <li key={mid} className="grid gap-2 rounded-xl bg-panel p-2 ring-1 ring-line">
             <MediaThumb media={media.find((m) => m.id === mid)} alt={t("photos.photo", { n: i + 1 })} className="aspect-[4/3] w-full" />
-            <div className="flex flex-wrap gap-0.5">
-              <Button variant="quiet" className="px-3" disabled={i === 0} aria-label={`${t("menu.moveUp")}: ${t("photos.photo", { n: i + 1 })}`} onClick={() => update({ gallery_media_ids: moveIndex(ids, i, i - 1) })}>{t("menu.moveUp")}</Button>
-              <Button variant="quiet" className="px-3" disabled={i === ids.length - 1} aria-label={`${t("menu.moveDown")}: ${t("photos.photo", { n: i + 1 })}`} onClick={() => update({ gallery_media_ids: moveIndex(ids, i, i + 1) })}>{t("menu.moveDown")}</Button>
+            <div className="flex items-center gap-0.5">
+              <Button variant="quiet" className="min-w-11 px-0 text-base" disabled={i === 0} title={t("menu.moveUp")} aria-label={`${t("menu.moveUp")}: ${t("photos.photo", { n: i + 1 })}`} onClick={() => update({ gallery_media_ids: moveIndex(ids, i, i - 1) })}><span aria-hidden="true">↑</span></Button>
+              <Button variant="quiet" className="min-w-11 px-0 text-base" disabled={i === ids.length - 1} title={t("menu.moveDown")} aria-label={`${t("menu.moveDown")}: ${t("photos.photo", { n: i + 1 })}`} onClick={() => update({ gallery_media_ids: moveIndex(ids, i, i + 1) })}><span aria-hidden="true">↓</span></Button>
               <Button variant="quiet" className="ml-auto px-3" aria-label={`${t("photos.remove")}: ${t("photos.photo", { n: i + 1 })}`} onClick={() => update({ gallery_media_ids: ids.filter((x) => x !== mid) })}>{t("photos.remove")}</Button>
             </div>
           </li>
