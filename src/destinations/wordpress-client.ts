@@ -36,10 +36,12 @@ export class WordPressClient {
     if (this.o.token) headers.authorization = `Bearer ${this.o.token}`;
     let res: Response;
     try {
-      res = await f(`${this.base}${path}`, { method, headers, body: body === undefined ? undefined : JSON.stringify(body), signal: AbortSignal.timeout(this.o.timeoutMs ?? 20_000) });
+      // Never follow redirects: a redirect could carry the bearer token or the request to another (private) host.
+      res = await f(`${this.base}${path}`, { method, headers, body: body === undefined ? undefined : JSON.stringify(body), redirect: "manual", signal: AbortSignal.timeout(this.o.timeoutMs ?? 20_000) });
     } catch (e) {
       throw new WordPressApiError(0, "sm_unreachable", `WordPress unreachable: ${e instanceof Error ? e.message : String(e)}`);
     }
+    if (res.status >= 300 && res.status < 400) throw new WordPressApiError(res.status, "sm_redirect", "The site redirected the request; use its final address.");
     const text = await res.text();
     let json: unknown = null;
     try {
@@ -113,24 +115,37 @@ export class WordPressClient {
 const LOCAL_HOSTS = new Set(["localhost", "127.0.0.1", "[::1]", "host.docker.internal"]);
 const PRIVATE_V4 = [/^10\./, /^127\./, /^0\./, /^169\.254\./, /^192\.168\./, /^172\.(1[6-9]|2\d|3[01])\./];
 
-function isPrivateIp(host: string): boolean {
-  if (/^\d+\.\d+\.\d+\.\d+$/.test(host)) return PRIVATE_V4.some((re) => re.test(host));
-  if (host.startsWith("[")) {
-    const h = host.slice(1, -1).toLowerCase();
-    if (h.startsWith("::ffff:")) {
-      // IPv4-mapped IPv6: URL normalises ::ffff:10.0.0.1 to ::ffff:a00:1; check the embedded IPv4 address.
-      const tail = h.slice(7);
-      const hex = tail.match(/^([0-9a-f]{1,4}):([0-9a-f]{1,4})$/);
-      const v4 = hex ? [parseInt(hex[1], 16) >> 8, parseInt(hex[1], 16) & 255, parseInt(hex[2], 16) >> 8, parseInt(hex[2], 16) & 255].join(".") : tail;
-      return PRIVATE_V4.some((re) => re.test(v4));
-    }
-    return h === "::1" || h.startsWith("fc") || h.startsWith("fd") || h.startsWith("fe80") || h === "::";
-  }
-  return false;
+/** The owner-facing reason for a site address that is (or resolves to) a private or local network. */
+export const PRIVATE_NETWORK_REASON = { bg: "Адресът сочи към вътрешна мрежа; нужен е публичният адрес на сайта.", en: "That address points at a private network; use the site's public address." } as const;
+
+/** localhost, 127.0.0.1, [::1], host.docker.internal and *.localhost (a URL hostname, IPv6 in brackets). */
+export function isLocalHost(host: string): boolean {
+  const h = host.toLowerCase();
+  return LOCAL_HOSTS.has(h) || h.endsWith(".localhost");
 }
 
-/** Normalises what the owner typed into an https site URL (plain http only for local hosts) or explains why not, in both languages. */
-export function validateSiteUrl(raw: string): { ok: true; url: string } | { ok: false; reason: { bg: string; en: string } } {
+/** True for private, loopback, link-local and unspecified IPv4/IPv6 addresses, written as DNS returns them or as a URL hostname ([v6]). */
+export function isPrivateAddress(address: string): boolean {
+  const a = address.trim().toLowerCase();
+  if (/^\d+\.\d+\.\d+\.\d+$/.test(a)) return PRIVATE_V4.some((re) => re.test(a));
+  const h = a.startsWith("[") && a.endsWith("]") ? a.slice(1, -1) : a;
+  if (!h.includes(":")) return false;
+  if (h.startsWith("::ffff:")) {
+    // IPv4-mapped IPv6: URL normalises ::ffff:10.0.0.1 to ::ffff:a00:1; check the embedded IPv4 address.
+    const tail = h.slice(7);
+    const hex = tail.match(/^([0-9a-f]{1,4}):([0-9a-f]{1,4})$/);
+    const v4 = hex ? [parseInt(hex[1], 16) >> 8, parseInt(hex[1], 16) & 255, parseInt(hex[2], 16) >> 8, parseInt(hex[2], 16) & 255].join(".") : tail;
+    return PRIVATE_V4.some((re) => re.test(v4));
+  }
+  return h === "::1" || h.startsWith("fc") || h.startsWith("fd") || h.startsWith("fe80") || h === "::";
+}
+
+/**
+ * Normalises what the owner typed into an https site URL or explains why not, in both languages. Local hosts and
+ * plain http are accepted only with `allowLocal` (memory store and the Docker smoke test); otherwise they are refused
+ * as a private network.
+ */
+export function validateSiteUrl(raw: string, opts: { allowLocal?: boolean } = {}): { ok: true; url: string } | { ok: false; reason: { bg: string; en: string } } {
   const typed = raw.trim();
   const withScheme = /^[a-z][a-z0-9+.-]*:\/\//i.test(typed) ? typed : `https://${typed}`;
   let u: URL;
@@ -143,8 +158,9 @@ export function validateSiteUrl(raw: string): { ok: true; url: string } | { ok: 
   if (u.username || u.password) return { ok: false, reason: { bg: "Адресът не бива да съдържа потребител или парола.", en: "The address must not contain a username or password." } };
   const host = u.hostname.toLowerCase();
   const hostWithPort = u.host.toLowerCase();
-  const local = LOCAL_HOSTS.has(host) || LOCAL_HOSTS.has(hostWithPort) || host.endsWith(".localhost");
-  if (!local && isPrivateIp(host)) return { ok: false, reason: { bg: "Адресът сочи към вътрешна мрежа; нужен е публичният адрес на сайта.", en: "That address points at a private network; use the site's public address." } };
+  const local = isLocalHost(host);
+  if (local && !opts.allowLocal) return { ok: false, reason: { ...PRIVATE_NETWORK_REASON } };
+  if (!local && isPrivateAddress(host)) return { ok: false, reason: { ...PRIVATE_NETWORK_REASON } };
   if (!local && !host.includes(".")) return { ok: false, reason: { bg: "Адресът трябва да е пълен домейн, например https://moeto-kafene.bg", en: "Use the full domain, for example https://my-cafe.com" } };
   if (u.protocol === "http:" && !local) return { ok: false, reason: { bg: "Адресът трябва да започва с https:// (обикновен http се допуска само за localhost).", en: "The address must start with https:// (plain http is allowed only for localhost)." } };
   const path = u.pathname.replace(/\/+$/, "");

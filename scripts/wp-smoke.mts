@@ -138,10 +138,10 @@ async function main() {
   assert(anon.status === 401, `unauthenticated /site must be 401, got ${anon.status}`);
   const bad = await fetch(`${WP_URL}/wp-json/site-manager/v1/site`, { headers: { authorization: `Bearer ${"0".repeat(64)}` } });
   assert(bad.status === 401, `wrong token must be 401, got ${bad.status}`);
-  const conn = await connectWordPress({ store, secretKey }, venue.id, WP_URL, code);
+  const conn = await connectWordPress({ store, secretKey, allowLocal: true }, venue.id, WP_URL, code);
   assert(conn.ok, `connect failed: ${conn.ok ? "" : conn.reason.en}`);
   console.log(`  connected to "${conn.site.name}" (WP ${conn.site.wp_version}), pages: ${conn.site.pages.map((p) => p.title).join(", ")}`);
-  const again = await connectWordPress({ store, secretKey }, venue.id, WP_URL, code);
+  const again = await connectWordPress({ store, secretKey, allowLocal: true }, venue.id, WP_URL, code);
   assert(!again.ok, "a used code must be refused");
 
   step("agent tools: edit page with a photo, preview, apply, undo");

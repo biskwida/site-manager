@@ -44,7 +44,7 @@ Add `lang="bg"` or `lang="en"` to force the language; the default is the venue's
 
 - The plugin's REST routes (`/wp-json/site-manager/v1/*`) require `Authorization: Bearer <token>`; the token is created during the handshake, returned once, and stored **hashed** in WordPress and **encrypted** (AES-256-GCM, `DESTINATION_SECRET_KEY`) in Site Manager. The handshake is bound to the venue code and the code expires after 15 minutes; 5 handshake attempts per minute per IP, 120 API calls per minute otherwise; every call is logged on the settings page (last 50).
 - Writes run as the WordPress admin who generated the code; disconnecting (either side) stops them at once.
-- Site Manager accepts only `https://` site addresses (plain `http://` only for `localhost` during development) and refuses private addresses.
+- Site Manager accepts only `https://` addresses of public sites: it refuses private and local addresses, also when the site's name resolves to one, and it never follows a redirect from the site (send the final address, for example with `www`). Plain `http://` and local hosts (`localhost`, `127.0.0.1`, `[::1]`, `host.docker.internal`, `*.localhost`) are accepted only by the in-memory development server (`SITE_MANAGER_STORE=memory`) and the Docker smoke test.
 - The public feed never contains admin data; the plugin never sends anything to Site Manager except the handshake.
 
 ## Run the checks (developers)

@@ -1,6 +1,6 @@
 // test/wordpress-client.test.ts
 import { describe, expect, it } from "vitest";
-import { WordPressApiError, WordPressClient, validateSiteUrl } from "@/src/destinations/wordpress-client";
+import { isPrivateAddress, WordPressApiError, WordPressClient, validateSiteUrl } from "@/src/destinations/wordpress-client";
 import { FakeWordPress } from "./fake-wordpress";
 
 function setup() {
@@ -15,12 +15,20 @@ describe("validateSiteUrl", () => {
     expect(validateSiteUrl("cafe.bg/wordpress/")).toEqual({ ok: true, url: "https://cafe.bg/wordpress" });
     expect(validateSiteUrl("https://Cafe.BG/blog?x=1#top")).toEqual({ ok: true, url: "https://cafe.bg/blog" });
   });
-  it("accepts plain http only for local hosts", () => {
-    expect(validateSiteUrl("http://localhost:8088")).toEqual({ ok: true, url: "http://localhost:8088" });
-    expect(validateSiteUrl("http://host.docker.internal:8088/")).toEqual({ ok: true, url: "http://host.docker.internal:8088" });
-    const r = validateSiteUrl("http://cafe.bg");
-    expect(r.ok).toBe(false);
-    if (!r.ok) expect(r.reason.bg).toMatch(/https:\/\//);
+  it("accepts plain http and local hosts only with allowLocal (memory store, smoke test)", () => {
+    expect(validateSiteUrl("http://localhost:8088", { allowLocal: true })).toEqual({ ok: true, url: "http://localhost:8088" });
+    expect(validateSiteUrl("http://host.docker.internal:8088/", { allowLocal: true })).toEqual({ ok: true, url: "http://host.docker.internal:8088" });
+    expect(validateSiteUrl("https://cafe.localhost", { allowLocal: true })).toEqual({ ok: true, url: "https://cafe.localhost" });
+    for (const local of ["http://localhost:8088", "https://localhost", "http://127.0.0.1:8088", "https://[::1]", "http://host.docker.internal:8088/", "https://cafe.localhost"]) {
+      const r = validateSiteUrl(local);
+      expect(r.ok, local).toBe(false);
+      if (!r.ok) expect(r.reason.en, local).toMatch(/private network/);
+    }
+    for (const opts of [{}, { allowLocal: true }]) {
+      const r = validateSiteUrl("http://cafe.bg", opts);
+      expect(r.ok).toBe(false);
+      if (!r.ok) expect(r.reason.bg).toMatch(/https:\/\//);
+    }
   });
   it("refuses credentials, private addresses and junk", () => {
     for (const bad of ["https://user:pw@cafe.bg", "https://10.0.0.5", "https://192.168.1.10/wp", "https://172.16.0.1", "https://169.254.1.1", "https://[fd00::1]", "https://[::ffff:10.0.0.1]", "https://[::ffff:a9fe:a9fe]", "ftp://cafe.bg", "not a url", "https://cafe"]) {
@@ -28,6 +36,28 @@ describe("validateSiteUrl", () => {
       expect(r.ok, bad).toBe(false);
       if (!r.ok) expect(r.reason.en.length, bad).toBeGreaterThan(5);
     }
+  });
+});
+
+describe("isPrivateAddress", () => {
+  it("knows private IPv4, IPv6 and IPv4-mapped addresses, as DNS returns them and as URLs write them", () => {
+    for (const a of ["10.0.0.5", "127.0.0.1", "192.168.1.1", "172.20.0.3", "169.254.169.254", "0.0.0.0", "::1", "[::1]", "fd00::1", "fe80::1", "::ffff:10.0.0.1", "[::ffff:a00:1]", "::"]) expect(isPrivateAddress(a), a).toBe(true);
+    for (const a of ["93.184.216.34", "1.1.1.1", "2606:2800:220:1:248:1893:25c8:1946", "::ffff:93.184.216.34"]) expect(isPrivateAddress(a), a).toBe(false);
+  });
+});
+
+describe("WordPressClient redirects", () => {
+  it("does not follow redirects and maps any 3xx to sm_redirect (not retryable)", async () => {
+    const inits: RequestInit[] = [];
+    const fetch302: typeof fetch = async (_url, init) => {
+      inits.push(init ?? {});
+      return new Response(null, { status: 302, headers: { location: "http://10.0.0.5/wp-json/site-manager/v1/site" } });
+    };
+    const client = new WordPressClient({ siteUrl: "https://cafe.example", token: "t", fetch: fetch302 });
+    const e = await client.site().catch((x: unknown) => x);
+    expect(e).toBeInstanceOf(WordPressApiError);
+    expect(e).toMatchObject({ status: 302, code: "sm_redirect", message: "The site redirected the request; use its final address.", retryable: false });
+    expect(inits[0].redirect).toBe("manual");
   });
 });
 

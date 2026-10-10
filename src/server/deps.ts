@@ -79,7 +79,7 @@ export async function makeServerDeps(o: DepsOptions): Promise<ServerDeps> {
     startRun: (r) => o.defer(() => handleRun(r)),
     transcribe,
     download: (filePath) => downloadTelegramFile(config.telegramToken, filePath),
-    connect: sync ? (venueId, siteUrl, code) => connectWordPress({ store: s, secretKey: destinationSecretKey }, venueId, siteUrl, code) : undefined,
+    connect: sync ? (venueId, siteUrl, code) => connectWordPress({ store: s, secretKey: destinationSecretKey, allowLocal: isMemory }, venueId, siteUrl, code) : undefined,
   };
   const bot = createBot(botDeps);
   const messenger = new TelegramMessenger(bot.api);
