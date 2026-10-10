@@ -144,7 +144,7 @@ export interface Store {
   setConversation(venueId: string, chatId: number, c: Conversation): Promise<void>;
 
   // rate limits
-  /** Sliding window counter. Returns true when the call is allowed (count after increment <= max). */
+  /** Fixed window counter (the window restarts at the first call after it elapses). Returns true when the call is allowed (count after increment <= max). */
   bumpRateLimit(key: string, windowMs: number, max: number, now: string): Promise<boolean>;
 }
 

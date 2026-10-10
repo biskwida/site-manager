@@ -44,7 +44,7 @@ create table if not exists public.rate_limits (
   window_start timestamptz not null
 );
 
--- Atomic sliding-window counter; true when the call is allowed (count after increment <= p_max). Service role only (see policies.sql).
+-- Atomic fixed-window counter; true when the call is allowed (count after increment <= p_max). Service role only (see policies.sql).
 create or replace function public.bump_rate_limit(p_key text, p_window_ms int, p_max int, p_now timestamptz) returns boolean language sql as $$
   with up as (
     insert into public.rate_limits as r (key, count, window_start) values (p_key, 1, p_now)

@@ -328,6 +328,7 @@ export class InMemoryStore implements Store {
 
   async bumpRateLimit(key: string, windowMs: number, max: number, now: string) {
     const t = Date.parse(now);
+    if (Number.isNaN(t)) throw new Error(`bumpRateLimit: invalid time ${now}`);
     const cur = this.rateLimits.get(key);
     const row = cur && cur.window_start + windowMs > t ? { count: cur.count + 1, window_start: cur.window_start } : { count: 1, window_start: t };
     this.rateLimits.set(key, row);

@@ -6,6 +6,8 @@ import { NOW } from "./fixtures";
 
 const LATER = "2026-10-09T10:00:00.000Z";
 const ctx = { newId: () => crypto.randomUUID(), now: NOW };
+/** Ids from a store-wide listing, narrowed to the venues one test created (a live store holds other venues too), in listing order. */
+const only = (venues: { id: string }[], ...ids: string[]) => venues.map((v) => v.id).filter((id) => ids.includes(id));
 
 /** Behaviour every Store must have. Call with a factory that yields an empty store. */
 export function storeContract(name: string, make: () => Promise<Store>) {
@@ -188,44 +190,57 @@ export function storeContract(name: string, make: () => Promise<Store>) {
     it("gives new venues the classic template, café type and live status, and accepts overrides", async () => {
       const s = await make();
       const v = await s.createVenue({ slug: "t10", name: "Test" });
-      expect(v).toMatchObject({ template: "classic", business_type: "cafe", status: "live", deploy: null, wizard_draft: null });
       const d = await s.createVenue({ slug: "t10d", name: "Draft", template: "nocturne", business_type: "bar", status: "draft" });
-      expect(d).toMatchObject({ template: "nocturne", business_type: "bar", status: "draft" });
-      expect((await s.listVenues()).map((x) => x.id)).toEqual(expect.arrayContaining([v.id, d.id]));
-      expect((await s.listVenues({ status: "draft" })).map((x) => x.id)).toEqual([d.id]);
-      expect((await s.listVenues({ status: "live" })).map((x) => x.id)).toContain(v.id);
-      expect((await s.listVenues({ status: "live" })).map((x) => x.id)).not.toContain(d.id);
+      try {
+        expect(v).toMatchObject({ template: "classic", business_type: "cafe", status: "live", deploy: null, wizard_draft: null });
+        expect(d).toMatchObject({ template: "nocturne", business_type: "bar", status: "draft" });
+        expect(only(await s.listVenues(), v.id, d.id)).toEqual([v.id, d.id]); // oldest first
+        expect(only(await s.listVenues({ status: "draft" }), v.id, d.id)).toEqual([d.id]);
+        expect(only(await s.listVenues({ status: "live" }), v.id, d.id)).toEqual([v.id]);
+      } finally {
+        await s.deleteVenue(v.id);
+        await s.deleteVenue(d.id);
+      }
     });
 
     it("updates venue fields and refuses a taken slug", async () => {
       const s = await make();
       const a = await s.createVenue({ slug: "t11a", name: "A" });
-      await s.createVenue({ slug: "t11b", name: "B" });
-      const u = await s.updateVenue(a.id, { name: "A2", template: "lumen", status: "draft", theme: { accent: "#112233" }, tagline_en: undefined });
-      expect(u).toMatchObject({ id: a.id, name: "A2", template: "lumen", status: "draft", theme: { accent: "#112233" }, tagline_en: "" });
-      expect(await s.getVenue(a.id)).toEqual(u);
-      const renamed = await s.updateVenue(a.id, { slug: "t11c" });
-      expect(renamed.slug).toBe("t11c");
-      expect((await s.getVenueBySlug("t11c"))?.id).toBe(a.id);
-      expect(await s.getVenueBySlug("t11a")).toBeNull();
-      await expect(s.updateVenue(a.id, { slug: "t11b" })).rejects.toThrow(/t11b/);
-      await expect(s.updateVenue("00000000-0000-0000-0000-000000000000", { name: "x" })).rejects.toThrow();
-      await expect(s.updateVenue(a.id, { slug: "t11c" })).resolves.toMatchObject({ slug: "t11c" }); // own slug is fine
+      const b = await s.createVenue({ slug: "t11b", name: "B" });
+      try {
+        const u = await s.updateVenue(a.id, { name: "A2", template: "lumen", status: "draft", theme: { accent: "#112233" }, tagline_en: undefined });
+        expect(u).toMatchObject({ id: a.id, name: "A2", template: "lumen", status: "draft", theme: { accent: "#112233" }, tagline_en: "" });
+        expect(await s.getVenue(a.id)).toEqual(u);
+        const renamed = await s.updateVenue(a.id, { slug: "t11c" });
+        expect(renamed.slug).toBe("t11c");
+        expect((await s.getVenueBySlug("t11c"))?.id).toBe(a.id);
+        expect(await s.getVenueBySlug("t11a")).toBeNull();
+        await expect(s.updateVenue(a.id, { slug: "t11b" })).rejects.toThrow(/t11b/);
+        await expect(s.updateVenue("00000000-0000-0000-0000-000000000000", { name: "x" })).rejects.toThrow();
+        await expect(s.updateVenue(a.id, { slug: "t11c" })).resolves.toMatchObject({ slug: "t11c" }); // own slug is fine
+      } finally {
+        await s.deleteVenue(a.id);
+        await s.deleteVenue(b.id);
+      }
     });
 
     it("stores the wizard draft JSON and clears it", async () => {
       const s = await make();
       const v = await s.createVenue({ slug: "t12", name: "Test", status: "draft" });
-      const draft = {
-        template: "classic" as const, business_type: "cafe" as const, name: "X", slug: "t12", default_lang: "bg" as const,
-        address: "", phone: "", instagram: "", maps_url: "", hours: v.hours, theme: { accent: "#2f6b4f" },
-        tagline_bg: "", tagline_en: "", about_bg: "", about_en: "", texts: { welcome: { bg: "", en: "" }, footer_note: { bg: "", en: "" } },
-        logo_media_id: null, cover_media_id: null, gallery_media_ids: [], categories: [{ key: "c1", name_bg: "Кафе", name_en: "Coffee", items: [] }], step: "menu" as const,
-      };
-      await s.updateVenue(v.id, { wizard_draft: draft });
-      expect((await s.getVenue(v.id)).wizard_draft).toEqual(draft);
-      await s.updateVenue(v.id, { wizard_draft: null, status: "live" });
-      expect(await s.getVenue(v.id)).toMatchObject({ wizard_draft: null, status: "live" });
+      try {
+        const draft = {
+          template: "classic" as const, business_type: "cafe" as const, name: "X", slug: "t12", default_lang: "bg" as const,
+          address: "", phone: "", instagram: "", maps_url: "", hours: v.hours, theme: { accent: "#2f6b4f" },
+          tagline_bg: "", tagline_en: "", about_bg: "", about_en: "", texts: { welcome: { bg: "", en: "" }, footer_note: { bg: "", en: "" } },
+          logo_media_id: null, cover_media_id: null, gallery_media_ids: [], categories: [{ key: "c1", name_bg: "Кафе", name_en: "Coffee", items: [] }], step: "menu" as const,
+        };
+        await s.updateVenue(v.id, { wizard_draft: draft });
+        expect((await s.getVenue(v.id)).wizard_draft).toEqual(draft);
+        await s.updateVenue(v.id, { wizard_draft: null, status: "live" });
+        expect(await s.getVenue(v.id)).toMatchObject({ wizard_draft: null, status: "live" });
+      } finally {
+        await s.deleteVenue(v.id);
+      }
     });
 
     it("tracks deployments and lists the ones in flight", async () => {
@@ -233,32 +248,40 @@ export function storeContract(name: string, make: () => Promise<Store>) {
       const a = await s.createVenue({ slug: "t13a", name: "A" });
       const b = await s.createVenue({ slug: "t13b", name: "B" });
       const c = await s.createVenue({ slug: "t13c", name: "C" });
-      const base = { provider: "fake" as const, project_id: "p", deployment_id: "d", url: null, error: null, template: "classic" as const, updated_at: NOW };
-      await s.setDeploy(a.id, { ...base, status: "pending" });
-      await s.setDeploy(b.id, { ...base, status: "building" });
-      await s.setDeploy(c.id, { ...base, status: "ready", url: "https://c.example.test" });
-      expect((await s.getVenue(a.id)).deploy).toEqual({ ...base, status: "pending" });
-      expect((await s.listVenues({ deploying: true })).map((x) => x.id).sort()).toEqual([a.id, b.id].sort());
-      await s.setDeploy(a.id, { ...base, status: "error", error: "boom" });
-      expect((await s.listVenues({ deploying: true })).map((x) => x.id)).toEqual([b.id]);
-      await s.setDeploy(b.id, null);
-      expect(await s.listVenues({ deploying: true })).toEqual([]);
-      expect((await s.getVenue(b.id)).deploy).toBeNull();
+      try {
+        const base = { provider: "fake" as const, project_id: "p", deployment_id: "d", url: null, error: null, template: "classic" as const, updated_at: NOW };
+        await s.setDeploy(a.id, { ...base, status: "pending" });
+        await s.setDeploy(b.id, { ...base, status: "building" });
+        await s.setDeploy(c.id, { ...base, status: "ready", url: "https://c.example.test" });
+        expect((await s.getVenue(a.id)).deploy).toEqual({ ...base, status: "pending" });
+        expect(only(await s.listVenues({ deploying: true }), a.id, b.id, c.id)).toEqual([a.id, b.id]);
+        await s.setDeploy(a.id, { ...base, status: "error", error: "boom" });
+        expect(only(await s.listVenues({ deploying: true }), a.id, b.id, c.id)).toEqual([b.id]);
+        await s.setDeploy(b.id, null);
+        expect(only(await s.listVenues({ deploying: true }), a.id, b.id, c.id)).toEqual([]);
+        expect((await s.getVenue(b.id)).deploy).toBeNull();
+      } finally {
+        for (const x of [a, b, c]) await s.deleteVenue(x.id);
+      }
     });
 
     it("finds a draft by its token hash and lists members", async () => {
       const s = await make();
       const v = await s.createVenue({ slug: "t14", name: "Test", status: "draft" });
-      expect(await s.findVenueByDraftToken("a".repeat(64))).toBeNull();
-      await s.setDraftToken(v.id, "a".repeat(64));
-      expect((await s.findVenueByDraftToken("a".repeat(64)))?.id).toBe(v.id);
-      await s.setDraftToken(v.id, null);
-      expect(await s.findVenueByDraftToken("a".repeat(64))).toBeNull();
-      await s.upsertMember({ venue_id: v.id, tg_chat_id: 21, role: "owner", lang: "bg" });
-      await s.upsertMember({ venue_id: v.id, tg_chat_id: 22, role: "staff", lang: "en" });
-      const members = await s.listMembers(v.id);
-      expect(members.map((m) => [m.tg_chat_id, m.role]).sort()).toEqual([[21, "owner"], [22, "staff"]]);
-      expect(await s.listMembers("00000000-0000-0000-0000-000000000000")).toEqual([]);
+      try {
+        expect(await s.findVenueByDraftToken("a".repeat(64))).toBeNull();
+        await s.setDraftToken(v.id, "a".repeat(64));
+        expect((await s.findVenueByDraftToken("a".repeat(64)))?.id).toBe(v.id);
+        await s.setDraftToken(v.id, null);
+        expect(await s.findVenueByDraftToken("a".repeat(64))).toBeNull();
+        await s.upsertMember({ venue_id: v.id, tg_chat_id: 21, role: "owner", lang: "bg" });
+        await s.upsertMember({ venue_id: v.id, tg_chat_id: 22, role: "staff", lang: "en" });
+        const members = await s.listMembers(v.id);
+        expect(members.map((m) => [m.tg_chat_id, m.role]).sort()).toEqual([[21, "owner"], [22, "staff"]]);
+        expect(await s.listMembers("00000000-0000-0000-0000-000000000000")).toEqual([]);
+      } finally {
+        await s.deleteVenue(v.id);
+      }
     });
 
     it("deletes a venue with everything attached", async () => {
@@ -282,7 +305,7 @@ export function storeContract(name: string, make: () => Promise<Store>) {
       await expect(s.deleteVenue(v.id)).resolves.toBeUndefined(); // idempotent
     });
 
-    it("counts rate limits in a sliding window", async () => {
+    it("counts rate limits in a fixed window", async () => {
       const s = await make();
       const key = `rl-${crypto.randomUUID()}`;
       const hour = 3_600_000;
