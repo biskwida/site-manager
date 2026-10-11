@@ -7,6 +7,7 @@ import { WIZARD } from "@/src/i18n/wizard";
 import { getServerDeps } from "@/src/server/deps";
 import { readDraftFromCookies } from "@/src/server/draft-cookie";
 import { sha256Hex } from "@/src/server/hash";
+import { enabledApps } from "@/src/server/connect-apps";
 import { instagramConfigured } from "@/src/server/instagram";
 import { emptyDraft } from "@/src/wizard/schema";
 import { NoDraft } from "../components/NoDraft";
@@ -48,7 +49,7 @@ export default async function Page(props: PageProps<"/new/[id]">) {
   const igReturn = instagramAvailable ? readIgReturn(await props.searchParams) : null;
   return (
     <LangProvider defaultLang={draft.default_lang}>
-      <Wizard id={id} initialDraft={draft} initialMedia={site.media} baseUrl={deps.config.publicBaseUrl} aiAvailable={aiAvailable} now={now} instagramAvailable={instagramAvailable} igReturn={igReturn} />
+      <Wizard id={id} initialDraft={draft} initialMedia={site.media} baseUrl={deps.config.publicBaseUrl} aiAvailable={aiAvailable} now={now} instagramAvailable={instagramAvailable} igReturn={igReturn} apps={enabledApps(deps.config)} />
     </LangProvider>
   );
 }

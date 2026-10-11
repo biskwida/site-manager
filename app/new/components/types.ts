@@ -1,4 +1,5 @@
 import type { Media } from "@/src/domain/types";
+import type { AppChannel } from "@/src/server/connect-apps";
 import type { PublishError, WizardDraft } from "@/src/wizard/schema";
 
 /** How the Instagram sign-in came back (`?ig=` on /new/<id>), for the step the flow started from. */
@@ -26,6 +27,8 @@ export interface StepProps {
    * Next, this step's validation errors. Paths are validateForPublish paths (`name`, `categories.0.items.1.price_eur`).
    */
   fieldErrors: PublishError[];
+  /** The messaging apps this server answers (enabledApps); the Review lead names Telegram only when it is the one app. Default: Telegram only. */
+  apps?: AppChannel[];
   /** false without INSTAGRAM_APP_ID/SECRET: the Instagram import is not shown. */
   instagramAvailable?: boolean;
   igReturn?: IgReturn | null;

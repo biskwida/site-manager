@@ -52,6 +52,17 @@ describe("AppsCard", () => {
     expect(html).toContain(">Done</button>");
     expect(html).not.toContain(">Connect another</button>"); // replaced by the open code until Done
   });
+  it("the fresh-code lead offers another app only when the server answers several", () => {
+    expect(render("en", [], FRESH)).toContain("A new owner code for one more app or a second phone.");
+    expect(render("bg", [], FRESH)).toContain("за още едно приложение или втори телефон");
+    const one = { ...FRESH, links: FRESH.links.slice(0, 1) };
+    const en = render("en", [], one);
+    expect(en).toContain("A new owner code for another phone.");
+    expect(en).not.toContain("one more app");
+    const bg = render("bg", [], one);
+    expect(bg).toContain("за още един телефон");
+    expect(bg).not.toContain("приложение или");
+  });
   it("a fresh code with Telegram alone keeps the /start form", () => {
     const html = render("bg", [], { ...FRESH, links: FRESH.links.slice(0, 1) });
     expect(html).toContain("/start WXYZ6789");

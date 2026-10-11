@@ -206,6 +206,7 @@ const en = {
   "admin.apps.staff.other": "{n} staff members",
   "admin.apps.another": "Connect another",
   "admin.apps.anotherLead": "A new owner code for one more app or a second phone. Each code works once.",
+  "admin.apps.anotherLeadOne": "A new owner code for another phone. Each code works once.",
   "admin.apps.hide": "Done",
 };
 export type MessageKey = keyof typeof en;
@@ -411,6 +412,7 @@ const bg: Record<MessageKey, string> = {
   "admin.apps.staff.other": "{n} служители",
   "admin.apps.another": "Свържете още едно",
   "admin.apps.anotherLead": "Нов код за собственик: за още едно приложение или втори телефон. Всеки код работи веднъж.",
+  "admin.apps.anotherLeadOne": "Нов код за собственик за още един телефон. Всеки код работи веднъж.",
   "admin.apps.hide": "Готово",
 };
 

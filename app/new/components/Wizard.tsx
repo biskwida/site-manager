@@ -2,6 +2,7 @@
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { Media } from "@/src/domain/types";
+import type { AppChannel } from "@/src/server/connect-apps";
 import { LangToggle } from "@/src/i18n";
 import { stepForPath, validateForPublish, type WizardDraft, type WizardStep } from "@/src/wizard/schema";
 import { api } from "./api";
@@ -27,10 +28,12 @@ function referencedMedia(d: WizardDraft): Set<string> {
   return new Set(ids.filter((x): x is string => typeof x === "string"));
 }
 
-export function Wizard({ id, initialDraft, initialMedia, baseUrl, aiAvailable, now, instagramAvailable = false, igReturn = null }: {
+export function Wizard({ id, initialDraft, initialMedia, baseUrl, aiAvailable, now, instagramAvailable = false, igReturn = null, apps }: {
   id: string; initialDraft: WizardDraft; initialMedia: Media[]; baseUrl: string; aiAvailable: boolean; now: number;
   /** INSTAGRAM_APP_ID/SECRET are set on this server. */
   instagramAvailable?: boolean;
+  /** The messaging apps this server answers (enabledApps). */
+  apps?: AppChannel[];
   /** Back from Instagram's sign-in (`?step=…&ig=…`): opens that step and tells it how the sign-in went. */
   igReturn?: IgReturn | null;
 }) {
@@ -129,7 +132,7 @@ export function Wizard({ id, initialDraft, initialMedia, baseUrl, aiAvailable, n
   }
 
   const closePreview = useCallback(() => setPreviewOpen(false), []);
-  const stepProps: StepProps = { id, draft, media: shownMedia, update, addMedia, baseUrl, aiAvailable, fieldErrors, instagramAvailable, igReturn: ig, onIgConsumed: consumeIg, flush: () => flush() };
+  const stepProps: StepProps = { id, draft, media: shownMedia, update, addMedia, baseUrl, aiAvailable, fieldErrors, instagramAvailable, apps, igReturn: ig, onIgConsumed: consumeIg, flush: () => flush() };
   const saveText = {
     idle: "",
     saving: t("save.saving"),

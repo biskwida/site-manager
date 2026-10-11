@@ -63,7 +63,7 @@ export function AppsCard({ apps, post, initialCode = null, initialFailed = null 
         <div className="border-t border-ink/10 px-4 py-4 sm:px-5">
           {fresh ? (
             <div className="transition-[opacity,transform] duration-200 ease-out starting:translate-y-1 starting:opacity-0 motion-reduce:transition-none">
-              <p ref={lead} tabIndex={-1} style={NO_RING} className="mb-4 text-sm text-ink-soft text-pretty">{t("admin.apps.anotherLead")}</p>
+              <p ref={lead} tabIndex={-1} style={NO_RING} className="mb-4 text-sm text-ink-soft text-pretty">{t(fresh.links.length === 1 ? "admin.apps.anotherLeadOne" : "admin.apps.anotherLead")}</p>
               <ConnectApps key={fresh.code} code={fresh.code} links={fresh.links} />
               <button type="button" onClick={() => setFresh(null)}
                 className="mt-5 min-h-11 rounded-full px-5 text-sm font-semibold text-ink ring-1 ring-ink/25 transition-[transform,background-color] duration-150 ease-out hover:bg-ink/5 active:scale-[0.98] motion-reduce:transition-none">{t("admin.apps.hide")}</button>
