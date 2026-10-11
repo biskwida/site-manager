@@ -16,13 +16,14 @@ const isLocalized = (d: unknown): d is { bg: string; en: string } =>
 /**
  * "Your apps": the chats linked to this venue per messaging app (owners and staff), and "Connect another", which asks the
  * server for a fresh single-use owner code (action new_owner_code) and shows its links, QR and code. A code also serves a
- * second phone on the same app. `initialCode` is for tests and screenshots.
+ * second phone on the same app. `initialCode` and `initialFailed` are for tests and screenshots. A refusal (409 not live, 429 too many codes) shows
+ * the server's bg/en line; the button stays so the owner can try again later.
  */
-export function AppsCard({ apps, post, initialCode = null }: { apps: ConnectedApp[]; post: Post; initialCode?: OwnerCode | null }) {
+export function AppsCard({ apps, post, initialCode = null, initialFailed = null }: { apps: ConnectedApp[]; post: Post; initialCode?: OwnerCode | null; initialFailed?: { bg: string; en: string } | true | null }) {
   const { lang, t } = useLang();
   const [fresh, setFresh] = useState<OwnerCode | null>(initialCode);
   const [busy, setBusy] = useState(false);
-  const [failed, setFailed] = useState<{ bg: string; en: string } | true | null>(null);
+  const [failed, setFailed] = useState<{ bg: string; en: string } | true | null>(initialFailed);
   const lead = useRef<HTMLParagraphElement>(null);
 
   const count = (n: number, one: MessageKey, other: MessageKey) => (n === 1 ? t(one) : t(other, { n: String(n) }));

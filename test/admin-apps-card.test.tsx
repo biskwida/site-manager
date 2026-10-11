@@ -9,8 +9,8 @@ import type { ConnectedApp, OwnerCode } from "@/src/server/connect-apps";
 
 const Provider = LangProvider as (props: { defaultLang: Lang; children?: ReactNode }) => ReactNode;
 const post = async () => ({ ok: true, data: null });
-const render = (lang: Lang, apps: ConnectedApp[], initialCode: OwnerCode | null = null) =>
-  renderToStaticMarkup(createElement(Provider, { defaultLang: lang }, createElement(AppsCard, { apps, post, initialCode })));
+const render = (lang: Lang, apps: ConnectedApp[], initialCode: OwnerCode | null = null, initialFailed: { bg: string; en: string } | true | null = null) =>
+  renderToStaticMarkup(createElement(Provider, { defaultLang: lang }, createElement(AppsCard, { apps, post, initialCode, initialFailed })));
 
 const FRESH: OwnerCode = {
   code: "WXYZ6789",
@@ -57,5 +57,17 @@ describe("AppsCard", () => {
     expect(html).toContain("/start WXYZ6789");
     expect(html).toContain("Отворете Telegram");
     expect(html).not.toContain('role="radiogroup"');
+  });
+  it("shows the server's message for 429 and 409 in the page language, else a generic failure", () => {
+    const limited = { bg: "Твърде много нови кодове за час. Опитайте по-късно.", en: "Too many new codes this hour. Try again later." };
+    const notLive = { bg: "Първо публикувайте сайта.", en: "Publish the site first." };
+    const bg = render("bg", [], null, limited);
+    expect(bg).toContain('role="alert"');
+    expect(bg).toContain(limited.bg);
+    expect(bg).toContain("Свържете още едно"); // the button stays so the owner can try later
+    expect(render("en", [], null, limited)).toContain(limited.en);
+    expect(render("en", [], null, notLive)).toContain("Publish the site first.");
+    expect(render("bg", [], null, notLive)).toContain("Първо публикувайте сайта.");
+    expect(render("en", [], null, true)).toContain("That did not work");
   });
 });

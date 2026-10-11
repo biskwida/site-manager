@@ -86,6 +86,27 @@ describe("POST /api/new/[id]/invite", () => {
   });
 });
 
+describe("shared code budget", () => {
+  it(`the wizard route and the dashboard action draw on one ${INVITES_PER_HOUR}/hour budget per venue`, async () => {
+    const { deps, id, cookie, publish } = await serve();
+    const pub = await publish();
+    const admin = () => adminPost(new Request(`${BASE}/api/admin/${pub.slug}?key=${pub.key}`, { method: "POST", body: JSON.stringify({ action: "new_owner_code" }) }), adminCtx(pub.slug));
+    for (let i = 0; i < INVITES_PER_HOUR; i++) expect((i % 2 ? await admin() : await invite(id, cookie)).status).toBe(200);
+    const viaAdmin = await admin();
+    expect(viaAdmin.status).toBe(429);
+    expect(await viaAdmin.json()).toEqual({ ok: false, error: "rate_limited", bg: expect.any(String), en: expect.any(String) });
+    expect((await invite(id, cookie)).status).toBe(429);
+    // a venue that is not live gets 409 from the dashboard action too (and it does not spend the budget)
+    const other = await serve();
+    const o = await other.publish();
+    await other.deps.store.updateVenue(other.id, { status: "draft" });
+    const res = await adminPost(new Request(`${BASE}/api/admin/${o.slug}?key=${o.key}`, { method: "POST", body: JSON.stringify({ action: "new_owner_code" }) }), adminCtx(o.slug));
+    expect(res.status).toBe(409);
+    expect(await res.json()).toMatchObject({ ok: false, error: "not_live" });
+    void deps;
+  });
+});
+
 describe("connected_apps", () => {
   it("the wizard status counts linked chats per app", async () => {
     const { deps, id, cookie, publish } = await serve();

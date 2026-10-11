@@ -121,7 +121,11 @@ describe("DoneStatus: connect an app", () => {
     for (const l of FOUR) expect(bg).toContain(`href="${l.url.replace(/&/g, "&amp;")}"`);
     for (const a of ALL) expect(count(bg, `data-app-icon="${a}"`)).toBe(2); // one on its button, one in the QR picker
     expect(bg).toContain('role="radiogroup"');
-    expect(bg).toContain('aria-label="QR код за"');
+    // a visible label names the picker, so it does not read as a second choice of app
+    const label = /<p id="([^"]+)"[^>]*>QR код за:<\/p><div role="radiogroup" aria-labelledby="([^"]+)"/.exec(bg);
+    expect(label?.[1]).toBeTruthy();
+    expect(label?.[1]).toBe(label?.[2]);
+    expect(bg).toContain("grid-cols-2"); // four apps: two rows of two
     expect(count(bg, 'role="radio"')).toBe(4);
     expect(bg).toMatch(/role="radio" aria-checked="true" tabindex="0"[^>]*>(<svg[^>]*>.*?<\/svg>)?Telegram/);
     expect(count(bg, 'aria-checked="false" tabindex="-1"')).toBe(3);
@@ -137,6 +141,29 @@ describe("DoneStatus: connect an app", () => {
     expect(en).toContain("If the link doesn&#x27;t carry the code, send it as a message");
     expect(en).toContain("reminders reach you if you have written to the bot in the last 24 hours");
     expect(en).toContain('aria-label="Scan with your phone to open the bot: Telegram"');
+  });
+  it("three apps sit in one row of three, never two plus one", () => {
+    const html = render("en", waiting, { links: FOUR.slice(0, 3), apps: ["telegram", "whatsapp", "messenger"] });
+    expect(html).toMatch(/role="radiogroup"[^>]*class="[^"]*grid-cols-3/);
+    expect(html).toContain(">QR code for:</p>");
+  });
+  it("one app that is not Telegram: generic copy and the bare code, never Start or /start", () => {
+    const wa = [FOUR[1]];
+    for (const lang of ["bg", "en"] as const) {
+      const html = render(lang, waiting, { links: wa, apps: ["whatsapp"] });
+      expect(html).not.toContain("Start");
+      expect(html).not.toContain("/start");
+      expect(html).toContain(">ABCD2345</code>");
+      expect(html).toContain(lang === "bg" ? "Чакаме да свържете приложение" : "Waiting for you to connect an app");
+      expect(html).toContain(lang === "bg" ? "свържете приложението, от което ще управлявате сайта" : "connect the app you will run the site from");
+      expect(html).toContain(lang === "bg" ? "Отворете WhatsApp" : "Open WhatsApp");
+      expect(html).not.toContain('role="radiogroup"');
+      expect(html).toMatch(/24 (часа|hours)/);
+    }
+  });
+  it("the connected line can take focus (it receives it when the fresh code closes)", () => {
+    const joined: DoneStatusResponse = { ...waiting, owner_joined: true, connected_apps: [{ app: "telegram", owners: 1, staff: 0 }] };
+    expect(render("en", joined, { code: null, links: [], apps: [...ALL] })).toMatch(/<p id="connected" tabindex="-1"[^>]*>/);
   });
   it("Telegram plus WhatsApp only: still the 24-hour line (a Meta app is on)", () => {
     expect(render("en", waiting, { links: FOUR.slice(0, 2), apps: ["telegram", "whatsapp"] })).toContain("last 24 hours");

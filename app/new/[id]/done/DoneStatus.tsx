@@ -67,10 +67,15 @@ export function DoneStatus({ id, slug, code, links, apps, adminKey, baseUrl, ini
   // "Connect another app": a fresh single-use owner code from POST /invite; cleared once one more chat links with it.
   const [fresh, setFresh] = useState<Fresh | null>(null);
   const [asking, setAsking] = useState(false);
+  /** Chat count at which a fresh code closed because it was used (0 = never); drives the focus move below. */
+  const [closedAt, setClosedAt] = useState(0);
   const [failed, setFailed] = useState<{ bg: string; en: string } | true | null>(null);
   const freshHeading = useRef<HTMLHeadingElement>(null);
+  const connectedLine = useRef<HTMLParagraphElement>(null);
   const phase = phaseOf(status);
   const several = apps.length > 1;
+  // Telegram-specific copy ("press Start in Telegram") only when Telegram is the one app (or none is configured, as before).
+  const generic = several || (apps.length === 1 && apps[0] !== "telegram");
   const connected = status.connected_apps ?? [];
   const joined = !code || !!status.owner_joined || connected.length > 0;
   const chats = chatsOf(status);
@@ -105,8 +110,15 @@ export function DoneStatus({ id, slug, code, links, apps, adminKey, baseUrl, ini
     return startTickNudge({ adminKey, fetcher });
   }, [phase, adminKey, fetcher]);
 
-  // The fresh code has been used once another chat shows up: back to the connected line.
-  if (fresh && chats > fresh.chats) setFresh(null);
+  // The fresh code has been used once another chat shows up: close it and put focus on the connected line, which now
+  // names the new app (focus would otherwise fall back to the page as the section disappears).
+  if (fresh && chats > fresh.chats) {
+    setFresh(null);
+    setClosedAt(chats);
+  }
+  useEffect(() => {
+    if (closedAt) connectedLine.current?.focus();
+  }, [closedAt]);
 
   async function another() {
     setAsking(true);
@@ -133,7 +145,7 @@ export function DoneStatus({ id, slug, code, links, apps, adminKey, baseUrl, ini
   const liveUrl = status.site_url ?? status.deploy?.url ?? null;
   const dot = phase === "live" ? "bg-accent" : phase === "error" ? "bg-clay" : "bg-amber";
   const link = "flex min-h-11 flex-col justify-center rounded-2xl bg-card px-4 py-2 ring-1 ring-ink/10 transition-[box-shadow,transform] duration-150 hover:ring-accent/50 active:scale-[0.99]";
-  const lead = several ? (status.hosted ? "done.leadAppsHosted" : "done.leadApps") : status.hosted ? "done.leadHosted" : "done.lead";
+  const lead = generic ? (status.hosted ? "done.leadAppsHosted" : "done.leadApps") : status.hosted ? "done.leadHosted" : "done.lead";
 
   return (
     <main className="mx-auto w-full max-w-2xl px-4 py-5 sm:px-6 sm:py-10">
@@ -152,7 +164,7 @@ export function DoneStatus({ id, slug, code, links, apps, adminKey, baseUrl, ini
         </section>
       ) : (
         <div className="mt-7">
-          <p className="flex flex-wrap items-center gap-x-3 gap-y-1 rounded-2xl bg-accent-soft px-4 py-3 font-semibold text-ink">
+          <p id="connected" tabIndex={-1} ref={connectedLine} style={NO_RING} className="flex flex-wrap items-center gap-x-3 gap-y-1 rounded-2xl bg-accent-soft px-4 py-3 font-semibold text-ink">
             {connected.length > 0 ? (
               <>
                 <span>{t("done.connected")}</span>
@@ -190,7 +202,7 @@ export function DoneStatus({ id, slug, code, links, apps, adminKey, baseUrl, ini
         <p data-phase={phase} className="mt-2 flex items-start gap-2.5 text-lg font-semibold leading-snug">
           <span aria-hidden="true" className={`mt-[0.45em] size-2.5 shrink-0 rounded-full ${dot} ${phase === "publishing" ? "animate-pulse" : ""}`} />
           <span className="min-w-0 [overflow-wrap:anywhere]">
-            {phase === "waiting" && t(several ? "done.waitingApps" : "done.waiting")}
+            {phase === "waiting" && t(generic ? "done.waitingApps" : "done.waiting")}
             {phase === "publishing" && t("done.publishing")}
             {phase === "live" && (liveUrl ? <>{t("done.live")} <a href={liveUrl} className="underline underline-offset-4 hover:text-accent">{liveUrl}</a></> : t("done.live"))}
             {phase === "error" && t("done.error")}

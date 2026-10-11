@@ -19,6 +19,30 @@ describe("loadConfig: app link keys", () => {
     expect(lenient({ CHANNELS_ENABLED: "yes please" }).channelsEnabled).toBe(false);
     expect(lenient({ WHATSAPP_NUMBER: "+" }).whatsappNumber).toBeNull();
   });
+  it("reduce a pasted Messenger link to the Page handle and refuse anything that is not a handle", () => {
+    const m = (v: string) => lenient({ MESSENGER_PAGE_HANDLE: v }).messengerPageHandle;
+    expect(m("sitemanager.demo")).toBe("sitemanager.demo");
+    expect(m("@sitemanager_1")).toBe("sitemanager_1");
+    expect(m("https://m.me/sitemanager.demo")).toBe("sitemanager.demo");
+    expect(m("https://m.me/sitemanager.demo/")).toBe("sitemanager.demo");
+    expect(m("http://m.me/sitemanager?ref=x")).toBe("sitemanager");
+    expect(m("m.me/sitemanager")).toBe("sitemanager");
+    for (const bad of ["https://evil.example/sitemanager", "https://m.me/a/b", "https://m.me/", "site manager", "café", "a/b", "x".repeat(65), "@", "https://instagram.com/sitemanager", "javascript:alert(1)"]) expect(m(bad), bad).toBeNull();
+    expect(m("x".repeat(64))).toBe("x".repeat(64));
+  });
+  it("reduce a pasted Instagram profile link to the username and refuse anything that is not one", () => {
+    const ig = (v: string) => lenient({ INSTAGRAM_USERNAME: v }).instagramUsername;
+    expect(ig("site.manager")).toBe("site.manager");
+    expect(ig("@site.manager")).toBe("site.manager");
+    expect(ig("https://instagram.com/site.manager")).toBe("site.manager");
+    expect(ig("https://www.instagram.com/site.manager/")).toBe("site.manager");
+    expect(ig("https://www.instagram.com/site.manager/?hl=bg")).toBe("site.manager");
+    expect(ig("instagram.com/site_manager")).toBe("site_manager");
+    for (const bad of ["https://m.me/site.manager", "https://www.instagram.com/p/abc/", "https://evil.example/site.manager", "site-manager", "@@x", "<script>"]) expect(ig(bad), bad).toBeNull();
+  });
+  it("never throws on a bad handle (the app still starts, the link is just not offered)", () => {
+    expect(() => loadConfig({ MESSENGER_PAGE_HANDLE: "%%%", INSTAGRAM_USERNAME: "http://[" }, { lenient: true })).not.toThrow();
+  });
 });
 
 describe("enabledApps", () => {

@@ -190,7 +190,7 @@ const en = {
   "done.dashboard": "Dashboard",
   // Connect an app (done page and dashboard, app/components/ConnectApps.tsx)
   "apps.open": "Open {app}",
-  "apps.qrFor": "QR code for",
+  "apps.qrFor": "QR code for:",
   "apps.qr": "Scan with your phone to open the bot",
   "apps.codeLabel": "Or send this to the bot:",
   "apps.codeLabelBare": "If the link doesn't carry the code, send it as a message:",
@@ -395,7 +395,7 @@ const bg: Record<MessageKey, string> = {
   "done.hosted": "Сайтът ви в Site Manager",
   "done.dashboard": "Табло",
   "apps.open": "Отворете {app}",
-  "apps.qrFor": "QR код за",
+  "apps.qrFor": "QR код за:",
   "apps.qr": "Сканирайте с телефона, за да отворите бота",
   "apps.codeLabel": "Или изпратете това на бота:",
   "apps.codeLabelBare": "Ако линкът не пренесе кода, изпратете го като съобщение:",
