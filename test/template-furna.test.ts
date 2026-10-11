@@ -6,9 +6,10 @@ import { describe, expect, it } from "vitest";
 import type { DraftInfo, Lang, Media, SiteState } from "@/src/domain/types";
 import { LangProvider } from "@/src/i18n";
 import { def } from "@/src/templates/furna";
+import { accentVars } from "@/src/templates/furna/Template";
 import { contrastRatio } from "@/src/templates/shared/color";
 import { TEMPLATE_ACCENT_DEFAULTS } from "@/src/wizard/schema";
-import { EXTREME_ACCENTS, LOOK_STEP_ACCENTS, makeDemo } from "./helpers";
+import { EXTREME_ACCENTS, LOOK_ACCENT_PRESETS, makeDemo, sweepAccents } from "./helpers";
 
 // Fonts come from the global next/font/google mock in test/setup.ts (R8): variables are `font-var-<Family>`.
 
@@ -248,7 +249,7 @@ describe("furna template", () => {
   it("computes the accent text colour in TypeScript (no CSS relative colour) and keeps the title and the button readable", async () => {
     const css = readFileSync(new URL("../src/templates/furna/styles.css", import.meta.url), "utf8");
     expect(css).not.toMatch(/oklch\(from/);
-    for (const accent of [def.accentDefault, ...LOOK_STEP_ACCENTS, ...EXTREME_ACCENTS]) {
+    for (const accent of [def.accentDefault, ...LOOK_ACCENT_PRESETS, ...EXTREME_ACCENTS]) {
       const html = await render("en", { page: "home", mutate: (s) => { s.venue.theme.accent = accent; } });
       const text = /--fu-accent-text:(#[0-9a-f]{6})/.exec(html)?.[1];
       expect(text, accent).toBeDefined();
@@ -258,6 +259,31 @@ describe("furna template", () => {
       expect(contrastRatio("#fff8ea", text!), `button text on ${text}`).toBeGreaterThanOrEqual(4.5);
     }
     expect(await render("en", { mutate: (s) => { s.venue.theme.accent = "#b8432a"; } })).toContain("--fu-accent-text:#b8432a"); // approved tomato unchanged
+  });
+  it("keeps the default and every Look-step preset at exactly the colours they had before the contrast guard", () => {
+    const expected: [string, Record<string, string>][] = [
+      ["#b8432a", {"--fu-accent-text": "#b8432a"}],
+      ["#2f6b4f", {"--fu-accent-text": "#2f6b4f"}],
+      ["#8f5c10", {"--fu-accent-text": "#8f5c10"}],
+      ["#a4442c", {"--fu-accent-text": "#a4442c"}],
+      ["#1d4ed8", {"--fu-accent-text": "#2d57be"}],
+      ["#6b21a8", {"--fu-accent-text": "#672f9c"}],
+      ["#1d2a24", {"--fu-accent-text": "#1d2a24"}],
+    ];
+    expect(expected.map(([a]) => a.toLowerCase())).toEqual(expect.arrayContaining([def.accentDefault.toLowerCase(), ...LOOK_ACCENT_PRESETS]));
+    for (const [accent, vars] of expected) expect(accentVars(accent), accent).toEqual(vars);
+  });
+  it("keeps every promised contrast floor across the colour space (64 hues × 3 lightnesses × 3 chromas)", () => {
+    const misses: string[] = [];
+    for (const accent of [...sweepAccents(), ...EXTREME_ACCENTS]) {
+      const v = accentVars(accent);
+      const pairs: [string, number, number][] = [
+        [`${v["--fu-accent-text"]} on paper`, contrastRatio(v["--fu-accent-text"], "#f6eedb"), 4.5],
+        [`button text on ${v["--fu-accent-text"]}`, contrastRatio("#fff8ea", v["--fu-accent-text"]), 4.5],
+      ];
+      for (const [what, ratio, floor] of pairs) if (!(ratio >= floor)) misses.push(`${accent}: ${what} ${ratio.toFixed(2)} < ${floor}`);
+    }
+    expect(misses).toEqual([]);
   });
   it("keeps the change flash reaching its final frame under reduced motion", () => {
     // `animation: none` would freeze .fu-flash at its base opacity (1) forever, because useLiveSite never clears `changed`.
