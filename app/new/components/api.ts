@@ -36,6 +36,11 @@ export function aiUnavailable(r: { ok: false; status: number }): boolean {
   return r.status === 503 || r.status === 404;
 }
 
+/** One Instagram photo the owner can pick (GET /api/new/[id]/instagram). */
+export interface IgItem { id: string; thumb: string; caption: string; permalink: string; taken_at: string }
+/** Where a picked photo goes: the cover, the logo, the gallery, or a dish ("<categoryKey>/<itemKey>"). */
+export type IgTarget = "cover" | "logo" | "gallery" | { item: string };
+
 export interface PublishResponse { slug: string; invite_code: string; start_url: string | null; admin_url: string; site_url: string }
 
 export const api = {
@@ -50,6 +55,11 @@ export const api = {
   extract: (id: string, files: ExtractFile[]) => call<ExtractResult>(`/api/new/${id}/extract`, json("POST", { files })),
   texts: (id: string, facts: string) => call<DraftTexts>(`/api/new/${id}/texts`, json("POST", { facts })),
   publish: (id: string) => call<PublishResponse>(`/api/new/${id}/publish`, { method: "POST" }),
+  /** A full-page navigation (Instagram's sign-in), not a fetch. */
+  igStartUrl: (id: string, from: "photos" | "look") => `/api/new/${id}/instagram/start${from === "look" ? "?from=look" : ""}`,
+  igList: (id: string) => call<{ items: IgItem[]; username?: string; expired?: boolean }>(`/api/new/${id}/instagram`),
+  igImport: (id: string, picks: { id: string; target: IgTarget }[]) =>
+    call<{ draft: WizardDraft; media: Media[]; failed: { id: string; code: string }[] }>(`/api/new/${id}/instagram/import`, json("POST", { picks })),
 };
 
 /** base64 payload only (no data: prefix), as the extract route expects. */

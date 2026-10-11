@@ -1,13 +1,22 @@
 import type { Media } from "@/src/domain/types";
 import type { PublishError, WizardDraft } from "@/src/wizard/schema";
 
+/** How the Instagram sign-in came back (`?ig=` on /new/<id>), for the step the flow started from. */
+export interface IgReturn {
+  status: "ok" | "cancelled" | "error";
+  /** The callback's error reason (`state`, `session`, `token`, `media`) when status is error. */
+  reason?: string;
+  step: "photos" | "look";
+}
+
 export interface StepProps {
   id: string;
   draft: WizardDraft;
   /** Media rows; freshly uploaded ones carry a blob: public_url so they render before the CDN has them. */
   media: Media[];
   update: (patch: Partial<WizardDraft>) => void;
-  addMedia: (m: Media, file: File) => void;
+  /** A new media row; `file` (a fresh upload) gives it a local preview until the CDN has it. */
+  addMedia: (m: Media, file?: File) => void;
   /** PUBLIC_BASE_URL, for the "your site will be at" hint. */
   baseUrl: string;
   /** false without ANTHROPIC_API_KEY: AI controls render an explanation instead. */
@@ -17,4 +26,9 @@ export interface StepProps {
    * Next, this step's validation errors. Paths are validateForPublish paths (`name`, `categories.0.items.1.price_eur`).
    */
   fieldErrors: PublishError[];
+  /** false without INSTAGRAM_APP_ID/SECRET: the Instagram import is not shown. */
+  instagramAvailable?: boolean;
+  igReturn?: IgReturn | null;
+  /** Sends pending autosave edits now (before leaving for Instagram, before an import patches the draft on the server). */
+  flush?: () => Promise<boolean>;
 }
