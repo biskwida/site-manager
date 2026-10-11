@@ -36,7 +36,7 @@ export const TEMPLATE_ACCENT_DEFAULTS: Record<TemplateId, string> = {
   lumen: "#2e5e4e",
   furna: "#b8432a",
   mehana: "#6e1f1b",
-  kvartal: "#C23A1C",
+  kvartal: "#c23a1c",
 };
 
 /** The accent presets the Look step offers after the design's own default; template tests check every design against them. */

@@ -49,7 +49,7 @@ export function accentVars(accent: string) {
 export function Template({ state: initial, now: initialNow, slug, page, draft, live, feedUrl, preview = false }: TemplateProps) {
   const { state, changed } = useLiveSite(initial, feedUrl, live);
   const now = useNow(initialNow);
-  const accent = ACCENT_RE.test(state.venue.theme.accent) ? state.venue.theme.accent : "#C23A1C";
+  const accent = ACCENT_RE.test(state.venue.theme.accent) ? state.venue.theme.accent : "#c23a1c";
   const media: MediaLookup = (id) => mediaUrl(id ? state.media.find((m) => m.id === id) : null, { preview });
   const { sections, numbers } = menuSections(state, now);
   const menuProps = { state, now, changed, media, slug, sections, numbers };

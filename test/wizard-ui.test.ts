@@ -145,6 +145,15 @@ describe("step components render labelled fields in both languages", () => {
     expect(html).not.toMatch(/checked="" value="lumen"/);
     expect(render("bg", createElement(Look, props()))).toContain("Дизайн");
   });
+  it("Look picks the design's default swatch for a stored accent in any letter case", () => {
+    for (const accent of ["#C23A1C", "#c23a1c"]) {
+      const draft = emptyDraft("kvartal");
+      draft.theme.accent = accent;
+      const html = render("en", createElement(Look, props({ draft })));
+      expect(html, accent).toMatch(/name="accent" checked="" value="#c23a1c"/);
+      expect(html, accent).not.toMatch(/checked="" value="custom"/);
+    }
+  });
   it("NoDraft links back to the chooser", () => {
     const html = render("bg", createElement(NoDraft));
     expect(html).toContain('href="/new"');

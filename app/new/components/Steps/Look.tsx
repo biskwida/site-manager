@@ -50,14 +50,16 @@ function ImageSlot({ id, label, hint, mediaId, media, onChange, addMedia, wide, 
 
 export function Look({ id, draft, media, update, addMedia, fieldErrors, flush, igReturn, onIgConsumed, instagramAvailable }: StepProps) {
   const { t, lang } = useT();
-  const templateDefault = TEMPLATE_ACCENT_DEFAULTS[draft.template];
-  const options = [templateDefault, ...LOOK_ACCENT_PRESETS.filter((p) => p !== templateDefault)];
-  const custom = !options.includes(draft.theme.accent.toLowerCase());
+  // Accents compare lowercased on both sides, so an uppercase hex stored by an older build still selects its swatch.
+  const accent = draft.theme.accent.toLowerCase();
+  const templateDefault = TEMPLATE_ACCENT_DEFAULTS[draft.template].toLowerCase();
+  const options = [templateDefault, ...LOOK_ACCENT_PRESETS.map((p) => p.toLowerCase()).filter((p) => p !== templateDefault)];
+  const custom = !options.includes(accent);
   const [hex, setHex] = useState(draft.theme.accent);
   // Switching designs keeps everything; an accent still on the old design's default follows the new design's default.
   function chooseTemplate(next: TemplateId) {
     if (next === draft.template) return;
-    const followDefault = draft.theme.accent.toLowerCase() === templateDefault;
+    const followDefault = accent === templateDefault;
     if (followDefault) setHex(TEMPLATE_ACCENT_DEFAULTS[next]);
     update({ template: next, ...(followDefault ? { theme: { accent: TEMPLATE_ACCENT_DEFAULTS[next] } } : {}) });
   }
@@ -78,7 +80,7 @@ export function Look({ id, draft, media, update, addMedia, fieldErrors, flush, i
         <div className="flex flex-wrap gap-2">
           {options.map((c, i) => (
             <label key={c} className={SWATCH}>
-              <input type="radio" name="accent" value={c} checked={draft.theme.accent.toLowerCase() === c} onChange={() => { setHex(c); update({ theme: { accent: c } }); }} className="sr-only" />
+              <input type="radio" name="accent" value={c} checked={accent === c} onChange={() => { setHex(c); update({ theme: { accent: c } }); }} className="sr-only" />
               <span aria-hidden="true" className="size-7 rounded-full ring-1 ring-fg/10" style={{ background: c }} />
               <span>{i === 0 ? t("look.accentDefault") : c}</span>
             </label>

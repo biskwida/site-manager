@@ -45,6 +45,12 @@ describe("TEMPLATE_ACCENT_DEFAULTS", () => {
     for (const id of TEMPLATE_IDS) expect(TEMPLATE_ACCENT_DEFAULTS[id]).toBe(TEMPLATES[id].accentDefault);
     expect(Object.keys(TEMPLATE_ACCENT_DEFAULTS).sort()).toEqual([...TEMPLATE_IDS].sort());
   });
+  it("stores every default as a lowercase 6-digit hex, the form the Look step and the dashboard compare against", () => {
+    for (const id of TEMPLATE_IDS) {
+      expect(TEMPLATE_ACCENT_DEFAULTS[id], id).toMatch(/^#[0-9a-f]{6}$/);
+      expect(TEMPLATES[id].accentDefault, id).toMatch(/^#[0-9a-f]{6}$/);
+    }
+  });
 });
 
 describe("emptyDraft", () => {

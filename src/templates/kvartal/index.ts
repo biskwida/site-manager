@@ -11,7 +11,7 @@ export const def: TemplateDef = {
   business_types: ["cafe", "bar"],
   // Vermilion from the approved mockup. The "Now" block puts #F6F5F1 text on it at 5.3:1 (the fill is capped at OKLCH
   // L 0.53, which nudges it to #BC3415); as text on the #E9E8E3 paper it is capped at L 0.5 (#B22905, 5.3:1).
-  accentDefault: "#C23A1C",
+  accentDefault: "#c23a1c",
   fontVars,
   Component: Template,
 };

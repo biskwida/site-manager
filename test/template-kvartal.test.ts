@@ -46,7 +46,7 @@ describe("kvartal template", () => {
     expect(def.id).toBe("kvartal");
     expect(def.fontVars).toContain("fv-geologica");
     expect(def.fontVars).toContain("fv-fira");
-    expect(def.accentDefault).toBe("#C23A1C");
+    expect(def.accentDefault).toBe("#c23a1c");
     expect(TEMPLATE_ACCENT_DEFAULTS.kvartal).toBe(def.accentDefault);
     expect(def.business_types).toEqual(["cafe", "bar"]);
   });
@@ -241,14 +241,14 @@ describe("kvartal template", () => {
       // A flashing row keeps its ink text readable.
       expect(contrastRatio("#17191b", soft!), `ink on ${soft}`).toBeGreaterThanOrEqual(4.5);
     }
-    const html = await render("en", { mutate: (s) => { s.venue.theme.accent = "#C23A1C"; } });
+    const html = await render("en", { mutate: (s) => { s.venue.theme.accent = "#c23a1c"; } });
     expect(html).toContain("--kv-accent-text:#b22905");
     expect(html).toContain("--kv-accent-fill:#bc3415");
     expect(html).toContain("--kv-accent-soft:#e7d1c8");
   });
   it("keeps the default and every Look-step preset at exactly the colours they had before the contrast guard", () => {
     const expected: [string, Record<string, string>][] = [
-      ["#C23A1C", {"--kv-accent-text": "#b22905", "--kv-accent-fill": "#bc3415", "--kv-accent-soft": "#e7d1c8"}],
+      ["#c23a1c", {"--kv-accent-text": "#b22905", "--kv-accent-fill": "#bc3415", "--kv-accent-soft": "#e7d1c8"}],
       ["#2f6b4f", {"--kv-accent-text": "#2f6b4f", "--kv-accent-fill": "#2f6b4f", "--kv-accent-soft": "#ced6cd"}],
       ["#8f5c10", {"--kv-accent-text": "#895705", "--kv-accent-fill": "#8f5c10", "--kv-accent-soft": "#ddd4c7"}],
       ["#a4442c", {"--kv-accent-text": "#a04129", "--kv-accent-fill": "#a4442c", "--kv-accent-soft": "#e2d1c8"}],
