@@ -2,8 +2,10 @@
 // Server-only. Which messaging apps an owner can connect, and the deep link that hands each app the owner's invite code.
 // This is the seam to build/channels: today members are Telegram-only and the links are built here; after that branch
 // merges, connectLinks delegates to src/channels/links.ts and memberApp parses chat_ref (see the "wire on merge" notes).
+import { INVITE_TTL_MS } from "../bot/bot";
 import type { Config } from "../config";
-import type { Member } from "../domain/types";
+import type { Member, Venue } from "../domain/types";
+import type { Store } from "../store/types";
 
 export type AppChannel = "telegram" | "whatsapp" | "messenger" | "instagram";
 /** Display and link order. */
@@ -66,4 +68,33 @@ export function connectedApps(members: Member[]): ConnectedApp[] {
     by.set(app, row);
   }
   return APP_ORDER.flatMap((a) => by.get(a) ?? []);
+}
+
+/** Fresh owner codes per venue per hour, shared by the wizard's POST /api/new/[id]/invite and the dashboard's new_owner_code. */
+export const INVITES_PER_HOUR = 10;
+const HOUR_MS = 3_600_000;
+export const inviteRateKey = (venueId: string) => `invite:${venueId}`;
+
+export interface OwnerCode {
+  code: string;
+  links: { app: AppChannel; url: string }[];
+  expires_at: string;
+}
+export type OwnerCodeResult =
+  | ({ ok: true } & OwnerCode)
+  | { ok: false; error: "not_live" | "rate_limited"; bg: string; en: string };
+
+export const NOT_LIVE = { ok: false, error: "not_live", bg: "Първо публикувайте сайта.", en: "Publish the site first." } as const;
+export const TOO_MANY_CODES = { ok: false, error: "rate_limited", bg: "Твърде много нови кодове за час. Опитайте по-късно.", en: "Too many new codes this hour. Try again later." } as const;
+
+/**
+ * A new single-use owner invite (INVITE_TTL_MS) for connecting one more app, with its links. Each app links with its own
+ * code, so "connect another app" always needs a fresh one. Live venues only; INVITES_PER_HOUR per venue.
+ */
+export async function newOwnerCode(store: Store, config: AppsConfig, venue: Venue, now: Date): Promise<OwnerCodeResult> {
+  if (venue.status !== "live") return NOT_LIVE;
+  if (!(await store.bumpRateLimit(inviteRateKey(venue.id), HOUR_MS, INVITES_PER_HOUR, now.toISOString()))) return TOO_MANY_CODES;
+  const expires_at = new Date(now.getTime() + INVITE_TTL_MS).toISOString();
+  const code = await store.createInvite(venue.id, "owner", expires_at);
+  return { ok: true, code, links: connectLinks(config, code), expires_at };
 }

@@ -16,7 +16,7 @@ const ready: DeployInfo = { provider: "fake", project_id: "prj_1", deployment_id
 const base: AdminOverview = {
   venue: { id: "v1", slug: "agala", name: "Кафене „Ъгъла“", tz: "Europe/Sofia", default_lang: "bg" },
   now: "2026-10-10T10:00:00.000Z", public_url: "https://site.example/agala", template: "classic", status: "live", hosted: false, deploy: null, site_url: "https://site.example/agala",
-  custom_domain: null, domain_verified: null, pending: [], scheduled: [], log: [], sold_out: [],
+  custom_domain: null, domain_verified: null, pending: [], scheduled: [], log: [], sold_out: [], connected_apps: [],
 };
 const post = async () => ({ ok: true, data: null });
 const instructions: DomainInstructions = { verified: false, records: [{ type: "CNAME", name: "cafe", value: "cname.vercel-dns.com" }, { type: "TXT", name: "_vercel.example.com", value: "vc-domain-verify=cafe.example.com,fake" }] };

@@ -21,6 +21,7 @@ describe("admin", () => {
     expect(o.pending.map((x) => x.id)).toEqual([p2.id, p1.id]);
     expect(o.scheduled.map((x) => x.id)).toEqual([s1.id]);
     expect(o.log).toEqual([]);
+    expect(o.connected_apps).toEqual([{ app: "telegram", owners: 1, staff: 1 }]);
 
     expect(await adminAction(d, venue, "apply", p1.id)).toEqual({ ok: true, status: "applied", change_set_id: p1.id });
     expect(messenger.edits[0]).toMatchObject({ chatId: 1001, messageId: 42 });
