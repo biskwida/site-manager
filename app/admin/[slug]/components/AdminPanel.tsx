@@ -2,6 +2,7 @@
 import { LangToggle, useLang } from "@/src/i18n";
 import type { AdminOverview } from "@/src/server/admin";
 import { formatDateTime } from "@/src/time";
+import { AppsCard } from "./AppsCard";
 import { Empty, Section } from "./bits";
 import { PendingList, ScheduledList } from "./Decisions";
 import { DomainCard } from "./DomainCard";
@@ -12,7 +13,7 @@ import { SiteCard } from "./SiteCard";
 import { useAdminOverview } from "./useAdminOverview";
 import { WordPressCard } from "./WordPressCard";
 
-/** The owner's dashboard: the site (status, template switch), the optional custom domain, decisions, schedule, sold-out items, change log with undo, QR and links. Client-polled every 3 s. */
+/** The owner's dashboard: the site (status, template switch), the optional custom domain, decisions, schedule, sold-out items, change log with undo, connected apps, QR and links. Client-polled every 3 s. */
 export function AdminPanel({ slug, adminKey, initial }: { slug: string; adminKey: string; initial: AdminOverview }) {
   const { lang, t } = useLang();
   const { overview: o, unauthorized, decide, post, refresh } = useAdminOverview(initial, slug, adminKey);
@@ -46,6 +47,7 @@ export function AdminPanel({ slug, adminKey, initial }: { slug: string; adminKey
           )}
         </Section>
         <LogList sets={o.log} tz={tz} decide={decide} />
+        <AppsCard apps={o.connected_apps ?? []} post={post} />
         <WordPressCard overview={o.wordpress ?? null} slug={slug} adminKey={adminKey} baseUrl={o.public_url.replace(new RegExp(`/${slug}$`), "")} tz={tz} />
         {/* Hosted mode (no deployer on this server): there is no provider project to attach a domain to. */}
         {!o.hosted && <DomainCard overview={o} post={post} />}
