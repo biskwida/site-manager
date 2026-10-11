@@ -42,6 +42,8 @@ export interface Config {
   instagramUsername: string | null;
   /** WhatsApp number, digits only with country code, for the wa.me/<digits> invite link. */
   whatsappNumber: string | null;
+  /** 32-byte key for destination secrets (WordPress plugin tokens); null = destinations cannot be connected (memory mode falls back to a dev key). */
+  destinationSecretKey: string | null;
 }
 
 type Env = Record<string, string | undefined>;
@@ -96,5 +98,6 @@ export function loadConfig(env: Env = process.env, opts: { lenient?: boolean } =
     messengerPageHandle: optional("MESSENGER_PAGE_HANDLE"),
     instagramUsername: optional("INSTAGRAM_USERNAME")?.replace(/^@/, "") ?? null,
     whatsappNumber: optional("WHATSAPP_NUMBER")?.replace(/\D/g, "") || null,
+    destinationSecretKey: optional("DESTINATION_SECRET_KEY"),
   };
 }

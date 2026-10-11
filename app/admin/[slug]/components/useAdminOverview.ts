@@ -29,22 +29,27 @@ export function useAdminOverview(initial: AdminOverview, slug: string, adminKey:
     return () => window.clearInterval(poll);
   }, [load]);
 
-  const decide = useCallback(
-    async (action: AdminActionName, changeSetId: string): Promise<boolean> => {
-      let ok = false;
+  /** POSTs any dashboard action, then refetches at once. `data` is the parsed JSON (null on a network error or a non-JSON body). */
+  const post = useCallback(
+    async (body: Record<string, unknown>): Promise<{ ok: boolean; data: unknown }> => {
+      let out: { ok: boolean; data: unknown } = { ok: false, data: null };
       try {
-        const res = await fetch(url, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ action, change_set_id: changeSetId }) });
-        ok = res.ok;
+        const res = await fetch(url, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
+        out = { ok: res.ok, data: await res.json().catch(() => null) };
       } catch {
-        ok = false;
+        out = { ok: false, data: null };
       }
       await load();
-      return ok;
+      return out;
     },
     [url, load],
   );
 
-  return { overview, unauthorized, decide };
+  const decide = useCallback(async (action: AdminActionName, changeSetId: string): Promise<boolean> => (await post({ action, change_set_id: changeSetId })).ok, [post]);
+
+  return { overview, unauthorized, decide, post, refresh: load };
 }
 
 export type Decide = ReturnType<typeof useAdminOverview>["decide"];
+export type Post = ReturnType<typeof useAdminOverview>["post"];
+export type Refresh = ReturnType<typeof useAdminOverview>["refresh"];

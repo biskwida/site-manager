@@ -1,0 +1,14 @@
+{
+  "$schema": "https://schemas.wp.org/trunk/block.json",
+  "apiVersion": 3,
+  "name": "site-manager/photos",
+  "title": "Site Manager: Photos",
+  "category": "widgets",
+  "icon": "format-gallery",
+  "description": "The photo gallery managed from Telegram.",
+  "keywords": ["photos", "снимки", "галерия", "site manager"],
+  "textdomain": "site-manager",
+  "attributes": { "lang": { "type": "string", "default": "auto", "enum": ["auto", "bg", "en"] } },
+  "supports": { "html": false, "align": ["wide", "full"] },
+  "editorScript": "site-manager-blocks"
+}

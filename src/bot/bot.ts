@@ -4,6 +4,7 @@ import type { UserFromGetMe } from "grammy/types";
 import type { ImageInput } from "../agent/run";
 import { makeRef } from "../channels/ref";
 import type { Member } from "../domain/types";
+import type { ConnectResult } from "../destinations/connect";
 import type { Store } from "../store/types";
 import { copy, langFromCode } from "./copy";
 import { handleInbound, type InboundMedia } from "./inbound";
@@ -34,6 +35,10 @@ export interface BotDeps {
   download: (filePath: string) => Promise<{ bytes: Uint8Array; contentType: string }>;
   /** Tests pass this to skip getMe. */
   botInfo?: UserFromGetMe;
+  /** Connects the venue to its WordPress site (src/destinations/connect.ts); undefined = the feature is off. */
+  connect?: (venueId: string, siteUrl: string, code: string) => Promise<ConnectResult>;
+  /** Called after a successful owner redeem; deps wire it to startDeploy (which is a no-op when a site already exists). Must not throw. */
+  onOwnerJoined?: (venueId: string) => void;
 }
 
 export { adminUrl, INVITE_TTL_MS, publicUrl } from "./links";

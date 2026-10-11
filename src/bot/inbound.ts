@@ -31,7 +31,7 @@ export interface InboundMessage {
 }
 
 const CODE = /^[A-Z0-9-]{8,}$/;
-const COMMANDS = new Set(["lang", "help", "menu", "undo"]);
+const COMMANDS = new Set(["lang", "help", "menu", "undo", "connect"]);
 /** Command words for Meta channels, where there is no command menu. No word for undo: a plain "отмени" may be meant for a proposal, not the last applied change; "/undo" or asking the agent ("върни последната промяна") still works. */
 const WORDS: [RegExp, string][] = [
   [/^(menu|меню)$/i, "/menu"],
@@ -51,10 +51,11 @@ export function normalizeCommand(text: string, channel: Channel): string | null 
   return null;
 }
 
-/** "/lang@site_manager_bot en" → { name: "lang", arg: "en" }. */
+/** "/lang@site_manager_bot en" → { name: "lang", arg: "en" }; the arg is the whole rest ("/connect <url> <code>"). */
 function splitCommand(cmd: string): { name: string; arg: string } {
-  const [head, arg = ""] = cmd.slice(1).split(/\s+/, 2);
-  return { name: head.replace(/@\w+$/, "").toLowerCase(), arg };
+  const m = /^\/(\S*)(?:\s+([\s\S]*))?$/.exec(cmd.trim());
+  const head = m?.[1] ?? "";
+  return { name: head.replace(/@\w+$/, "").toLowerCase(), arg: (m?.[2] ?? "").trim() };
 }
 
 /** "/start CODE" → CODE, "/start" → "", a bare code from a non-member → itself, otherwise null. */
@@ -90,21 +91,20 @@ export async function handleInbound(d: BotDeps, m: InboundMessage): Promise<void
   // Telegram tells us the language; on Meta, Cyrillic means Bulgarian and other prose English. A code or nothing says nothing: Bulgarian.
   const uiLang: Lang = m.langHint ?? detectLang(text) ?? (code === null && /\p{L}/u.test(text) ? "en" : "bg");
   if (code !== null) {
-    if (member) {
-      await welcomeBack(d, member);
-      return;
-    }
-    if (!code) {
-      await say(copy(uiLang).noAccess(channel));
-      return;
-    }
-    const linked = await d.store.redeemInvite(code, m.chatRef, uiLang, now.toISOString());
+    // A code is tried first, even from a linked chat: the owner may be setting up another venue (the demo phone, a second
+    // café). redeemInvite moves the chat to the code's venue. Only without a usable code does a linked chat get welcome-back.
+    const linked = code ? await d.store.redeemInvite(code, m.chatRef, uiLang, now.toISOString()) : null;
     if (!linked) {
-      await say(copy(uiLang).badCode);
+      if (member) await welcomeBack(d, member);
+      else await say(code ? copy(uiLang).badCode : copy(uiLang).noAccess(channel));
       return;
+    }
+    // An owner tapping a staff code for their own venue must not demote themselves (the code is still used up).
+    if (member && member.venue_id === linked.venue_id && member.role === "owner" && linked.role !== "owner") {
+      Object.assign(linked, await d.store.upsertMember({ venue_id: member.venue_id, chat_ref: m.chatRef, role: "owner", lang: member.lang }));
     }
     await touch(d, m.chatRef, now);
-    await welcome(d, linked);
+    await welcome(d, linked, member);
     return;
   }
 
@@ -147,11 +147,23 @@ async function touch(d: BotDeps, chatRef: string, now: Date) {
   }
 }
 
-async function welcome(d: BotDeps, member: Member) {
+/** `previous` is the chat's membership before the redeem (null for a new chat). */
+async function welcome(d: BotDeps, member: Member, previous: Member | null) {
   const venue = await d.store.getVenue(member.venue_id);
   const c = copy(member.lang);
-  if (member.role === "owner") await d.messenger.send(member.chat_ref, c.welcome(venue.name, adminUrl(d.baseUrl, venue.slug, await d.store.getAdminToken(venue.id)), publicUrl(d.baseUrl, venue.slug), channelOf(member.chat_ref)));
-  else await d.messenger.send(member.chat_ref, c.welcomeStaff(venue.name, publicUrl(d.baseUrl, venue.slug)));
+  if (previous && previous.venue_id !== member.venue_id) await d.messenger.send(member.chat_ref, c.switched(venue.name));
+  if (member.role === "owner") {
+    await d.messenger.send(member.chat_ref, c.welcome(venue.name, adminUrl(d.baseUrl, venue.slug, await d.store.getAdminToken(venue.id)), publicUrl(d.baseUrl, venue.slug), channelOf(member.chat_ref)));
+    if (d.onOwnerJoined) {
+      // The first owner join is the human check that publishes the site; startDeploy ignores venues that already have one.
+      if (venue.status === "live" && venue.deploy === null) await d.messenger.send(member.chat_ref, c.publishing);
+      try {
+        d.onOwnerJoined(venue.id);
+      } catch (e) {
+        console.error("[bot] onOwnerJoined failed:", e instanceof Error ? e.message : e);
+      }
+    }
+  } else await d.messenger.send(member.chat_ref, c.welcomeStaff(venue.name, publicUrl(d.baseUrl, venue.slug)));
 }
 
 async function welcomeBack(d: BotDeps, member: Member) {
@@ -166,7 +178,7 @@ async function runCommand(d: BotDeps, member: Member, channel: Channel, cmd: str
   const c = copy(member.lang);
   switch (name) {
     case "lang": {
-      const l = arg.toLowerCase();
+      const l = (arg.split(/\s+/)[0] ?? "").toLowerCase();
       if (l !== "bg" && l !== "en") {
         await d.messenger.send(member.chat_ref, c.langUsage(channel));
         return;
@@ -182,6 +194,26 @@ async function runCommand(d: BotDeps, member: Member, channel: Channel, cmd: str
       const venue = await d.store.getVenue(member.venue_id);
       const admin = member.role === "owner" ? adminUrl(d.baseUrl, venue.slug, await d.store.getAdminToken(venue.id)) : null;
       await d.messenger.send(member.chat_ref, c.menu(publicUrl(d.baseUrl, venue.slug), admin));
+      return;
+    }
+    case "connect": {
+      const lang = detectLang(cmd) ?? member.lang;
+      const cc = copy(lang);
+      if (member.role !== "owner") {
+        await d.messenger.send(member.chat_ref, cc.connectOwnerOnly);
+        return;
+      }
+      const [siteUrl, code] = arg.split(/\s+/);
+      if (!siteUrl || !code) {
+        await d.messenger.send(member.chat_ref, cc.connectUsage);
+        return;
+      }
+      if (!d.connect) {
+        await d.messenger.send(member.chat_ref, cc.connectUnavailable);
+        return;
+      }
+      const r = await d.connect(member.venue_id, siteUrl, code);
+      await d.messenger.send(member.chat_ref, r.ok ? cc.connectOk(r.site.name, String(r.destination.config.site_url)) : cc.connectFailed(lang === "bg" ? r.reason.bg : r.reason.en));
       return;
     }
     case "undo":

@@ -18,8 +18,9 @@ export function Landing({ demoSlug }: { demoSlug: string }) {
         <h1 className="mt-3 text-4xl font-semibold leading-tight sm:text-6xl">{t("landing.h1")}</h1>
         <p className="mt-5 max-w-2xl text-lg text-ink-soft">{t("landing.lead")}</p>
         <div className="mt-8 flex flex-col items-start gap-2">
-          <Link href={`/${demoSlug}`} className="rounded-full bg-accent px-6 py-3 text-base font-semibold text-white shadow-sm transition hover:brightness-110">{t("landing.cta")}</Link>
+          <Link href="/new" className="rounded-full bg-accent px-6 py-3 text-base font-semibold text-white shadow-sm transition hover:brightness-110">{t("landing.cta")}</Link>
           <span className="text-sm text-ink-soft">{t("landing.ctaNote")}</span>
+          <Link href={`/${demoSlug}`} className="mt-1 inline-flex min-h-11 items-center text-sm font-semibold text-accent underline-offset-4 hover:underline">{t("nav.demo")}</Link>
         </div>
       </section>
       <section className="mt-16">

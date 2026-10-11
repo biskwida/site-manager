@@ -65,4 +65,13 @@ describe("handleDecision", () => {
     expect(await handleDecision(d, "tg:1002", "apply", cs.id)).toEqual({ toast: "That proposal is not from this chat." });
     expect(await handleDecision(d, "tg:1001", "apply", "missing")).toEqual({ toast: "Това предложение не е от този чат." });
   });
+  it("appends one line per destination push after applying", async () => {
+    const { d, cs, store } = await proposal();
+    const dest = await store.upsertDestination({ venue_id: cs.venue_id, kind: "wordpress", config: { site_url: "https://cafe.example" }, secrets: "x" });
+    await store.createSync({ venue_id: cs.venue_id, destination_id: dest.id, change_set_id: cs.id, payload: { kind: "wordpress" }, next_at: T0.toISOString() });
+    const row = (await store.listSyncs({ changeSetId: cs.id }))[0];
+    await store.updateSync(row.id, { status: "done" });
+    const r = await handleDecision(d, "tg:1001", "apply", cs.id);
+    expect(r.edit).toEqual({ full: "• Капучино: 2,90 € → 3,20 €\n\n✅ Приложено\nWordPress: обновено ✅", short: "✅ Приложено\nWordPress: обновено ✅" });
+  });
 });

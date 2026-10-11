@@ -50,3 +50,27 @@ export class FakeMessenger implements Messenger {
     return this.sent[this.sent.length - 1];
   }
 }
+
+/** The only keywords a strict tool input_schema may use; the Messages API rejects constraints such as minimum or minLength. */
+export const TOOL_SCHEMA_KEYWORDS = ["type", "properties", "required", "additionalProperties", "enum", "description", "items"] as const;
+
+/**
+ * Schema-aware walk (descends through properties.* values and items only, so property names are never read as keywords).
+ * Returns one line per violation — a keyword outside the allow-list, or a non-string "type" — empty when the schema is safe to send.
+ */
+export function toolSchemaViolations(schema: unknown, path = "$"): string[] {
+  if (!schema || typeof schema !== "object" || Array.isArray(schema)) return [`${path}: not a schema object`];
+  const node = schema as Record<string, unknown>;
+  const out: string[] = [];
+  for (const k of Object.keys(node)) {
+    if (!(TOOL_SCHEMA_KEYWORDS as readonly string[]).includes(k)) out.push(`${path}.${k}: keyword not allowed`);
+  }
+  if (typeof node.type !== "string") out.push(`${path}.type: must be a string`);
+  if ("properties" in node) {
+    const props = node.properties;
+    if (!props || typeof props !== "object" || Array.isArray(props)) out.push(`${path}.properties: must be an object`);
+    else for (const [name, sub] of Object.entries(props)) out.push(...toolSchemaViolations(sub, `${path}.properties[${JSON.stringify(name)}]`));
+  }
+  if ("items" in node) out.push(...toolSchemaViolations(node.items, `${path}.items`));
+  return out;
+}

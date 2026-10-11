@@ -6,9 +6,14 @@ import { NOW } from "./fixtures";
 
 const LATER = "2026-10-09T10:00:00.000Z";
 const ctx = { newId: () => crypto.randomUUID(), now: NOW };
+/** Ids from a store-wide listing, narrowed to the venues one test created (a live store holds other venues too), in listing order. */
+const only = (venues: { id: string }[], ...ids: string[]) => venues.map((v) => v.id).filter((id) => ids.includes(id));
 
-/** Behaviour every Store must have. Call with a factory that yields an empty store. */
-export function storeContract(name: string, make: () => Promise<Store>) {
+/**
+ * Behaviour every Store must have. Call with a factory that yields an empty store, and a probe that says whether a storage
+ * object exists at a media row's storage_path in that store (used by the draft-cleanup storage test).
+ */
+export function storeContract(name: string, make: () => Promise<Store>, storageHas: (s: Store, path: string) => Promise<boolean>) {
   describe(`${name} store`, () => {
     it("creates a venue with defaults and reads it back by id and slug", async () => {
       const s = await make();
@@ -189,47 +194,78 @@ export function storeContract(name: string, make: () => Promise<Store>) {
       expect(await s.findMember("tg:10")).not.toBeNull();
     });
 
+    it("clears only the menu and texts (media, venue fields and members stay)", async () => {
+      const s = await make();
+      const v = await s.createVenue({ slug: "t9m", name: "Test" });
+      const c = await s.insertCategory({ venue_id: v.id, name_bg: "Кафе", name_en: "Coffee", position: 0 });
+      await s.insertItem({ venue_id: v.id, category_id: c.id, name_bg: "x", name_en: "x", desc_bg: "", desc_en: "", price_eur: 1, allergens: [], position: 0 });
+      await s.setSiteText(v.id, "welcome", "Здравейте", "Hello");
+      const m = await s.saveMedia(v.id, new Uint8Array([1]), "image/png");
+      await s.upsertMember({ venue_id: v.id, chat_ref: "tg:11", role: "owner", lang: "bg" });
+      await s.clearMenu(v.id);
+      const site = await s.getSite(v.id);
+      expect(site.items).toEqual([]);
+      expect(site.categories).toEqual([]);
+      expect(site.texts).toEqual([]);
+      expect(site.media.map((x) => x.id)).toEqual([m.id]);
+      expect(site.venue.name).toBe("Test");
+      expect(await s.findMember("tg:11")).not.toBeNull();
+    });
+
     it("gives new venues the classic template, café type and live status, and accepts overrides", async () => {
       const s = await make();
       const v = await s.createVenue({ slug: "t10", name: "Test" });
-      expect(v).toMatchObject({ template: "classic", business_type: "cafe", status: "live", deploy: null, wizard_draft: null });
       const d = await s.createVenue({ slug: "t10d", name: "Draft", template: "nocturne", business_type: "bar", status: "draft" });
-      expect(d).toMatchObject({ template: "nocturne", business_type: "bar", status: "draft" });
-      expect((await s.listVenues()).map((x) => x.id)).toEqual(expect.arrayContaining([v.id, d.id]));
-      expect((await s.listVenues({ status: "draft" })).map((x) => x.id)).toEqual([d.id]);
-      expect((await s.listVenues({ status: "live" })).map((x) => x.id)).toContain(v.id);
-      expect((await s.listVenues({ status: "live" })).map((x) => x.id)).not.toContain(d.id);
+      try {
+        expect(v).toMatchObject({ template: "classic", business_type: "cafe", status: "live", deploy: null, wizard_draft: null });
+        expect(d).toMatchObject({ template: "nocturne", business_type: "bar", status: "draft" });
+        expect(only(await s.listVenues(), v.id, d.id)).toEqual([v.id, d.id]); // oldest first
+        expect(only(await s.listVenues({ status: "draft" }), v.id, d.id)).toEqual([d.id]);
+        expect(only(await s.listVenues({ status: "live" }), v.id, d.id)).toEqual([v.id]);
+      } finally {
+        await s.deleteVenue(v.id);
+        await s.deleteVenue(d.id);
+      }
     });
 
     it("updates venue fields and refuses a taken slug", async () => {
       const s = await make();
       const a = await s.createVenue({ slug: "t11a", name: "A" });
-      await s.createVenue({ slug: "t11b", name: "B" });
-      const u = await s.updateVenue(a.id, { name: "A2", template: "lumen", status: "draft", theme: { accent: "#112233" }, tagline_en: undefined });
-      expect(u).toMatchObject({ id: a.id, name: "A2", template: "lumen", status: "draft", theme: { accent: "#112233" }, tagline_en: "" });
-      expect(await s.getVenue(a.id)).toEqual(u);
-      const renamed = await s.updateVenue(a.id, { slug: "t11c" });
-      expect(renamed.slug).toBe("t11c");
-      expect((await s.getVenueBySlug("t11c"))?.id).toBe(a.id);
-      expect(await s.getVenueBySlug("t11a")).toBeNull();
-      await expect(s.updateVenue(a.id, { slug: "t11b" })).rejects.toThrow(/t11b/);
-      await expect(s.updateVenue("00000000-0000-0000-0000-000000000000", { name: "x" })).rejects.toThrow();
-      await expect(s.updateVenue(a.id, { slug: "t11c" })).resolves.toMatchObject({ slug: "t11c" }); // own slug is fine
+      const b = await s.createVenue({ slug: "t11b", name: "B" });
+      try {
+        const u = await s.updateVenue(a.id, { name: "A2", template: "lumen", status: "draft", theme: { accent: "#112233" }, tagline_en: undefined });
+        expect(u).toMatchObject({ id: a.id, name: "A2", template: "lumen", status: "draft", theme: { accent: "#112233" }, tagline_en: "" });
+        expect(await s.getVenue(a.id)).toEqual(u);
+        const renamed = await s.updateVenue(a.id, { slug: "t11c" });
+        expect(renamed.slug).toBe("t11c");
+        expect((await s.getVenueBySlug("t11c"))?.id).toBe(a.id);
+        expect(await s.getVenueBySlug("t11a")).toBeNull();
+        await expect(s.updateVenue(a.id, { slug: "t11b" })).rejects.toThrow(/t11b/);
+        await expect(s.updateVenue("00000000-0000-0000-0000-000000000000", { name: "x" })).rejects.toThrow();
+        await expect(s.updateVenue(a.id, { slug: "t11c" })).resolves.toMatchObject({ slug: "t11c" }); // own slug is fine
+      } finally {
+        await s.deleteVenue(a.id);
+        await s.deleteVenue(b.id);
+      }
     });
 
     it("stores the wizard draft JSON and clears it", async () => {
       const s = await make();
       const v = await s.createVenue({ slug: "t12", name: "Test", status: "draft" });
-      const draft = {
-        template: "classic" as const, business_type: "cafe" as const, name: "X", slug: "t12", default_lang: "bg" as const,
-        address: "", phone: "", instagram: "", maps_url: "", hours: v.hours, theme: { accent: "#2f6b4f" },
-        tagline_bg: "", tagline_en: "", about_bg: "", about_en: "", texts: { welcome: { bg: "", en: "" }, footer_note: { bg: "", en: "" } },
-        logo_media_id: null, cover_media_id: null, gallery_media_ids: [], categories: [{ key: "c1", name_bg: "Кафе", name_en: "Coffee", items: [] }], step: "menu" as const,
-      };
-      await s.updateVenue(v.id, { wizard_draft: draft });
-      expect((await s.getVenue(v.id)).wizard_draft).toEqual(draft);
-      await s.updateVenue(v.id, { wizard_draft: null, status: "live" });
-      expect(await s.getVenue(v.id)).toMatchObject({ wizard_draft: null, status: "live" });
+      try {
+        const draft = {
+          template: "classic" as const, business_type: "cafe" as const, name: "X", slug: "t12", default_lang: "bg" as const,
+          address: "", phone: "", instagram: "", maps_url: "", hours: v.hours, theme: { accent: "#2f6b4f" },
+          tagline_bg: "", tagline_en: "", about_bg: "", about_en: "", texts: { welcome: { bg: "", en: "" }, footer_note: { bg: "", en: "" } },
+          logo_media_id: null, cover_media_id: null, gallery_media_ids: [], categories: [{ key: "c1", name_bg: "Кафе", name_en: "Coffee", items: [] }], step: "menu" as const,
+        };
+        await s.updateVenue(v.id, { wizard_draft: draft });
+        expect((await s.getVenue(v.id)).wizard_draft).toEqual(draft);
+        await s.updateVenue(v.id, { wizard_draft: null, status: "live" });
+        expect(await s.getVenue(v.id)).toMatchObject({ wizard_draft: null, status: "live" });
+      } finally {
+        await s.deleteVenue(v.id);
+      }
     });
 
     it("tracks deployments and lists the ones in flight", async () => {
@@ -237,32 +273,139 @@ export function storeContract(name: string, make: () => Promise<Store>) {
       const a = await s.createVenue({ slug: "t13a", name: "A" });
       const b = await s.createVenue({ slug: "t13b", name: "B" });
       const c = await s.createVenue({ slug: "t13c", name: "C" });
-      const base = { provider: "fake" as const, project_id: "p", deployment_id: "d", url: null, error: null, template: "classic" as const, updated_at: NOW };
-      await s.setDeploy(a.id, { ...base, status: "pending" });
-      await s.setDeploy(b.id, { ...base, status: "building" });
-      await s.setDeploy(c.id, { ...base, status: "ready", url: "https://c.example.test" });
-      expect((await s.getVenue(a.id)).deploy).toEqual({ ...base, status: "pending" });
-      expect((await s.listVenues({ deploying: true })).map((x) => x.id).sort()).toEqual([a.id, b.id].sort());
-      await s.setDeploy(a.id, { ...base, status: "error", error: "boom" });
-      expect((await s.listVenues({ deploying: true })).map((x) => x.id)).toEqual([b.id]);
-      await s.setDeploy(b.id, null);
-      expect(await s.listVenues({ deploying: true })).toEqual([]);
-      expect((await s.getVenue(b.id)).deploy).toBeNull();
+      try {
+        const base = { provider: "fake" as const, project_id: "p", deployment_id: "d", url: null, error: null, template: "classic" as const, updated_at: NOW };
+        await s.setDeploy(a.id, { ...base, status: "pending" });
+        await s.setDeploy(b.id, { ...base, status: "building" });
+        await s.setDeploy(c.id, { ...base, status: "ready", url: "https://c.example.test" });
+        expect((await s.getVenue(a.id)).deploy).toEqual({ ...base, status: "pending" });
+        expect(only(await s.listVenues({ deploying: true }), a.id, b.id, c.id)).toEqual([a.id, b.id]);
+        await s.setDeploy(a.id, { ...base, status: "error", error: "boom" });
+        expect(only(await s.listVenues({ deploying: true }), a.id, b.id, c.id)).toEqual([b.id]);
+        await s.setDeploy(b.id, null);
+        expect(only(await s.listVenues({ deploying: true }), a.id, b.id, c.id)).toEqual([]);
+        expect((await s.getVenue(b.id)).deploy).toBeNull();
+      } finally {
+        for (const x of [a, b, c]) await s.deleteVenue(x.id);
+      }
+    });
+
+    it("claims a deploy only from the statuses the caller names (one winner)", async () => {
+      const s = await make();
+      const v = await s.createVenue({ slug: "t13d", name: "D" });
+      try {
+        const base = { provider: "fake" as const, project_id: "p", deployment_id: "", url: null, error: null, template: "classic" as const, updated_at: NOW };
+        const pending = { ...base, status: "pending" as const };
+        expect(await s.claimDeploy(v.id, pending, { whenStatusIn: ["error"] })).toBe(false); // no deploy yet, null not allowed
+        expect((await s.getVenue(v.id)).deploy).toBeNull();
+        expect(await s.claimDeploy(v.id, pending, { whenStatusIn: [null, "error"] })).toBe(true);
+        expect((await s.getVenue(v.id)).deploy).toEqual(pending);
+        expect(await s.claimDeploy(v.id, pending, { whenStatusIn: [null, "error"] })).toBe(false); // already pending: the other caller lost
+        const building = { ...base, deployment_id: "d1", status: "building" as const, template: "lumen" as const };
+        expect(await s.claimDeploy(v.id, building, { whenStatusIn: ["ready", "error"] })).toBe(false);
+        expect(await s.claimDeploy(v.id, building, { whenStatusIn: ["pending"] })).toBe(true);
+        expect((await s.getVenue(v.id)).deploy).toEqual(building);
+        expect(await s.claimDeploy(v.id, building, { whenStatusIn: [] })).toBe(false);
+        expect(await s.claimDeploy("00000000-0000-0000-0000-000000000000", pending, { whenStatusIn: [null] })).toBe(false);
+        // whenDeploymentId: a poll result for deployment d1 must not land on a newer deployment (a template switch started d2)
+        const ready = { ...building, status: "ready" as const, url: "https://x.example.test" };
+        expect(await s.claimDeploy(v.id, ready, { whenStatusIn: ["pending", "building"], whenDeploymentId: "d0" })).toBe(false);
+        expect((await s.getVenue(v.id)).deploy).toEqual(building);
+        expect(await s.claimDeploy(v.id, ready, { whenStatusIn: ["pending", "building"], whenDeploymentId: "d1" })).toBe(true);
+        expect((await s.getVenue(v.id)).deploy).toEqual(ready);
+        expect(await s.claimDeploy(v.id, ready, { whenStatusIn: ["pending", "building"], whenDeploymentId: "d1" })).toBe(false); // already ready: a second poller loses
+        const switching = { ...ready, deployment_id: "", status: "building" as const };
+        expect(await s.claimDeploy(v.id, switching, { whenStatusIn: ["ready"] })).toBe(true);
+        expect(await s.claimDeploy(v.id, { ...switching, status: "error" as const }, { whenStatusIn: ["building"], whenDeploymentId: "" })).toBe(true); // empty id matches a create still in flight
+      } finally {
+        await s.deleteVenue(v.id);
+      }
+    });
+
+    it("deleteVenue with storage removes the venue's stored files too, and only that venue's", async () => {
+      const s = await make();
+      const a = await s.createVenue({ slug: "t14a", name: "A", status: "draft" });
+      const b = await s.createVenue({ slug: "t14b", name: "B", status: "draft" });
+      const ma = [await s.saveMedia(a.id, new Uint8Array([1]), "image/png"), await s.saveMedia(a.id, new Uint8Array([2]), "image/jpeg")];
+      const mb = await s.saveMedia(b.id, new Uint8Array([3]), "image/png");
+      try {
+        expect(await storageHas(s, ma[0].storage_path)).toBe(true);
+        await s.deleteVenue(a.id, { withStorage: true });
+        await expect(s.getVenue(a.id)).rejects.toThrow();
+        for (const m of ma) {
+          expect(await s.getMedia(m.id)).toBeNull();
+          expect(await storageHas(s, m.storage_path)).toBe(false);
+        }
+        expect(await storageHas(s, mb.storage_path)).toBe(true);
+        expect(await s.getMedia(mb.id)).not.toBeNull();
+      } finally {
+        await s.deleteVenue(a.id, { withStorage: true });
+        await s.deleteVenue(b.id, { withStorage: true });
+      }
+      expect(await storageHas(s, mb.storage_path)).toBe(false);
+    });
+
+    it("finds the newest open invite for a venue and role (unused, unexpired), or null", async () => {
+      const s = await make();
+      const v = await s.createVenue({ slug: "t15a", name: "A" });
+      const other = await s.createVenue({ slug: "t15b", name: "B" });
+      try {
+        expect(await s.findOpenInvite(v.id, "owner", NOW)).toBeNull();
+        await s.createInvite(v.id, "owner", "2026-10-09T08:00:00.000Z"); // expired at NOW
+        await s.createInvite(v.id, "staff", "2026-10-20T00:00:00.000Z"); // other role
+        await s.createInvite(other.id, "owner", "2026-10-20T00:00:00.000Z"); // other venue
+        expect(await s.findOpenInvite(v.id, "owner", NOW)).toBeNull();
+        const older = await s.createInvite(v.id, "owner", "2026-10-12T00:00:00.000Z");
+        const newer = await s.createInvite(v.id, "owner", "2026-10-15T00:00:00.000Z");
+        expect(await s.findOpenInvite(v.id, "owner", NOW)).toBe(newer);
+        expect(await s.redeemInvite(newer, "tg:7101", "bg", NOW)).not.toBeNull();
+        expect(await s.findOpenInvite(v.id, "owner", NOW)).toBe(older); // used codes are skipped
+        expect(await s.findOpenInvite(v.id, "owner", "2026-10-13T00:00:00.000Z")).toBeNull();
+      } finally {
+        await s.deleteVenue(v.id);
+        await s.deleteVenue(other.id);
+      }
+    });
+
+    it("lets one publish claim a draft; the claim expires so a crashed publish does not block a retry", async () => {
+      const s = await make();
+      const draft = await s.createVenue({ slug: "t13e", name: "E", status: "draft" });
+      const live = await s.createVenue({ slug: "t13f", name: "F" });
+      try {
+        expect(await s.claimPublish(live.id, NOW)).toBe(false); // only drafts publish
+        expect(await s.claimPublish("00000000-0000-0000-0000-000000000000", NOW)).toBe(false);
+        expect(await s.claimPublish(draft.id, NOW)).toBe(true);
+        expect(await s.claimPublish(draft.id, NOW)).toBe(false); // held
+        await s.releasePublish(draft.id);
+        expect(await s.claimPublish(draft.id, NOW)).toBe(true); // released → claimable again
+        expect(await s.claimPublish(draft.id, NOW)).toBe(false);
+        expect(await s.claimPublish(draft.id, "2026-10-09T09:04:00.000Z")).toBe(false); // 4 min later: still held
+        expect(await s.claimPublish(draft.id, "2026-10-09T09:06:00.000Z")).toBe(true); // past PUBLISH_CLAIM_TTL_MS: stale claim is taken over
+        await s.updateVenue(draft.id, { status: "live" });
+        expect(await s.claimPublish(draft.id, "2026-10-09T10:00:00.000Z")).toBe(false); // published: never again
+      } finally {
+        await s.deleteVenue(draft.id);
+        await s.deleteVenue(live.id);
+      }
     });
 
     it("finds a draft by its token hash and lists members", async () => {
       const s = await make();
       const v = await s.createVenue({ slug: "t14", name: "Test", status: "draft" });
-      expect(await s.findVenueByDraftToken("a".repeat(64))).toBeNull();
-      await s.setDraftToken(v.id, "a".repeat(64));
-      expect((await s.findVenueByDraftToken("a".repeat(64)))?.id).toBe(v.id);
-      await s.setDraftToken(v.id, null);
-      expect(await s.findVenueByDraftToken("a".repeat(64))).toBeNull();
-      await s.upsertMember({ venue_id: v.id, chat_ref: "tg:21", role: "owner", lang: "bg" });
-      await s.upsertMember({ venue_id: v.id, chat_ref: "tg:22", role: "staff", lang: "en" });
-      const members = await s.listMembers(v.id);
-      expect(members.map((m) => [m.chat_ref, m.role]).sort()).toEqual([["tg:21", "owner"], ["tg:22", "staff"]]);
-      expect(await s.listMembers("00000000-0000-0000-0000-000000000000")).toEqual([]);
+      try {
+        expect(await s.findVenueByDraftToken("a".repeat(64))).toBeNull();
+        await s.setDraftToken(v.id, "a".repeat(64));
+        expect((await s.findVenueByDraftToken("a".repeat(64)))?.id).toBe(v.id);
+        await s.setDraftToken(v.id, null);
+        expect(await s.findVenueByDraftToken("a".repeat(64))).toBeNull();
+        await s.upsertMember({ venue_id: v.id, chat_ref: "tg:21", role: "owner", lang: "bg" });
+        await s.upsertMember({ venue_id: v.id, chat_ref: "tg:22", role: "staff", lang: "en" });
+        const members = await s.listMembers(v.id);
+        expect(members.map((m) => [m.chat_ref, m.role]).sort()).toEqual([["tg:21", "owner"], ["tg:22", "staff"]]);
+        expect(await s.listMembers("00000000-0000-0000-0000-000000000000")).toEqual([]);
+      } finally {
+        await s.deleteVenue(v.id);
+      }
     });
 
     it("deletes a venue with everything attached", async () => {
@@ -286,7 +429,7 @@ export function storeContract(name: string, make: () => Promise<Store>) {
       await expect(s.deleteVenue(v.id)).resolves.toBeUndefined(); // idempotent
     });
 
-    it("counts rate limits in a sliding window", async () => {
+    it("counts rate limits in a fixed window", async () => {
       const s = await make();
       const key = `rl-${crypto.randomUUID()}`;
       const hour = 3_600_000;
@@ -297,6 +440,41 @@ export function storeContract(name: string, make: () => Promise<Store>) {
       expect(await s.bumpRateLimit(key, hour, 2, "2026-10-09T10:00:00.000Z")).toBe(true); // window elapsed: count restarts at 1
       expect(await s.bumpRateLimit(`${key}-other`, hour, 1, NOW)).toBe(true); // keys are independent
       expect(await s.bumpRateLimit(`${key}-other`, hour, 1, NOW)).toBe(false);
+    });
+
+    it("stores one destination per kind with secrets kept apart, and syncs with due ordering", async () => {
+      const s = await make();
+      const v = await s.createVenue({ slug: "t-dest", name: "Dest" });
+      const d1 = await s.upsertDestination({ venue_id: v.id, kind: "wordpress", config: { site_url: "https://a.example" }, secrets: "enc-1" });
+      expect(d1).toMatchObject({ venue_id: v.id, kind: "wordpress", status: "connected", last_error: null, config: { site_url: "https://a.example" } });
+      expect(d1).not.toHaveProperty("secrets");
+      const d2 = await s.upsertDestination({ venue_id: v.id, kind: "wordpress", config: { site_url: "https://b.example" }, secrets: "enc-2" });
+      expect(d2.id).toBe(d1.id);
+      expect(await s.getDestination(v.id, "wordpress")).toMatchObject({ id: d1.id, secrets: "enc-2", config: { site_url: "https://b.example" }, status: "connected" });
+      expect(await s.getDestination(v.id, "google")).toBeNull();
+      const listed = await s.listDestinations(v.id);
+      expect(listed.map((d) => d.kind)).toEqual(["wordpress"]);
+      expect(listed[0]).not.toHaveProperty("secrets");
+      await s.updateDestination(d1.id, { status: "error", last_error: "boom" });
+      expect(await s.getDestination(v.id, "wordpress")).toMatchObject({ status: "error", last_error: "boom" });
+
+      const cs = await s.createChangeSet({ venue_id: v.id, chat_ref: null, summary_bg: "x", summary_en: "x", preview_bg: "", preview_en: "", source: "text", status: "proposed", changes: [{ position: 0, op: "wp_edit_page", entity: "wp_page", entity_id: "7", before: { title: "a" }, after: { title: "b" } }] });
+      expect(await s.applyChangeSet(cs.id, NOW)).toBe("applied"); // wp_* rows are no-ops for the store
+      expect((await s.getChangeSet(cs.id)).changes[0]).toMatchObject({ entity: "wp_page", op: "wp_edit_page", after: { title: "b" } });
+
+      const y1 = await s.createSync({ venue_id: v.id, destination_id: d1.id, change_set_id: cs.id, payload: { kind: "wordpress" }, next_at: "2026-10-09T09:05:00.000Z" });
+      const y2 = await s.createSync({ venue_id: v.id, destination_id: d1.id, change_set_id: cs.id, payload: { kind: "wordpress" }, next_at: "2026-10-09T09:00:00.000Z" });
+      expect(y1).toMatchObject({ status: "pending", attempts: 0, last_error: null, result: null, payload: { kind: "wordpress" } });
+      expect((await s.listSyncs({ venueId: v.id, status: ["pending"], dueBefore: "2026-10-09T09:01:00.000Z" })).map((x) => x.id)).toEqual([y2.id]);
+      expect((await s.listSyncs({ changeSetId: cs.id })).map((x) => x.id)).toEqual([y1.id, y2.id]);
+      await s.updateSync(y2.id, { status: "done", attempts: 1, result: { pushed: 1 }, updated_at: LATER });
+      expect(await s.getSync(y2.id)).toMatchObject({ status: "done", attempts: 1, result: { pushed: 1 }, updated_at: LATER });
+      expect((await s.listSyncs({ venueId: v.id, status: ["pending"] })).map((x) => x.id)).toEqual([y1.id]);
+      expect((await s.listSyncs({ venueId: v.id, limit: 1 })).map((x) => x.id)).toEqual([y1.id]);
+
+      await s.deleteDestination(d1.id);
+      expect(await s.getDestination(v.id, "wordpress")).toBeNull();
+      expect(await s.listSyncs({ venueId: v.id })).toEqual([]);
     });
   });
 }

@@ -1,5 +1,6 @@
 // src/bot/approvals.ts
 import { setCorrection } from "../agent/memory";
+import { syncLines } from "../destinations/sync";
 import type { Lang } from "../domain/types";
 import type { Store } from "../store/types";
 import { formatDateTime } from "../time";
@@ -63,5 +64,7 @@ export async function handleDecision(d: DecisionDeps, chatRef: string, decision:
     const fresh = await d.store.getChangeSet(cs.id);
     return { edit: { full: `${preview}\n\n${c.status[fresh.status]}`, short: c.status[fresh.status] }, toast: c.status[fresh.status] };
   }
-  return { edit: { full: `${preview}\n\n${c.applied}`, short: c.applied }, toast: c.applied };
+  const lines = await syncLines(d.store, cs.id, lang);
+  const tail = lines.length ? `\n${lines.join("\n")}` : "";
+  return { edit: { full: `${preview}\n\n${c.applied}${tail}`, short: `${c.applied}${tail}` }, toast: c.applied };
 }

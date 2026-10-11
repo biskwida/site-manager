@@ -168,3 +168,44 @@ describe("handleInbound", () => {
     expect((await store.getChangeSet(cs.id)).status).toBe("applied");
   });
 });
+
+describe("handleInbound: WordPress /connect and venue switching on Meta channels", () => {
+  it("runs /connect from WhatsApp and Messenger with the whole argument (url and code)", async () => {
+    const calls: unknown[] = [];
+    const { d, messenger, store, venue } = await setup({
+      connect: async (venueId, siteUrl, code) => {
+        calls.push([venueId, siteUrl, code]);
+        return { ok: true, site: { name: "Smoke Café" } as never, destination: { config: { site_url: "https://cafe.example" } } as never };
+      },
+    });
+    await store.upsertMember({ venue_id: venue.id, chat_ref: "wa:359888123456", role: "owner", lang: "bg" });
+    await handleInbound(d, { chatRef: "wa:359888123456", kind: "text", text: "/connect https://cafe.example/ GOOD" });
+    expect(calls).toEqual([[venue.id, "https://cafe.example/", "GOOD"]]);
+    expect(texts(messenger).at(-1)).toMatch(/^✅ Свързах WordPress сайта „Smoke Café“/);
+    await store.upsertMember({ venue_id: venue.id, chat_ref: "fb:900", role: "staff", lang: "en" });
+    await handleInbound(d, { chatRef: "fb:900", kind: "text", text: "/connect https://cafe.example GOOD" });
+    expect(texts(messenger).at(-1)).toBe("Only the owner can connect the site.");
+    await handleInbound(d, { chatRef: "fb:901", kind: "text", text: "/connect https://cafe.example GOOD" });
+    expect(texts(messenger).at(-1)).toBe("This bot manages one venue's website. Send the code you received from us.");
+    expect(calls).toHaveLength(1);
+  });
+  it("moves a linked Messenger owner to another venue with a new code, announces the switch and calls onOwnerJoined", async () => {
+    const joined: string[] = [];
+    const { d, messenger, store, venue } = await setup({ onOwnerJoined: (id) => joined.push(id) });
+    await store.upsertMember({ venue_id: venue.id, chat_ref: "fb:902", role: "owner", lang: "bg" });
+    const other = await store.createVenue({ slug: "bar-nosht", name: "Бар Нощ" });
+    const code = await store.createInvite(other.id, "owner", "2026-10-10T00:00:00.000Z");
+    // Reopening m.me/<page>?ref=<code> in an existing thread: a referral event with no text.
+    await handleInbound(d, { chatRef: "fb:902", kind: "text", text: "", referralCode: code });
+    expect(texts(messenger)[0]).toBe("Вече управлявате Бар Нощ.");
+    expect(texts(messenger)[1]).toMatch(/^Свързахте се като собственик на Бар Нощ/);
+    expect(joined).toEqual([other.id]);
+    expect(await store.findMember("fb:902")).toMatchObject({ venue_id: other.id, role: "owner" });
+  });
+  it("keeps an owner an owner when they redeem a staff code for their own venue", async () => {
+    const { d, store, venue } = await setup();
+    const code = await store.createInvite(venue.id, "staff", "2026-10-10T00:00:00.000Z");
+    await handleInbound(d, { chatRef: "tg:1001", kind: "text", text: `/start ${code}` });
+    expect(await store.findMember("tg:1001")).toMatchObject({ venue_id: venue.id, role: "owner" });
+  });
+});

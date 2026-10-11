@@ -4,11 +4,11 @@ The public marketing landing for Site Manager is built in Lovable. This file is 
 
 How to use it:
 
-1. Replace every `{{DEMO_URL}}` below with the demo café's address, `<PUBLIC_BASE_URL>/agala` (for example `https://your-project.vercel.app/agala`). If you do not know it yet, leave the placeholder and ask Lovable to swap it later (step 5).
+1. Replace every `{{APP_URL}}` below with the app's address, `<PUBLIC_BASE_URL>` without a trailing slash (today `https://site-manager-lovat.vercel.app`, so the button goes to `https://site-manager-lovat.vercel.app/new`), and every `{{DEMO_URL}}` with the demo café's address, `<PUBLIC_BASE_URL>/agala` (today `https://site-manager-lovat.vercel.app/agala`). If you do not know them yet, leave the placeholders and ask Lovable to swap them later (step 5).
 2. Copy everything from "PROMPT START" to "PROMPT END" and paste it into a new Lovable project as the first message.
 3. When Lovable is done, check the page against section 2 word for word, then publish and follow section 5.
 
-The copy in section 2 is taken verbatim from `landing.*` in `src/i18n/dicts.ts`. If you change the copy there, change it here too.
+The copy in section 2 is taken verbatim from `landing.*` in `src/i18n/dicts.ts` (the demo text link is `nav.demo`). If you change the copy there, change it here too.
 
 ---
 
@@ -16,13 +16,13 @@ The copy in section 2 is taken verbatim from `landing.*` in `src/i18n/dicts.ts`.
 
 ## 1. What to build
 
-Build a single-page, bilingual marketing landing for **Site Manager**, a service that gives a café a website the owner runs from Telegram. The page has a Bulgarian/English language toggle: English is the default on the first visit, the visitor's choice is remembered in `localStorage` and restored on the next visit, `?lang=bg` or `?lang=en` in the URL overrides it, and the `<html lang>` attribute follows the current language. Switching language swaps every visible string on the page instantly, without a reload. Mobile-first: design for a 375 px wide phone first, then widen to a centred column of about 900 px on desktop. This is a static page: no backend, no database, no authentication, no forms, no newsletter signup, no contact section, no chat widget. There is exactly one call to action, the primary button "Open the demo café →" (Bulgarian: "Отворете демо кафенето →"), which links to `{{DEMO_URL}}`. At the very bottom, add a small footer line "Landing built with Lovable · product by Site Manager" (its Bulgarian version is in section 2.8).
+Build a single-page, bilingual marketing landing for **Site Manager**, a service that gives a café a website the owner runs from Telegram. The page has a Bulgarian/English language toggle: English is the default on the first visit, the visitor's choice is remembered in `localStorage` and restored on the next visit, `?lang=bg` or `?lang=en` in the URL overrides it, and the `<html lang>` attribute follows the current language. Switching language swaps every visible string on the page instantly, without a reload. Mobile-first: design for a 375 px wide phone first, then widen to a centred column of about 900 px on desktop. This is a static page: no backend, no database, no authentication, no forms, no newsletter signup, no contact section, no chat widget. There is exactly one call to action, the primary button "Create your site →" (Bulgarian: "Създайте сайта си →"), which links to `{{APP_URL}}/new`. Under the button and its note there is one plain text link, "See the demo café" (Bulgarian: "Вижте демо кафенето"), to `{{DEMO_URL}}`: a link in the accent colour, not a second button. At the very bottom, add a small footer line "Landing built with Lovable · product by Site Manager" (its Bulgarian version is in section 2.8).
 
 Sections, top to bottom: header, hero, how it works, what the bot can do, price block, how it was built, footer. Use exactly the copy in section 2 and nothing else.
 
 ## 2. Copy, in both languages
 
-Use these strings exactly as written, including the typographic quotes („…“ in Bulgarian, “…” in English), the euro sign after the number with a space ("25 €"), the "→" arrows and the emoji. Do not shorten, rephrase, translate or add words. Each item shows the English (EN) and the Bulgarian (BG) text for the same element. Two English strings deliberately contain Bulgarian (the demo café's name, Кафене „Ъгъла“, and the example message in step 1, “Капучиното става 3,20”): keep them in Bulgarian, they show what the owner actually types.
+Use these strings exactly as written, including the typographic quotes („…“ in Bulgarian, “…” in English), the euro sign after the number with a space ("25 €"), the "→" arrows and the emoji. Do not shorten, rephrase, translate or add words. Each item shows the English (EN) and the Bulgarian (BG) text for the same element. One English string deliberately contains Bulgarian (the example message in step 1, “Капучиното става 3,20”): keep it in Bulgarian, it shows what the owner actually types.
 
 #### 2.1 Browser tab title
 
@@ -40,23 +40,25 @@ Left: the brand name **Site Manager** (same in both languages, display font, sem
 
 #### 2.3 Hero
 
-The primary button links to `{{DEMO_URL}}` (same tab). Keep the arrow at the end of the button label.
+The primary button links to `{{APP_URL}}/new` (same tab); the text link under the note links to `{{DEMO_URL}}` (same tab). Keep the arrow at the end of the button label.
 
 **English (EN)**
 
 - Eyebrow (small uppercase line above the headline): For cafés and small restaurants
 - Headline (H1): Your café's website, managed by chat.
 - Lead paragraph: We build your site and give you a Telegram bot. Text it, send a voice note or a photo, in Bulgarian or English, and the site changes: prices, sold-out dishes, today's specials, hours, holidays, photos. Every change is previewed, approved with one tap, logged and undoable.
-- Primary button: Open the demo café →
-- Note under the button: A fictional café, Кафене „Ъгъла“, that we change live during the demo.
+- Primary button: Create your site →
+- Note under the button: Three designs, your menu from a photo, online in minutes. Then you run it from Telegram.
+- Text link under the note: See the demo café
 
 **Bulgarian (BG)**
 
 - Eyebrow (small uppercase line above the headline): За кафенета и малки ресторанти
 - Headline (H1): Сайтът на вашето кафене, управляван с едно съобщение.
 - Lead paragraph: Правим ви сайт и ви даваме Telegram бот. Пишете му, пратете гласово или снимка, на български или английски, и сайтът се променя: цени, изчерпани ястия, днешни предложения, работно време, почивни дни, снимки. Всяка промяна се вижда предварително, потвърждава се с едно докосване, записва се и може да се върне.
-- Primary button: Отворете демо кафенето →
-- Note under the button: Измислено кафене, Кафене „Ъгъла“, което променяме на живо по време на демото.
+- Primary button: Създайте сайта си →
+- Note under the button: Три дизайна, менюто от снимка, онлайн за минути. После го управлявате от Telegram.
+- Text link under the note: Вижте демо кафенето
 
 #### 2.4 How it works
 
@@ -194,7 +196,7 @@ Accessibility (WCAG 2.1 AA):
 - No stock photos of people, no AI-generated faces, no photos of real cafés.
 - No invented numbers. The only numbers on the page are those in the copy: 25 € a month, the four venues and their amounts, and "3,20" in step 1.
 - Keep the four venue names and amounts exactly as written: Bar and Dinner Central 30 €, Coffique 20 €, Family House 50 €, The High End Bar 70 €. Do not turn them into testimonials, logos or quotes.
-- One call to action only, the primary button to `{{DEMO_URL}}`. No second button, no "Sign up", "Book a demo" or "Contact us".
+- One call to action only, the primary button to `{{APP_URL}}/new`, plus the single text link to `{{DEMO_URL}}` under it. No second button, no "Sign up", "Book a demo" or "Contact us".
 - Both languages must be complete: no string may stay in English when Bulgarian is selected, except the brand name "Site Manager", "Telegram", "Claude", "Lovable", the venue names and the hackathon name, which stay as written.
 - No cookie banner, analytics or third-party scripts.
 
@@ -204,7 +206,7 @@ Accessibility (WCAG 2.1 AA):
 
 ## 5. After it is published
 
-1. If the demo button still points to `{{DEMO_URL}}`, ask Lovable: "Change the primary button link to `<PUBLIC_BASE_URL>/agala`", with your real address, and publish again. Open the published page and click the button to check it lands on the demo café.
+1. If the button or the link still show a placeholder, ask Lovable: "Change the primary button link to `<PUBLIC_BASE_URL>/new` and the demo text link to `<PUBLIC_BASE_URL>/agala`", with your real address (today `https://site-manager-lovat.vercel.app`), and publish again. Open the published page: the button must land on the template chooser, the link on the demo café.
 2. Check both languages on a phone: toggle БГ / EN, reload, and confirm the choice is remembered.
 3. Copy the published Lovable URL (it must start with `https://`) and set it as `NEXT_PUBLIC_LANDING_URL`:
    - Vercel: Project → Settings → Environment Variables → `NEXT_PUBLIC_LANDING_URL` = the Lovable URL (Production and Preview), then redeploy. `NEXT_PUBLIC_*` values are baked in at build time, so the change takes effect only after a new deployment.

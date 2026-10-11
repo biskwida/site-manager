@@ -1,6 +1,7 @@
 import { formatDate, formatDateTime, hhmm, localTime } from "../time";
 import { allergenName } from "./allergens";
 import { categoryName, formatPrice, itemName, quote, tr, weekdayLabel } from "./format";
+import { wpPreviewLines } from "./wp-preview";
 import { MONO_TEXT_KEYS, WEEKDAYS, type Change, type Item, type Lang, type Row, type SiteState, type TextKey, type WeekHours } from "./types";
 
 const FIELD: Record<string, { bg: string; en: string }> = {
@@ -167,6 +168,13 @@ export function renderPreview(s: SiteState, changes: Change[], lang: Lang, tz: s
       }
       case "set_theme":
         lines.push(`• ${tr(lang, "Цвят на темата", "Accent colour")}: ${(b.theme as { accent: string } | undefined)?.accent ?? "—"} → ${(a.theme as { accent: string }).accent}`);
+        break;
+      case "wp_edit_page":
+      case "wp_upload_photo":
+      case "wp_set_option":
+      case "wp_edit_menu":
+      case "wp_edit_product":
+        lines.push(...wpPreviewLines(c, lang));
         break;
     }
   }

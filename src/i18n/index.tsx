@@ -80,6 +80,15 @@ export function LangProvider({ defaultLang, children }: { defaultLang: Lang; chi
   return <LangContext.Provider value={value}>{children}</LangContext.Provider>;
 }
 
+/**
+ * A language held by the caller instead of the page-wide choice: no storage, no URL, no <html lang>. The wizard wraps
+ * its live preview in one so the template's own БГ/EN toggle switches the preview, not the wizard around it.
+ */
+export function LangScope({ lang, setLang, children }: { lang: Lang; setLang: (lang: Lang) => void; children?: ReactNode }) {
+  const value = useMemo<LangContextValue>(() => ({ lang, setLang, t: (k, v) => interpolate(DICTS[lang][k], v), locale: lang === "bg" ? "bg-BG" : "en-GB" }), [lang, setLang]);
+  return <LangContext.Provider value={value}>{children}</LangContext.Provider>;
+}
+
 export function useLang() {
   const ctx = useContext(LangContext);
   if (!ctx) throw new Error("useLang must be used inside <LangProvider>");

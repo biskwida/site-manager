@@ -40,4 +40,8 @@ describe("loadConfig", () => {
     expect(() => loadConfig({ ...full, META_PAGE_TOKEN: "pt" })).toThrow(/META_APP_SECRET and META_VERIFY_TOKEN/);
     expect(() => loadConfig({ ...full, META_APP_SECRET: "s", META_VERIFY_TOKEN: "v", WHATSAPP_TOKEN: "wt" })).toThrow(/WHATSAPP_PHONE_NUMBER_ID/);
   });
+  it("reads DESTINATION_SECRET_KEY as optional", () => {
+    expect(loadConfig(full).destinationSecretKey).toBeNull();
+    expect(loadConfig({ ...full, DESTINATION_SECRET_KEY: "ab".repeat(32) }).destinationSecretKey).toBe("ab".repeat(32));
+  });
 });

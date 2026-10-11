@@ -1,8 +1,11 @@
 // src/store/types.ts
 import type {
-  BusinessType, Category, Change, ChangeSet, ChangeSetStatus, ChangeSource, Conversation, DeployInfo, Item, Lang, Media, Member, Role, SiteState, SiteTextKey, TemplateId, Venue, VenueStatus, WeekHours,
+  BusinessType, Category, Change, ChangeSet, ChangeSetStatus, ChangeSource, Conversation, DeployInfo, DeployStatus, Item, Lang, Media, Member, Role, SiteState, SiteTextKey, TemplateId, Venue, VenueStatus, WeekHours,
 } from "../domain/types";
 import type { WizardDraft } from "../wizard/schema";
+
+/** How long a publish claim (claimPublish) blocks a second publish of the same draft; a publish that died keeps nobody out for longer. */
+export const PUBLISH_CLAIM_TTL_MS = 5 * 60_000;
 
 export const DEFAULT_HOURS: WeekHours = {
   mon: { open: "08:00", close: "18:00" },
@@ -88,11 +91,30 @@ export interface Store {
   /** Throws on an unknown id or a slug that another venue already has. Keys set to undefined are ignored. */
   updateVenue(id: string, patch: VenuePatch): Promise<Venue>;
   setDeploy(id: string, deploy: DeployInfo | null): Promise<void>;
+  /**
+   * Conditional deploy write: sets `deploy = next` only while the current deploy status is one of `whenStatusIn`
+   * (`null` = no deploy yet) and, when `whenDeploymentId` is given, the current deploy.deployment_id equals it.
+   * One atomic update; true when the row changed, false when another request got there first (or the venue is unknown).
+   * Deploy starts and template switches claim through this so two requests never both deploy; deploy polls claim their
+   * ready/error result with the deployment id they polled, so a result never lands on a newer deployment.
+   */
+  claimDeploy(id: string, next: DeployInfo, opts: { whenStatusIn: (DeployStatus | null)[]; whenDeploymentId?: string }): Promise<boolean>;
+  /**
+   * Marks a draft as "publishing now" (`now` ISO, defaults to the clock) only if its status is still `draft` and no other
+   * publish claimed it in the last PUBLISH_CLAIM_TTL_MS (a crashed publish releases itself). True when this call won the claim.
+   */
+  claimPublish(id: string, now?: string): Promise<boolean>;
+  /** Drops a publish claim so a failed publish can be retried at once (a successful one ends with status live, where the claim is moot). */
+  releasePublish(id: string): Promise<void>;
   /** Stores the sha256 of the wizard's draft token (null clears it). */
   setDraftToken(id: string, tokenHash: string | null): Promise<void>;
   findVenueByDraftToken(tokenHash: string): Promise<Venue | null>;
-  /** Deletes the venue and everything that hangs off it: content, members, invites, tokens, change sets, media rows (storage objects stay). */
-  deleteVenue(id: string): Promise<void>;
+  /**
+   * Deletes the venue and everything that hangs off it: content, members, invites, tokens, change sets, media rows.
+   * Storage objects stay unless `withStorage` (abandoned wizard drafts): then every object under `<id>/` in the media
+   * bucket is removed first, so a failed storage call leaves the rows for the next attempt.
+   */
+  deleteVenue(id: string, opts?: { withStorage?: boolean }): Promise<void>;
   /** Everything for one venue, including inactive items (the site filters with domain/effective). */
   getSite(venueId: string): Promise<SiteState>;
   insertCategory(c: NewCategory): Promise<Category>;
@@ -100,6 +122,8 @@ export interface Store {
   setSiteText(venueId: string, key: SiteTextKey, text_bg: string, text_en: string): Promise<void>;
   /** Deletes the venue's menu, texts, holidays, announcements, media rows and change sets (demo reset). Members, invites and tokens stay. */
   clearVenueContent(venueId: string): Promise<void>;
+  /** Deletes the venue's items, categories and site texts only (a retried wizard publish starts its menu again). Media, change sets and venue fields stay. */
+  clearMenu(venueId: string): Promise<void>;
 
   // members and access (chatRef = "<channel>:<id>", src/channels/ref.ts)
   findMember(chatRef: string): Promise<Member | null>;
@@ -109,6 +133,8 @@ export interface Store {
   /** Records an inbound message from the member; no-op for unknown refs. */
   touchMember(chatRef: string, nowIso: string): Promise<void>;
   createInvite(venueId: string, role: Role, expiresAt: string): Promise<string>;
+  /** The open invite (unused, expires after `now`) for this venue and role that expires last; null when there is none. */
+  findOpenInvite(venueId: string, role: Role, now: string): Promise<string | null>;
   /** Links the chat and marks the code used; null when the code is unknown, used or expired. */
   redeemInvite(code: string, chatRef: string, lang: Lang, now: string): Promise<Member | null>;
   /** Creates the token on first call. */
@@ -146,7 +172,7 @@ export interface Store {
   setConversation(venueId: string, chatRef: string, c: Conversation): Promise<void>;
 
   // rate limits
-  /** Sliding window counter. Returns true when the call is allowed (count after increment <= max). */
+  /** Fixed window counter (the window restarts at the first call after it elapses). Returns true when the call is allowed (count after increment <= max). */
   bumpRateLimit(key: string, windowMs: number, max: number, now: string): Promise<boolean>;
 }
 
@@ -162,4 +188,72 @@ export function newInviteCode(): string {
 
 export function extensionFor(contentType: string): string {
   return { "image/jpeg": "jpg", "image/png": "png", "image/webp": "webp", "image/gif": "gif" }[contentType] ?? "bin";
+}
+
+// --- Destinations (integrations track, appended 2026-10-10) ---
+export type DestinationKind = "wordpress" | "google" | "github";
+export type DestinationStatus = "connected" | "error" | "disconnected";
+export interface Destination {
+  id: string;
+  venue_id: string;
+  kind: DestinationKind;
+  /** Non-secret settings (site URL, site name, versions, connected_at…). */
+  config: Record<string, unknown>;
+  status: DestinationStatus;
+  last_error: string | null;
+  created_at: string;
+  updated_at: string;
+}
+/** Only getDestination returns the encrypted secrets blob (base64 ciphertext); never put it on Destination. */
+export interface DestinationWithSecrets extends Destination {
+  secrets: string;
+}
+export interface NewDestination {
+  venue_id: string;
+  kind: DestinationKind;
+  config: Record<string, unknown>;
+  secrets: string;
+  status?: DestinationStatus;
+}
+export type DestinationPatch = Partial<Pick<Destination, "status" | "last_error" | "config">>;
+
+export type SyncStatus = "pending" | "done" | "failed";
+export interface DestinationSync {
+  id: string;
+  venue_id: string;
+  destination_id: string;
+  change_set_id: string;
+  status: SyncStatus;
+  attempts: number;
+  /** Earliest instant the next attempt may run (ISO). */
+  next_at: string;
+  last_error: string | null;
+  payload: Record<string, unknown>;
+  result: Record<string, unknown> | null;
+  created_at: string;
+  updated_at: string;
+}
+export interface NewSync {
+  venue_id: string;
+  destination_id: string;
+  change_set_id: string;
+  payload: Record<string, unknown>;
+  next_at: string;
+}
+export type SyncPatch = Partial<Pick<DestinationSync, "status" | "attempts" | "next_at" | "last_error" | "result" | "updated_at">>;
+
+// Declaration merging: the Store interface above gains the destination methods.
+export interface Store {
+  /** One destination per (venue, kind): replaces config, secrets and status of an existing row, keeping its id. */
+  upsertDestination(d: NewDestination): Promise<Destination>;
+  getDestination(venueId: string, kind: DestinationKind): Promise<DestinationWithSecrets | null>;
+  listDestinations(venueId: string): Promise<Destination[]>;
+  updateDestination(id: string, patch: DestinationPatch): Promise<void>;
+  /** Deletes the destination and its sync rows. */
+  deleteDestination(id: string): Promise<void>;
+  createSync(s: NewSync): Promise<DestinationSync>;
+  getSync(id: string): Promise<DestinationSync>;
+  /** Oldest first (created_at). `dueBefore` keeps rows with next_at <= dueBefore. */
+  listSyncs(opts: { venueId?: string; changeSetId?: string; status?: SyncStatus[]; dueBefore?: string; limit?: number }): Promise<DestinationSync[]>;
+  updateSync(id: string, patch: SyncPatch): Promise<void>;
 }

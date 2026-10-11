@@ -1,7 +1,7 @@
 // src/store/memory.ts
 import { applyChanges } from "../domain/changes";
-import type { Category, ChangeSet, Conversation, DeployInfo, Item, Lang, Media, Member, Role, SiteState, SiteTextKey, Venue, VenueStatus } from "../domain/types";
-import { DEFAULT_HOURS, extensionFor, newInviteCode, newToken, type ChangeSetPatch, type ExpiredTimer, type NewCategory, type NewChangeSet, type NewItem, type NewVenue, type Store, type VenuePatch } from "./types";
+import type { Category, ChangeSet, Conversation, DeployInfo, DeployStatus, Item, Lang, Media, Member, Role, SiteState, SiteTextKey, Venue, VenueStatus } from "../domain/types";
+import { DEFAULT_HOURS, extensionFor, newInviteCode, newToken, PUBLISH_CLAIM_TTL_MS, type ChangeSetPatch, type ExpiredTimer, type NewCategory, type NewChangeSet, type NewItem, type NewVenue, type Store, type VenuePatch, type Destination, type DestinationKind, type DestinationPatch, type DestinationSync, type DestinationWithSecrets, type NewDestination, type NewSync, type SyncPatch, type SyncStatus } from "./types";
 
 const clone = <T>(v: T): T => structuredClone(v);
 
@@ -22,6 +22,7 @@ export class InMemoryStore implements Store {
   conversations = new Map<string, Conversation>();
   files = new Map<string, Uint8Array>();
   draftTokens = new Map<string, string>(); // venue id -> sha256 of the draft token
+  publishing = new Map<string, string>(); // venue id -> ISO time of the last publish claim
   rateLimits = new Map<string, { count: number; window_start: number }>();
   private lastTick = 0;
   /** Strictly increasing clock for created_at (so newest-first ordering is stable); tests may override. */
@@ -90,6 +91,24 @@ export class InMemoryStore implements Store {
   async setDeploy(id: string, deploy: DeployInfo | null) {
     this.site(id).venue.deploy = deploy ? clone(deploy) : null;
   }
+  async claimDeploy(id: string, next: DeployInfo, opts: { whenStatusIn: (DeployStatus | null)[]; whenDeploymentId?: string }) {
+    const s = this.sites.get(id);
+    if (!s || !opts.whenStatusIn.includes(s.venue.deploy?.status ?? null)) return false;
+    if (opts.whenDeploymentId !== undefined && s.venue.deploy?.deployment_id !== opts.whenDeploymentId) return false;
+    s.venue.deploy = clone(next);
+    return true;
+  }
+  async claimPublish(id: string, now = this.clock()) {
+    const s = this.sites.get(id);
+    if (!s || s.venue.status !== "draft") return false;
+    const prev = this.publishing.get(id);
+    if (prev && Date.parse(now) - Date.parse(prev) < PUBLISH_CLAIM_TTL_MS) return false;
+    this.publishing.set(id, now);
+    return true;
+  }
+  async releasePublish(id: string) {
+    this.publishing.delete(id);
+  }
   async setDraftToken(id: string, tokenHash: string | null) {
     this.site(id);
     if (tokenHash === null) this.draftTokens.delete(id);
@@ -99,16 +118,19 @@ export class InMemoryStore implements Store {
     for (const [venueId, h] of this.draftTokens) if (h === tokenHash && this.sites.has(venueId)) return this.getVenue(venueId);
     return null;
   }
-  async deleteVenue(id: string) {
+  async deleteVenue(id: string, opts: { withStorage?: boolean } = {}) {
+    if (opts.withStorage) for (const path of [...this.files.keys()]) if (path.startsWith(`${id}/`)) this.files.delete(path);
     if (!this.sites.has(id)) return;
     this.sites.delete(id);
     this.draftTokens.delete(id);
+    this.publishing.delete(id);
     this.tokens.delete(id);
     for (const [chatRef, m] of this.members) if (m.venue_id === id) this.members.delete(chatRef);
     for (const [code, inv] of this.invites) if (inv.venue_id === id) this.invites.delete(code);
     for (const [setId, cs] of this.sets) if (cs.venue_id === id) this.sets.delete(setId);
     for (const key of [...this.conversations.keys()]) if (key.startsWith(`${id}:`)) this.conversations.delete(key);
-    for (const path of [...this.files.keys()]) if (path.startsWith(`${id}/`)) this.files.delete(path);
+    for (const [did, d] of this.destinations) if (d.venue_id === id) this.destinations.delete(did);
+    for (const [sid, s] of this.syncs) if (s.venue_id === id) this.syncs.delete(sid);
   }
   async getSite(venueId: string) {
     return clone(this.site(venueId));
@@ -148,6 +170,12 @@ export class InMemoryStore implements Store {
     if (existing) Object.assign(existing, { text_bg, text_en });
     else s.texts.push({ venue_id: venueId, key, text_bg, text_en });
   }
+  async clearMenu(venueId: string) {
+    const s = this.site(venueId);
+    s.items = [];
+    s.categories = [];
+    s.texts = [];
+  }
   async clearVenueContent(venueId: string) {
     const s = this.site(venueId);
     s.categories = [];
@@ -158,6 +186,7 @@ export class InMemoryStore implements Store {
     s.texts = [];
     for (const [id, cs] of this.sets) if (cs.venue_id === venueId) this.sets.delete(id);
     for (const key of [...this.conversations.keys()]) if (key.startsWith(`${venueId}:`)) this.conversations.delete(key);
+    for (const [sid, s] of this.syncs) if (s.venue_id === venueId) this.syncs.delete(sid);
   }
 
   async findMember(chatRef: string) {
@@ -187,6 +216,11 @@ export class InMemoryStore implements Store {
     const code = newInviteCode();
     this.invites.set(code, { code, venue_id: venueId, role, expires_at: expiresAt, used_at: null });
     return code;
+  }
+  async findOpenInvite(venueId: string, role: Role, now: string) {
+    const open = [...this.invites.values()].filter((i) => i.venue_id === venueId && i.role === role && i.used_at === null && Date.parse(i.expires_at) > Date.parse(now));
+    open.sort((a, b) => b.expires_at.localeCompare(a.expires_at));
+    return open[0]?.code ?? null;
   }
   async redeemInvite(code: string, chatRef: string, lang: Lang, now: string) {
     const inv = this.invites.get(code);
@@ -333,9 +367,80 @@ export class InMemoryStore implements Store {
 
   async bumpRateLimit(key: string, windowMs: number, max: number, now: string) {
     const t = Date.parse(now);
+    if (Number.isNaN(t)) throw new Error(`bumpRateLimit: invalid time ${now}`);
     const cur = this.rateLimits.get(key);
     const row = cur && cur.window_start + windowMs > t ? { count: cur.count + 1, window_start: cur.window_start } : { count: 1, window_start: t };
     this.rateLimits.set(key, row);
     return row.count <= max;
+  }
+
+  // --- Destinations (integrations track, appended 2026-10-10) ---
+  destinations = new Map<string, DestinationWithSecrets>();
+  syncs = new Map<string, DestinationSync>();
+
+  private publicDestination(d: DestinationWithSecrets): Destination {
+    const { secrets: _secrets, ...rest } = d;
+    void _secrets;
+    return clone(rest);
+  }
+  async upsertDestination(d: NewDestination): Promise<Destination> {
+    this.site(d.venue_id);
+    const now = this.clock();
+    const existing = [...this.destinations.values()].find((x) => x.venue_id === d.venue_id && x.kind === d.kind);
+    const row: DestinationWithSecrets = {
+      id: existing?.id ?? crypto.randomUUID(),
+      venue_id: d.venue_id,
+      kind: d.kind,
+      config: clone(d.config),
+      secrets: d.secrets,
+      status: d.status ?? "connected",
+      last_error: null,
+      created_at: existing?.created_at ?? now,
+      updated_at: now,
+    };
+    this.destinations.set(row.id, row);
+    return this.publicDestination(row);
+  }
+  async getDestination(venueId: string, kind: DestinationKind) {
+    const d = [...this.destinations.values()].find((x) => x.venue_id === venueId && x.kind === kind);
+    return d ? clone(d) : null;
+  }
+  async listDestinations(venueId: string) {
+    return [...this.destinations.values()].filter((x) => x.venue_id === venueId).sort((a, b) => a.created_at.localeCompare(b.created_at)).map((d) => this.publicDestination(d));
+  }
+  async updateDestination(id: string, patch: DestinationPatch) {
+    const d = this.destinations.get(id);
+    if (!d) throw new Error(`destination ${id} not found`);
+    if (patch.status !== undefined) d.status = patch.status;
+    if (patch.last_error !== undefined) d.last_error = patch.last_error;
+    if (patch.config !== undefined) d.config = clone(patch.config);
+    d.updated_at = this.clock();
+  }
+  async deleteDestination(id: string) {
+    this.destinations.delete(id);
+    for (const [sid, s] of this.syncs) if (s.destination_id === id) this.syncs.delete(sid);
+  }
+  async createSync(s: NewSync): Promise<DestinationSync> {
+    const now = this.clock();
+    const row: DestinationSync = { id: crypto.randomUUID(), venue_id: s.venue_id, destination_id: s.destination_id, change_set_id: s.change_set_id, status: "pending", attempts: 0, next_at: s.next_at, last_error: null, payload: clone(s.payload), result: null, created_at: now, updated_at: now };
+    this.syncs.set(row.id, row);
+    return clone(row);
+  }
+  async getSync(id: string) {
+    const s = this.syncs.get(id);
+    if (!s) throw new Error(`sync ${id} not found`);
+    return clone(s);
+  }
+  async listSyncs(opts: { venueId?: string; changeSetId?: string; status?: SyncStatus[]; dueBefore?: string; limit?: number }) {
+    const rows = [...this.syncs.values()]
+      .filter((s) => (!opts.venueId || s.venue_id === opts.venueId) && (!opts.changeSetId || s.change_set_id === opts.changeSetId) && (!opts.status || opts.status.includes(s.status)) && (!opts.dueBefore || s.next_at <= opts.dueBefore))
+      .sort((a, b) => a.created_at.localeCompare(b.created_at) || a.id.localeCompare(b.id));
+    return (opts.limit ? rows.slice(0, opts.limit) : rows).map(clone);
+  }
+  async updateSync(id: string, patch: SyncPatch) {
+    const s = this.syncs.get(id);
+    if (!s) throw new Error(`sync ${id} not found`);
+    for (const [k, v] of Object.entries(patch)) if (v !== undefined) (s as unknown as Record<string, unknown>)[k] = typeof v === "object" && v !== null ? clone(v) : v;
+    if (patch.updated_at === undefined) s.updated_at = this.clock();
   }
 }

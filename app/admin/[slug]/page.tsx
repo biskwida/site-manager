@@ -27,7 +27,7 @@ export default async function Page(props: PageProps<"/admin/[slug]">) {
       <LangProvider defaultLang="bg"><InvalidKey /></LangProvider>
     );
   }
-  const overview = await adminOverview(deps.store, venue, new Date(), deps.config.publicBaseUrl);
+  const overview = await adminOverview(deps.store, venue, new Date(), deps.config.publicBaseUrl, { hosted: deps.deployer === null });
   return (
     <LangProvider defaultLang={venue.default_lang}>
       <AdminPanel slug={slug} adminKey={key} initial={overview} />

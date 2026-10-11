@@ -1,11 +1,14 @@
 // scripts/check-rls.mts
 // Proves with the anon key what the browser can and cannot do. Exit 1 on any FAIL.
+import { randomBytes } from "node:crypto";
 import { createClient } from "@supabase/supabase-js";
 
 const url = process.env.NEXT_PUBLIC_SUPABASE_URL?.trim();
 const anon = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY?.trim();
 if (!url || !anon) throw new Error("Missing NEXT_PUBLIC_SUPABASE_URL or NEXT_PUBLIC_SUPABASE_ANON_KEY in .env.local");
 const db = createClient(url, anon, { auth: { persistSession: false } });
+const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY?.trim();
+const admin = serviceKey ? createClient(url, serviceKey, { auth: { persistSession: false, autoRefreshToken: false } }) : null;
 
 let failed = 0;
 const check = (name: string, ok: boolean, detail = "") => {
@@ -27,12 +30,25 @@ for (const t of ["venue_members", "venue_invites", "venue_admin_tokens", "change
   const r = await db.from(t).select("*").limit(1);
   check(`anon cannot read ${t}`, !!r.error || (r.data?.length ?? 0) === 0, r.error?.code ?? `${r.data?.length ?? 0} rows`);
 }
-const drafts = await db.from("venues").select("id").eq("status", "draft").limit(1);
-check("anon sees no draft venues", !drafts.error && (drafts.data?.length ?? 0) === 0, drafts.error?.code ?? `${drafts.data?.length ?? 0} rows`);
+if (admin) {
+  // A throwaway draft proves the policy hides drafts (an empty result alone would pass with no drafts at all).
+  const slug = `rlscheck-${randomBytes(4).toString("hex")}`;
+  const created = await admin.from("venues").insert({ slug, name: "RLS check", status: "draft" }).select("id").single();
+  try {
+    check("service role creates a throwaway draft venue", !created.error && !!created.data, created.error?.code ?? slug);
+    const asAdmin = await admin.from("venues").select("id").eq("slug", slug);
+    check("service role sees the throwaway draft", !asAdmin.error && asAdmin.data?.length === 1, asAdmin.error?.code ?? `${asAdmin.data?.length ?? 0} rows`);
+    const asAnon = await db.from("venues").select("id").eq("slug", slug);
+    check("anon cannot see the throwaway draft", !asAnon.error && (asAnon.data?.length ?? 0) === 0, asAnon.error?.code ?? `${asAnon.data?.length ?? 0} rows`);
+  } finally {
+    const del = await admin.from("venues").delete().eq("slug", slug);
+    check("throwaway draft venue deleted", !del.error, del.error?.code ?? slug);
+  }
+} else console.log("SKIP anon cannot see a draft venue (no SUPABASE_SERVICE_ROLE_KEY)");
 const rl = await db.from("rate_limits").select("*").limit(1);
 check("anon cannot read rate_limits", !!rl.error || (rl.data?.length ?? 0) === 0, rl.error?.code ?? `${rl.data?.length ?? 0} rows`);
 const bump = await db.rpc("bump_rate_limit", { p_key: "rls-check", p_window_ms: 1000, p_max: 1, p_now: new Date().toISOString() });
-check("anon cannot call bump_rate_limit", !!bump.error, bump.error?.code ?? "no error");
+check("anon cannot call bump_rate_limit: permission denied", bump.error?.code === "42501", bump.error?.code ?? "no error");
 // Writes must be refused by the grants themselves (42501 insufficient_privilege), not merely match zero rows.
 const write = await db.from("items").update({ price_eur: 1 }).eq("id", "00000000-0000-0000-0000-000000000000").select("id");
 check("anon cannot update items: permission denied", write.error?.code === "42501", write.error?.code ?? `no error, ${write.data?.length ?? 0} rows`);
@@ -43,5 +59,10 @@ check("anon sees no admin tokens", (tokens.data?.length ?? 0) === 0, tokens.erro
 // No media objects exist after a fresh seed, so this checks the public URL shape (bucket served from the public path), not a fetch.
 const publicUrl = db.storage.from("media").getPublicUrl("x").data.publicUrl;
 check("media public URL uses the public object path", publicUrl.includes("/object/public/media/"));
+
+for (const t of ["venue_destinations", "destination_syncs"]) {
+  const r = await db.from(t).select("*").limit(1);
+  check(`anon cannot read ${t}`, !!r.error || (r.data?.length ?? 0) === 0, r.error?.code ?? `${r.data?.length ?? 0} rows`);
+}
 
 process.exit(failed ? 1 : 0);

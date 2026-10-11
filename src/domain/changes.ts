@@ -2,7 +2,7 @@ import { isAllergenCode } from "./allergens";
 import { isValidHours } from "./hours";
 import { PRICE_MAX, PRICE_MIN, round2 } from "./pricing";
 import {
-  MONO_TEXT_KEYS, SITE_TEXT_KEYS, VENUE_TEXT_KEYS,
+  isWpEntity, MONO_TEXT_KEYS, SITE_TEXT_KEYS, VENUE_TEXT_KEYS,
   type Announcement, type Change, type ChangeOp, type Entity, type Holiday, type Item, type Row, type SiteState, type SiteText, type TextKey,
 } from "./types";
 
@@ -277,6 +277,7 @@ function writeList<T extends { id: string }>(list: T[], id: string, before: Row 
 
 /** Pure entity write. Inserts are idempotent by id; updates merge the patch; deletes remove by id. */
 export function applyChange(s: SiteState, c: Change): SiteState {
+  if (isWpEntity(c.entity)) return s; // lives on the owner's WordPress site; the destination push writes it
   switch (c.entity) {
     case "venue":
       if (c.after === null || c.before === null) throw new Error("venue rows are only updated");

@@ -1,4 +1,5 @@
 // test/store-supabase.test.ts
+import { createClient } from "@supabase/supabase-js";
 import { describe, it } from "vitest";
 import { SupabaseStore } from "@/src/store/supabase";
 import { storeContract } from "./store-contract";
@@ -11,6 +12,13 @@ if (url && key && process.env.SUPABASE_CONTRACT === "1") {
     const s = new SupabaseStore(url, key);
     s.slugPrefix = `test-${Date.now().toString(36)}-`;
     return s;
+  }, async (_s, path) => {
+    // Probe the media bucket directly: list the object's folder and look for its name.
+    const db = createClient(url, key, { auth: { persistSession: false } });
+    const slash = path.lastIndexOf("/");
+    const { data, error } = await db.storage.from("media").list(path.slice(0, slash), { limit: 1000, search: path.slice(slash + 1) });
+    if (error) throw new Error(`storage list: ${error.message}`);
+    return (data ?? []).some((o) => o.name === path.slice(slash + 1));
   });
 } else {
   describe("supabase store", () => {

@@ -131,7 +131,7 @@ Order (from this worktree, `SUPABASE_DB_URL` in `.env.local`). Always start with
 ```bash
 npm run db:dry-run      # runs the migration inside a transaction and ROLLS BACK; must end with "DRY RUN OK"
 npm run db:apply -- supabase/migrations/2026-10-10-chat-ref.sql   # FIRST: the migration alone
-npm run db:apply        # then schema.sql + policies.sql (idempotent; schema.sql already has the new shape)
+npm run db:apply        # then schema.sql + policies.sql + schema-integrations.sql + policies-integrations.sql (idempotent; schema.sql already has the new shape)
 npm run check:rls       # every line PASS
 ```
 

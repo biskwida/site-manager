@@ -22,6 +22,7 @@ const BG = {
   welcomeStaff: (name: string, publicUrl: string) =>
     `Свързахте се като персонал на ${name}. Можете да отбелязвате изчерпани продукти и да добавяте днешните предложения.\n\nСайт: ${publicUrl}`,
   welcomeBack: (name: string, adminUrl: string) => `Вече сте свързани с ${name}. Табло: ${adminUrl}`,
+  switched: (name: string) => `Вече управлявате ${name}.`,
   help: (ch: Channel) =>
     `${HELP_BG_BODY}\n\n${ch === "tg" ? "Команди: /menu – линкове към сайта, /lang bg|en – език, /undo – връща последната промяна." : "Думи-команди: „меню“ – линкове към сайта, „език bg“ / „език en“ – език. За да отмените последната промяна, напишете /undo или „върни последната промяна“."}`,
   langSet: "Езикът е български.",
@@ -47,6 +48,15 @@ const BG = {
   photoFailed: "Не успях да изтегля снимката. Опитайте отново.",
   photoTooBig: "Снимката е над 5 MB. Изпратете по-малка или я пратете като снимка, а не като файл.",
   error: "Възникна грешка. Опитайте отново.",
+  connectUsage: "Свържете сайта си на WordPress: инсталирайте плъгина Site Manager, отворете Настройки → Site Manager, натиснете „Генерирай код“ и изпратете тук реда, който плъгинът показва:\n/connect https://вашият-сайт.bg КОД",
+  connectOwnerOnly: "Само собственикът може да свързва сайта.",
+  connectUnavailable: "Свързването на сайтове не е включено на този сървър.",
+  connectOk: (name: string, url: string) => `✅ Свързах WordPress сайта „${name}“ (${url}). Вече мога да редактирам страниците, снимките и менютата му; всяка промяна първо ще ви покажа за одобрение.`,
+  connectFailed: (reason: string) => `Не успях да свържа сайта. ${reason}`,
+  publishing: "Сайтът ви се публикува. Ще ви пиша, когато е готов (обикновено до 2–3 минути).",
+  siteLive: (name: string, url: string) => `🎉 Сайтът на ${name} е готов: ${url}\n\nОт тук нататък промените от този чат се появяват на него за секунди.`,
+  designLive: (url: string) => `✅ Новият дизайн е онлайн: ${url}`,
+  siteFailed: (name: string) => `Публикуването на сайта на ${name} не успя. Отворете таблото и натиснете „Опитай пак“; дотогава сайтът ви остава достъпен на адреса от приветственото съобщение.`,
 };
 
 const EN: typeof BG = {
@@ -57,6 +67,7 @@ const EN: typeof BG = {
     `You are linked as the owner of ${name}.\n\nHow it works:\n1. Type or send a voice note: “Cappuccino is 3.20 now”, “Banitsa is sold out”, “We're closed on 24 December”.\n2. You get a preview and confirm it with ✅.\n3. The site updates right away; ${ch === "tg" ? "/undo reverts the last change" : "“undo the last change” (or /undo) reverts it"}.\n\nSite: ${publicUrl}\nDashboard (keep this link, it is your key): ${adminUrl}`,
   welcomeStaff: (name, publicUrl) => `You are linked as staff of ${name}. You can mark items sold out and add today's specials.\n\nSite: ${publicUrl}`,
   welcomeBack: (name, adminUrl) => `You are already linked to ${name}. Dashboard: ${adminUrl}`,
+  switched: (name) => `You now manage ${name}.`,
   help: (ch) =>
     `${HELP_EN_BODY}\n\n${ch === "tg" ? "Commands: /menu – site links, /lang bg|en – language, /undo – reverts the last change." : "Command words: “menu” – site links, “language bg” / “language en” – language. To revert the last change, type /undo or write “undo the last change”."}`,
   langSet: "Language set to English.",
@@ -82,6 +93,15 @@ const EN: typeof BG = {
   photoFailed: "I couldn't download the photo. Please try again.",
   photoTooBig: "The photo is over 5 MB. Send a smaller one, or send it as a photo rather than a file.",
   error: "Something went wrong. Please try again.",
+  connectUsage: "Connect your WordPress site: install the Site Manager plugin, open Settings → Site Manager, press “Generate code” and send me the line the plugin shows:\n/connect https://your-site.com CODE",
+  connectOwnerOnly: "Only the owner can connect the site.",
+  connectUnavailable: "Connecting sites is not enabled on this server.",
+  connectOk: (name, url) => `✅ Connected the WordPress site “${name}” (${url}). I can now edit its pages, photos and menus; every change is shown to you for approval first.`,
+  connectFailed: (reason) => `I could not connect the site. ${reason}`,
+  publishing: "Your site is being published. I'll message you when it's live (usually within 2–3 minutes).",
+  siteLive: (name, url) => `🎉 ${name}'s site is live: ${url}\n\nFrom now on, changes from this chat show up there within seconds.`,
+  designLive: (url) => `✅ The new design is live: ${url}`,
+  siteFailed: (name) => `Publishing ${name}'s site failed. Open the dashboard and press Try again; until then your site stays available at the address from the welcome message.`,
 };
 
 export function copy(lang: Lang) {
