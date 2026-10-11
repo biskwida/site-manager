@@ -39,6 +39,15 @@ export const TEMPLATE_ACCENT_DEFAULTS: Record<TemplateId, string> = {
   kvartal: "#c23a1c",
 };
 
+/**
+ * The accent after switching designs `from` → `to`: one still on the old design's default (compared case-insensitively)
+ * follows the new design's default; any other accent is the owner's choice and stays. Shared by the wizard Look step and
+ * the dashboard template switch.
+ */
+export function accentAfterTemplateSwitch(accent: string, from: TemplateId, to: TemplateId): string {
+  return accent.toLowerCase() === TEMPLATE_ACCENT_DEFAULTS[from].toLowerCase() ? TEMPLATE_ACCENT_DEFAULTS[to] : accent;
+}
+
 /** The accent presets the Look step offers after the design's own default; template tests check every design against them. */
 export const LOOK_ACCENT_PRESETS: readonly string[] = ["#2f6b4f", "#8f5c10", "#a4442c", "#1d4ed8", "#6b21a8", "#1d2a24"];
 

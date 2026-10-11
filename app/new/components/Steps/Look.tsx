@@ -1,7 +1,7 @@
 "use client";
 import { useState, type ReactNode } from "react";
 import { TEMPLATE_IDS, type Media, type TemplateId } from "@/src/domain/types";
-import { LOOK_ACCENT_PRESETS, TEMPLATE_ACCENT_DEFAULTS } from "@/src/wizard/schema";
+import { accentAfterTemplateSwitch, LOOK_ACCENT_PRESETS, TEMPLATE_ACCENT_DEFAULTS } from "@/src/wizard/schema";
 import { api, WIZARD_MAX_IMAGE_BYTES } from "../api";
 import { fieldError } from "../errors";
 import { Button, Fieldset, FileButton, Status, TextField } from "../Field";
@@ -59,9 +59,10 @@ export function Look({ id, draft, media, update, addMedia, fieldErrors, flush, i
   // Switching designs keeps everything; an accent still on the old design's default follows the new design's default.
   function chooseTemplate(next: TemplateId) {
     if (next === draft.template) return;
-    const followDefault = accent === templateDefault;
-    if (followDefault) setHex(TEMPLATE_ACCENT_DEFAULTS[next]);
-    update({ template: next, ...(followDefault ? { theme: { accent: TEMPLATE_ACCENT_DEFAULTS[next] } } : {}) });
+    const nextAccent = accentAfterTemplateSwitch(draft.theme.accent, draft.template, next);
+    const followDefault = nextAccent !== draft.theme.accent;
+    if (followDefault) setHex(nextAccent);
+    update({ template: next, ...(followDefault ? { theme: { accent: nextAccent } } : {}) });
   }
   return (
     <div className="grid gap-8">

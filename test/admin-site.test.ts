@@ -9,7 +9,7 @@ import { makeDemo } from "./helpers";
 const T0 = new Date("2026-10-10T10:00:00.000Z");
 const ready: DeployInfo = { provider: "fake", project_id: "prj_1", deployment_id: "dpl_1", url: "https://agala.example.test", status: "ready", error: null, template: "classic", updated_at: "2026-10-10T09:00:00.000Z" };
 
-function deps(store: Awaited<ReturnType<typeof makeDemo>>["store"], deployer: Deployer = new FakeDeployer()) {
+function deps(store: Awaited<ReturnType<typeof makeDemo>>["store"], deployer: Deployer | null = new FakeDeployer()) {
   return { store, deployer, feedUrlFor: (slug: string) => `https://site.example/api/site/${slug}`, now: () => T0 };
 }
 
@@ -124,6 +124,20 @@ describe("set_template", () => {
     const r = await setTemplate(deps(flaky, withProject()), await store.getVenue(venue.id), "lumen");
     expect(r).toMatchObject({ ok: true, deploy: { status: "error", error: "Redeploy could not start." } });
     expect((await store.getVenue(venue.id)).deploy).toMatchObject({ status: "error", template: "lumen" });
+  });
+
+  it("moves an accent still on the old template's default (any letter case) to the new template's default; a custom accent stays", async () => {
+    const { store, venue } = await makeDemo();
+    await store.updateVenue(venue.id, { template: "classic", theme: { accent: "#2F6B4F" } });
+    expect(await setTemplate(deps(store, null), await store.getVenue(venue.id), "kvartal")).toMatchObject({ ok: true });
+    expect((await store.getVenue(venue.id)).theme.accent).toBe("#c23a1c");
+    await store.setDeploy(venue.id, { ...ready, template: "kvartal" });
+    expect(await setTemplate(deps(store, withProject()), await store.getVenue(venue.id), "mehana")).toMatchObject({ ok: true, deploy: { status: "building" } });
+    expect((await store.getVenue(venue.id)).theme.accent).toBe("#6e1f1b");
+    await store.updateVenue(venue.id, { theme: { accent: "#1d4ed8" } });
+    await store.setDeploy(venue.id, { ...ready, template: "mehana" });
+    expect(await setTemplate(deps(store, withProject()), await store.getVenue(venue.id), "lumen")).toMatchObject({ ok: true });
+    expect((await store.getVenue(venue.id))).toMatchObject({ template: "lumen", theme: { accent: "#1d4ed8" } });
   });
 
   it("lets only one of two concurrent switches start a redeploy", async () => {

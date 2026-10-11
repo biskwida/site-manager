@@ -8,6 +8,7 @@ import type { Deployer, DeployInput, DomainInstructions } from "../deploy/types"
 import { normalizeDomain } from "../deploy/vercel-domains";
 import type { DestinationStatus, Store, SyncStatus } from "../store/types";
 import { formatDateTime } from "../time";
+import { accentAfterTemplateSwitch } from "../wizard/schema";
 import { connectedApps, type ConnectedApp } from "./connect-apps";
 
 export interface AdminOverview {
@@ -192,9 +193,10 @@ export async function setTemplate(d: AdminSiteDeps, venue: Venue, template: unkn
   const updated_at = d.now().toISOString();
   const claimed: DeployInfo = { ...deploy, deployment_id: "", status: "building", error: null, template: id, updated_at };
   if (!(await d.store.claimDeploy(venue.id, claimed, { whenStatusIn: ["ready", "error"] }))) {
-    // A concurrent switch won the claim: the venue field follows the deploy that is actually running.
-    const winner = (await d.store.getVenue(venue.id).catch(() => null))?.deploy?.template;
-    if (winner && winner !== id) await d.store.updateVenue(venue.id, { template: winner }).catch(() => undefined);
+    // A concurrent switch won the claim: the venue fields follow the deploy that is actually running.
+    const current = await d.store.getVenue(venue.id).catch(() => null);
+    const winner = current?.deploy?.template;
+    if (current && winner && winner !== id) await saveTemplate(d, current, winner, id);
     return BUSY;
   }
   const input: DeployInput = { slug: venue.slug, templateId: id, feedUrl: d.feedUrlFor(venue.slug) };
@@ -212,10 +214,11 @@ export async function setTemplate(d: AdminSiteDeps, venue: Venue, template: unkn
   return { ok: true, template: id, deploy: next };
 }
 
-/** Writes the venue's template; false when the store refuses it. */
-async function saveTemplate(d: AdminSiteDeps, venue: Venue, id: TemplateId): Promise<boolean> {
+/** Writes the venue's template (and moves a default accent along, as the wizard does); false when the store refuses it. */
+async function saveTemplate(d: AdminSiteDeps, venue: Venue, id: TemplateId, from: TemplateId = venue.template): Promise<boolean> {
+  const accent = accentAfterTemplateSwitch(venue.theme.accent, from, id);
   try {
-    await d.store.updateVenue(venue.id, { template: id });
+    await d.store.updateVenue(venue.id, { template: id, ...(accent !== venue.theme.accent ? { theme: { ...venue.theme, accent } } : {}) });
     return true;
   } catch {
     return false;
