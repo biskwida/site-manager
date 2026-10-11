@@ -3,6 +3,7 @@ import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import { isWpEntity, type WpEntity } from "../domain/types";
 import type { Announcement, BusinessType, Category, Change, ChangeSet, Conversation, DeployInfo, DeployStatus, Holiday, InstagramImport, Item, Lang, Media, Member, Role, SiteState, SiteText, SiteTextKey, TemplateId, Venue, VenueStatus } from "../domain/types";
 import type { WizardDraft } from "../wizard/schema";
+import { legacyTelegramId } from "../channels/ref";
 import { DEFAULT_HOURS, extensionFor, newInviteCode, newToken, PUBLISH_CLAIM_TTL_MS, type ChangeSetPatch, type ExpiredTimer, type NewCategory, type NewChangeSet, type NewItem, type NewVenue, type Store, type VenuePatch, type Destination, type DestinationKind, type DestinationPatch, type DestinationSync, type DestinationWithSecrets, type NewDestination, type NewSync, type SyncPatch, type SyncStatus } from "./types";
 
 type Row = Record<string, unknown>;
@@ -11,7 +12,6 @@ type DbError = { message: string; code?: string } | null;
 const str = (v: unknown): string => (v === null || v === undefined ? "" : String(v));
 const strOrNull = (v: unknown): string | null => (v === null || v === undefined ? null : String(v));
 const num = (v: unknown): number => Number(v);
-const numOrNull = (v: unknown): number | null => (v === null || v === undefined ? null : Number(v));
 const iso = (v: unknown): string => new Date(String(v)).toISOString();
 const isoOrNull = (v: unknown): string | null => (v === null || v === undefined ? null : iso(v));
 
@@ -81,7 +81,7 @@ export function toSiteText(r: Row): SiteText {
   return { venue_id: r.venue_id as string, key: r.key as SiteTextKey, text_bg: str(r.text_bg), text_en: str(r.text_en) };
 }
 export function toMember(r: Row): Member {
-  return { venue_id: r.venue_id as string, tg_chat_id: num(r.tg_chat_id), role: r.role as Role, lang: (r.lang as Lang) ?? "bg", created_at: iso(r.created_at) };
+  return { venue_id: r.venue_id as string, chat_ref: str(r.chat_ref), role: r.role as Role, lang: (r.lang as Lang) ?? "bg", last_seen_at: isoOrNull(r.last_seen_at), created_at: iso(r.created_at) };
 }
 export function toChange(r: Row): Change {
   return { position: num(r.position), op: r.op as Change["op"], entity: r.entity as Change["entity"], entity_id: str(r.entity_id), before: (r.before as Row | null) ?? null, after: (r.after as Row | null) ?? null };
@@ -90,7 +90,7 @@ export function toChangeSet(r: Row): ChangeSet {
   return {
     id: r.id as string,
     venue_id: r.venue_id as string,
-    chat_id: numOrNull(r.chat_id),
+    chat_ref: strOrNull(r.chat_ref),
     summary_bg: str(r.summary_bg),
     summary_en: str(r.summary_en),
     preview_bg: str(r.preview_bg),
@@ -103,10 +103,16 @@ export function toChangeSet(r: Row): ChangeSet {
     applied_at: isoOrNull(r.applied_at),
     reverted_by: strOrNull(r.reverted_by),
     undoes_id: strOrNull(r.undoes_id),
-    tg_message_id: numOrNull(r.tg_message_id),
+    message_ref: strOrNull(r.message_ref),
     created_at: iso(r.created_at),
     changes: ((r.changes as Row[]) ?? []).map(toChange).sort((a, b) => a.position - b.position),
   };
+}
+/** Legacy bigint columns, written only for Telegram refs so the production build (Telegram only) keeps working; removed in the phase-2 code cleanup, before the migration runs. */
+export function legacyColumns(chatRef: string | null, messageRef?: string | null): { chat_id: number | null; tg_message_id: number | null } {
+  const chat_id = legacyTelegramId(chatRef); // legacy
+  const tg_message_id = chat_id !== null && messageRef && /^-?\d+$/.test(messageRef) ? Number(messageRef) : null; // legacy
+  return { chat_id, tg_message_id }; // legacy
 }
 
 /** Unwraps a Supabase result; keeps the error code in the message so callers can tell not-found (PGRST116) apart. */
@@ -276,8 +282,8 @@ export class SupabaseStore implements Store {
     await mustRows(this.db.from("venues").update({ cover_media_id: null, logo_media_id: null }).eq("id", venueId).select("id"), "clearVenueContent venue");
   }
 
-  async findMember(chatId: number) {
-    const { data, error } = await this.db.from("venue_members").select("*").eq("tg_chat_id", chatId).maybeSingle();
+  async findMember(chatRef: string) {
+    const { data, error } = await this.db.from("venue_members").select("*").eq("chat_ref", chatRef).maybeSingle();
     if (error) throw new Error(`findMember: ${error.message}`);
     return data ? toMember(data) : null;
   }
@@ -285,14 +291,19 @@ export class SupabaseStore implements Store {
     if (badVenue(venueId)) return [];
     return (await must(this.db.from("venue_members").select("*").eq("venue_id", venueId).order("created_at"), "listMembers")).map(toMember);
   }
-  async upsertMember(m: Omit<Member, "created_at">) {
-    // One venue per chat: drop any previous link first (the unique index on tg_chat_id would reject it).
-    const { error } = await this.db.from("venue_members").delete().eq("tg_chat_id", m.tg_chat_id).neq("venue_id", m.venue_id);
+  async upsertMember(m: Omit<Member, "created_at" | "last_seen_at"> & { last_seen_at?: string | null }) {
+    // One venue per chat: drop any previous link first (the unique index on chat_ref would reject it).
+    const { error } = await this.db.from("venue_members").delete().eq("chat_ref", m.chat_ref).neq("venue_id", m.venue_id);
     if (error) throw new Error(`upsertMember unlink: ${error.message}`);
-    return toMember(await must(this.db.from("venue_members").upsert(m, { onConflict: "venue_id,tg_chat_id" }).select("*").single(), "upsertMember"));
+    const row = { venue_id: m.venue_id, chat_ref: m.chat_ref, role: m.role, lang: m.lang, ...(m.last_seen_at !== undefined ? { last_seen_at: m.last_seen_at } : {}), tg_chat_id: legacyTelegramId(m.chat_ref) }; // legacy: remove in phase 2
+    return toMember(await must(this.db.from("venue_members").upsert(row, { onConflict: "venue_id,chat_ref" }).select("*").single(), "upsertMember"));
   }
-  async setMemberLang(venueId: string, chatId: number, lang: Lang) {
-    await mustRows(this.db.from("venue_members").update({ lang }).eq("venue_id", venueId).eq("tg_chat_id", chatId).select("tg_chat_id"), "setMemberLang");
+  async setMemberLang(venueId: string, chatRef: string, lang: Lang) {
+    await mustRows(this.db.from("venue_members").update({ lang }).eq("venue_id", venueId).eq("chat_ref", chatRef).select("chat_ref"), "setMemberLang");
+  }
+  async touchMember(chatRef: string, nowIso: string) {
+    const { error } = await this.db.from("venue_members").update({ last_seen_at: nowIso }).eq("chat_ref", chatRef);
+    if (error) throw new Error(`touchMember: ${error.message}`);
   }
   async createInvite(venueId: string, role: Role, expiresAt: string) {
     const code = newInviteCode();
@@ -305,13 +316,13 @@ export class SupabaseStore implements Store {
     if (error) throw new Error(`findOpenInvite: ${error.message}`);
     return data ? (data.code as string) : null;
   }
-  async redeemInvite(code: string, chatId: number, lang: Lang, now: string) {
+  async redeemInvite(code: string, chatRef: string, lang: Lang, now: string) {
     const rows = await must(
       this.db.from("venue_invites").update({ used_at: now }).eq("code", code).is("used_at", null).gt("expires_at", now).select("*"),
       "redeemInvite",
     );
     if (rows.length === 0) return null;
-    return this.upsertMember({ venue_id: rows[0].venue_id as string, tg_chat_id: chatId, role: rows[0].role as Role, lang });
+    return this.upsertMember({ venue_id: rows[0].venue_id as string, chat_ref: chatRef, role: rows[0].role as Role, lang });
   }
   async getAdminToken(venueId: string) {
     const { data, error } = await this.db.from("venue_admin_tokens").select("token").eq("venue_id", venueId).maybeSingle();
@@ -328,8 +339,8 @@ export class SupabaseStore implements Store {
   }
 
   async createChangeSet(cs: NewChangeSet) {
-    const { changes, ...head } = cs;
-    const row = await must<Row>(this.db.from("change_sets").insert({ ...head, apply_at: head.apply_at ?? null, undoes_id: head.undoes_id ?? null, tg_message_id: head.tg_message_id ?? null }).select("*").single(), "createChangeSet");
+    const { changes, message_ref, ...head } = cs;
+    const row = await must<Row>(this.db.from("change_sets").insert({ ...head, apply_at: head.apply_at ?? null, undoes_id: head.undoes_id ?? null, message_ref: message_ref ?? null, ...legacyColumns(head.chat_ref, message_ref) }).select("*").single(), "createChangeSet");
     if (changes.length) {
       await must(this.db.from("changes").insert(changes.map((c, i) => ({ change_set_id: row.id, position: i, op: c.op, entity: c.entity, entity_id: c.entity_id, before: c.before, after: c.after }))).select("id"), "createChangeSet changes");
     }
@@ -338,8 +349,8 @@ export class SupabaseStore implements Store {
   async getChangeSet(id: string) {
     return toChangeSet(await must(this.db.from("change_sets").select(SET_SELECT).eq("id", id).single(), `getChangeSet ${id}`));
   }
-  async findProposed(venueId: string, chatId: number) {
-    const rows = await must(this.db.from("change_sets").select(SET_SELECT).eq("venue_id", venueId).eq("chat_id", chatId).eq("status", "proposed").order("created_at", { ascending: false }).limit(1), "findProposed");
+  async findProposed(venueId: string, chatRef: string) {
+    const rows = await must(this.db.from("change_sets").select(SET_SELECT).eq("venue_id", venueId).eq("chat_ref", chatRef).eq("status", "proposed").order("created_at", { ascending: false }).limit(1), "findProposed");
     return rows.length ? toChangeSet(rows[0]) : null;
   }
   async listChangeSets(venueId: string, opts: { status?: ChangeSet["status"][]; limit?: number } = {}) {
@@ -366,8 +377,9 @@ export class SupabaseStore implements Store {
     return (await must(q, "listProposedBefore")).map(toChangeSet);
   }
   async updateChangeSet(id: string, patch: ChangeSetPatch) {
-    const clean = Object.fromEntries(Object.entries(patch).filter(([, v]) => v !== undefined));
+    const clean: Row = Object.fromEntries(Object.entries(patch).filter(([, v]) => v !== undefined));
     if (Object.keys(clean).length === 0) return;
+    if (patch.message_ref !== undefined) clean.tg_message_id = legacyColumns((await this.getChangeSet(id)).chat_ref, patch.message_ref).tg_message_id; // legacy, phase 2
     await mustRows(this.db.from("change_sets").update(clean).eq("id", id).select("id"), `updateChangeSet ${id}`);
   }
 
@@ -459,14 +471,15 @@ export class SupabaseStore implements Store {
     return data ? toMedia(data) : null;
   }
 
-  async getConversation(venueId: string, chatId: number) {
-    const { data, error } = await this.db.from("conversations").select("*").eq("venue_id", venueId).eq("chat_id", chatId).maybeSingle();
+  async getConversation(venueId: string, chatRef: string) {
+    const { data, error } = await this.db.from("conversations").select("*").eq("venue_id", venueId).eq("chat_ref", chatRef).maybeSingle();
     if (error) throw new Error(`getConversation: ${error.message}`);
     if (!data) return null;
     return { turns: (data.turns as Conversation["turns"]) ?? [], correction_for: strOrNull(data.correction_for), updated_at: iso(data.updated_at) };
   }
-  async setConversation(venueId: string, chatId: number, c: Conversation) {
-    await must(this.db.from("conversations").upsert({ venue_id: venueId, chat_id: chatId, turns: c.turns, correction_for: c.correction_for, updated_at: c.updated_at }, { onConflict: "venue_id,chat_id" }).select("chat_id"), "setConversation");
+  async setConversation(venueId: string, chatRef: string, c: Conversation) {
+    const row = { venue_id: venueId, chat_ref: chatRef, chat_id: legacyTelegramId(chatRef), turns: c.turns, correction_for: c.correction_for, updated_at: c.updated_at }; // legacy chat_id: remove in phase 2
+    await must(this.db.from("conversations").upsert(row, { onConflict: "venue_id,chat_ref" }).select("chat_ref"), "setConversation");
   }
 
   async bumpRateLimit(key: string, windowMs: number, max: number, now: string) {

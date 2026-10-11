@@ -67,17 +67,18 @@ function printDebugLogTail() {
 
 class PrintMessenger implements Messenger {
   private n = 1;
-  async send(_c: number, text: string) {
+  async send(_c: string, text: string) {
     console.log(`  [bot] ${text.split("\n")[0]}`);
-    return this.n++;
+    return String(this.n++);
   }
-  async sendProposal(_c: number, text: string) {
+  async sendProposal(_c: string, text: string) {
     console.log(`  [bot proposal] ${text.replace(/\n/g, " | ")}`);
-    return this.n++;
+    return String(this.n++);
   }
-  async edit(_c: number, _m: number, text: string) {
-    console.log(`  [bot edit] ${text.replace(/\n/g, " | ")}`);
+  async conclude(_c: string, _m: string | null, full: string) {
+    console.log(`  [bot edit] ${full.replace(/\n/g, " | ")}`);
   }
+  async typing() {}
 }
 
 async function main() {
@@ -129,7 +130,7 @@ async function main() {
   step("write side: handshake through our connect flow");
   const store0 = new InMemoryStore();
   const { venue } = await seedDemo(store0, feedSlug);
-  await store0.upsertMember({ venue_id: venue.id, tg_chat_id: 1, role: "owner", lang: "bg" });
+  await store0.upsertMember({ venue_id: venue.id, chat_ref: "tg:1", role: "owner", lang: "bg" });
   const secretKey = parseSecretKey(DEV_SECRET_KEY_HEX);
   const syncDeps = { store: store0, secretKey, log: (s: string) => console.log(`  ${s}`) };
   const store = withDestinationSync(store0, syncDeps);
@@ -164,11 +165,11 @@ async function main() {
   const site = await store0.getSite(venue.id);
   site.media.find((m) => m.id === photo.id)!.public_url = `http://host.docker.internal:${PHOTO_PORT}/photo.png`;
   store0.sites.set(venue.id, site);
-  const member = (await store.findMember(1))!;
+  const member = (await store.findMember("tg:1"))!;
   const wpc = await wordPressClientFor({ store, secretKey }, venue.id);
   assert(wpc, "client not available after connect");
   const messenger = new PrintMessenger();
-  const tools = makeTools({ store, venueId: venue.id, chatId: 1, member, messenger, now: () => new Date(), baseUrl: "http://localhost:3000", wordpress: wpc.client });
+  const tools = makeTools({ store, venueId: venue.id, chatRef: "tg:1", member, messenger, now: () => new Date(), baseUrl: "http://localhost:3000", wordpress: wpc.client });
   const call = async (name: string, input: unknown) => {
     const t = tools.find((x) => x.name === name)!;
     return JSON.parse(await (t.run as (i: unknown) => Promise<string>)(t.parse(input))) as Record<string, unknown>;

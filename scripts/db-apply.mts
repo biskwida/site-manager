@@ -1,16 +1,18 @@
 // scripts/db-apply.mts
 // Applies supabase/schema.sql, policies.sql, schema-integrations.sql and policies-integrations.sql to SUPABASE_DB_URL. Idempotent.
+// With file arguments, applies only those: `npm run db:apply -- supabase/migrations/2026-10-10-chat-ref.sql` applies one file.
 import { readFile } from "node:fs/promises";
 import pg from "pg";
 
 const url = process.env.SUPABASE_DB_URL?.trim();
 if (!url) throw new Error("Missing SUPABASE_DB_URL (Supabase → Settings → Database → Connection string URI); put it in .env.local");
 
+const files = process.argv.slice(2).length ? process.argv.slice(2) : ["schema.sql", "policies.sql", "schema-integrations.sql", "policies-integrations.sql"];
 const client = new pg.Client({ connectionString: url, ssl: { rejectUnauthorized: false } });
 await client.connect();
 try {
-  for (const file of ["schema.sql", "policies.sql", "schema-integrations.sql", "policies-integrations.sql"]) {
-    const sql = await readFile(new URL(`../supabase/${file}`, import.meta.url), "utf8");
+  for (const file of files) {
+    const sql = await readFile(new URL(`../${file.startsWith("supabase/") ? file : "supabase/" + file}`, import.meta.url), "utf8");
     await client.query(sql);
     console.log(`applied ${file}`);
   }

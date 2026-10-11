@@ -2,6 +2,7 @@
 // Deploy lifecycle over the Store: startDeploy (pending → building | error) and pollDeployments (building → ready | error, owner notifications).
 import { copy } from "../bot/copy";
 import type { Messenger } from "../bot/messenger";
+import { maskRef } from "../channels/ref";
 import type { DeployInfo, Lang, Venue } from "../domain/types";
 import type { Store } from "../store/types";
 import type { Deployer, DeployInput, DeployStatusResult } from "./types";
@@ -159,9 +160,9 @@ async function notify(d: PollDeps, venue: Venue, text: (lang: Lang) => string): 
   for (const m of await d.store.listMembers(venue.id)) {
     if (m.role !== "owner") continue;
     try {
-      await d.messenger.send(m.tg_chat_id, text(m.lang));
+      await d.messenger.send(m.chat_ref, text(m.lang), { proactive: true });
     } catch (e) {
-      console.error(`[deploy] notify ${venue.slug} chat ${m.tg_chat_id} failed:`, short(e));
+      console.error(`[deploy] notify ${venue.slug} chat ${maskRef(m.chat_ref)} failed:`, short(e));
     }
   }
 }

@@ -3,6 +3,12 @@
 import Anthropic from "@anthropic-ai/sdk";
 import type { Bot } from "grammy";
 import { runTurn } from "../agent/run";
+import { ConsoleMessenger } from "../channels/console";
+import { downloadUrl, downloadWhatsAppMedia, type MediaFetch } from "../channels/meta/graph";
+import { MetaMessenger } from "../channels/meta/send";
+import { makeRef, type Channel } from "../channels/ref";
+import { ChannelRouter } from "../channels/router";
+import { WhatsAppMessenger } from "../channels/whatsapp/send";
 import { createBot, type BotDeps, type RunRequest } from "../bot/bot";
 import { downloadTelegramFile } from "../bot/media";
 import { TelegramMessenger, type Messenger } from "../bot/messenger";
@@ -26,8 +32,15 @@ import { connectWordPress, wordPressClientFor } from "../destinations/connect";
 export interface ServerDeps {
   config: Config;
   store: Store;
+  /** The ChannelRouter: dispatches by chat_ref prefix to the per-channel adapters. */
   messenger: Messenger;
   bot: Bot;
+  /** Shared with createBot; the Meta webhook route reuses it for inbound handling. */
+  botDeps: BotDeps;
+  /** WhatsApp media id → bytes (two-step Graph download with the bearer token). */
+  waDownload: MediaFetch;
+  /** Plain URL → bytes (Messenger/Instagram attachment URLs). */
+  fetchUrl: MediaFetch;
   /** Per-venue tick, then the agent turn. Logs and swallows errors. */
   handleRun: (r: RunRequest) => Promise<void>;
   isMemory: boolean;
@@ -77,7 +90,8 @@ export async function makeServerDeps(o: DepsOptions): Promise<ServerDeps> {
       const mem = new InMemoryStore();
       const { venue } = await seedDemo(mem, config.demoVenueSlug);
       const chat = Number(env.DEMO_OWNER_CHAT_ID);
-      if (Number.isInteger(chat) && chat > 0) await mem.upsertMember({ venue_id: venue.id, tg_chat_id: chat, role: "owner", lang: "bg" });
+      const ref = env.DEMO_OWNER_CHAT_REF?.trim() || (Number.isInteger(chat) && chat > 0 ? makeRef("tg", chat) : null);
+      if (ref) await mem.upsertMember({ venue_id: venue.id, chat_ref: ref, role: "owner", lang: "bg" });
       log(`[memory store] demo venue "${venue.slug}" seeded; admin link: ${config.publicBaseUrl}/admin/${venue.slug}?key=${await mem.getAdminToken(venue.id)}`);
       store = mem;
     } else {
@@ -126,8 +140,14 @@ export async function makeServerDeps(o: DepsOptions): Promise<ServerDeps> {
     onOwnerJoined: deployer ? startDeploy : undefined,
   };
   const bot = createBot(botDeps);
-  const messenger: Messenger = new TelegramMessenger(bot.api);
+  const adapters: Partial<Record<Channel, Messenger>> = { tg: new TelegramMessenger(bot.api) };
+  if (config.metaPageToken) adapters.fb = adapters.ig = new MetaMessenger({ pageToken: config.metaPageToken });
+  if (config.whatsappToken && config.whatsappPhoneNumberId) adapters.wa = new WhatsAppMessenger({ token: config.whatsappToken, phoneNumberId: config.whatsappPhoneNumberId });
+  if (isMemory) for (const ch of ["fb", "ig", "wa"] as const) adapters[ch] ??= new ConsoleMessenger(log);
+  const messenger = new ChannelRouter({ store: store2, now: () => new Date(), adapters });
   botDeps.messenger = messenger;
+  const waDownload: MediaFetch = (mediaId) => downloadWhatsAppMedia(config.whatsappToken ?? "", mediaId);
+  const fetchUrl: MediaFetch = (url) => downloadUrl(url);
 
   async function handleRun(r: RunRequest): Promise<void> {
     try {
@@ -138,7 +158,7 @@ export async function makeServerDeps(o: DepsOptions): Promise<ServerDeps> {
     const wp = sync ? await wordPressClientFor({ store: s, secretKey: destinationSecretKey }, r.venueId).catch(() => null) : null;
     try {
       await runTurn(
-        { store: store2, venueId: r.venueId, chatId: r.chatId, member: r.member, messenger, now: () => new Date(), baseUrl: config.publicBaseUrl, wordpress: wp?.client ?? null },
+        { store: store2, venueId: r.venueId, chatRef: r.chatRef, member: r.member, messenger, now: () => new Date(), baseUrl: config.publicBaseUrl, wordpress: wp?.client ?? null },
         { text: r.text, source: r.source, image: r.image, mediaId: r.mediaId },
         { model: config.agentModel, effort: config.agentEffort, apiKey: config.anthropicApiKey || undefined },
         o.client,
@@ -149,7 +169,7 @@ export async function makeServerDeps(o: DepsOptions): Promise<ServerDeps> {
   }
 
   const outbound: typeof fetch = o.fetch ?? ((input, init) => fetch(input, init));
-  return { config, store: store2, messenger, bot, handleRun, isMemory, deployer, startDeploy, watchDeploy, anthropic, destinationSecretKey, sync, fetch: outbound };
+  return { config, store: store2, messenger, bot, botDeps, waDownload, fetchUrl, handleRun, isMemory, deployer, startDeploy, watchDeploy, anthropic, destinationSecretKey, sync, fetch: outbound };
 }
 
 // On globalThis, not a module variable: `next dev` (HMR, separate route bundles) then shares one in-memory store between pages and API routes.

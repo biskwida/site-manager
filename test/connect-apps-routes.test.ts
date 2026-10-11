@@ -16,7 +16,7 @@ afterEach(() => {
   g.__siteManagerDeps = undefined;
 });
 
-const META = { MESSENGER_PAGE_HANDLE: "sitemanager", INSTAGRAM_USERNAME: "site.manager", WHATSAPP_NUMBER: "359888123456" };
+const META = { MESSENGER_PAGE_HANDLE: "sitemanager", INSTAGRAM_USERNAME: "site.manager", WHATSAPP_NUMBER: "359888123456", META_PAGE_TOKEN: "page-token", META_APP_SECRET: "app-secret", META_VERIFY_TOKEN: "verify", WHATSAPP_TOKEN: "wa-token", WHATSAPP_PHONE_NUMBER_ID: "1234" };
 
 async function serve(env: Record<string, string> = {}) {
   const deps = await makeServerDeps({ defer: (fn) => void fn(), env: { SITE_MANAGER_STORE: "memory", PUBLIC_BASE_URL: BASE, TELEGRAM_BOT_USERNAME: "site_bot", ...env }, log: () => {} });
@@ -61,9 +61,9 @@ describe("POST /api/new/[id]/invite", () => {
     expect(exp).toBeGreaterThanOrEqual(before + INVITE_TTL_MS);
     expect(exp).toBeLessThanOrEqual(Date.now() + INVITE_TTL_MS);
     // both codes work: a second app links with the fresh one after the first used the publish code
-    expect(await deps.store.redeemInvite(pub.invite_code, 7001, "bg", new Date().toISOString())).toMatchObject({ role: "owner" });
-    expect(await deps.store.redeemInvite(body.code, 7002, "bg", new Date().toISOString())).toMatchObject({ role: "owner" });
-    expect(await deps.store.redeemInvite(body.code, 7003, "bg", new Date().toISOString())).toBeNull(); // single use
+    expect(await deps.store.redeemInvite(pub.invite_code, "tg:7001", "bg", new Date().toISOString())).toMatchObject({ role: "owner" });
+    expect(await deps.store.redeemInvite(body.code, "tg:7002", "bg", new Date().toISOString())).toMatchObject({ role: "owner" });
+    expect(await deps.store.redeemInvite(body.code, "tg:7003", "bg", new Date().toISOString())).toBeNull(); // single use
   });
   it("keeps the Meta apps out until CHANNELS_ENABLED, then links all four", async () => {
     const off = await serve(META);
@@ -114,13 +114,13 @@ describe("connected_apps", () => {
     expect((await status()).connected_apps).toEqual([]);
     const pub = await publish();
     expect((await status()).connected_apps).toEqual([]);
-    await deps.store.redeemInvite(pub.invite_code, 7001, "bg", new Date().toISOString());
+    await deps.store.redeemInvite(pub.invite_code, "tg:7001", "bg", new Date().toISOString());
     expect(await status()).toMatchObject({ owner_joined: true, connected_apps: [{ app: "telegram", owners: 1, staff: 0 }] });
   });
   it("the dashboard overview lists them and new_owner_code returns a fresh code (admin key required)", async () => {
     const { deps, publish } = await serve({ ...META, CHANNELS_ENABLED: "true" });
     const pub = await publish();
-    await deps.store.redeemInvite(pub.invite_code, 7001, "bg", new Date().toISOString());
+    await deps.store.redeemInvite(pub.invite_code, "tg:7001", "bg", new Date().toISOString());
     const url = (key: string) => `${BASE}/api/admin/${pub.slug}?key=${key}`;
     const overview = (await (await adminGet(new Request(url(pub.key)), adminCtx(pub.slug))).json()) as { connected_apps: unknown };
     expect(overview.connected_apps).toEqual([{ app: "telegram", owners: 1, staff: 0 }]);
@@ -131,6 +131,6 @@ describe("connected_apps", () => {
     const body = (await res.json()) as { ok: boolean; code: string; links: { app: string }[]; expires_at: string };
     expect(body.ok).toBe(true);
     expect(body.links.map((l) => l.app)).toEqual(["telegram", "whatsapp", "messenger", "instagram"]);
-    expect(await deps.store.redeemInvite(body.code, 7002, "en", new Date().toISOString())).toMatchObject({ role: "owner" });
+    expect(await deps.store.redeemInvite(body.code, "tg:7002", "en", new Date().toISOString())).toMatchObject({ role: "owner" });
   });
 });

@@ -1,8 +1,9 @@
 // src/server/connect-apps.ts
 // Server-only. Which messaging apps an owner can connect, and the deep link that hands each app the owner's invite code.
-// This is the seam to build/channels: today members are Telegram-only and the links are built here; after that branch
-// merges, connectLinks delegates to src/channels/links.ts and memberApp parses chat_ref (see the "wire on merge" notes).
+// Links come from src/channels/links.ts (startLinks); a member's app comes from its chat_ref (src/channels/ref.ts).
 import { INVITE_TTL_MS } from "../bot/bot";
+import { startLinks } from "../channels/links";
+import { channelOf } from "../channels/ref";
 import type { Config } from "../config";
 import type { Member, Venue } from "../domain/types";
 import type { Store } from "../store/types";
@@ -11,44 +12,33 @@ export type AppChannel = "telegram" | "whatsapp" | "messenger" | "instagram";
 /** Display and link order. */
 export const APP_ORDER: readonly AppChannel[] = ["telegram", "whatsapp", "messenger", "instagram"];
 
-export type AppsConfig = Pick<Config, "telegramBotUsername" | "messengerPageHandle" | "instagramUsername" | "whatsappNumber" | "channelsEnabled">;
+export type AppsConfig = Pick<Config, "telegramBotUsername" | "messengerPageHandle" | "instagramUsername" | "whatsappNumber" | "channelsEnabled" | "metaPageToken" | "whatsappToken">;
 
 /**
- * Telegram when TELEGRAM_BOT_USERNAME is set; WhatsApp, Messenger and Instagram when their handle is set AND CHANNELS_ENABLED
- * is true. The gate keeps the Meta apps hidden in production until the code that answers them is deployed.
+ * Telegram when TELEGRAM_BOT_USERNAME is set. WhatsApp, Messenger and Instagram when CHANNELS_ENABLED is true, their link
+ * handle is set AND the channel's token is configured (WHATSAPP_TOKEN; META_PAGE_TOKEN for Messenger and Instagram), so an
+ * owner is never sent to an app this deployment does not answer.
  */
 export function enabledApps(config: AppsConfig): AppChannel[] {
   const on: Record<AppChannel, boolean> = {
     telegram: !!config.telegramBotUsername,
-    whatsapp: config.channelsEnabled && !!config.whatsappNumber,
-    messenger: config.channelsEnabled && !!config.messengerPageHandle,
-    instagram: config.channelsEnabled && !!config.instagramUsername,
+    whatsapp: config.channelsEnabled && !!config.whatsappToken && !!config.whatsappNumber,
+    messenger: config.channelsEnabled && !!config.metaPageToken && !!config.messengerPageHandle,
+    instagram: config.channelsEnabled && !!config.metaPageToken && !!config.instagramUsername,
   };
   return APP_ORDER.filter((a) => on[a]);
 }
 
-/**
- * One owner link per enabled app, the code URL-encoded. Same URL shapes as startLinks on build/channels.
- * Replace with src/channels/links.ts startLinks after build/channels merges.
- */
+/** One owner link per enabled app (startLinks URL-encodes the code). */
 export function connectLinks(config: AppsConfig, code: string): { app: AppChannel; url: string }[] {
-  const c = encodeURIComponent(code);
-  const url: Record<AppChannel, () => string> = {
-    telegram: () => `https://t.me/${config.telegramBotUsername}?start=${c}`,
-    whatsapp: () => `https://wa.me/${config.whatsappNumber}?text=${c}`,
-    messenger: () => `https://m.me/${config.messengerPageHandle}?ref=${c}`,
-    instagram: () => `https://ig.me/m/${config.instagramUsername}?ref=${c}`,
-  };
-  return enabledApps(config).map((app) => ({ app, url: url[app]() }));
+  const all = startLinks(config, code);
+  return enabledApps(config).flatMap((app) => (all[app] ? [{ app, url: all[app] }] : []));
 }
 
-/**
- * The app a member is linked through. Today every member is a Telegram chat (tg_chat_id).
- * After build/channels merges, parse member.chat_ref ("tg:" | "wa:" | "fb:" | "ig:" + id) instead.
- */
+const BY_CHANNEL = { tg: "telegram", wa: "whatsapp", fb: "messenger", ig: "instagram" } as const;
+/** The app a member is linked through, from its chat_ref ("tg:" | "wa:" | "fb:" | "ig:" + id). */
 export function memberApp(member: Member): AppChannel {
-  void member;
-  return "telegram";
+  return BY_CHANNEL[channelOf(member.chat_ref)];
 }
 
 export interface ConnectedApp {

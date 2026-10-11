@@ -14,7 +14,7 @@ describe("wordPressOverview", () => {
     expect(await wordPressOverview(store, venue.id)).toBeNull();
     const dest = await store.upsertDestination({ venue_id: venue.id, kind: "wordpress", config: { site_url: "https://cafe.example", site_name: "Smoke Café", connected_at: T0.toISOString() }, secrets: "SECRET-BLOB" });
     for (let i = 0; i < 6; i++) {
-      const cs = await store.createChangeSet({ venue_id: venue.id, chat_id: null, summary_bg: `Промяна ${i}`, summary_en: `Change ${i}`, preview_bg: "", preview_en: "", source: "text", status: "proposed", changes: [] });
+      const cs = await store.createChangeSet({ venue_id: venue.id, chat_ref: null, summary_bg: `Промяна ${i}`, summary_en: `Change ${i}`, preview_bg: "", preview_en: "", source: "text", status: "proposed", changes: [] });
       const s = await store.createSync({ venue_id: venue.id, destination_id: dest.id, change_set_id: cs.id, payload: { kind: "wordpress" }, next_at: T0.toISOString() });
       await store.updateSync(s.id, { status: i === 5 ? "failed" : "done", last_error: i === 5 ? "boom" : null });
     }

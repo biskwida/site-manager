@@ -9,8 +9,8 @@ const T0 = new Date("2026-10-09T09:00:00.000Z");
 async function setup() {
   const demo = await makeDemo();
   const messenger = new FakeMessenger();
-  const member = (await demo.store.findMember(1001))!;
-  const deps: AgentDeps = { store: demo.store, venueId: demo.venue.id, chatId: 1001, member, messenger, now: () => T0, baseUrl: "https://site.example" };
+  const member = (await demo.store.findMember("tg:1001"))!;
+  const deps: AgentDeps = { store: demo.store, venueId: demo.venue.id, chatRef: "tg:1001", member, messenger, now: () => T0, baseUrl: "https://site.example" };
   return { ...demo, messenger, deps, tools: makeTools(deps) };
 }
 
@@ -97,17 +97,17 @@ describe("undo", () => {
     expect((await call(base.tools, "undo", { change_set_id: "last" })).error).toMatch(/Nothing to undo/);
     const p = await call(base.tools, "propose_changes", { summary_bg: "x", summary_en: "x", changes: [{ op: "set_price", item_id: base.items.Latte.id, price_eur: 3.5 }] });
     expect((await call(base.tools, "undo", { change_set_id: p.change_set_id })).error).toMatch(/"proposed"/);
-    const staff = (await base.store.findMember(1002))!;
-    const staffTools = makeTools({ ...base.deps, chatId: 1002, member: staff });
+    const staff = (await base.store.findMember("tg:1002"))!;
+    const staffTools = makeTools({ ...base.deps, chatRef: "tg:1002", member: staff });
     expect((await call(staffTools, "undo", { change_set_id: "last" })).error).toMatch(/only the owner/);
   });
   it("skips auto sets when looking for the last one", async () => {
     const { tools, store, venue, items } = await setup();
     const site = await store.getSite(venue.id);
     const { planChanges } = await import("@/src/domain/changes");
-    const real = await store.createChangeSet({ venue_id: venue.id, chat_id: 1001, summary_bg: "Истинска", summary_en: "Real", preview_bg: "p", preview_en: "p", source: "text", status: "proposed", changes: planChanges(site, [{ op: "set_price", item_id: items.Tea.id, price_eur: 2.2 }], { newId: () => "n", now: T0.toISOString() }) });
+    const real = await store.createChangeSet({ venue_id: venue.id, chat_ref: "tg:1001", summary_bg: "Истинска", summary_en: "Real", preview_bg: "p", preview_en: "p", source: "text", status: "proposed", changes: planChanges(site, [{ op: "set_price", item_id: items.Tea.id, price_eur: 2.2 }], { newId: () => "n", now: T0.toISOString() }) });
     await store.applyChangeSet(real.id, T0.toISOString());
-    const auto = await store.createChangeSet({ venue_id: venue.id, chat_id: null, summary_bg: "авто", summary_en: "auto", preview_bg: "p", preview_en: "p", source: "auto", status: "proposed", changes: [] });
+    const auto = await store.createChangeSet({ venue_id: venue.id, chat_ref: null, summary_bg: "авто", summary_en: "auto", preview_bg: "p", preview_en: "p", source: "auto", status: "proposed", changes: [] });
     await store.applyChangeSet(auto.id, "2026-10-09T09:01:00.000Z");
     const u = await call(tools, "undo", { change_set_id: "last" });
     expect(u.undoes).toBe(real.id);
@@ -118,9 +118,9 @@ describe("undo", () => {
     const { planChanges } = await import("@/src/domain/changes");
     const ctx = { newId: () => "n", now: T0.toISOString() };
     // A is created first and applied later (T0+1h), like a scheduled set that lands after a quick fix.
-    const a = await store.createChangeSet({ venue_id: venue.id, chat_id: 1001, summary_bg: "A", summary_en: "A", preview_bg: "p", preview_en: "p", source: "text", status: "proposed", changes: planChanges(site, [{ op: "set_price", item_id: items.Tea.id, price_eur: 2.2 }], ctx) });
+    const a = await store.createChangeSet({ venue_id: venue.id, chat_ref: "tg:1001", summary_bg: "A", summary_en: "A", preview_bg: "p", preview_en: "p", source: "text", status: "proposed", changes: planChanges(site, [{ op: "set_price", item_id: items.Tea.id, price_eur: 2.2 }], ctx) });
     // B is created second and applied earlier (T0).
-    const b = await store.createChangeSet({ venue_id: venue.id, chat_id: 1001, summary_bg: "B", summary_en: "B", preview_bg: "p", preview_en: "p", source: "text", status: "scheduled", apply_at: T0.toISOString(), changes: planChanges(site, [{ op: "set_price", item_id: items.Latte.id, price_eur: 3.5 }], ctx) });
+    const b = await store.createChangeSet({ venue_id: venue.id, chat_ref: "tg:1001", summary_bg: "B", summary_en: "B", preview_bg: "p", preview_en: "p", source: "text", status: "scheduled", apply_at: T0.toISOString(), changes: planChanges(site, [{ op: "set_price", item_id: items.Latte.id, price_eur: 3.5 }], ctx) });
     await store.applyChangeSet(b.id, T0.toISOString());
     await store.applyChangeSet(a.id, "2026-10-09T10:00:00.000Z");
     const u = await call(tools, "undo", { change_set_id: "last" });

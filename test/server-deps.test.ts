@@ -14,7 +14,7 @@ describe("makeServerDeps (memory mode)", () => {
     const venue = await deps.store.getVenueBySlug("agala");
     expect(venue?.name).toBe("Кафене „Ъгъла“");
     expect((await deps.store.getSite(venue!.id)).items.length).toBe(12);
-    expect(await deps.store.findMember(777)).toMatchObject({ role: "owner" });
+    expect(await deps.store.findMember("tg:777")).toMatchObject({ role: "owner" });
     expect(logs.join("\n")).toMatch(/admin link: http:\/\/localhost:3000\/admin\/agala\?key=/);
     expect(deps.anthropic).toBeNull(); // no ANTHROPIC_API_KEY: the wizard AI routes answer 503
   });
@@ -61,8 +61,8 @@ describe("makeServerDeps (memory mode)", () => {
     expect((await deps.store.getVenue(venue.id)).deploy).toMatchObject({ provider: "fake", status: "ready", url: "https://agala.example.test" });
     expect(api.texts().filter((t) => t.includes("https://agala.example.test"))).toHaveLength(1);
     // a later per-webhook tick (handleRun) finds nothing in flight and sends nothing more
-    const member = (await deps.store.findMember(4001))!;
-    await deps.handleRun({ venueId: venue.id, chatId: 4001, member, text: "", source: "text" as const });
+    const member = (await deps.store.findMember("tg:4001"))!;
+    await deps.handleRun({ venueId: venue.id, chatRef: "tg:4001", member, text: "", source: "text" as const });
     expect(api.texts().filter((t) => t.includes("https://agala.example.test"))).toHaveLength(1);
   });
 
@@ -136,8 +136,18 @@ describe("makeServerDeps (Supabase mode)", () => {
     const venue = (await deps.store.getVenueBySlug("agala"))!;
     // Undecryptable secrets: the push fails at once without any network call, but the sync row must exist.
     await deps.store.upsertDestination({ venue_id: venue.id, kind: "wordpress", config: { site_url: "https://cafe.example" }, secrets: "not-a-blob" });
-    const cs = await deps.store.createChangeSet({ venue_id: venue.id, chat_id: null, summary_bg: "s", summary_en: "s", preview_bg: "p", preview_en: "p", source: "text", status: "proposed", changes: [{ position: 0, op: "wp_set_option", entity: "wp_option", entity_id: "blogname", before: { value: "A" }, after: { value: "B" } }] });
+    const cs = await deps.store.createChangeSet({ venue_id: venue.id, chat_ref: null, summary_bg: "s", summary_en: "s", preview_bg: "p", preview_en: "p", source: "text", status: "proposed", changes: [{ position: 0, op: "wp_set_option", entity: "wp_option", entity_id: "blogname", before: { value: "A" }, after: { value: "B" } }] });
     expect(await deps.store.applyChangeSet(cs.id, new Date().toISOString())).toBe("applied");
     expect(await deps.store.listSyncs({ changeSetId: cs.id })).toHaveLength(1);
+  });
+  it("routes Meta refs to console adapters in memory mode (no tokens)", async () => {
+    const logs: string[] = [];
+    const deps = await makeServerDeps({ defer: (fn) => void fn(), env: { SITE_MANAGER_STORE: "memory", DEMO_OWNER_CHAT_REF: "fb:4242" }, log: (s) => logs.push(s) });
+    expect(await deps.store.findMember("fb:4242")).toMatchObject({ role: "owner" });
+    expect(await deps.messenger.send("fb:4242", "hi")).toBe("c1");
+    expect(logs).toContain("→ [fb:4242] hi");
+    expect(deps.botDeps.messenger).toBe(deps.messenger);
+    expect(typeof deps.waDownload).toBe("function");
+    expect(typeof deps.fetchUrl).toBe("function");
   });
 });

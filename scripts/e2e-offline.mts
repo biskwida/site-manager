@@ -1,37 +1,24 @@
 // scripts/e2e-offline.mts
 // npm run e2e  — the demo flow offline (memory store, no network, no keys):
-// proposal → approve → applied; instant sold-out; specials; schedule; undo; bulk via the dashboard; tick. Exit 1 on any mismatch.
+// proposal → approve → applied; instant sold-out; specials; schedule; undo; bulk via the dashboard; tick; a Messenger owner via handleInbound + ChannelRouter. Exit 1 on any mismatch.
 import { makeTools } from "../src/agent/tools";
 import { handleDecision } from "../src/bot/approvals";
-import type { Messenger } from "../src/bot/messenger";
+import { handleInbound } from "../src/bot/inbound";
+import { ConsoleMessenger } from "../src/channels/console";
+import { ChannelRouter } from "../src/channels/router";
 import { seedDemo } from "../src/seed/demo";
 import { adminAction, adminOverview } from "../src/server/admin";
 import { InMemoryStore } from "../src/store/memory";
 import { runTick } from "../src/tick";
 
-class ConsoleMessenger implements Messenger {
-  private next = 1;
-  async send(chatId: number, text: string) {
-    console.log(`→ [${chatId}] ${text}`);
-    return this.next++;
-  }
-  async sendProposal(chatId: number, text: string) {
-    console.log(`→ [${chatId}] ${text}\n   [✅ Приложи] [✏️ Промени] [❌ Откажи]`);
-    return this.next++;
-  }
-  async edit(chatId: number, messageId: number, text: string) {
-    console.log(`✎ [${chatId}#${messageId}] ${text.split("\n").pop()}`);
-  }
-}
-
 const store = new InMemoryStore();
 const { venue, items } = await seedDemo(store);
-await store.upsertMember({ venue_id: venue.id, tg_chat_id: 1, role: "owner", lang: "bg" });
-const member = (await store.findMember(1))!;
+await store.upsertMember({ venue_id: venue.id, chat_ref: "tg:1", role: "owner", lang: "bg" });
+const member = (await store.findMember("tg:1"))!;
 const messenger = new ConsoleMessenger();
 let now = new Date("2026-10-09T09:00:00.000Z"); // Friday 12:00 in Sofia
 const clock = () => now;
-const tools = makeTools({ store, venueId: venue.id, chatId: 1, member, messenger, now: clock, baseUrl: "http://localhost:3000" });
+const tools = makeTools({ store, venueId: venue.id, chatRef: "tg:1", member, messenger, now: clock, baseUrl: "http://localhost:3000" });
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 const call = async (name: string, input: unknown): Promise<any> => {
   const t = tools.find((x) => x.name === name);
@@ -47,7 +34,7 @@ const assert = (cond: unknown, msg: string) => {
   }
   console.log(`PASS ${msg}`);
 };
-const decide = (setId: string) => handleDecision({ store, messenger, now: clock }, 1, "apply", setId);
+const decide = (setId: string) => handleDecision({ store, messenger, now: clock }, "tg:1", "apply", setId);
 const price = async (id: string) => (await store.getSite(venue.id)).items.find((i) => i.id === id)!.price_eur;
 const cap = items.find((i) => i.name_en === "Cappuccino")!;
 const ban = items.find((i) => i.name_en === "Cheese banitsa")!;
@@ -97,6 +84,21 @@ assert(t1.auto.length === 2, "banitsa back in stock + special expired, logged as
 now = new Date("2026-12-20T06:30:00.000Z");
 const t2 = await runTick({ store, messenger, now });
 assert(t2.applied.includes(sc.change_set_id) && (await store.getSite(venue.id)).holidays.length === 2, "scheduled holidays applied on time");
+
+console.log("\n8. Messenger owner: bare-code link, apply tap, the 24 h rule");
+// Meta leg: a Messenger owner links with a bare code, proposes, taps apply; a proactive reminder is skipped after 25 h of silence.
+const fbLog: string[] = [];
+const router = new ChannelRouter({ store, now: clock, adapters: { fb: new ConsoleMessenger((l) => fbLog.push(l)) } });
+const botDeps = { token: "t", store, messenger: router, baseUrl: "http://localhost:3000", now: clock, startRun: () => undefined, transcribe: null, download: async () => ({ bytes: new Uint8Array(), contentType: "" }) };
+const code = await store.createInvite(venue.id, "owner", new Date(clock().getTime() + 86_400_000).toISOString());
+await handleInbound(botDeps, { chatRef: "fb:4242", kind: "text", text: code });
+assert(fbLog.at(-1)?.includes("Свързахте се като собственик") === true, "fb owner linked with a bare code");
+const metaCs = await store.createChangeSet({ venue_id: venue.id, chat_ref: "fb:4242", summary_bg: "Чай 2,20 €", summary_en: "Tea €2.20", preview_bg: "• Чай: 2,00 € → 2,20 €", preview_en: "• Tea", source: "text", status: "proposed", changes: [] });
+await handleInbound(botDeps, { chatRef: "fb:4242", kind: "button", text: `cs:apply:${metaCs.id}` });
+assert((await store.getChangeSet(metaCs.id)).status === "applied" && fbLog.at(-1)?.includes("✅ Приложено") === true, "fb apply tap concluded");
+assert((await router.send("fb:4242", "reminder", { proactive: true })) !== null, "proactive inside the window is sent");
+await store.touchMember("fb:4242", new Date(clock().getTime() - 25 * 3_600_000).toISOString());
+assert((await router.send("fb:4242", "reminder", { proactive: true })) === null, "proactive after 25 h is skipped");
 
 const o = await adminOverview(store, venue, now, "http://x");
 console.log(`\nlog: ${o.log.map((s) => `${s.status}:${s.summary_en}`).join(" | ")}`);

@@ -3,8 +3,8 @@ import { describe, expect, it } from "vitest";
 import { loadConfig } from "@/src/config";
 import { connectedApps, connectLinks, enabledApps, memberApp, type AppsConfig } from "@/src/server/connect-apps";
 
-const none: AppsConfig = { telegramBotUsername: null, messengerPageHandle: null, instagramUsername: null, whatsappNumber: null, channelsEnabled: false };
-const all: AppsConfig = { telegramBotUsername: "site_bot", messengerPageHandle: "sitemanager", instagramUsername: "site.manager", whatsappNumber: "359888123456", channelsEnabled: true };
+const none: AppsConfig = { telegramBotUsername: null, messengerPageHandle: null, instagramUsername: null, whatsappNumber: null, channelsEnabled: false, metaPageToken: null, whatsappToken: null };
+const all: AppsConfig = { telegramBotUsername: "site_bot", messengerPageHandle: "sitemanager", instagramUsername: "site.manager", whatsappNumber: "359888123456", channelsEnabled: true, metaPageToken: "page-token", whatsappToken: "wa-token" };
 
 describe("loadConfig: app link keys", () => {
   const lenient = (env: Record<string, string>) => loadConfig(env, { lenient: true });
@@ -53,9 +53,9 @@ describe("enabledApps", () => {
     expect(enabledApps({ ...all, channelsEnabled: false })).toEqual(["telegram"]);
     expect(enabledApps({ ...all, channelsEnabled: false, telegramBotUsername: null })).toEqual([]);
   });
-  it("lists each app whose handle is set once channels are enabled, Telegram first", () => {
+  it("lists each app whose handle and token are set once channels are enabled, Telegram first", () => {
     expect(enabledApps(all)).toEqual(["telegram", "whatsapp", "messenger", "instagram"]);
-    expect(enabledApps({ ...none, channelsEnabled: true, whatsappNumber: "359888123456" })).toEqual(["whatsapp"]);
+    expect(enabledApps({ ...none, channelsEnabled: true, whatsappNumber: "359888123456", whatsappToken: "wa-token" })).toEqual(["whatsapp"]);
     expect(enabledApps({ ...all, messengerPageHandle: null })).toEqual(["telegram", "whatsapp", "instagram"]);
   });
 });
@@ -80,15 +80,32 @@ describe("connectLinks", () => {
 });
 
 describe("memberApp", () => {
-  it("is Telegram for every member today", () => {
-    expect(memberApp({ venue_id: "v", tg_chat_id: 42, role: "owner", lang: "bg", created_at: "2026-10-11T00:00:00.000Z" })).toBe("telegram");
+  it("reads the app from the member's chat_ref", () => {
+    const m = (chat_ref: string) => ({ venue_id: "v", chat_ref, role: "owner" as const, lang: "bg" as const, last_seen_at: null, created_at: "2026-10-11T00:00:00.000Z" });
+    expect(memberApp(m("tg:42"))).toBe("telegram");
+    expect(memberApp(m("wa:359888123456"))).toBe("whatsapp");
+    expect(memberApp(m("fb:1234"))).toBe("messenger");
+    expect(memberApp(m("ig:5678"))).toBe("instagram");
+  });
+});
+
+describe("enabledApps: channel tokens", () => {
+  it("hides a Meta app whose token is missing even with CHANNELS_ENABLED and a handle", () => {
+    expect(enabledApps({ ...all, metaPageToken: null })).toEqual(["telegram", "whatsapp"]);
+    expect(enabledApps({ ...all, whatsappToken: null })).toEqual(["telegram", "messenger", "instagram"]);
+    expect(enabledApps({ ...all, channelsEnabled: false })).toEqual(["telegram"]);
   });
 });
 
 describe("connectedApps", () => {
   it("counts owners and staff per app and leaves out apps nobody linked", () => {
-    const m = (role: "owner" | "staff", id: number) => ({ venue_id: "v", tg_chat_id: id, role, lang: "bg" as const, created_at: "2026-10-11T00:00:00.000Z" });
+    const m = (role: "owner" | "staff", chat_ref: string) => ({ venue_id: "v", chat_ref, role, lang: "bg" as const, last_seen_at: null, created_at: "2026-10-11T00:00:00.000Z" });
     expect(connectedApps([])).toEqual([]);
-    expect(connectedApps([m("owner", 1), m("staff", 2), m("staff", 3), m("owner", 4)])).toEqual([{ app: "telegram", owners: 2, staff: 2 }]);
+    expect(connectedApps([m("owner", "tg:1"), m("staff", "tg:2"), m("staff", "tg:3"), m("owner", "tg:4")])).toEqual([{ app: "telegram", owners: 2, staff: 2 }]);
+    expect(connectedApps([m("owner", "tg:1"), m("owner", "wa:3598"), m("staff", "ig:9")])).toEqual([
+      { app: "telegram", owners: 1, staff: 0 },
+      { app: "whatsapp", owners: 1, staff: 0 },
+      { app: "instagram", owners: 0, staff: 1 },
+    ]);
   });
 });

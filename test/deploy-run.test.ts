@@ -100,7 +100,7 @@ describe("startDeploy", () => {
 describe("pollDeployments", () => {
   it("marks the site ready after the fake's second poll and tells every owner in their language", async () => {
     const { store, venue } = await makeDemo(); // owner 1001 (bg), staff 1002 (en)
-    await store.upsertMember({ venue_id: venue.id, tg_chat_id: 1003, role: "owner", lang: "en" });
+    await store.upsertMember({ venue_id: venue.id, chat_ref: "tg:1003", role: "owner", lang: "en" });
     const deployer = new FakeDeployer();
     const m = new FakeMessenger();
     await startDeploy({ store, deployer, feedUrlFor, now: () => T0 }, venue.id);
@@ -110,9 +110,9 @@ describe("pollDeployments", () => {
     expect(m.sent).toEqual([]);
     expect(await pollDeployments(d)).toEqual({ ready: [venue.id], failed: [] });
     expect((await store.getVenue(venue.id)).deploy).toMatchObject({ status: "ready", url: "https://agala.example.test", error: null });
-    expect(m.sent.map((s) => [s.chatId, s.text])).toEqual([
-      [1001, "🎉 Сайтът на Кафене „Ъгъла“ е готов: https://agala.example.test\n\nОт тук нататък промените от този чат се появяват на него за секунди."],
-      [1003, "🎉 Кафене „Ъгъла“'s site is live: https://agala.example.test\n\nFrom now on, changes from this chat show up there within seconds."],
+    expect(m.sent.map((s) => [s.chatRef, s.text])).toEqual([
+      ["tg:1001", "🎉 Сайтът на Кафене „Ъгъла“ е готов: https://agala.example.test\n\nОт тук нататък промените от този чат се появяват на него за секунди."],
+      ["tg:1003", "🎉 Кафене „Ъгъла“'s site is live: https://agala.example.test\n\nFrom now on, changes from this chat show up there within seconds."],
     ]);
     expect(await pollDeployments(d)).toEqual({ ready: [], failed: [] }); // ready venues are not polled again
     expect(m.sent).toHaveLength(2);
@@ -131,7 +131,7 @@ describe("pollDeployments", () => {
     await startDeploy({ store, deployer: failing, feedUrlFor, now: () => T0 }, venue.id);
     expect(await pollDeployments({ store, deployer: failing, messenger: m, now: () => T0 })).toEqual({ ready: [], failed: [venue.id] });
     expect((await store.getVenue(venue.id)).deploy).toMatchObject({ status: "error", error: "Build failed\nModule not found: zod", url: null });
-    expect(m.sent).toEqual([expect.objectContaining({ chatId: 1001, text: "Публикуването на сайта на Кафене „Ъгъла“ не успя. Отворете таблото и натиснете „Опитай пак“; дотогава сайтът ви остава достъпен на адреса от приветственото съобщение." })]);
+    expect(m.sent).toEqual([expect.objectContaining({ chatRef: "tg:1001", text: "Публикуването на сайта на Кафене „Ъгъла“ не успя. Отворете таблото и натиснете „Опитай пак“; дотогава сайтът ви остава достъпен на адреса от приветственото съобщение." })]);
     const other = await store.createVenue({ slug: "other", name: "Other" });
     await startDeploy({ store, deployer: failing, feedUrlFor, now: () => T0 }, other.id);
     expect(await pollDeployments({ store, deployer: failing, messenger: null, now: () => T0 })).toEqual({ ready: [], failed: [other.id] });
@@ -227,7 +227,7 @@ describe("pollDeployments", () => {
 
   it("says the new design is live after a redeploy (the record had a URL from an earlier ready deploy)", async () => {
     const { store, venue } = await makeDemo();
-    await store.upsertMember({ venue_id: venue.id, tg_chat_id: 1003, role: "owner", lang: "en" });
+    await store.upsertMember({ venue_id: venue.id, chat_ref: "tg:1003", role: "owner", lang: "en" });
     const deployer: Deployer = {
       provider: "fake",
       createSite: async () => ({ projectId: "p", deploymentId: "d1" }),
@@ -238,9 +238,9 @@ describe("pollDeployments", () => {
     await store.setDeploy(venue.id, { provider: "fake", project_id: "p", deployment_id: "d2", url: "https://agala.example.test", status: "building", error: null, template: "lumen", updated_at: T0.toISOString() });
     const m = new FakeMessenger();
     expect(await pollDeployments({ store, deployer, messenger: m, now: () => T0 })).toEqual({ ready: [venue.id], failed: [] });
-    expect(m.sent.map((x) => [x.chatId, x.text])).toEqual([
-      [1001, "✅ Новият дизайн е онлайн: https://agala.example.test"],
-      [1003, "✅ The new design is live: https://agala.example.test"],
+    expect(m.sent.map((x) => [x.chatRef, x.text])).toEqual([
+      ["tg:1001", "✅ Новият дизайн е онлайн: https://agala.example.test"],
+      ["tg:1003", "✅ The new design is live: https://agala.example.test"],
     ]);
   });
 
