@@ -3,7 +3,8 @@
 import { isWpEntity, type ChangeSet, type Lang } from "../domain/types";
 import type { DestinationSync, Store } from "../store/types";
 import { adapterFor } from "./registry";
-import { decryptSecrets } from "./secrets";
+import { decryptSecrets, encryptSecrets } from "./secrets";
+import { socialMissingLines, socialSyncLine } from "./social-lines";
 import type { PushResult } from "./types";
 import { formatSyncError, wpErrorText } from "./wp-errors";
 
@@ -12,6 +13,8 @@ export interface SyncDeps {
   secretKey: Buffer | null;
   fetch?: typeof fetch;
   log?: (s: string) => void;
+  /** Waits between Instagram container polls; default a real timer. */
+  sleep?: (ms: number) => Promise<void>;
 }
 export const BACKOFF_MS = [60_000, 300_000, 1_500_000, 7_200_000, 36_000_000] as const;
 export const MAX_ATTEMPTS = 5;
@@ -61,9 +64,17 @@ export async function runSync(d: SyncDeps, sync: DestinationSync, now: Date): Pr
     } catch (e) {
       return connectionError(e, false);
     }
+    const key = d.secretKey;
+    // Results this destination stored for a set (partial ones from failed attempts included): adapters skip what is already out.
+    const resultsOf = async (changeSetId: string) =>
+      (await d.store.listSyncs({ changeSetId })).filter((s) => s.destination_id === dest.id && s.result).map((s) => s.result as Record<string, unknown>);
+    const saveConnection = async (config: Record<string, unknown>, fresh: Record<string, string>) => {
+      await d.store.upsertDestination({ venue_id: dest.venue_id, kind: dest.kind, config, secrets: encryptSecrets(fresh, key), status: dest.status });
+    };
     try {
       const cs = await d.store.getChangeSet(sync.change_set_id);
-      return await adapter.push({ venue, destination: dest, secrets, changeSet: cs, changes: adapter.relevant(cs.changes), fetch: d.fetch, now });
+      const prior = await resultsOf(sync.change_set_id);
+      return await adapter.push({ venue, destination: dest, secrets, changeSet: cs, changes: adapter.relevant(cs.changes), fetch: d.fetch, now, prior, resultsOf, saveConnection, sleep: d.sleep });
     } catch (e) {
       return connectionError(e, true);
     }
@@ -77,7 +88,7 @@ export async function runSync(d: SyncDeps, sync: DestinationSync, now: Date): Pr
   const giveUp = !result.retry || attempts >= MAX_ATTEMPTS;
   // Attempt n waits BACKOFF_MS[n-1]; attempts past the table reuse its last entry.
   const nextAt = new Date(now.getTime() + (BACKOFF_MS[Math.min(attempts, BACKOFF_MS.length) - 1] ?? BACKOFF_MS[BACKOFF_MS.length - 1])).toISOString();
-  await d.store.updateSync(sync.id, { status: giveUp ? "failed" : "pending", attempts, next_at: nextAt, last_error: stored, updated_at: now.toISOString() });
+  await d.store.updateSync(sync.id, { status: giveUp ? "failed" : "pending", attempts, next_at: nextAt, last_error: stored, updated_at: now.toISOString(), ...(result.partial ? { result: result.partial } : {}) });
   if (giveUp) await d.store.updateDestination(dest.id, { status: "error", last_error: stored });
   log(`[destinations] ${dest.kind} push for set ${sync.change_set_id} failed (attempt ${attempts}${giveUp ? ", giving up" : `, next at ${nextAt}`}): ${result.error}`);
   return result;
@@ -165,11 +176,16 @@ export async function syncLines(store: Store, changeSetId: string, lang: Lang): 
     const wp = (await store.listDestinations(cs.venue_id)).find((x) => x.kind === "wordpress" && x.status !== "disconnected");
     if (!wp) return [lang === "bg" ? "WordPress: не е свързан, промяната не е изпратена" : "WordPress: not connected, the change was not sent"];
   }
-  return rows.map((s) => {
-    const name = String(s.payload.kind ?? "destination") === "wordpress" ? "WordPress" : String(s.payload.kind);
+  const lines = rows.map((s) => {
+    const kind = String(s.payload.kind ?? "destination");
+    if (kind === "facebook" || kind === "instagram") return socialSyncLine(kind, s.status, s.result, s.last_error, lang);
+    const name = kind === "wordpress" ? "WordPress" : kind;
     if (s.status === "done") return lang === "bg" ? `${name}: обновено ✅` : `${name}: updated ✅`;
     if (s.status === "pending") return lang === "bg" ? `${name}: не успях да обновя, ще опитам пак` : `${name}: update failed, will retry`;
     const text = wpErrorText(s.last_error, lang);
     return lang === "bg" ? `${name}: грешка: ${text}` : `${name}: error: ${text}`;
   });
+  // Social posts aimed at a network without an active connection: say so (after the networks that did get it).
+  const active = new Set((await store.listDestinations(cs.venue_id)).filter((x) => x.status !== "disconnected").map((x) => x.kind));
+  return [...lines, ...socialMissingLines(cs.changes, active, lang)];
 }
