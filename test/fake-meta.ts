@@ -6,6 +6,8 @@
 // - graph.instagram.com/v25.0: /me, /{ig}/media (containers with status polling), /{ig}/media_publish, GET /{media}?fields=permalink,
 //   /access_token (ig_exchange_token), /refresh_access_token (ig_refresh_token)
 // - api.instagram.com/oauth/access_token (form POST): the short-lived Instagram token
+// - GET graph.instagram.com/v25.0/{ig|me}/media (the account's own posts, carousels with children) and the image bytes on
+//   *.cdninstagram.com (the dashboard's photo import; appended 2026-10-11)
 // Tokens are read from the bearer header or an access_token query parameter, exactly like Graph.
 import { randomBytes } from "node:crypto";
 
@@ -115,6 +117,7 @@ export class FakeMeta {
       url.hostname === "graph.facebook.com" ? this.facebook(method, path, url.searchParams, body, token)
       : url.hostname === "graph.instagram.com" ? this.instagram(method, path, url.searchParams, body, token)
       : url.hostname === "api.instagram.com" && path === "/oauth/access_token" && method === "POST" ? this.igCode(body ?? {})
+      : url.hostname.endsWith(".cdninstagram.com") && method === "GET" ? this.cdn(url.toString())
       : graphError(400, 100, "Unsupported request");
     if (this.dropResponse?.(call)) throw new TypeError("fetch failed (the answer was lost)");
     return res;
@@ -259,6 +262,7 @@ export class FakeMeta {
         return Response.json(this.publishWithoutId ? { success: true } : { id });
       }
     }
+    if (method === "GET" && parts.length === 2 && parts[1] === "media" && (parts[0] === user.user_id || parts[0] === "me")) return this.feedPage(user, q);
     if (method === "GET" && parts.length === 1) {
       const c = this.containers.get(parts[0]);
       if (c && c.user_id === user.user_id) {
@@ -283,4 +287,57 @@ export class FakeMeta {
     this.igShortTokens.set(short, userId);
     return Response.json({ data: [{ access_token: short, user_id: Number(userId), permissions: "instagram_business_basic,instagram_business_content_publish" }] });
   }
+
+  // --- The account's own posts and their image bytes (dashboard photo import, appended 2026-10-11) ---
+  /** Posts per Instagram user id, newest first, in Graph's /media shape (children inline for carousels). */
+  feed = new Map<string, Json[]>();
+  /** Image bytes by CDN URL; a URL not here answers 404. */
+  cdnImages = new Map<string, { bytes: Uint8Array; type: string }>();
+
+  /** Adds a post on top of the user's feed: an image, a video, or a carousel of `children` images. Returns the image ids. */
+  addFeedPost(userId: string, o: { kind?: "IMAGE" | "VIDEO" | "CAROUSEL_ALBUM"; caption?: string; children?: number; bytes?: Uint8Array; timestamp?: string } = {}): string[] {
+    const kind = o.kind ?? "IMAGE";
+    const id = num();
+    const timestamp = o.timestamp ?? this.stamp();
+    const image = (mid: string): Json => {
+      const url = `https://scontent-sof1-1.cdninstagram.com/v/t51/${mid}.jpg?stp=dst-jpg&_nc_sig=${mid}`;
+      this.cdnImages.set(url, { bytes: o.bytes ?? FAKE_JPEG, type: "image/jpeg" });
+      return { id: mid, media_type: "IMAGE", media_url: url };
+    };
+    const base: Json = { id, permalink: `https://www.instagram.com/p/C${id}/`, timestamp, ...(o.caption !== undefined ? { caption: o.caption } : {}) };
+    let row: Json;
+    let ids: string[];
+    if (kind === "VIDEO") {
+      row = { ...base, media_type: "VIDEO", media_url: `https://scontent-sof1-1.cdninstagram.com/o1/v/${id}.mp4`, thumbnail_url: `https://scontent-sof1-1.cdninstagram.com/v/t51/${id}-thumb.jpg` };
+      ids = [];
+    } else if (kind === "CAROUSEL_ALBUM") {
+      const kids = Array.from({ length: o.children ?? 2 }, () => image(num()));
+      row = { ...base, media_type: "CAROUSEL_ALBUM", media_url: kids[0].media_url, children: { data: kids } };
+      ids = kids.map((k) => String(k.id));
+    } else {
+      row = { ...base, ...image(id) };
+      ids = [id];
+    }
+    this.feed.set(userId, [row, ...(this.feed.get(userId) ?? [])]);
+    return ids;
+  }
+
+  /** The CDN URL the feed gives for an image id. */
+  cdnUrlOf(mediaId: string): string {
+    return [...this.cdnImages.keys()].find((u) => u.includes(`/${mediaId}.jpg`)) ?? "";
+  }
+
+  private feedPage(user: FakeIgUser, q: URLSearchParams): Response {
+    const limit = Math.min(Number(q.get("limit") ?? 25) || 25, 100);
+    return Response.json({ data: (this.feed.get(user.user_id) ?? []).slice(0, limit) });
+  }
+
+  private cdn(url: string): Response {
+    const img = this.cdnImages.get(url);
+    if (!img) return new Response("not found", { status: 404 });
+    return new Response(img.bytes as BodyInit, { status: 200, headers: { "content-type": img.type, "content-length": String(img.bytes.byteLength) } });
+  }
 }
+
+/** A minimal JPEG header: enough for the image type sniff. */
+export const FAKE_JPEG = new Uint8Array([0xff, 0xd8, 0xff, 0xe0, 0, 0x10, 0x4a, 0x46, 0x49, 0x46, 0, 1]);
