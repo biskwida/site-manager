@@ -12,7 +12,7 @@ import { LangProvider } from "@/src/i18n";
 import { DICTS } from "@/src/i18n/dicts";
 import { adminAction, type SocialOverview } from "@/src/server/admin";
 import {
-  DASH_IG_IMPORTS_PER_HOUR, DASH_IG_MAX_PICKS, handleDashboardInstagramImport, handleDashboardInstagramList, type DashboardInstagramDeps,
+  DASH_IG_DEADLINE_MS, DASH_IG_IMPORTS_PER_HOUR, DASH_IG_LISTS_PER_HOUR, DASH_IG_MAX_PICKS, dashIgRateLimitKey, handleDashboardInstagramImport, handleDashboardInstagramList, type DashboardInstagramDeps,
 } from "@/src/server/dashboard-instagram";
 import { makeServerDeps, type ServerDeps } from "@/src/server/deps";
 import { FAKE_JPEG, FakeMeta, type FakeIgUser } from "./fake-meta";
@@ -58,7 +58,7 @@ const list = async (s: Setup) => {
   const res = await handleDashboardInstagramList(s.d, s.venue);
   return { res, body: (await res.json()) as ListBody };
 };
-type ImportBody = { ok?: boolean; change_set_id?: string; imported?: number; failed?: { id: string; code: string }[]; error?: { code: string; bg: string; en: string } };
+type ImportBody = { ok?: boolean; change_set_id?: string; imported?: number; failed?: { id: string; target: unknown; code: string }[]; error?: { code: string; bg: string; en: string } };
 const importPicks = async (s: Setup, picks: unknown) => {
   const res = await handleDashboardInstagramImport(new Request(`${BASE}/api/admin/agala/instagram-import`, { method: "POST", body: JSON.stringify({ picks }) }), s.d, s.venue);
   return { res, body: (await res.json()) as ImportBody };
@@ -70,6 +70,26 @@ async function removeItem(s: Setup, itemId: string) {
   const changes = planChanges(site, [{ op: "remove_item", item_id: itemId }], { newId: () => crypto.randomUUID(), now: T0.toISOString() });
   const cs = await s.store.createChangeSet({ venue_id: s.venue.id, chat_ref: null, summary_bg: "x", summary_en: "x", preview_bg: "", preview_en: "", source: "dashboard", status: "proposed", changes });
   await s.store.applyChangeSet(cs.id, T0.toISOString());
+}
+
+/** The test store, except that saving an image first takes `itemId` off the menu (the dish leaves while photos download). */
+function removingOnSave(s: Setup, itemId: string): Setup["store"] {
+  let done = false;
+  return new Proxy(s.store, {
+    get(target, prop, receiver) {
+      if (prop === "saveMedia") {
+        return async (...args: Parameters<Setup["store"]["saveMedia"]>) => {
+          if (!done) {
+            done = true;
+            await removeItem(s, itemId);
+          }
+          return target.saveMedia(...args);
+        };
+      }
+      const v = Reflect.get(target, prop, receiver);
+      return typeof v === "function" ? (v as (...a: unknown[]) => unknown).bind(target) : v;
+    },
+  });
 }
 
 describe("dashboard Instagram list", () => {
@@ -158,6 +178,45 @@ describe("dashboard Instagram list", () => {
   });
 });
 
+describe("dashboard Instagram list, limits and token writes", () => {
+  it(`allows ${DASH_IG_LISTS_PER_HOUR} list reads per venue per hour, checked before calling Instagram`, async () => {
+    const s = await setup();
+    s.meta.addFeedPost(s.user.user_id);
+    for (let i = 0; i < DASH_IG_LISTS_PER_HOUR; i++) expect((await list(s)).res.status).toBe(200);
+    s.meta.calls = [];
+    const { res, body } = await list(s);
+    expect(res.status).toBe(429);
+    expect(body.error?.code).toBe("rate_limited");
+    expect(s.meta.calls).toEqual([]);
+    expect(await s.store.bumpRateLimit(`ig-dash-list:${s.venue.id}`, 3_600_000, DASH_IG_LISTS_PER_HOUR, T0.toISOString())).toBe(false);
+  });
+
+  it("a refresh keeps the connection's status and last error, and never overwrites a reconnect that happened meanwhile", async () => {
+    const old = new Date(T0.getTime() - 40 * DAY).toISOString();
+    const s = await setup({ refreshedAt: old });
+    s.meta.addFeedPost(s.user.user_id);
+    const row = (await s.store.getDestination(s.venue.id, "instagram"))!;
+    await s.store.updateDestination(row.id, { status: "error", last_error: "sm_meta_permission: earlier failure" });
+    expect((await list(s)).res.status).toBe(200);
+    const kept = (await s.store.getDestination(s.venue.id, "instagram"))!;
+    expect(kept).toMatchObject({ status: "error", last_error: "sm_meta_permission: earlier failure" });
+    expect(kept.config.token_refreshed_at).toBe(T0.toISOString());
+    expect(decryptSecrets(kept.secrets, KEY).token).toBe(s.user.token);
+
+    // A reconnect lands while the refresh is in flight: the reconnect's token stays.
+    const r = await setup({ refreshedAt: old });
+    r.meta.addFeedPost(r.user.user_id);
+    const inner = r.d.fetch;
+    r.d.fetch = async (input, init) => {
+      const u = String(input instanceof Request ? input.url : input);
+      if (u.includes("/refresh_access_token")) await r.store.upsertDestination({ venue_id: r.venue.id, kind: "instagram", config: { ig_user_id: r.user.user_id, username: "agala.cafe", connected_at: T0.toISOString(), token_refreshed_at: T0.toISOString() }, secrets: encryptSecrets({ token: "RECONNECTED" }, KEY), status: "connected" });
+      return inner(input, init);
+    };
+    expect((await list(r)).res.status).toBe(200);
+    expect(decryptSecrets((await r.store.getDestination(r.venue.id, "instagram"))!.secrets, KEY).token).toBe("RECONNECTED");
+  });
+});
+
 describe("dashboard Instagram import", () => {
   async function withFeed() {
     const s = await setup();
@@ -168,18 +227,48 @@ describe("dashboard Instagram import", () => {
     return { s, a, b, c, e, f };
   }
 
-  it("refuses ids that are not in the account's list, and never takes a URL from the client", async () => {
+  it("refuses a request when none of its photos is in the account's list any more, and says to refresh the list", async () => {
     const { s, a } = await withFeed();
     const sets = (await s.store.listChangeSets(s.venue.id)).length;
     const media = (await s.store.getSite(s.venue.id)).media.length;
-    for (const picks of [[{ id: "999999", target: "gallery" }], [{ id: a, target: "gallery" }, { id: "nope", target: "cover" }], [{ id: `x${a}`, url: "https://evil.example/x.jpg", target: "gallery" }]]) {
+    for (const picks of [[{ id: "999999", target: "gallery" }], [{ id: `x${a}`, url: "https://evil.example/x.jpg", target: "gallery" }]]) {
       const { res, body } = await importPicks(s, picks);
       expect(res.status).toBe(400);
       expect(body.error?.code).toBe("bad_request");
+      expect(body.error?.bg).toContain("Опреснете списъка");
+      expect(body.error?.en).toContain("Refresh the list");
     }
     expect(s.meta.calls.filter((c) => c.host.endsWith("cdninstagram.com"))).toEqual([]);
+    expect(s.meta.calls.some((c) => c.host === "evil.example")).toBe(false);
     expect((await s.store.listChangeSets(s.venue.id)).length).toBe(sets);
     expect((await s.store.getSite(s.venue.id)).media.length).toBe(media);
+  });
+
+  it("never fetches a URL sent by the browser: only the CDN URL Instagram gave for that id", async () => {
+    const { s, a } = await withFeed();
+    const { res, body } = await importPicks(s, [{ id: a, url: "https://evil.example/x.jpg", target: "gallery" }]);
+    expect(res.status).toBe(200);
+    expect(body.imported).toBe(1);
+    expect(s.meta.calls.filter((c) => c.host !== "graph.instagram.com").map((c) => c.url)).toEqual([s.meta.cdnUrlOf(a)]);
+  });
+
+  it("imports the photos still listed and reports the stale ones per pick", async () => {
+    const { s, a } = await withFeed();
+    const { res, body } = await importPicks(s, [{ id: a, target: "gallery" }, { id: "nope", target: "cover" }]);
+    expect(res.status).toBe(200);
+    expect(body.imported).toBe(1);
+    expect(body.failed).toEqual([{ id: "nope", target: "cover", code: "stale" }]);
+    const cs = await s.store.getChangeSet(body.change_set_id!);
+    expect(cs.changes.map((x) => x.op)).toEqual(["add_gallery_image"]);
+  });
+
+  it("reports a dish that went inactive since the list was read per pick, and imports the rest", async () => {
+    const { s, a, b } = await withFeed();
+    await removeItem(s, s.items["Tea"].id);
+    const { res, body } = await importPicks(s, [{ id: a, target: { item: s.items["Tea"].id } }, { id: b, target: "logo" }]);
+    expect(res.status).toBe(200);
+    expect(body.failed).toEqual([{ id: a, target: { item: s.items["Tea"].id }, code: "invalid" }]);
+    expect(s.meta.calls.filter((c) => c.host.endsWith("cdninstagram.com")).map((c) => c.url)).toEqual([s.meta.cdnUrlOf(b)]);
   });
 
   it("refuses a dish that is not on the live menu or no longer active, and bad bodies", async () => {
@@ -250,7 +339,8 @@ describe("dashboard Instagram import", () => {
     const { res, body } = await importPicks(s, [{ id: a, target: "gallery" }, { id: b, target: "gallery" }, { id: c, target: "cover" }]);
     expect(res.status).toBe(200);
     expect(body.imported).toBe(1);
-    expect(body.failed).toEqual(expect.arrayContaining([{ id: b, code: "unsupported_type" }, { id: c, code: "fetch_failed" }]));
+    expect(body.failed).toEqual(expect.arrayContaining([{ id: b, target: "gallery", code: "unsupported_type" }, { id: c, target: "cover", code: "fetch_failed" }]));
+    expect(body.failed).toHaveLength(2);
     const cs = await s.store.getChangeSet(body.change_set_id!);
     expect(cs.changes.map((x) => x.op)).toEqual(["add_gallery_image"]);
     expect(cs.summary_en).toBe("Photos from Instagram (1)");
@@ -275,6 +365,66 @@ describe("dashboard Instagram import", () => {
     expect(limited.body.error?.code).toBe("rate_limited");
     s.setClock(new Date(T0.getTime() + 3_600_001));
     expect((await importPicks(s, [{ id: ids[DASH_IG_IMPORTS_PER_HOUR], target: "gallery" }])).res.status).toBe(200);
+  });
+
+  it("keeps a dish that left the menu while its photo downloaded out of the change set, and applies the other picks", async () => {
+    const { s, a, f } = await withFeed();
+    const espresso = s.items["Espresso"];
+    s.d.store = removingOnSave(s, espresso.id);
+    const { res, body } = await importPicks(s, [{ id: a, target: "cover" }, { id: f, target: "gallery" }, { id: f, target: { item: espresso.id } }]);
+    expect(res.status).toBe(200);
+    // The same photo also went to the gallery: the dish pick is still reported, keyed by its own target.
+    expect(body.failed).toEqual([{ id: f, target: { item: espresso.id }, code: "invalid" }]);
+    expect(body.imported).toBe(2);
+    const cs = await s.store.getChangeSet(body.change_set_id!);
+    expect(cs.status).toBe("applied");
+    expect(cs.changes.map((x) => x.op).sort()).toEqual(["add_gallery_image", "set_cover_image"]);
+    const after = await s.store.getSite(s.venue.id);
+    expect(after.items.find((i) => i.id === espresso.id)!.image_media_id).toBe(espresso.image_media_id);
+    expect(after.venue.cover_media_id).toBe(cs.changes.find((x) => x.op === "set_cover_image")!.after!.cover_media_id);
+  });
+
+  it("answers 400 invalid with no change set when every dish left the menu during the download", async () => {
+    const { s, f } = await withFeed();
+    const espresso = s.items["Espresso"];
+    s.d.store = removingOnSave(s, espresso.id);
+    const { res, body } = await importPicks(s, [{ id: f, target: { item: espresso.id } }]);
+    expect(res.status).toBe(400);
+    expect(body.error?.code).toBe("invalid");
+    expect((await s.store.listChangeSets(s.venue.id)).filter((x) => x.summary_en.startsWith("Photos from Instagram"))).toEqual([]);
+    expect((await s.store.getSite(s.venue.id)).items.find((i) => i.id === espresso.id)!.image_media_id).toBe(espresso.image_media_id);
+  });
+
+  it("checks the import limit before calling Instagram", async () => {
+    const s = await setup();
+    const [id] = s.meta.addFeedPost(s.user.user_id);
+    for (let i = 0; i < DASH_IG_IMPORTS_PER_HOUR; i++) await s.store.bumpRateLimit(dashIgRateLimitKey(s.venue.id), 3_600_000, DASH_IG_IMPORTS_PER_HOUR, T0.toISOString());
+    s.meta.calls = [];
+    const r = await importPicks(s, [{ id, target: "gallery" }]);
+    expect(r.res.status).toBe(429);
+    expect(s.meta.calls).toEqual([]);
+  });
+
+  it("stops starting new downloads after the deadline and reports the rest as failed", async () => {
+    const { s, a, b, c, e, f } = await withFeed();
+    let jumped = false;
+    const inner = s.d.fetch;
+    s.d.fetch = (input, init) => {
+      const u = String(input instanceof Request ? input.url : input);
+      if (u.includes("cdninstagram.com") && !jumped) {
+        jumped = true;
+        s.setClock(new Date(T0.getTime() + DASH_IG_DEADLINE_MS + 1));
+      }
+      return inner(input, init);
+    };
+    const picks = [a, b, c, e, f].map((id) => ({ id, target: "gallery" }));
+    const { res, body } = await importPicks(s, picks);
+    expect(res.status).toBe(200);
+    const fetched = s.meta.calls.filter((x) => x.host.endsWith("cdninstagram.com")).length;
+    expect(fetched).toBeLessThan(picks.length);
+    expect(body.imported).toBe(fetched);
+    expect(body.failed).toHaveLength(picks.length - fetched);
+    for (const x of body.failed!) expect(x.code).toBe("fetch_failed");
   });
 
   it("asks to connect first when not connected", async () => {

@@ -511,5 +511,19 @@ export function storeContract(name: string, make: () => Promise<Store>, storageH
       expect((await s.getSync(y.id)).leased_until).toBeNull();
       expect(await s.claimSync(y.id, LATER, "2026-10-09T11:00:00.000Z")).toBe(false); // only pending rows
     });
+
+    // Dashboard Instagram import (appended 2026-10-11): a token refresh on the read path.
+    it("replaces a destination's config and secrets only while the secrets are unchanged, keeping status and last error", async () => {
+      const s = await make();
+      const v = await s.createVenue({ slug: `t-dsec-${crypto.randomUUID().slice(0, 8)}`, name: "Secrets" });
+      const d = await s.upsertDestination({ venue_id: v.id, kind: "instagram", config: { username: "a" }, secrets: "enc-1" });
+      await s.updateDestination(d.id, { status: "error", last_error: "boom" });
+      expect(await s.replaceDestinationSecrets(d.id, "enc-1", { config: { username: "a", token_refreshed_at: NOW }, secrets: "enc-2" })).toBe(true);
+      expect(await s.getDestination(v.id, "instagram")).toMatchObject({ id: d.id, secrets: "enc-2", config: { username: "a", token_refreshed_at: NOW }, status: "error", last_error: "boom" });
+      // A reconnect (or another refresh) changed the secrets meanwhile: nothing is written.
+      expect(await s.replaceDestinationSecrets(d.id, "enc-1", { config: { username: "stale" }, secrets: "enc-3" })).toBe(false);
+      expect(await s.getDestination(v.id, "instagram")).toMatchObject({ secrets: "enc-2", config: { username: "a" } });
+      expect(await s.replaceDestinationSecrets(crypto.randomUUID(), "enc-2", { config: {}, secrets: "x" })).toBe(false);
+    });
   });
 }
