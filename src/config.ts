@@ -31,6 +31,18 @@ export interface Config {
   /** Meta app (Instagram API with Instagram Login) for the wizard's photo import; the feature is off unless both are set. */
   instagramAppId: string | null;
   instagramAppSecret: string | null;
+  /** Page username for the m.me/<handle> owner link (same key as build/channels). Shown only when channelsEnabled. */
+  messengerPageHandle: string | null;
+  /** Instagram username (no @) for the ig.me/m/<user> owner link. Shown only when channelsEnabled. */
+  instagramUsername: string | null;
+  /** WhatsApp number, digits only with country code, for the wa.me/<digits> owner link. Shown only when channelsEnabled. */
+  whatsappNumber: string | null;
+  /**
+   * CHANNELS_ENABLED (default false): the wizard and dashboard offer Messenger, Instagram and WhatsApp links only when true.
+   * Keep it false until build/channels (the code that answers those apps) is deployed: a link to a number our code does not
+   * answer would strand the owner. Telegram is unaffected.
+   */
+  channelsEnabled: boolean;
 }
 
 type Env = Record<string, string | undefined>;
@@ -73,5 +85,9 @@ export function loadConfig(env: Env = process.env, opts: { lenient?: boolean } =
     destinationSecretKey: optional("DESTINATION_SECRET_KEY"),
     instagramAppId: optional("INSTAGRAM_APP_ID"),
     instagramAppSecret: optional("INSTAGRAM_APP_SECRET"),
+    messengerPageHandle: optional("MESSENGER_PAGE_HANDLE"),
+    instagramUsername: optional("INSTAGRAM_USERNAME")?.replace(/^@/, "") || null,
+    whatsappNumber: optional("WHATSAPP_NUMBER")?.replace(/\D/g, "") || null,
+    channelsEnabled: /^(1|true)$/i.test(optional("CHANNELS_ENABLED") ?? ""),
   };
 }
