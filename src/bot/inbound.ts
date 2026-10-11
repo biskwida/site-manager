@@ -84,7 +84,9 @@ export async function handleInbound(d: BotDeps, m: InboundMessage): Promise<void
   }
 
   // Linking: /start <code>, a referral code, or a bare code from someone not yet linked.
-  const code = m.referralCode !== undefined ? m.referralCode.trim().toUpperCase() : m.kind === "text" ? startCode(text, member !== null) : null;
+  // A linked member who reopens the deep link and writes something is talking to the agent; the stale referral is ignored.
+  const referral = m.referralCode !== undefined && !(member && text) ? m.referralCode : undefined;
+  const code = referral !== undefined ? referral.trim().toUpperCase() : m.kind === "text" ? startCode(text, member !== null) : null;
   // Telegram tells us the language; on Meta, Cyrillic means Bulgarian and other prose English. A code or nothing says nothing: Bulgarian.
   const uiLang: Lang = m.langHint ?? detectLang(text) ?? (code === null && /\p{L}/u.test(text) ? "en" : "bg");
   if (code !== null) {
@@ -114,6 +116,10 @@ export async function handleInbound(d: BotDeps, m: InboundMessage): Promise<void
   }
 
   if (m.kind === "text") {
+    if (!text) {
+      await welcomeBack(d, member); // opened the chat (Get Started) with nothing to say
+      return;
+    }
     const cmd = normalizeCommand(text, channel);
     if (cmd) {
       await runCommand(d, member, channel, cmd);

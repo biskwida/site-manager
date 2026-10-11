@@ -68,7 +68,8 @@ function pageEvent(channel: Channel, ev: J | null, fetchUrl: MediaFetch): Inboun
     if (/^cs:/.test(payload)) return { chatRef, kind: "button", text: payload, messageRef: eventId, eventId };
     const ref = str(obj(pb.referral)?.ref);
     if (ref) return { chatRef, kind: "text", text: "", referralCode: ref, eventId };
-    return null;
+    // Get Started (or any other postback of ours) without a code: an "opened the chat" event, answered by handleInbound.
+    return { chatRef, kind: "text", text: "", eventId };
   }
   const ref = str(obj(ev.referral)?.ref);
   if (ref) return { chatRef, kind: "text", text: "", referralCode: ref, eventId: `${sender}:${ts}` };

@@ -7,6 +7,13 @@ const page = (messaging: unknown[], object = "page") => ({ object, entry: [{ id:
 const wa = (value: Record<string, unknown>) => ({ object: "whatsapp_business_account", entry: [{ id: "WABA1", changes: [{ field: "messages", value: { messaging_product: "whatsapp", metadata: { display_phone_number: "1555", phone_number_id: "PNID" }, ...value } }] }] });
 
 describe("parseMetaWebhook: Messenger and Instagram", () => {
+  it("turns a Get Started tap without a referral into an empty text message", () => {
+    const out = parseMetaWebhook(page([
+      { sender: { id: "504" }, recipient: { id: "PAGE1" }, timestamp: 12, postback: { mid: "m12", title: "Get Started", payload: "GET_STARTED" } },
+    ]), deps);
+    expect(out).toEqual([{ chatRef: "fb:504", kind: "text", text: "", eventId: "m12" }]);
+    expect(out[0].referralCode).toBeUndefined();
+  });
   it("keeps a referral code that arrives on the message itself, with the text", () => {
     const out = parseMetaWebhook(page([
       { sender: { id: "503" }, recipient: { id: "PAGE1" }, timestamp: 11, message: { mid: "m11", text: "Здравейте", referral: { ref: "QRST2345", source: "SHORTLINK", type: "OPEN_THREAD" } } },

@@ -33,6 +33,26 @@ describe("normalizeCommand", () => {
   });
 });
 
+describe("handleInbound: opening the chat again", () => {
+  it("answers an empty open-chat event: no-access for a stranger, welcome-back for a member, never an agent run", async () => {
+    const { d, messenger, runs, store, venue } = await setup();
+    await handleInbound(d, { chatRef: "fb:800", kind: "text", text: "" });
+    expect(texts(messenger).at(-1)).toBe("Този бот управлява сайта на конкретно заведение. Изпратете кода, който получихте от нас.");
+    await store.upsertMember({ venue_id: venue.id, chat_ref: "fb:801", role: "owner", lang: "bg" });
+    await handleInbound(d, { chatRef: "fb:801", kind: "text", text: "" });
+    expect(texts(messenger).at(-1)).toMatch(/^Вече сте свързани/);
+    expect(runs).toHaveLength(0);
+  });
+  it("sends a linked member's text to the agent even when the message carries the deep-link referral", async () => {
+    const { d, messenger, runs, store, venue } = await setup();
+    await store.upsertMember({ venue_id: venue.id, chat_ref: "ig:802", role: "owner", lang: "bg" });
+    await handleInbound(d, { chatRef: "ig:802", kind: "text", text: "Капучиното става 3,20", referralCode: "OLDCODE12" });
+    expect(runs).toHaveLength(1);
+    expect(runs[0]).toMatchObject({ chatRef: "ig:802", text: "Капучиното става 3,20", source: "text" });
+    expect(texts(messenger).some((t) => /Вече сте свързани/.test(t))).toBe(false);
+  });
+});
+
 describe("handleInbound", () => {
   it("links a Messenger user with a bare code and tells a stranger to send the code (no /start wording)", async () => {
     const { d, messenger, store, venue } = await setup();
