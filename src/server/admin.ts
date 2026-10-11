@@ -10,6 +10,7 @@ import type { DestinationStatus, Store, SyncStatus } from "../store/types";
 import { formatDateTime } from "../time";
 import { accentAfterTemplateSwitch } from "../wizard/schema";
 import { connectedApps, type ConnectedApp } from "./connect-apps";
+import { publishedIn, safeLink } from "../destinations/social-common";
 
 export interface AdminOverview {
   venue: Pick<Venue, "id" | "slug" | "name" | "tz" | "default_lang">;
@@ -33,9 +34,11 @@ export interface AdminOverview {
   wordpress?: WordPressOverview | null;
   /** Linked chats per app ("Your apps" card). */
   connected_apps: ConnectedApp[];
+  /** "Facebook and Instagram" card. */
+  social?: SocialOverview;
 }
 
-export async function adminOverview(store: Store, venue: Venue, now: Date, baseUrl = "", opts: { hosted?: boolean } = {}): Promise<AdminOverview> {
+export async function adminOverview(store: Store, venue: Venue, now: Date, baseUrl = "", opts: { hosted?: boolean; social?: { facebook: boolean; instagram: boolean } } = {}): Promise<AdminOverview> {
   const [pending, scheduled, log, site, members] = await Promise.all([
     store.listChangeSets(venue.id, { status: ["proposed"], limit: 20 }),
     store.listChangeSets(venue.id, { status: ["scheduled"], limit: 50 }),
@@ -64,6 +67,7 @@ export async function adminOverview(store: Store, venue: Venue, now: Date, baseU
     sold_out: site.items.filter((i) => i.active && isSoldOut(i, nowMs)).map((i) => ({ id: i.id, name_bg: i.name_bg, name_en: i.name_en, sold_out_until: i.sold_out_until as string })),
     wordpress: await wordPressOverview(store, venue.id),
     connected_apps: connectedApps(members),
+    social: await socialOverview(store, venue.id, opts.social ?? { facebook: false, instagram: false }),
   };
 }
 
@@ -289,4 +293,56 @@ export async function checkDomain(d: AdminSiteDeps, venue: Venue): Promise<Domai
   const domain = venue.deploy.custom_domain;
   if (!domain) return NO_DOMAIN;
   return attachDomain(d, venue, domain);
+}
+
+// --- Facebook and Instagram card (social track, appended 2026-10-11) ---
+export interface SocialAccountOverview {
+  status: DestinationStatus;
+  /** Page name, or @username. */
+  name: string;
+  connected_at: string | null;
+  last_error: string | null;
+}
+export interface SocialPostOverview {
+  id: string;
+  change_set_id: string;
+  kind: "facebook" | "instagram";
+  status: SyncStatus;
+  summary_bg: string;
+  summary_en: string;
+  updated_at: string;
+  last_error: string | null;
+  /** Public links of what went out (https only). */
+  links: string[];
+}
+export interface SocialOverview {
+  /** Which Connect buttons this server can serve (app id + secret + destination key). */
+  available: { facebook: boolean; instagram: boolean };
+  facebook: SocialAccountOverview | null;
+  instagram: SocialAccountOverview | null;
+  /** The last five pushes to either network, newest first. */
+  posts: SocialPostOverview[];
+}
+
+/** Never includes secrets: display fields of the two destination rows and of their sync rows only. */
+export async function socialOverview(store: Store, venueId: string, available: { facebook: boolean; instagram: boolean }): Promise<SocialOverview> {
+  const [fb, ig] = await Promise.all([store.getDestination(venueId, "facebook"), store.getDestination(venueId, "instagram")]);
+  const account = (d: typeof fb, name: string): SocialAccountOverview | null =>
+    d ? { status: d.status, name, connected_at: typeof d.config.connected_at === "string" ? d.config.connected_at : null, last_error: d.last_error } : null;
+  const ids = new Map<string, "facebook" | "instagram">();
+  if (fb) ids.set(fb.id, "facebook");
+  if (ig) ids.set(ig.id, "instagram");
+  const rows = ids.size ? (await store.listSyncs({ venueId })).filter((s) => ids.has(s.destination_id)) : [];
+  const last = rows.slice(-5).reverse();
+  const sets = await Promise.all(last.map((s) => store.getChangeSet(s.change_set_id).catch(() => null)));
+  return {
+    available,
+    facebook: account(fb, String(fb?.config.page_name ?? "")),
+    instagram: account(ig, ig?.config.username ? `@${String(ig.config.username)}` : ""),
+    posts: last.map((s, i) => ({
+      id: s.id, change_set_id: s.change_set_id, kind: ids.get(s.destination_id)!, status: s.status,
+      summary_bg: sets[i]?.summary_bg ?? "", summary_en: sets[i]?.summary_en ?? "", updated_at: s.updated_at, last_error: s.last_error,
+      links: publishedIn([s.result]).map((p) => safeLink(p.permalink)).filter((x): x is string => !!x),
+    })),
+  };
 }

@@ -221,7 +221,7 @@ export const OP_NAMES: readonly OpName[] = [
   "set_text", "set_theme",
 ];
 
-export type Entity = "venue" | "category" | "item" | "holiday" | "announcement" | "media" | "site_text" | WpEntity;
+export type Entity = "venue" | "category" | "item" | "holiday" | "announcement" | "media" | "site_text" | WpEntity | SocialEntity;
 export type Row = Record<string, unknown>;
 
 /**
@@ -231,7 +231,7 @@ export type Row = Record<string, unknown>;
  */
 export interface Change {
   position: number;
-  op: OpName | WpOpName;
+  op: OpName | WpOpName | SocialOpName;
   entity: Entity;
   entity_id: string;
   before: Row | null;
@@ -298,4 +298,26 @@ export type WpEntity = "wp_page" | "wp_media" | "wp_option" | "wp_menu" | "wp_pr
 export const WP_ENTITIES: readonly WpEntity[] = ["wp_page", "wp_media", "wp_option", "wp_menu", "wp_product"];
 export function isWpEntity(e: string): e is WpEntity {
   return (WP_ENTITIES as readonly string[]).includes(e);
+}
+
+// --- Social posting (social track, appended 2026-10-11) ---
+/** The op produced by the social_post agent tool (src/agent/social-tools.ts); never by planChange. */
+export type SocialOpName = "social_post";
+/** A photo published to the venue's Facebook Page and/or Instagram account: the store applies it as a no-op, the destinations publish it. */
+export type SocialEntity = "social_post";
+export type SocialTarget = "facebook_post" | "facebook_story" | "instagram_post" | "instagram_story";
+export const SOCIAL_TARGETS: readonly SocialTarget[] = ["facebook_post", "facebook_story", "instagram_post", "instagram_story"];
+/** `after` of a social_post row (entity_id = our media id); undo swaps it into `before`. */
+export interface SocialPostRow {
+  media_id: string;
+  image_url: string;
+  caption: string;
+  targets: SocialTarget[];
+  /** Instagram feed only: a padded JPEG copy (our storage) when the photo is outside 4:5..1.91:1. */
+  ig_feed_image_url?: string;
+  ig_feed_ratio?: "4:5" | "1.91:1";
+}
+/** Entities that live outside our database (the owner's WordPress site, Facebook, Instagram): applied as no-ops, written by destination pushes. */
+export function isExternalEntity(e: string): e is WpEntity | SocialEntity {
+  return isWpEntity(e) || e === "social_post";
 }

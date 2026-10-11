@@ -493,5 +493,23 @@ export function storeContract(name: string, make: () => Promise<Store>, storageH
       expect(await s.getDestination(v.id, "wordpress")).toBeNull();
       expect(await s.listSyncs({ venueId: v.id })).toEqual([]);
     });
+
+    it("claims a pending sync row for one run at a time (lease), and frees it again", async () => {
+      const s = await make();
+      const v = await s.createVenue({ slug: `t-claim-${crypto.randomUUID().slice(0, 8)}`, name: "Claim" });
+      const d = await s.upsertDestination({ venue_id: v.id, kind: "facebook", config: {}, secrets: "enc" });
+      const cs = await s.createChangeSet({ venue_id: v.id, chat_ref: null, summary_bg: "x", summary_en: "x", preview_bg: "", preview_en: "", source: "text", status: "proposed", changes: [] });
+      const y = await s.createSync({ venue_id: v.id, destination_id: d.id, change_set_id: cs.id, payload: { kind: "facebook" }, next_at: NOW });
+      expect(y.leased_until ?? null).toBeNull();
+      const lease = "2026-10-09T09:05:00.000Z";
+      expect(await s.claimSync(y.id, NOW, lease)).toBe(true);
+      expect(await s.claimSync(y.id, NOW, lease)).toBe(false); // another run holds a fresh lease
+      expect(await s.claimSync(y.id, "2026-10-09T09:04:59.000Z", lease)).toBe(false);
+      expect((await s.getSync(y.id)).leased_until).toBe(lease);
+      expect(await s.claimSync(y.id, lease, "2026-10-09T09:10:00.000Z")).toBe(true); // an expired lease (crashed run) can be taken over
+      await s.updateSync(y.id, { leased_until: null, status: "done" });
+      expect((await s.getSync(y.id)).leased_until).toBeNull();
+      expect(await s.claimSync(y.id, LATER, "2026-10-09T11:00:00.000Z")).toBe(false); // only pending rows
+    });
   });
 }

@@ -53,6 +53,10 @@ export interface Config {
    * deployment does not answer. Turn it on once the Meta webhooks point at this deployment (docs/CHANNELS.md). Telegram is unaffected.
    */
   channelsEnabled: boolean;
+  /** Meta app id (App settings → Basic), public; with META_APP_SECRET it enables "Connect Facebook" for posting to the venue's Page. */
+  metaAppId: string | null;
+  /** Facebook Login for Business configuration id; when set the login sends config_id instead of a scope list. */
+  metaLoginConfigId: string | null;
 }
 
 type Env = Record<string, string | undefined>;
@@ -136,5 +140,7 @@ export function loadConfig(env: Env = process.env, opts: { lenient?: boolean } =
     instagramUsername: parseHandle(optional("INSTAGRAM_USERNAME"), ["instagram.com", "www.instagram.com"]),
     whatsappNumber: optional("WHATSAPP_NUMBER")?.replace(/\D/g, "") || null,
     channelsEnabled: /^(1|true)$/i.test(optional("CHANNELS_ENABLED") ?? ""),
+    metaAppId: optional("META_APP_ID"),
+    metaLoginConfigId: optional("META_LOGIN_CONFIG_ID"),
   };
 }

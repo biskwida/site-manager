@@ -3,7 +3,8 @@
 import { isWpEntity, type ChangeSet, type Lang } from "../domain/types";
 import type { DestinationSync, Store } from "../store/types";
 import { adapterFor } from "./registry";
-import { decryptSecrets } from "./secrets";
+import { decryptSecrets, encryptSecrets } from "./secrets";
+import { socialMissingLines, socialSyncLine } from "./social-lines";
 import type { PushResult } from "./types";
 import { formatSyncError, wpErrorText } from "./wp-errors";
 
@@ -12,12 +13,18 @@ export interface SyncDeps {
   secretKey: Buffer | null;
   fetch?: typeof fetch;
   log?: (s: string) => void;
+  /** Waits between Instagram container polls; default a real timer. */
+  sleep?: (ms: number) => Promise<void>;
 }
 export const BACKOFF_MS = [60_000, 300_000, 1_500_000, 7_200_000, 36_000_000] as const;
 export const MAX_ATTEMPTS = 5;
 
 /** Lease the store hook puts on the rows it creates, so a tick running at the same time does not push them too. */
 export const HOOK_LEASE_MS = 5 * 60_000;
+/** How long one run holds a row while pushing it (claimSync); a run that crashed frees it after this. */
+export const PUSH_LEASE_MS = 5 * 60_000;
+/** Error codes after which a social destination is marked "error" (the connection itself is broken). */
+const CONNECTION_CODES = new Set(["sm_meta_token", "sm_meta_permission"]);
 
 /**
  * One pending row per destination that has something to push for this set. `leaseMs` moves the row's first
@@ -37,16 +44,26 @@ export async function enqueueForChangeSet(store: Store, cs: ChangeSet, now: Date
   return out;
 }
 
-/** Runs one attempt; returns null when the row is not pending or its destination is gone. */
-export async function runSync(d: SyncDeps, sync: DestinationSync, now: Date): Promise<PushResult | null> {
+/**
+ * Runs one attempt; returns null when the row is not pending, another run holds it (claimSync), or its destination is gone.
+ * The row is claimed for PUSH_LEASE_MS first and freed with the outcome, so two runs never push the same row at once.
+ */
+export async function runSync(d: SyncDeps, listed: DestinationSync, now: Date): Promise<PushResult | null> {
   const log = d.log ?? ((s: string) => console.log(s));
-  if (sync.status !== "pending") return null;
+  if (listed.status !== "pending") return null;
+  if (!(await d.store.claimSync(listed.id, now.toISOString(), new Date(now.getTime() + PUSH_LEASE_MS).toISOString()))) return null;
+  // Fresh read after the claim: the listed copy may predate another run's outcome.
+  const sync = await d.store.getSync(listed.id);
+  if (sync.status !== "pending") {
+    await d.store.updateSync(sync.id, { leased_until: null });
+    return null;
+  }
   const venue = await d.store.getVenue(sync.venue_id);
   const dest = (await d.store.listDestinations(sync.venue_id)).find((x) => x.id === sync.destination_id);
   const withSecrets = dest ? await d.store.getDestination(sync.venue_id, dest.kind) : null;
   const adapter = dest ? adapterFor(dest.kind) : null;
   if (!dest || !withSecrets || !adapter) {
-    await d.store.updateSync(sync.id, { status: "failed", attempts: sync.attempts + 1, last_error: "destination not found", updated_at: now.toISOString() });
+    await d.store.updateSync(sync.id, { status: "failed", attempts: sync.attempts + 1, last_error: "destination not found", updated_at: now.toISOString(), leased_until: null });
     return null;
   }
   const attempts = sync.attempts + 1;
@@ -61,15 +78,27 @@ export async function runSync(d: SyncDeps, sync: DestinationSync, now: Date): Pr
     } catch (e) {
       return connectionError(e, false);
     }
+    const key = d.secretKey;
+    // Results this destination stored for a set (partial ones from failed attempts included): adapters skip what is already out.
+    const resultsOf = async (changeSetId: string) =>
+      (await d.store.listSyncs({ changeSetId })).filter((s) => s.destination_id === dest.id && s.result).map((s) => s.result as Record<string, unknown>);
+    const saveConnection = async (config: Record<string, unknown>, fresh: Record<string, string>) => {
+      await d.store.upsertDestination({ venue_id: dest.venue_id, kind: dest.kind, config, secrets: encryptSecrets(fresh, key), status: dest.status });
+    };
+    // Written to the row at once (before a call whose answer might be lost), so a retry knows what may already be out.
+    const checkpoint = async (partial: Record<string, unknown>) => {
+      await d.store.updateSync(sync.id, { result: partial, updated_at: now.toISOString() });
+    };
     try {
       const cs = await d.store.getChangeSet(sync.change_set_id);
-      return await adapter.push({ venue, destination: dest, secrets, changeSet: cs, changes: adapter.relevant(cs.changes), fetch: d.fetch, now });
+      const prior = await resultsOf(sync.change_set_id);
+      return await adapter.push({ venue, destination: dest, secrets, changeSet: cs, changes: adapter.relevant(cs.changes), fetch: d.fetch, now, prior, resultsOf, saveConnection, sleep: d.sleep, checkpoint });
     } catch (e) {
       return connectionError(e, true);
     }
   })();
   if (result.ok) {
-    await d.store.updateSync(sync.id, { status: "done", attempts, last_error: null, result: result.result, updated_at: now.toISOString() });
+    await d.store.updateSync(sync.id, { status: "done", attempts, last_error: null, result: result.result, updated_at: now.toISOString(), leased_until: null });
     if (dest.status === "error") await d.store.updateDestination(dest.id, { status: "connected", last_error: null });
     return result;
   }
@@ -77,8 +106,11 @@ export async function runSync(d: SyncDeps, sync: DestinationSync, now: Date): Pr
   const giveUp = !result.retry || attempts >= MAX_ATTEMPTS;
   // Attempt n waits BACKOFF_MS[n-1]; attempts past the table reuse its last entry.
   const nextAt = new Date(now.getTime() + (BACKOFF_MS[Math.min(attempts, BACKOFF_MS.length) - 1] ?? BACKOFF_MS[BACKOFF_MS.length - 1])).toISOString();
-  await d.store.updateSync(sync.id, { status: giveUp ? "failed" : "pending", attempts, next_at: nextAt, last_error: stored, updated_at: now.toISOString() });
-  if (giveUp) await d.store.updateDestination(dest.id, { status: "error", last_error: stored });
+  await d.store.updateSync(sync.id, { status: giveUp ? "failed" : "pending", attempts, next_at: nextAt, last_error: stored, updated_at: now.toISOString(), leased_until: null, ...(result.partial ? { result: result.partial } : {}) });
+  // WordPress: any final failure marks the connection. Facebook/Instagram: only a broken token or a missing permission does;
+  // a refused photo or a Meta outage says nothing about the connection.
+  const social = dest.kind === "facebook" || dest.kind === "instagram";
+  if (giveUp && (!social || CONNECTION_CODES.has(result.code ?? ""))) await d.store.updateDestination(dest.id, { status: "error", last_error: stored });
   log(`[destinations] ${dest.kind} push for set ${sync.change_set_id} failed (attempt ${attempts}${giveUp ? ", giving up" : `, next at ${nextAt}`}): ${result.error}`);
   return result;
 }
@@ -121,6 +153,11 @@ export async function runDestinationQueue(d: SyncDeps, destinationId: string, no
       if (fresh.status === "done") {
         report.done.push(sync.id);
         continue;
+      }
+      if (r === null && fresh.status === "pending") {
+        // Another run holds this row (claimSync): it pushes it and the rows behind it; leave them alone.
+        stop = true;
+        break;
       }
       if (r === null || fresh.status === "failed") {
         report.failed.push(sync.id);
@@ -165,11 +202,16 @@ export async function syncLines(store: Store, changeSetId: string, lang: Lang): 
     const wp = (await store.listDestinations(cs.venue_id)).find((x) => x.kind === "wordpress" && x.status !== "disconnected");
     if (!wp) return [lang === "bg" ? "WordPress: не е свързан, промяната не е изпратена" : "WordPress: not connected, the change was not sent"];
   }
-  return rows.map((s) => {
-    const name = String(s.payload.kind ?? "destination") === "wordpress" ? "WordPress" : String(s.payload.kind);
+  const lines = rows.map((s) => {
+    const kind = String(s.payload.kind ?? "destination");
+    if (kind === "facebook" || kind === "instagram") return socialSyncLine(kind, s.status, s.result, s.last_error, lang);
+    const name = kind === "wordpress" ? "WordPress" : kind;
     if (s.status === "done") return lang === "bg" ? `${name}: обновено ✅` : `${name}: updated ✅`;
     if (s.status === "pending") return lang === "bg" ? `${name}: не успях да обновя, ще опитам пак` : `${name}: update failed, will retry`;
     const text = wpErrorText(s.last_error, lang);
     return lang === "bg" ? `${name}: грешка: ${text}` : `${name}: error: ${text}`;
   });
+  // Social posts aimed at a network without an active connection: say so (after the networks that did get it).
+  const active = new Set((await store.listDestinations(cs.venue_id)).filter((x) => x.status !== "disconnected").map((x) => x.kind));
+  return [...lines, ...socialMissingLines(cs.changes, active, lang)];
 }

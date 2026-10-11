@@ -14,6 +14,7 @@ import type { ChangeOp, ChangeSet, ChangeSource, Lang, Member, SiteState } from 
 import type { Store } from "../store/types";
 import { formatDateTime, nowText } from "../time";
 import { BulkSchema, CancelSchema, CheckAllergensSchema, ListSchema, ProposeSchema, ScheduleSchema, UndoSchema, type ChangeInput } from "./tool-schemas";
+import { socialTools } from "./social-tools";
 import { wpTools } from "./wp-tools";
 
 export interface AgentDeps {
@@ -31,6 +32,10 @@ export interface AgentDeps {
   source?: ChangeSource;
   /** The venue's WordPress site, when connected (Task 6 registers the wp_* tools). */
   wordpress?: WordPressClient | null;
+  /** Networks connected for posting (registers social_post when either is true). */
+  social?: { facebook: boolean; instagram: boolean } | null;
+  /** Outbound HTTP for reading the owner's photo (social_post checks its shape for Instagram); default the global fetch. */
+  fetch?: typeof fetch;
 }
 
 const STAFF_OPS = new Set<ChangeOp["op"]>(["set_sold_out", "add_item"]);
@@ -255,7 +260,7 @@ export function makeTools(d: AgentDeps) {
 
   // Task 11 appends schedule_changes, propose_bulk_price_change, check_allergens, undo here.
   const kit: ToolKit = { attempt, site, ctx, previews, mine, propose, getSet, ensureNoPending, lang };
-  return [getSite, getMenu, proposeChanges, cancelChangeSet, listChanges, ...extraTools(d, kit), ...wpTools(d, kit)];
+  return [getSite, getMenu, proposeChanges, cancelChangeSet, listChanges, ...extraTools(d, kit), ...wpTools(d, kit), ...socialTools(d, kit)];
 }
 
 /** What the shared helpers of makeTools expose to the second group of tools. */
