@@ -2,7 +2,7 @@
 import type { CSSProperties } from "react";
 import { useLang } from "@/src/i18n";
 import type { TemplateProps } from "../index";
-import { capAccent } from "../shared/color";
+import { capAccent, ensureContrast } from "../shared/color";
 import { mediaUrl } from "../shared/media";
 import { useLiveSite, useNow } from "../shared/useLiveSite";
 import type { MediaLookup } from "./bits";
@@ -30,17 +30,23 @@ function DraftNote({ summary_bg, summary_en }: { summary_bg: string; summary_en:
   );
 }
 
+/**
+ * The accent as text and button fill: OKLCH lightness lifted to >= 0.78 and chroma capped at 0.14, then lifted further if
+ * needed until it reads >= 8.2:1 on --n-bg-2 (#1c1711, the lighter ground; --n-bg is darker still). Computed here rather than
+ * with CSS relative colour syntax; test/template-nocturne.test.ts sweeps the colour space against these floors.
+ */
+export function accentVars(accent: string) {
+  return { "--n-accent-text": ensureContrast(capAccent(accent, { minL: 0.78, maxC: 0.14 }), "#1c1711", 8.2, "lighten") };
+}
+
 /** Nocturne: dark, cinematic, for bars and evening venues (Unbounded + Manrope). */
 export function Template({ state: initial, now: initialNow, slug, page, draft, live, feedUrl, preview = false }: TemplateProps) {
   const { state, changed } = useLiveSite(initial, feedUrl, live);
   const now = useNow(initialNow);
   const accent = ACCENT_RE.test(state.venue.theme.accent) ? state.venue.theme.accent : "#d9a05b";
-  // Accent as text and button fill: OKLCH lightness lifted to >= 0.78, chroma capped at 0.14, computed here rather than with CSS
-  // relative colour syntax, so it reads on near-black (>= 8.2:1) for any accent (test/template-nocturne.test.ts).
-  const accentText = capAccent(accent, { minL: 0.78, maxC: 0.14 });
   const media: MediaLookup = (id) => mediaUrl(id ? state.media.find((m) => m.id === id) : null, { preview });
   return (
-    <div className={`tpl-nocturne ${fontVars}`} style={{ "--accent": accent, "--n-accent-text": accentText } as CSSProperties} data-page={page}>
+    <div className={`tpl-nocturne ${fontVars}`} style={{ "--accent": accent, ...accentVars(accent) } as CSSProperties} data-page={page}>
       <div aria-hidden="true" className="n-grain" />
       {draft && <DraftNote summary_bg={draft.summary_bg} summary_en={draft.summary_en} />}
       <Hero state={state} slug={slug} page={page} media={media} aside={<Tonight state={state} now={now} />} />

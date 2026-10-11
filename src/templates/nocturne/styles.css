@@ -11,10 +11,11 @@
   --n-line: color-mix(in oklab, var(--n-ink) 12%, transparent);
   --n-line-strong: color-mix(in oklab, var(--n-ink) 34%, transparent);
   --n-accent: var(--accent, #d9a05b);
-  /* Accent as text/fill: OKLCH lightness lifted to at least 0.78 and chroma capped at 0.14, so a dark owner-picked accent
-     still reads on near-black (>= 8.2:1 on --n-bg and --n-bg-2 for any accent; --n-bg text on it as a button fill reads the
-     same). Computed in Template.tsx (src/templates/shared/color.ts capAccent) and set inline, so no browser needs CSS relative
-     colour syntax; this value is only the default (brass #d9a05b lifted) for a render without the inline property. */
+  /* Accent as text/fill: OKLCH lightness lifted to at least 0.78 (further if ever needed) and chroma capped at 0.14, so a
+     dark owner-picked accent still reads on near-black (>= 8.2:1 on --n-bg and --n-bg-2 for any accent; --n-bg text on it as
+     a button fill reads the same). Computed in Template.tsx accentVars (shared/color.ts capAccent, ensureContrast) and set
+     inline, so no browser needs CSS relative colour syntax; this value is only the default (brass #d9a05b lifted) for a
+     render without the inline property. */
   --n-accent-text: #e4ab66;
   --n-ease: cubic-bezier(0.22, 1, 0.36, 1);
   --n-radius: 1.25rem;
