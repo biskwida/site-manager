@@ -1,6 +1,6 @@
 // test/template-color.test.ts
 import { describe, expect, it } from "vitest";
-import { capAccent, contrastRatio, hexToOklch, mixHex, oklchToHex } from "@/src/templates/shared/color";
+import { capAccent, contrastRatio, ensureContrast, hexToOklch, mixHex, oklchToHex } from "@/src/templates/shared/color";
 
 const channels = (hex: string) => [1, 3, 5].map((i) => parseInt(hex.slice(i, i + 2), 16));
 
@@ -69,6 +69,32 @@ describe("shared/color", () => {
     expect(mixHex("nope", "#f8fbf9", 0.1)).toBe("#f8fbf9");
     expect(mixHex("#2e5e4e", "nope", 0.1)).toBe("nope");
     expect(mixHex("#2e5e4e", "#f8fbf9", NaN)).toBe("#f8fbf9");
+  });
+  it("darkens vivid greens and cyans until they reach the asked contrast, keeping the hue", () => {
+    for (const fg of ["#3ce178", "#00e5ff", "#7fff00", "#00ff00", "#19eb32"]) {
+      for (const bg of ["#ffffff", "#f6eedb", "#fff8ea", "#e9e8e3"]) {
+        const out = ensureContrast(fg, bg, 4.5, "darken");
+        expect(contrastRatio(out, bg), `${fg} → ${out} on ${bg}`).toBeGreaterThanOrEqual(4.5);
+        expect(contrastRatio(out, bg), `${fg} → ${out} on ${bg} (no overshoot)`).toBeLessThan(4.9);
+        expect(Math.abs(hexToOklch(out)!.h - hexToOklch(fg)!.h), `${fg} hue`).toBeLessThan(6);
+      }
+    }
+  });
+  it("lightens on a dark ground", () => {
+    const out = ensureContrast("#3a1f6b", "#1c1711", 8.2, "lighten");
+    expect(contrastRatio(out, "#1c1711")).toBeGreaterThanOrEqual(8.2);
+    expect(hexToOklch(out)!.l).toBeGreaterThan(hexToOklch("#3a1f6b")!.l);
+  });
+  it("returns a colour that already passes exactly as given", () => {
+    expect(ensureContrast("#b8432a", "#f6eedb", 4.5, "darken")).toBe("#b8432a");
+    expect(ensureContrast("#B22905", "#e9e8e3", 4.5, "darken")).toBe("#B22905");
+    expect(ensureContrast("#e4ab66", "#1c1711", 8.2, "lighten")).toBe("#e4ab66");
+  });
+  it("returns the best effort when the contrast cannot be reached, and invalid input unchanged", () => {
+    expect(ensureContrast("#777777", "#808080", 4.5, "lighten")).toBe("#ffffff"); // white on mid grey is ~3.9:1 at most
+    expect(ensureContrast("#777777", "#000000", 30, "lighten")).toBe("#ffffff");
+    expect(ensureContrast("nope", "#ffffff", 4.5, "darken")).toBe("nope");
+    expect(ensureContrast("#3ce178", "nope", 4.5, "darken")).toBe("#3ce178");
   });
   it("computes WCAG contrast ratios", () => {
     expect(contrastRatio("#000000", "#ffffff")).toBeCloseTo(21, 1);

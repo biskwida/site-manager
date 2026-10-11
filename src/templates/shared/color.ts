@@ -96,6 +96,29 @@ export function capAccent(hex: string, caps: { minL?: number; maxL?: number; max
 }
 
 /**
+ * Moves `fg` in OKLCH lightness (hue kept; chroma only as far as the sRGB gamut clip in `oklchToHex` takes it) until its WCAG
+ * contrast with `bg` is at least `min`: `dir` "darken" for a colour on or under light text/paper, "lighten" for one on a dark
+ * ground. Steps are 0.005 in L. A colour that already passes comes back unchanged (exactly as given), so presets and defaults
+ * that pass are not touched. When `min` cannot be reached (L hits 0 or 1 first) the best ratio found is returned; input that is
+ * not a hex colour comes back unchanged. `ensureContrast("#3ce178", "#ffffff", 4.5, "darken")` → a deep green at ~4.5:1.
+ */
+export function ensureContrast(fg: string, bg: string, min: number, dir: "darken" | "lighten"): string {
+  const o = hexToOklch(fg);
+  const start = contrastRatio(fg, bg);
+  if (!o || Number.isNaN(start) || start >= min) return fg;
+  let best = fg;
+  let bestRatio = start;
+  for (let l = o.l; dir === "darken" ? l > 0 : l < 1; ) {
+    l = dir === "darken" ? Math.max(0, l - 0.005) : Math.min(1, l + 0.005);
+    const hex = oklchToHex({ l, c: o.c, h: o.h });
+    const ratio = contrastRatio(hex, bg);
+    if (ratio >= min) return hex;
+    if (ratio > bestRatio) [best, bestRatio] = [hex, ratio];
+  }
+  return best;
+}
+
+/**
  * Mixes two hex colours in OKLab, the TypeScript twin of `color-mix(in oklab, a <t*100>%, b)`: `t` is the share of `a`
  * (0 gives `b`, 1 gives `a`; clamped to 0..1). `mixHex("#2e5e4e", "#f8fbf9", 0.1)` → "#e3eae6". When either input is not a hex
  * colour, `b` comes back unchanged (it is the ground the mix sits on, so the result is never a broken value).

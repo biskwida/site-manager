@@ -39,6 +39,9 @@ export const TEMPLATE_ACCENT_DEFAULTS: Record<TemplateId, string> = {
   kvartal: "#C23A1C",
 };
 
+/** The accent presets the Look step offers after the design's own default; template tests check every design against them. */
+export const LOOK_ACCENT_PRESETS: readonly string[] = ["#2f6b4f", "#8f5c10", "#a4442c", "#1d4ed8", "#6b21a8", "#1d2a24"];
+
 export type WizardStep = "template" | "basics" | "look" | "hours" | "menu" | "texts" | "photos" | "review" | "done";
 export const WIZARD_STEPS: readonly WizardStep[] = ["template", "basics", "look", "hours", "menu", "texts", "photos", "review", "done"];
 

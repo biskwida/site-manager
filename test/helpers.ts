@@ -1,5 +1,6 @@
 // test/helpers.ts
 import { seedDemo } from "@/src/seed/demo";
+import { oklchToHex } from "@/src/templates/shared/color";
 import { InMemoryStore } from "@/src/store/memory";
 import type { Category, Item, Lang, Venue } from "@/src/domain/types";
 import type { Messenger } from "@/src/bot/messenger";
@@ -71,7 +72,18 @@ export function toolSchemaViolations(schema: unknown, path = "$"): string[] {
   return out;
 }
 
-/** The accent presets the wizard's Look step offers (PRESETS in app/new/components/Steps/Look.tsx; it does not export them). */
-export const LOOK_STEP_ACCENTS = ["#2f6b4f", "#8f5c10", "#a4442c", "#1d4ed8", "#6b21a8", "#1d2a24"];
 /** Owner picks outside every template's comfortable range: a very light butter and a near-black violet. */
 export const EXTREME_ACCENTS = ["#f4e7a1", "#1a0b3d"];
+
+/** Re-exported so template tests and the Look step share one list. */
+export { LOOK_ACCENT_PRESETS } from "@/src/wizard/schema";
+
+/**
+ * Owner accents spread over the whole colour space for contrast sweeps: 64 evenly spaced OKLCH hues × L {0.45, 0.65, 0.85} ×
+ * C {0.05, 0.15, 0.25}, converted to #rrggbb (out-of-gamut ones lose chroma, as a colour picker would give them).
+ */
+export function sweepAccents(): string[] {
+  const out: string[] = [];
+  for (let i = 0; i < 64; i++) for (const l of [0.45, 0.65, 0.85]) for (const c of [0.05, 0.15, 0.25]) out.push(oklchToHex({ l, c, h: (i * 360) / 64 }));
+  return out;
+}

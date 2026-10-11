@@ -1,7 +1,7 @@
 "use client";
 import { useState, type ReactNode } from "react";
 import { TEMPLATE_IDS, type Media, type TemplateId } from "@/src/domain/types";
-import { TEMPLATE_ACCENT_DEFAULTS } from "@/src/wizard/schema";
+import { LOOK_ACCENT_PRESETS, TEMPLATE_ACCENT_DEFAULTS } from "@/src/wizard/schema";
 import { api, WIZARD_MAX_IMAGE_BYTES } from "../api";
 import { fieldError } from "../errors";
 import { Button, Fieldset, FileButton, Status, TextField } from "../Field";
@@ -11,7 +11,6 @@ import { MediaThumb } from "../MediaThumb";
 import type { StepProps } from "../types";
 import { useT } from "../useWizardText";
 
-const PRESETS = ["#2f6b4f", "#8f5c10", "#a4442c", "#1d4ed8", "#6b21a8", "#1d2a24"];
 const HEX = /^#[0-9a-fA-F]{6}$/;
 const SWATCH = "inline-flex min-h-11 cursor-pointer items-center gap-2.5 rounded-full bg-panel py-1 pl-1.5 pr-3.5 text-sm text-fg ring-1 ring-line transition-[box-shadow,background-color] duration-150 ease-out hover:bg-sunken has-[:checked]:ring-2 has-[:checked]:ring-fg has-[:focus-visible]:ring-2 has-[:focus-visible]:ring-brand";
 
@@ -52,7 +51,7 @@ function ImageSlot({ id, label, hint, mediaId, media, onChange, addMedia, wide, 
 export function Look({ id, draft, media, update, addMedia, fieldErrors, flush, igReturn, onIgConsumed, instagramAvailable }: StepProps) {
   const { t, lang } = useT();
   const templateDefault = TEMPLATE_ACCENT_DEFAULTS[draft.template];
-  const options = [templateDefault, ...PRESETS.filter((p) => p !== templateDefault)];
+  const options = [templateDefault, ...LOOK_ACCENT_PRESETS.filter((p) => p !== templateDefault)];
   const custom = !options.includes(draft.theme.accent.toLowerCase());
   const [hex, setHex] = useState(draft.theme.accent);
   // Switching designs keeps everything; an accent still on the old design's default follows the new design's default.
