@@ -2,6 +2,7 @@ import { after } from "next/server";
 import { adminAction, adminOverview, checkDomain, connectDomain, setTemplate, type AdminActionName } from "@/src/server/admin";
 import { newOwnerCode } from "@/src/server/connect-apps";
 import { getServerDeps } from "@/src/server/deps";
+import { socialAvailability } from "@/src/server/social-connect";
 
 export const dynamic = "force-dynamic";
 // A template switch keeps watching the redeploy in after() for up to 240 s.
@@ -19,7 +20,7 @@ export async function GET(req: Request, ctx: RouteContext<"/api/admin/[slug]">) 
   const { slug } = await ctx.params;
   const { deps, venue } = await auth(req, slug);
   if (!venue) return Response.json({ error: "unauthorized" }, { status: 401 });
-  return Response.json(await adminOverview(deps.store, venue, new Date(), deps.config.publicBaseUrl, { hosted: deps.deployer === null }), { headers: { "cache-control": "no-store" } });
+  return Response.json(await adminOverview(deps.store, venue, new Date(), deps.config.publicBaseUrl, { hosted: deps.deployer === null, social: socialAvailability(deps.config, deps.destinationSecretKey) }), { headers: { "cache-control": "no-store" } });
 }
 
 export async function POST(req: Request, ctx: RouteContext<"/api/admin/[slug]">) {

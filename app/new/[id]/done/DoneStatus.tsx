@@ -50,6 +50,8 @@ interface Props {
   baseUrl: string;
   initial: DoneStatusResponse;
   fetcher?: typeof fetch;
+  /** This server can connect Facebook/Instagram for posting: show the pointer to the dashboard's card. */
+  social?: boolean;
 }
 
 type Fresh = { code: string; links: AppLink[]; chats: number };
@@ -61,7 +63,7 @@ const isLocalized = (d: unknown): d is { bg: string; en: string } =>
   typeof d === "object" && d !== null && typeof (d as { bg?: unknown }).bg === "string" && typeof (d as { en?: unknown }).en === "string";
 
 /** App hand-off (deep links, raw code, QR), then a status line polled every 5 s until the site is live. */
-export function DoneStatus({ id, slug, code, links, apps, adminKey, baseUrl, initial, fetcher = defaultFetch }: Props) {
+export function DoneStatus({ id, slug, code, links, apps, adminKey, baseUrl, initial, fetcher = defaultFetch, social = false }: Props) {
   const { lang, t } = useLang();
   const [status, setStatus] = useState(initial);
   // "Connect another app": a fresh single-use owner code from POST /invite; cleared once one more chat links with it.
@@ -194,6 +196,14 @@ export function DoneStatus({ id, slug, code, links, apps, adminKey, baseUrl, ini
           <h2 id="another" ref={freshHeading} tabIndex={-1} style={NO_RING} className="text-xl font-semibold">{t("done.anotherTitle")}</h2>
           <p className="mb-4 mt-1 text-sm text-ink-soft text-pretty">{t("done.anotherLead")}</p>
           <ConnectApps key={fresh.code} code={fresh.code} links={fresh.links} />
+        </section>
+      )}
+
+      {social && (
+        <section aria-labelledby="social" className="mt-5 rounded-3xl bg-card p-4 ring-1 ring-ink/10 sm:p-6">
+          <h2 id="social" className="text-xl font-semibold">{t("done.social.title")}</h2>
+          <p className="mt-1 text-sm text-ink-soft text-pretty">{t("done.social.text")}</p>
+          <a href={`${adminUrl}#social`} className="mt-3 inline-flex min-h-11 items-center rounded-full px-5 text-sm font-semibold text-ink ring-1 ring-ink/25 transition-[transform,background-color] duration-150 ease-out hover:bg-ink/5 active:scale-[0.98] motion-reduce:transition-none">{t("done.social.link")}</a>
         </section>
       )}
 

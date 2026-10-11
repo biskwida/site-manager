@@ -8,6 +8,7 @@ import { LangProvider } from "@/src/i18n";
 import { DICTS } from "@/src/i18n/dicts";
 import { connectedApps, connectLinks, enabledApps } from "@/src/server/connect-apps";
 import { getServerDeps } from "@/src/server/deps";
+import { socialAvailability } from "@/src/server/social-connect";
 import { DRAFT_COOKIE, venueFromDraftCookie } from "@/src/server/draft-cookie";
 import { doneInviteCode } from "@/src/server/wizard";
 import { DoneStatus, type DoneStatusResponse } from "./DoneStatus";
@@ -48,7 +49,7 @@ export default async function Page(props: PageProps<"/new/[id]/done">) {
   };
   return (
     <LangProvider defaultLang={venue.default_lang}>
-      <DoneStatus id={id} slug={venue.slug} code={code} links={code ? connectLinks(deps.config, code) : []} apps={enabledApps(deps.config)} adminKey={adminKey} baseUrl={deps.config.publicBaseUrl} initial={initial} />
+      <DoneStatus id={id} slug={venue.slug} code={code} links={code ? connectLinks(deps.config, code) : []} apps={enabledApps(deps.config)} adminKey={adminKey} baseUrl={deps.config.publicBaseUrl} initial={initial} social={Object.values(socialAvailability(deps.config, deps.destinationSecretKey)).some(Boolean)} />
     </LangProvider>
   );
 }
