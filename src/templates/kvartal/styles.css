@@ -17,16 +17,17 @@
   --kv-on: #f6f5f1;          /* text on ink and on the accent block */
   --kv-on-soft: #a9aaa6;     /* secondary text on ink: 7.5:1 */
   --kv-accent: var(--accent, #c23a1c);
-  /* Accent as text on the paper: lightness capped at OKLCH 0.5 so any owner-picked accent reads (vermilion → #b22905,
-     5.3:1; blue #1f5f8b unchanged, 5.6:1; green → #377333, 4.7:1; ink 14.4:1). Browsers without relative colour syntax
-     keep the plain accent (first declaration). */
-  --kv-accent-text: var(--kv-accent);
-  --kv-accent-text: oklch(from var(--kv-accent) min(l, 0.5) c h);
+  /* Accent as text on the paper: OKLCH lightness capped at 0.5 so any owner-picked accent reads (>= 4.5:1 for any accent;
+     vermilion → #b22905, 5.3:1; blue #1f5f8b unchanged, 5.6:1; green → #377333, 4.7:1; ink 14.4:1). */
+  --kv-accent-text: #b22905;
   /* Accent as the "Now" block fill under --kv-on text: capped at L 0.53 (vermilion → #bc3415, 5.3:1; blue 6.3:1; green
-     #3e7a3a unchanged, 4.8:1; ink 16.2:1; a light owner pick such as #7fd1ae → #277d5e, 4.6:1). */
-  --kv-accent-fill: var(--kv-accent);
-  --kv-accent-fill: oklch(from var(--kv-accent) min(l, 0.53) c h);
-  --kv-accent-soft: color-mix(in oklab, var(--kv-accent) 14%, var(--kv-bg));
+     #3e7a3a unchanged, 4.8:1; ink 16.2:1; a light owner pick such as #7fd1ae → #277d5e, 4.6:1; >= 4.8:1 for every wizard
+     preset, and only vivid greens such as #00c805 dip to 4.48:1). */
+  --kv-accent-fill: #bc3415;
+  /* The change flash behind a row: 14% accent on the paper in OKLab. These three are computed in Template.tsx
+     (src/templates/shared/color.ts capAccent, mixHex) and set inline, so no browser needs CSS relative colour syntax or
+     color-mix for them; the values here are only the defaults (vermilion) for a render without the inline properties. */
+  --kv-accent-soft: #e7d1c8;
   --kv-ease: cubic-bezier(0.23, 1, 0.32, 1);
   --kv-gutter: 16px;
   --kv-gap: 16px;

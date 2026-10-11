@@ -6,7 +6,7 @@ import { describe, expect, it, vi } from "vitest";
 import type { DraftInfo, Lang, SiteState } from "@/src/domain/types";
 import { LangProvider } from "@/src/i18n";
 import { TEMPLATE_ACCENT_DEFAULTS } from "@/src/wizard/schema";
-import { makeDemo } from "./helpers";
+import { EXTREME_ACCENTS, LOOK_STEP_ACCENTS, makeDemo } from "./helpers";
 
 // next/font/google only works through the Next.js compiler; this file asserts the fv-* values below, so it keeps its own stub.
 vi.mock("next/font/google", () => {
@@ -15,6 +15,7 @@ vi.mock("next/font/google", () => {
 });
 
 import { def } from "@/src/templates/kvartal";
+import { contrastRatio } from "@/src/templates/shared/color";
 import { fitHeadline } from "@/src/templates/kvartal/Hero";
 
 // createElement passes children positionally, which LangProvider's required `children` prop type does not model.
@@ -222,6 +223,27 @@ describe("kvartal template", () => {
     const fit = (x: ReturnType<typeof fitHeadline>) => parseFloat(String((x.style as Record<string, string>)["--kv-fit"]));
     expect(fit(fitHeadline("★★★"))).toBeLessThanOrEqual((100 / 3) * 0.98 + 0.01); // unmapped symbol: 1em each
     expect(fit(fitHeadline("ѣѣѣ"))).toBeLessThanOrEqual((100 / (3 * 1.05)) * 0.98 + 0.01); // unmapped lowercase: widest lowercase
+  });
+  it("computes the accent text, fill and flash tint in TypeScript (no CSS relative colour) and keeps them readable for every accent", async () => {
+    const css = readFileSync(new URL("../src/templates/kvartal/styles.css", import.meta.url), "utf8");
+    expect(css).not.toMatch(/oklch\(from/);
+    expect(css).not.toMatch(/--kv-accent-soft:\s*color-mix/);
+    for (const accent of [def.accentDefault, ...LOOK_STEP_ACCENTS, ...EXTREME_ACCENTS]) {
+      const html = await render("en", { page: "home", mutate: (s) => { s.venue.theme.accent = accent; } });
+      const read = (name: string) => new RegExp(`--kv-accent-${name}:(#[0-9a-f]{6})`).exec(html)?.[1];
+      const [text, fill, soft] = [read("text"), read("fill"), read("soft")];
+      expect(text && fill && soft, accent).toBeTruthy();
+      // Numbers, the full stop and the map link on the paper.
+      expect(contrastRatio(text!, "#e9e8e3"), `${text} on paper`).toBeGreaterThanOrEqual(4.5);
+      // The "Now" block: --kv-on text on the fill.
+      expect(contrastRatio("#f6f5f1", fill!), `--kv-on on ${fill}`).toBeGreaterThanOrEqual(4.5);
+      // A flashing row keeps its ink text readable.
+      expect(contrastRatio("#17191b", soft!), `ink on ${soft}`).toBeGreaterThanOrEqual(4.5);
+    }
+    const html = await render("en", { mutate: (s) => { s.venue.theme.accent = "#C23A1C"; } });
+    expect(html).toContain("--kv-accent-text:#b22905");
+    expect(html).toContain("--kv-accent-fill:#bc3415");
+    expect(html).toContain("--kv-accent-soft:#e7d1c8");
   });
   it("keeps the change flash reaching its final frame under reduced motion", () => {
     // `animation: none` would freeze .kv-flash at its base opacity (1) forever, because useLiveSite never clears `changed`.

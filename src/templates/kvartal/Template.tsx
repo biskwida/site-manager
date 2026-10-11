@@ -2,6 +2,7 @@
 import type { CSSProperties } from "react";
 import { useLang } from "@/src/i18n";
 import type { TemplateProps } from "../index";
+import { capAccent, mixHex } from "../shared/color";
 import { mediaUrl } from "../shared/media";
 import { useLiveSite, useNow } from "../shared/useLiveSite";
 import { menuSections, type MediaLookup } from "./bits";
@@ -35,11 +36,17 @@ export function Template({ state: initial, now: initialNow, slug, page, draft, l
   const { state, changed } = useLiveSite(initial, feedUrl, live);
   const now = useNow(initialNow);
   const accent = ACCENT_RE.test(state.venue.theme.accent) ? state.venue.theme.accent : "#C23A1C";
+  // Accent as text on the paper (OKLCH lightness capped at 0.5), as the "Now" block fill under light text (capped at 0.53) and
+  // the change-flash tint (14% on the paper, #e9e8e3), computed here rather than with CSS relative colour syntax (contrast
+  // floors in styles.css, asserted in test/template-kvartal.test.ts).
+  const accentText = capAccent(accent, { maxL: 0.5 });
+  const accentFill = capAccent(accent, { maxL: 0.53 });
+  const accentSoft = mixHex(accent, "#e9e8e3", 0.14);
   const media: MediaLookup = (id) => mediaUrl(id ? state.media.find((m) => m.id === id) : null, { preview });
   const { sections, numbers } = menuSections(state, now);
   const menuProps = { state, now, changed, media, slug, sections, numbers };
   return (
-    <div className={`tpl-kvartal ${fontVars}`} style={{ "--accent": accent } as CSSProperties} data-page={page}>
+    <div className={`tpl-kvartal ${fontVars}`} style={{ "--accent": accent, "--kv-accent-text": accentText, "--kv-accent-fill": accentFill, "--kv-accent-soft": accentSoft } as CSSProperties} data-page={page}>
       {draft && <DraftNote summary_bg={draft.summary_bg} summary_en={draft.summary_en} />}
       <Header state={state} slug={slug} page={page} media={media} />
       <main id="main" className="kv-main">
