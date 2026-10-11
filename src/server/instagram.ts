@@ -307,7 +307,14 @@ export async function handleInstagramCallback(req: Request, d: InstagramDeps): P
     const token = await exchangeCode(d.fetch, { appId: d.config.instagramAppId!, appSecret: d.config.instagramAppSecret!, redirectUri: igRedirectUri(base) }, code);
     const read = await readInstagramMedia(d.fetch, token);
     const list: InstagramImport = { fetched_at: d.now().toISOString(), ...read };
+    // Reading Instagram takes seconds; the draft may have been published meanwhile. Write only to a draft, and if a publish
+    // slipped in between this read and the write, take the list off again: a live venue never keeps one.
+    if ((await d.store.getVenue(venue.id)).status !== "draft") return go(`/new/${venue.id}`);
     await d.store.updateVenue(venue.id, { instagram_import: list });
+    if ((await d.store.getVenue(venue.id)).status !== "draft") {
+      await d.store.updateVenue(venue.id, { instagram_import: null });
+      return go(`/new/${venue.id}`);
+    }
     return back(step, "ig=1");
   } catch (e) {
     const reason = e instanceof IgFail ? e.reason : "media";
@@ -343,7 +350,8 @@ export const IgPickSchema = z.object({
   target: z.union([z.enum(["cover", "logo", "gallery"]), z.object({ item: ItemRef })]),
 });
 export type IgPick = z.infer<typeof IgPickSchema>;
-export type IgFailCode = "too_large" | "unsupported_type" | "fetch_failed";
+/** Per pick: the image could not be fetched or used (`too_large`, `unsupported_type`, `fetch_failed`), or its dish left the menu while it downloaded (`invalid`). */
+export type IgFailCode = "too_large" | "unsupported_type" | "fetch_failed" | "invalid";
 
 /** Reads at most `max` bytes; null when the body is larger. */
 async function readCapped(res: Response, max: number): Promise<Uint8Array | null> {
@@ -483,9 +491,16 @@ export async function handleInstagramImport(req: Request, d: InstagramDeps, venu
       const code = failed[0]?.code;
       throw code === "too_large" ? TOO_LARGE() : code === "unsupported_type" ? UNSUPPORTED() : FETCH_FAILED();
     }
-    // A fresh read: autosaves that landed while the images downloaded are kept.
+    // A fresh read: autosaves that landed while the images downloaded are kept. A dish removed meanwhile cannot take its photo.
     const fresh = await d.store.getVenue(venue.id);
-    const updated = await updateDraft(d.store, fresh, picksPatch(fresh.wizard_draft ?? emptyDraft(fresh.template), picks, mediaFor));
+    const freshDraft = fresh.wizard_draft ?? emptyDraft(fresh.template);
+    const freshRefs = new Set(freshDraft.categories.flatMap((c) => c.items.map((it) => `${c.key}/${it.key}`)));
+    const applicable = picks.filter((p) => {
+      if (typeof p.target !== "object" || freshRefs.has(p.target.item) || !mediaFor.has(p.id)) return true;
+      failed.push({ id: p.id, code: "invalid" });
+      return false;
+    });
+    const updated = await updateDraft(d.store, fresh, picksPatch(freshDraft, applicable, mediaFor));
     return Response.json({ draft: updated, media, failed }, { headers: NO_STORE });
   } catch (e) {
     return wizardErrorResponse(e);

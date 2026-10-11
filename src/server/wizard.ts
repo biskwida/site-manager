@@ -250,7 +250,9 @@ async function publishClaimed(store: Store, venue: Venue, d: WizardDraft, now: D
 
   // 3. Live: the last write. From here on the venue is public and the wizard draft is gone, with any Instagram import list
   //    (written only when there is one, so a database without the instagram_import column still publishes).
-  await store.updateVenue(venue.id, { status: "live", wizard_draft: null, ...(venue.instagram_import ? { instagram_import: null } : {}) });
+  //    The list is checked on a fresh read: the Instagram callback may have stored one after this request read the venue.
+  const latest = await store.getVenue(venue.id);
+  await store.updateVenue(venue.id, { status: "live", wizard_draft: null, ...(latest.instagram_import ? { instagram_import: null } : {}) });
 
   // 4. Owner invite and admin token. A failure here leaves a live venue without a code; the done page issues a fresh invite.
   const inviteCode = await store.createInvite(venue.id, "owner", new Date(now.getTime() + INVITE_TTL_MS).toISOString());

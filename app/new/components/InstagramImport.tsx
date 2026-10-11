@@ -1,9 +1,9 @@
 "use client";
-import { useEffect, useId, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 import { wizardText, type WizardKey } from "@/src/i18n/wizard";
 import type { WizardDraft } from "@/src/wizard/schema";
 import { api, type IgItem, type IgTarget } from "./api";
-import { Button, Note, Status } from "./Field";
+import { Button, Note } from "./Field";
 import type { IgReturn, StepProps } from "./types";
 import { useT } from "./useWizardText";
 
@@ -25,7 +25,7 @@ export function dishOptions(d: WizardDraft, lang: "bg" | "en"): DishOption[] {
 const SELECT = "min-h-11 w-full min-w-0 rounded-xl bg-panel px-3 text-sm text-fg ring-1 ring-line outline-none transition-shadow duration-150 ease-out focus-visible:ring-2 focus-visible:ring-brand";
 
 /** The picking grid: one labelled checkbox per photo (the caption is the label) and, once ticked, where it goes. */
-export function InstagramGrid({ items, username, picks, dishes, onToggle, onTarget, busy = false }: {
+export function InstagramGrid({ items, username, picks, dishes, onToggle, onTarget, busy = false, focusHeading = false }: {
   items: IgItem[];
   username?: string;
   picks: Record<string, TargetValue>;
@@ -33,14 +33,20 @@ export function InstagramGrid({ items, username, picks, dishes, onToggle, onTarg
   onToggle: (id: string, on: boolean) => void;
   onTarget: (id: string, v: TargetValue) => void;
   busy?: boolean;
+  /** Move keyboard and screen-reader focus to the heading when the grid appears (the list just loaded). */
+  focusHeading?: boolean;
 }) {
   const { t } = useT();
   const headingId = useId();
+  const heading = useRef<HTMLHeadingElement>(null);
+  useEffect(() => {
+    if (focusHeading) heading.current?.focus();
+  }, [focusHeading]);
   const full = Object.keys(picks).length >= IG_PICKS_MAX;
   return (
     <section aria-labelledby={headingId} className="grid gap-3">
       <div className="grid gap-1">
-        <h2 id={headingId} className="text-base font-semibold text-fg">{username ? t("ig.titleUser", { user: username }) : t("ig.title")}</h2>
+        <h2 id={headingId} ref={heading} tabIndex={-1} className="text-base font-semibold text-fg outline-none focus-visible:ring-2 focus-visible:ring-brand">{username ? t("ig.titleUser", { user: username }) : t("ig.title")}</h2>
         <p className="max-w-[60ch] text-sm leading-snug text-fg-soft">{t("ig.pickHint", { n: IG_PICKS_MAX })}</p>
       </div>
       <ul className="grid grid-cols-2 gap-3 sm:grid-cols-3">
@@ -98,24 +104,43 @@ type Message = { tone: "soft" | "danger"; bg: string; en: string };
 const msg = (tone: Message["tone"], key: WizardKey, vars?: Record<string, string | number>): Message => ({ tone, bg: wizardText("bg", key, vars), en: wizardText("en", key, vars) });
 const IG_REASONS = ["state", "session", "token", "media"];
 
+/** What to say about the return from Instagram's sign-in (cancelled, or an error by reason); null for a successful return. */
+export function returnMessage(here: IgReturn | null): Message | null {
+  if (here?.status === "cancelled") return msg("soft", "ig.cancelled");
+  if (here?.status === "error") return msg("danger", IG_REASONS.includes(here.reason ?? "") ? (`ig.error.${here.reason}` as WizardKey) : "ig.failed");
+  return null;
+}
+
 type Phase = { kind: "idle" } | { kind: "loading" } | { kind: "list"; items: IgItem[]; username?: string } | { kind: "expired" } | { kind: "empty" } | { kind: "failed" };
 
 /**
  * "Import photos from Instagram": the entry button and hint; after the sign-in came back to this step (`?ig=1`), the grid.
  * `from` is the step it lives in; in the Look step a ticked photo goes to the cover by default.
  */
-export function InstagramImport({ id, draft, update, addMedia, flush, igReturn, instagramAvailable, from }: Pick<StepProps, "id" | "draft" | "update" | "addMedia" | "flush" | "igReturn" | "instagramAvailable"> & { from: "photos" | "look" }) {
+export function InstagramImport({ id, draft, update, addMedia, flush, igReturn, onIgConsumed, instagramAvailable, from }: Pick<StepProps, "id" | "draft" | "update" | "addMedia" | "flush" | "igReturn" | "onIgConsumed" | "instagramAvailable"> & { from: "photos" | "look" }) {
   const { t, lang } = useT();
-  const here: IgReturn | null = igReturn && igReturn.step === from ? igReturn : null;
+  // The return from Instagram is read once, at mount; the wizard then forgets it, so revisiting the step starts clean.
+  const [here] = useState<IgReturn | null>(() => (igReturn && igReturn.step === from ? igReturn : null));
   const [phase, setPhase] = useState<Phase>(here?.status === "ok" ? { kind: "loading" } : { kind: "idle" });
   const [picks, setPicks] = useState<Record<string, TargetValue>>({});
   const [busy, setBusy] = useState(false);
   const [leaving, setLeaving] = useState(false);
-  const [message, setMessage] = useState<Message | null>(() => {
-    if (here?.status === "cancelled") return msg("soft", "ig.cancelled");
-    if (here?.status === "error") return msg("danger", IG_REASONS.includes(here.reason ?? "") ? (`ig.error.${here.reason}` as WizardKey) : "ig.failed");
-    return null;
-  });
+  const [message, setMessage] = useState<Message | null>(null);
+  const [focusGrid, setFocusGrid] = useState(false);
+  const statusLine = useRef<HTMLParagraphElement>(null);
+  /** The draft as last rendered: an import merges onto it after its awaits, never onto the one captured at the click. */
+  const draftRef = useRef(draft);
+  useEffect(() => {
+    draftRef.current = draft;
+  }, [draft]);
+
+  useEffect(() => {
+    if (!here) return;
+    onIgConsumed?.();
+    // Set after the first paint, so the aria-live line already exists and announces the change.
+    const frame = window.requestAnimationFrame(() => setMessage(returnMessage(here)));
+    return () => window.cancelAnimationFrame(frame);
+  }, [here, onIgConsumed]);
 
   useEffect(() => {
     if (!instagramAvailable || here?.status !== "ok") return;
@@ -125,16 +150,25 @@ export function InstagramImport({ id, draft, update, addMedia, flush, igReturn, 
       if (!r.ok) setPhase({ kind: "failed" });
       else if (r.data.expired) setPhase({ kind: "expired" });
       else if (!r.data.items.length) setPhase({ kind: "empty" });
-      else setPhase({ kind: "list", items: r.data.items, ...(r.data.username ? { username: r.data.username } : {}) });
+      else {
+        setPhase({ kind: "list", items: r.data.items, ...(r.data.username ? { username: r.data.username } : {}) });
+        setFocusGrid(true);
+      }
     });
     return () => { live = false; };
-  }, [id, instagramAvailable, here?.status]);
+  }, [id, instagramAvailable, here]);
 
   if (!instagramAvailable) return null;
 
   async function start() {
     setLeaving(true);
-    await flush?.();
+    // Leaving the page with unsaved edits would lose them: stay and say so.
+    if (flush && !(await flush())) {
+      setLeaving(false);
+      setMessage(msg("danger", "save.error"));
+      statusLine.current?.focus();
+      return;
+    }
     window.location.assign(api.igStartUrl(id, from));
   }
 
@@ -149,10 +183,11 @@ export function InstagramImport({ id, draft, update, addMedia, flush, igReturn, 
     if (!r.ok) {
       if (r.error.code === "instagram_expired") { setPhase({ kind: "expired" }); setMessage(null); return; }
       setMessage(r.status === 400 || r.status === 429 || r.status === 502 ? { tone: "danger", bg: r.error.bg, en: r.error.en } : msg("danger", "ig.failed"));
+      statusLine.current?.focus();
       return;
     }
     for (const m of r.data.media) addMedia(m);
-    update(importPatch(draft, r.data.draft, list.filter((p) => !r.data.failed.some((f) => f.id === p.id)).map((p) => p.target)));
+    update(importPatch(draftRef.current, r.data.draft, list.filter((p) => !r.data.failed.some((f) => f.id === p.id)).map((p) => p.target)));
     setPicks({});
     const failed = r.data.failed.length;
     const done = msg(failed ? "danger" : "soft", "ig.imported", { n: r.data.media.length });
@@ -160,6 +195,7 @@ export function InstagramImport({ id, draft, update, addMedia, flush, igReturn, 
       const more = msg("danger", "ig.someFailed", { n: failed });
       setMessage({ tone: "danger", bg: `${done.bg} ${more.bg}`, en: `${done.en} ${more.en}` });
     } else setMessage(done);
+    statusLine.current?.focus();
   }
 
   const count = Object.keys(picks).length;
@@ -173,7 +209,7 @@ export function InstagramImport({ id, draft, update, addMedia, flush, igReturn, 
     <div className="grid gap-3">
       {phase.kind === "list" ? (
         <>
-          <InstagramGrid items={phase.items} username={phase.username} picks={picks} busy={busy} dishes={dishOptions(draft, lang)}
+          <InstagramGrid items={phase.items} username={phase.username} picks={picks} busy={busy} dishes={dishOptions(draft, lang)} focusHeading={focusGrid}
             onToggle={(pid, on) => setPicks((p) => { const next = { ...p }; if (on) next[pid] = from === "look" ? "cover" : "gallery"; else delete next[pid]; return next; })}
             onTarget={(pid, v) => setPicks((p) => ({ ...p, [pid]: v }))} />
           <div className="flex flex-wrap items-center gap-3">
@@ -189,7 +225,10 @@ export function InstagramImport({ id, draft, update, addMedia, flush, igReturn, 
           {phase.kind === "empty" && <Note>{t("ig.empty")}</Note>}
         </>
       )}
-      <Status tone={phase.kind === "failed" ? "danger" : message?.tone ?? "soft"}>{phase.kind === "loading" ? t("ig.loading") : phase.kind === "failed" ? t("ig.error.media") : (message ? message[lang] : "")}</Status>
+      {/* Same look as Field's Status, plus a ref and tabIndex so focus can land on the result of an import. */}
+      <p ref={statusLine} tabIndex={-1} aria-live="polite" className={`min-h-5 text-sm outline-none ${phase.kind === "failed" || message?.tone === "danger" ? "font-semibold text-danger" : "text-fg-soft"}`}>
+        {phase.kind === "loading" ? t("ig.loading") : phase.kind === "failed" ? t("ig.error.media") : (message ? message[lang] : "")}
+      </p>
     </div>
   );
 }

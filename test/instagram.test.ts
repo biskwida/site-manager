@@ -203,6 +203,15 @@ describe("GET /api/new/instagram/callback", () => {
     expect(logs.join("\n")).not.toContain("CODE123");
   });
 
+  it("does not leave a list on a venue that was published while Instagram was being read", async () => {
+    const ig = instagram({ media: async () => { await s.store.updateVenue(s.id, { status: "live" }); return json({ data: [{ id: "10", media_type: "IMAGE", media_url: `${CDN}10.jpg` }] }); } });
+    const s = await setup({ fetch: ig.f }); // the handler above runs later, during the callback
+    const { state, cookie } = await startFlow(s);
+    const res = await handleInstagramCallback(callback({ code: "C", state }, cookie), s.d);
+    expect(res.headers.get("location")).toBe(`${BASE}/new/${s.id}`);
+    expect((await s.venue()).instagram_import).toBeNull();
+  });
+
   it("returns to the Look step when the flow started there, and accepts a flat token response", async () => {
     const ig = instagram({ token: () => json({ access_token: TOKEN, user_id: 1, permissions: "instagram_business_basic" }) });
     const s = await setup({ fetch: ig.f });
@@ -334,6 +343,17 @@ describe("POST /api/new/[id]/instagram/import", () => {
     expect((await s.store.getSite(s.id)).media).toHaveLength(3);
   });
 
+  it("reports a pick whose dish was removed while the images downloaded as failed (invalid), and applies the rest", async () => {
+    const net = fakeFetch([[CDN, async () => { await updateDraft(s.store, await s.venue(), { categories: [] }); return img(JPEG); }]]);
+    const s = await withList({ fetch: net.f }); // the handler above runs later, during the import
+    const res = await handleInstagramImport(importReq({ picks: [{ id: "10", target: { item: "c1/i1" } }, { id: "21", target: "cover" }] }), s.d, await s.venue());
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { failed: { id: string; code: string }[]; draft: { cover_media_id: string | null; categories: unknown[] } };
+    expect(body.failed).toEqual([{ id: "10", code: "invalid" }]);
+    expect(body.draft.cover_media_id).not.toBeNull();
+    expect(body.draft.categories).toEqual([]);
+  });
+
   it("refuses ids that are not in the stored list and dishes that are not on the menu", async () => {
     const net = cdn();
     const s = await withList({ fetch: net.f });
@@ -427,6 +447,14 @@ describe("the import list stays server-side", () => {
     expect(v.wizard_draft!.name).toBe("Ъгъла");
     expect(v.instagram_import).toBeNull();
     expect(JSON.stringify(v.wizard_draft)).not.toContain("instagram_import");
+  });
+  it("publish clears it from a fresh read, even when the request's venue predates the list", async () => {
+    const s = await setup();
+    await updateDraft(s.store, await s.venue(), { name: "Ъгъла", slug: "agala-ig2", address: "ул. Пример 1", categories: [{ key: "c1", name_bg: "Кафе", name_en: "Coffee", items: [{ key: "i1", name_bg: "Капучино", name_en: "Cappuccino", desc_bg: "", desc_en: "", price_eur: 3, allergens: [], image_media_id: null }] }] });
+    const stale = await s.venue(); // read before the callback stored a list
+    await s.store.updateVenue(s.id, { instagram_import: LIST });
+    await publishDraft(s.store, stale, T0);
+    expect((await s.venue()).instagram_import).toBeNull();
   });
   it("publish clears it", async () => {
     const s = await withList();

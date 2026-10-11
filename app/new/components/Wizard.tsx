@@ -39,6 +39,8 @@ export function Wizard({ id, initialDraft, initialMedia, baseUrl, aiAvailable, n
   const [draft, setDraft] = useState(initialDraft);
   const [media, setMedia] = useState(initialMedia);
   const [localUrls, setLocalUrls] = useState<Record<string, string>>({});
+  const [ig, setIg] = useState(igReturn);
+  const consumeIg = useCallback(() => setIg(null), []);
   const [step, setStep] = useState<WizardStep>(igReturn ? igReturn.step : FORM_STEPS.includes(initialDraft.step) ? initialDraft.step : "basics");
   const [save, setSave] = useState<SaveSnapshot>({ state: "idle", errors: [], message: null });
   const [showErrors, setShowErrors] = useState(false);
@@ -127,7 +129,7 @@ export function Wizard({ id, initialDraft, initialMedia, baseUrl, aiAvailable, n
   }
 
   const closePreview = useCallback(() => setPreviewOpen(false), []);
-  const stepProps: StepProps = { id, draft, media: shownMedia, update, addMedia, baseUrl, aiAvailable, fieldErrors, instagramAvailable, igReturn, flush: () => flush() };
+  const stepProps: StepProps = { id, draft, media: shownMedia, update, addMedia, baseUrl, aiAvailable, fieldErrors, instagramAvailable, igReturn: ig, onIgConsumed: consumeIg, flush: () => flush() };
   const saveText = {
     idle: "",
     saving: t("save.saving"),

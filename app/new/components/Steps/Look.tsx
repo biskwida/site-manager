@@ -49,7 +49,7 @@ function ImageSlot({ id, label, hint, mediaId, media, onChange, addMedia, wide, 
   );
 }
 
-export function Look({ id, draft, media, update, addMedia, fieldErrors, flush, igReturn, instagramAvailable }: StepProps) {
+export function Look({ id, draft, media, update, addMedia, fieldErrors, flush, igReturn, onIgConsumed, instagramAvailable }: StepProps) {
   const { t, lang } = useT();
   const templateDefault = TEMPLATE_ACCENT_DEFAULTS[draft.template];
   const options = [templateDefault, ...PRESETS.filter((p) => p !== templateDefault)];
@@ -95,7 +95,7 @@ export function Look({ id, draft, media, update, addMedia, fieldErrors, flush, i
       <div className="grid gap-8 border-t border-line pt-8">
         <ImageSlot id={id} label={t("look.logo")} mediaId={draft.logo_media_id} media={media} addMedia={addMedia} onChange={(logo_media_id) => update({ logo_media_id })} />
         <ImageSlot id={id} label={t("look.cover")} hint={t("look.coverHint")} mediaId={draft.cover_media_id} media={media} addMedia={addMedia} onChange={(cover_media_id) => update({ cover_media_id })} wide>
-          <InstagramImport id={id} draft={draft} update={update} addMedia={addMedia} flush={flush} igReturn={igReturn} instagramAvailable={instagramAvailable} from="look" />
+          <InstagramImport id={id} draft={draft} update={update} addMedia={addMedia} flush={flush} igReturn={igReturn} onIgConsumed={onIgConsumed} instagramAvailable={instagramAvailable} from="look" />
         </ImageSlot>
       </div>
     </div>

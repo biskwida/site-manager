@@ -29,6 +29,8 @@ export interface StepProps {
   /** false without INSTAGRAM_APP_ID/SECRET: the Instagram import is not shown. */
   instagramAvailable?: boolean;
   igReturn?: IgReturn | null;
+  /** Called once the step has read `igReturn`; the wizard then drops it, so revisiting the step does not show it again. */
+  onIgConsumed?: () => void;
   /** Sends pending autosave edits now (before leaving for Instagram, before an import patches the draft on the server). */
   flush?: () => Promise<boolean>;
 }

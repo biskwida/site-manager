@@ -188,12 +188,14 @@ Owner setup (once):
 1. Apply the schema change: `npm run db:apply` (adds `venues.instagram_import`; publishing works without it, the import needs it).
 2. developers.facebook.com → My Apps → Create app → type **Business** (Instagram Login needs a Business app).
 3. Add the **Instagram** product → **API setup with Instagram login**.
-4. Under "Set up Instagram business login" → **Business login settings** → **OAuth redirect URIs**: add exactly `<PUBLIC_BASE_URL>/api/new/instagram/callback` (for local tries also `http://localhost:3000/api/new/instagram/callback` if Meta accepts it; otherwise test on the deployment).
+4. Under "Set up Instagram business login" → **Business login settings** → **OAuth redirect URIs**: add exactly `<PUBLIC_BASE_URL>/api/new/instagram/callback`. For the current production deployment that is `https://site-manager-lovat.vercel.app/api/new/instagram/callback`. Meta generally wants https redirect URIs, so test on the deployment rather than `localhost`.
 5. Copy the **Instagram app ID** and **Instagram app secret** from the same page (they differ from the Facebook app id and secret) and set them: `npm run env:set -- INSTAGRAM_APP_ID`, `npm run env:set -- INSTAGRAM_APP_SECRET`, and the same two in Vercel (Production). Redeploy.
 6. While the app is in **Development** mode only accounts with a role on the app can sign in: App roles → Roles → add the café's Instagram account as an **Instagram Tester**, then accept the invite on instagram.com (Settings → Apps and websites → Tester invites; Meta moves this menu now and then). The account must be a Business or Creator account.
 7. For cafés you do not manage: Meta requires **Advanced Access** to `instagram_business_basic`, which goes through **App Review** (a screencast of this flow, a privacy policy URL) and **Business verification** of the business that owns the app; then switch the app to **Live**. Check the current requirements in the App Dashboard's App Review section.
 
 Without the two keys the button is hidden and `/api/new/<id>/instagram/*` answers 503 `instagram_unavailable`.
+
+The Graph API version is pinned: `IG_GRAPH_URL = "https://graph.instagram.com/v25.0"` in `src/server/instagram.ts` (the version Meta's Instagram Login docs used on 2026-10-11). Meta supports each version for about two years and announces the retirement date in the App Dashboard and its changelog; bump the constant (and re-run one real import) before that date, or when a newer field or behaviour is needed.
 
 ## Landing page (Lovable)
 
@@ -226,7 +228,7 @@ Cron: `vercel.json` runs `/api/tick` every 5 minutes (`*/5 * * * *`; the team is
 
 ## Security notes
 
-- **Anon key.** The browser no longer uses it: public pages, the dashboard and the wizard read through the app's own server routes. Its grants stay locked down anyway: it can read only live venues and their public site tables (`venues`, `site_texts`, `categories`, `items`, `holidays`, `announcements`, `media`), never drafts, members, invites, admin tokens, change sets, changes, conversations or `rate_limits`; it cannot call `bump_rate_limit`; every write is refused (`42501`). `npm run check:rls` proves this against the live project.
+- **Anon key.** The browser no longer uses it: public pages, the dashboard and the wizard read through the app's own server routes. Its grants stay locked down anyway: it can read only live venues (and of `venues` only the public feed's columns, granted column by column; `deploy`, `wizard_draft`, `draft_token_hash`, `publishing_at` and `instagram_import` answer `42501`) and their public site tables (`venues`, `site_texts`, `categories`, `items`, `holidays`, `announcements`, `media`), never drafts, members, invites, admin tokens, change sets, changes, conversations or `rate_limits`; it cannot call `bump_rate_limit`; every write is refused (`42501`). `npm run check:rls` proves this against the live project.
 - **Service-role key.** Only in server code (`src/server/deps.ts`, the route handlers) and the scripts. The build is checked for it: `grep -rl "SUPABASE_SERVICE_ROLE\|service_role" .next/static` finds nothing.
 - **The admin link is the key.** Whoever has `/admin/<slug>?key=…` can approve, cancel and undo changes for that venue. Share it only with the owner. The dev server's request log skips admin URLs, the admin API, the tick and any URL with `?key=`.
 - **Webhook secret.** `/api/telegram` rejects any request without Telegram's `X-Telegram-Bot-Api-Secret-Token` header matching `TELEGRAM_WEBHOOK_SECRET`. `/api/tick` needs `TICK_SECRET` (header or Bearer) or a venue's admin key (that venue only).

@@ -6,7 +6,7 @@ import type { Lang } from "@/src/domain/types";
 import { LangProvider } from "@/src/i18n";
 import { WIZARD_BG, WIZARD_EN } from "@/src/i18n/wizard";
 import { emptyDraft, type WizardDraft } from "@/src/wizard/schema";
-import { dishOptions, IG_PICKS_MAX, importPatch, InstagramGrid, InstagramImport } from "@/app/new/components/InstagramImport";
+import { dishOptions, IG_PICKS_MAX, importPatch, InstagramGrid, InstagramImport, returnMessage } from "@/app/new/components/InstagramImport";
 import { Look } from "@/app/new/components/Steps/Look";
 import { Photos } from "@/app/new/components/Steps/Photos";
 import type { IgItem } from "@/app/new/components/api";
@@ -50,17 +50,23 @@ describe("Instagram entry points", () => {
     expect(render("bg", createElement(Look, props({ instagramAvailable: true })))).toContain("Вземи корица от Instagram");
     expect(render("en", createElement(Look, props({ instagramAvailable: true })))).toContain("Take the cover from Instagram");
   });
-  it("tells the owner how the sign-in came back, only in the step it started from", () => {
-    const at = (igReturn: StepProps["igReturn"], lang: Lang = "bg", from: "photos" | "look" = "photos") =>
-      render(lang, createElement(InstagramImport, { ...props({ instagramAvailable: true, igReturn }), from }));
-    expect(at({ status: "cancelled", step: "photos" })).toContain(WIZARD_BG["ig.cancelled"]);
-    expect(at({ status: "cancelled", step: "photos" }, "en")).toContain(WIZARD_EN["ig.cancelled"]);
-    expect(at({ status: "error", step: "photos", reason: "token" })).toContain(WIZARD_BG["ig.error.token"]);
-    expect(at({ status: "error", step: "photos", reason: "media" }, "en")).toContain(WIZARD_EN["ig.error.media"].replace("'", "&#x27;"));
-    expect(at({ status: "error", step: "photos", reason: "session" }, "en")).toContain(WIZARD_EN["ig.error.session"]);
-    expect(at({ status: "error", step: "photos", reason: "weird" }, "en")).toContain(WIZARD_EN["ig.failed"].replace("'", "&#x27;"));
+  it("chooses the return message by status and reason, in both languages", () => {
+    expect(returnMessage({ status: "cancelled", step: "photos" })).toEqual({ tone: "soft", bg: WIZARD_BG["ig.cancelled"], en: WIZARD_EN["ig.cancelled"] });
+    expect(returnMessage({ status: "error", step: "photos", reason: "token" })).toEqual({ tone: "danger", bg: WIZARD_BG["ig.error.token"], en: WIZARD_EN["ig.error.token"] });
+    expect(returnMessage({ status: "error", step: "look", reason: "session" })?.en).toBe(WIZARD_EN["ig.error.session"]);
+    expect(returnMessage({ status: "error", step: "photos", reason: "media" })?.bg).toBe(WIZARD_BG["ig.error.media"]);
+    expect(returnMessage({ status: "error", step: "photos", reason: "weird" })?.en).toBe(WIZARD_EN["ig.failed"]);
+    expect(returnMessage({ status: "ok", step: "photos" })).toBeNull();
+    expect(returnMessage(null)).toBeNull();
+  });
+  it("renders an empty live region first (the return message is set after mount so it is announced); ok shows loading", () => {
+    const at = (igReturn: StepProps["igReturn"], from: "photos" | "look" = "photos") =>
+      render("bg", createElement(InstagramImport, { ...props({ instagramAvailable: true, igReturn }), from }));
+    const cancelled = at({ status: "cancelled", step: "photos" });
+    expect(cancelled).not.toContain(WIZARD_BG["ig.cancelled"]);
+    expect(cancelled).toMatch(/<p tabindex="-1" aria-live="polite"[^>]*><\/p>/);
     expect(at({ status: "ok", step: "photos" })).toContain(WIZARD_BG["ig.loading"]);
-    expect(at({ status: "cancelled", step: "look" }, "bg", "photos")).not.toContain(WIZARD_BG["ig.cancelled"]);
+    expect(at({ status: "ok", step: "look" }, "photos")).not.toContain(WIZARD_BG["ig.loading"]); // another step's return
   });
 });
 
@@ -71,6 +77,7 @@ describe("InstagramGrid", () => {
   it("renders labelled checkboxes with the caption, and a target select for each ticked photo (bg)", () => {
     const html = grid("bg", { "10": "item:c1/i1" });
     expect(html).toContain("Снимки от @agala.cafe");
+    expect(html).toMatch(/<h2 id="[^"]+" tabindex="-1"/); // focus lands on the heading when the list loads
     expect(html.match(/type="checkbox"/g)).toHaveLength(2);
     expect(html).toMatch(/<label[^>]*>(?:(?!<\/label>)[\s\S])*<input type="checkbox"[^>]* checked=""\/>(?:(?!<\/label>)[\s\S])*Сутрешно капучино на терасата/);
     expect(html).toContain("Снимка 2 без описание");
