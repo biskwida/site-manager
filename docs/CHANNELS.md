@@ -44,6 +44,7 @@ You create the accounts and paste the keys; the app needs no code change. Every 
    - Messenger → Settings → Webhooks (newer dashboards: Use cases → Messenger → Customize → Configure webhooks) → Callback URL `<preview URL>/api/meta`, Verify token = your `META_VERIFY_TOKEN` → Verify and save → subscribe the Page to `messages`, `messaging_postbacks`, `messaging_referrals`.
    - Instagram → Webhooks → the same callback and verify token → subscribe `messages`, `messaging_postbacks`, `messaging_referral`. Use the **Instagram API with Facebook Login** setup (Messenger API for Instagram), not "API setup with Instagram login": the code sends with the Page token through `graph.facebook.com` and verifies signatures with the Meta app secret, which is what the Facebook Login setup uses.
    - WhatsApp → Configuration → Webhook → Edit → the same callback and verify token → Webhook fields → subscribe `messages`.
+   - **Or let the script do all of step 5:** `npm run meta:setup` registers the app's webhook objects itself (`whatsapp_business_account` → `messages`; `page` → `messages`, `messaging_postbacks`, `messaging_referrals`; `instagram` → `messages`, `messaging_postbacks`, `messaging_referral`) with the callback URL and verify token, and subscribes the WhatsApp Business Account to the app when `WHATSAPP_BUSINESS_ACCOUNT_ID` is set (`npm run env:set -- WHATSAPP_BUSINESS_ACCOUNT_ID`, the ID shown next to the Phone number ID). In the 2026-10-11 live test Meta delivered nothing until both were done; the dashboard alone had left the app with only a `user` object and the WhatsApp account subscribed to Meta's own test app.
    - `npm run meta:setup` (with `PUBLIC_BASE_URL` pointing at the preview): prints the Page name and id, subscribes the app to the Page's `messages,messaging_postbacks,messaging_referrals` (Messenger needs this besides the dashboard), sets the Messenger **Get Started** button (`me/messenger_profile`; a first contact through `m.me/<page>?ref=<code>` then delivers the code with the Get Started postback), prints the WhatsApp display number, the enabled channels and the webhook URL to paste. It never prints a token.
 
 6. **Testers.** Until App Review (step 8) only people with a role on the app can talk to the bot.
@@ -119,7 +120,7 @@ then redeploy (`vercel --yes`) and move the alias. Never type or paste the secre
 
 - Stable URL: https://site-manager-channels-biskwida.vercel.app (alias), webhook `https://site-manager-channels-biskwida.vercel.app/api/meta`.
 - Deployment on 2026-10-10: https://site-manager-k0m6uxem4-biskwida-dev.vercel.app (`PUBLIC_BASE_URL` for Preview = the stable URL).
-- Behind Deployment Protection (see "Vercel Deployment Protection"): the public URL answers `302` until protection is changed. The same build run locally with `next start` answered the handshake with `ping`, a wrong verify token with `403` and an unsigned POST with `401`.
+- Vercel Authentication was switched off on 2026-10-11; the public URL answers the handshake (`ping`), a wrong token with `403` and an unsigned POST with `401`. The same build run locally with `next start` answered the handshake with `ping`, a wrong verify token with `403` and an unsigned POST with `401`.
 
 ## Database migration
 
