@@ -31,11 +31,13 @@
   --fu-oven-sold: #b9a27a;    /* 5.56:1 */
   --fu-oven-gone: #e9967a;    /* 5.95:1 */
   --fu-accent: var(--accent, #b8432a);
-  /* Accent as text or fill: cap lightness and chroma so a light owner-picked accent still reads on paper and under the button
-     text. The cap sits at tomato's own lightness (0.541), so the default renders exactly as approved. Browsers without relative
-     colour syntax keep the plain accent (first declaration). */
-  --fu-accent-text: var(--fu-accent);
-  --fu-accent-text: oklch(from var(--fu-accent) min(l, 0.542) min(c, 0.17) h);
+  /* Accent as text or fill: OKLCH lightness capped at 0.542 and chroma at 0.17, so a light owner-picked accent still reads on
+     paper and under the button text. The cap sits at tomato's own lightness (0.541), so the default renders exactly as
+     approved. For any accent the display text stays >= 4.0:1 on paper (it is only used at display sizes, where AA needs 3:1)
+     and the button text >= 4.4:1 on it (>= 4.7:1 for every wizard preset; only vivid greens and cyans dip under 4.5).
+     Computed in Template.tsx (src/templates/shared/color.ts capAccent) and set inline, so no browser needs CSS relative colour
+     syntax; this value is only the default for a render without the inline property. */
+  --fu-accent-text: #b8432a;
   --fu-ease: cubic-bezier(0.23, 1, 0.32, 1);
   --fu-gutter: 1rem;
   --fu-radius: 28px;

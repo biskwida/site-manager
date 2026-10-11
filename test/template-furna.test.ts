@@ -6,8 +6,9 @@ import { describe, expect, it } from "vitest";
 import type { DraftInfo, Lang, Media, SiteState } from "@/src/domain/types";
 import { LangProvider } from "@/src/i18n";
 import { def } from "@/src/templates/furna";
+import { contrastRatio } from "@/src/templates/shared/color";
 import { TEMPLATE_ACCENT_DEFAULTS } from "@/src/wizard/schema";
-import { makeDemo } from "./helpers";
+import { EXTREME_ACCENTS, LOOK_STEP_ACCENTS, makeDemo } from "./helpers";
 
 // Fonts come from the global next/font/google mock in test/setup.ts (R8): variables are `font-var-<Family>`.
 
@@ -244,6 +245,20 @@ describe("furna template", () => {
     expect(menu).toContain('class="fu-dock is-single"');
   });
 
+  it("computes the accent text colour in TypeScript (no CSS relative colour) and keeps the title and the button readable", async () => {
+    const css = readFileSync(new URL("../src/templates/furna/styles.css", import.meta.url), "utf8");
+    expect(css).not.toMatch(/oklch\(from/);
+    for (const accent of [def.accentDefault, ...LOOK_STEP_ACCENTS, ...EXTREME_ACCENTS]) {
+      const html = await render("en", { page: "home", mutate: (s) => { s.venue.theme.accent = accent; } });
+      const text = /--fu-accent-text:(#[0-9a-f]{6})/.exec(html)?.[1];
+      expect(text, accent).toBeDefined();
+      // Display type only (title, category headings): the floor promised in styles.css, above AA's 3:1 for large text.
+      expect(contrastRatio(text!, "#f6eedb"), `${text} on paper`).toBeGreaterThanOrEqual(4.0);
+      // The accent button: --fu-on-accent text on the fill.
+      expect(contrastRatio("#fff8ea", text!), `button text on ${text}`).toBeGreaterThanOrEqual(4.5);
+    }
+    expect(await render("en", { mutate: (s) => { s.venue.theme.accent = "#b8432a"; } })).toContain("--fu-accent-text:#b8432a"); // approved tomato unchanged
+  });
   it("keeps the change flash reaching its final frame under reduced motion", () => {
     // `animation: none` would freeze .fu-flash at its base opacity (1) forever, because useLiveSite never clears `changed`.
     const css = readFileSync(new URL("../src/templates/furna/styles.css", import.meta.url), "utf8");
