@@ -30,7 +30,7 @@ async function setup(over: { now?: () => Date; config?: Partial<SocialConnectDep
   let clock = T0;
   const d: SocialConnectDeps = {
     store: demo.store,
-    config: { publicBaseUrl: BASE, metaAppId: meta.appId, metaAppSecret: meta.appSecret, instagramAppId: meta.igAppId, instagramAppSecret: meta.igAppSecret, ...over.config },
+    config: { publicBaseUrl: BASE, metaLoginConfigId: null, metaAppId: meta.appId, metaAppSecret: meta.appSecret, instagramAppId: meta.igAppId, instagramAppSecret: meta.igAppSecret, ...over.config },
     secretKey: KEY,
     fetch: meta.fetch,
     now: over.now ?? (() => clock),
@@ -45,6 +45,8 @@ async function setup(over: { now?: () => Date; config?: Partial<SocialConnectDep
     (kind === "facebook" ? handleFacebookCallback : handleInstagramPublishCallback)(new Request(`${BASE}${kind === "facebook" ? FB_CALLBACK_PATH : IG_PUBLISH_CALLBACK_PATH}?${q}`, { headers: { cookie } }), d);
   return { ...demo, meta, d, adminKey, start, callback, tick: (ms: number) => (clock = new Date(clock.getTime() + ms)) };
 }
+/** The generic BG/EN page: no redirect, so the admin key never leaves the server without a matching nonce cookie. */
+const isGeneric = async (res: Response) => res.status === 400 && res.headers.get("location") === null && (await res.text()).includes("Свързването не завърши");
 const resultOf = (res: Response) => {
   const loc = new URL(res.headers.get("location") ?? "about:blank");
   return { path: loc.pathname, key: loc.searchParams.get("key"), result: loc.searchParams.get("social_result"), hash: loc.hash };
@@ -89,6 +91,15 @@ describe("start", () => {
     expect(loc.searchParams.get("response_type")).toBe("code");
     expect(IG_SCOPE).toBe("instagram_business_basic"); // the wizard import keeps its read-only scope
   });
+  it("with META_LOGIN_CONFIG_ID sends Facebook Login for Business config_id instead of scope", async () => {
+    const { start } = await setup({ config: { metaLoginConfigId: "cfg-123" } });
+    const { loc } = await start("facebook");
+    expect(loc.searchParams.get("config_id")).toBe("cfg-123");
+    expect(loc.searchParams.get("response_type")).toBe("code");
+    expect(loc.searchParams.has("scope")).toBe(false);
+    expect(loadConfig({ META_LOGIN_CONFIG_ID: "cfg-9" }, { lenient: true }).metaLoginConfigId).toBe("cfg-9");
+  });
+
   it("answers 503 when the login is not configured", async () => {
     const { d, venue, adminKey } = await setup({ config: { metaAppId: null } });
     const res = await handleSocialStart(d, venue, adminKey, "facebook");
@@ -147,20 +158,20 @@ describe("Facebook callback", () => {
     const html = await (await callback("facebook", `code=${meta.issueFacebookCode()}&state=${state}`, cookie)).text();
     const selectState = html.match(/name="state" value="([^"]+)"/)?.[1] ?? "";
     const post = (c: string) => handleFacebookSelect(new Request(`${BASE}/api/social/facebook/select`, { method: "POST", body: new URLSearchParams({ state: selectState, page: b.id }), headers: { cookie: c, "content-type": "application/x-www-form-urlencoded" } }), d);
-    expect(resultOf(await post(`${SOCIAL_NONCE_COOKIE}=${"0".repeat(32)}`)).result).toBe("facebook_error");
+    expect(await isGeneric(await post(`${SOCIAL_NONCE_COOKIE}=${"0".repeat(32)}`))).toBe(true);
+    expect(await isGeneric(await post(""))).toBe(true);
     tick(SOCIAL_STATE_TTL_MS + 1000);
     const late = await post(cookie);
-    expect(late.status).toBe(400);
-    expect(await late.text()).toContain("Връзката изтече");
+    expect(await isGeneric(late)).toBe(true);
     expect(await store.getDestination(venue.id, "facebook")).toBeNull();
   });
 
-  it("no page → asks for one; declined → cancelled; nothing stored", async () => {
+  it("no page → asks for one; declined → the generic page (no redirect); nothing stored", async () => {
     const { start, callback, meta, store, venue } = await setup();
     const s1 = await start("facebook");
     expect(resultOf(await callback("facebook", `code=${meta.issueFacebookCode([])}&state=${s1.state}`, s1.cookie)).result).toBe("facebook_no_pages");
     const s2 = await start("facebook");
-    expect(resultOf(await callback("facebook", `error=access_denied&error_reason=user_denied&state=${s2.state}`, s2.cookie)).result).toBe("facebook_cancelled");
+    expect(await isGeneric(await callback("facebook", `error=access_denied&error_reason=user_denied&state=${s2.state}`, s2.cookie))).toBe(true);
     expect(await store.getDestination(venue.id, "facebook")).toBeNull();
   });
 
@@ -171,10 +182,9 @@ describe("Facebook callback", () => {
     const tampered = await callback("facebook", `code=${meta.issueFacebookCode()}&state=${state.slice(0, -2)}xx`, cookie);
     expect(tampered.status).toBe(400);
     expect(await tampered.text()).toContain("Open the dashboard again");
-    const noCookie = await callback("facebook", `code=${meta.issueFacebookCode()}&state=${state}`, "");
-    expect(resultOf(noCookie).result).toBe("facebook_error");
-    const other = await callback("facebook", `code=${meta.issueFacebookCode()}&state=${state}`, `${SOCIAL_NONCE_COOKIE}=${"a".repeat(32)}`);
-    expect(resultOf(other).result).toBe("facebook_error");
+    expect(await isGeneric(await callback("facebook", `code=${meta.issueFacebookCode()}&state=${state}`, ""))).toBe(true);
+    expect(await isGeneric(await callback("facebook", `code=${meta.issueFacebookCode()}&state=${state}`, `${SOCIAL_NONCE_COOKIE}=${"a".repeat(32)}`))).toBe(true);
+    expect(await isGeneric(await callback("facebook", `error=access_denied&state=${state}`, ""))).toBe(true);
     tick(SOCIAL_STATE_TTL_MS + 1000);
     expect((await callback("facebook", `code=${meta.issueFacebookCode()}&state=${state}`, cookie)).status).toBe(400);
     expect(await store.getDestination(venue.id, "facebook")).toBeNull();
@@ -209,6 +219,20 @@ describe("Instagram callback", () => {
     expect((await store.getVenue(venue.id)).instagram_import).toBeNull(); // nothing near the wizard import
   });
 
+  it("reads /me in Meta's data wrapper, and refuses a profile without user_id", async () => {
+    const { start, callback, meta, store, venue } = await setup();
+    const ig = meta.addInstagramUser("agala.cafe");
+    meta.wrapMe = true;
+    const s1 = await start("instagram");
+    expect(resultOf(await callback("instagram", `code=${meta.issueInstagramCode(ig.user_id)}&state=${s1.state}`, s1.cookie)).result).toBe("instagram_connected");
+    expect((await store.getDestination(venue.id, "instagram"))!.config).toMatchObject({ ig_user_id: ig.user_id });
+    await store.deleteDestination((await store.getDestination(venue.id, "instagram"))!.id);
+    meta.meWithoutUserId = true;
+    const s2 = await start("instagram");
+    expect(resultOf(await callback("instagram", `code=${meta.issueInstagramCode(ig.user_id)}&state=${s2.state}`, s2.cookie)).result).toBe("instagram_error");
+    expect(await store.getDestination(venue.id, "instagram")).toBeNull();
+  });
+
   it("refuses a personal account with the prerequisite, stores nothing", async () => {
     const { start, callback, meta, store, venue } = await setup();
     const ig = meta.addInstagramUser("personal.me", "PERSONAL");
@@ -217,10 +241,10 @@ describe("Instagram callback", () => {
     expect(await store.getDestination(venue.id, "instagram")).toBeNull();
   });
 
-  it("cancelled and failed logins return with the matching result", async () => {
+  it("a declined login shows the generic page; a failed one returns with an error", async () => {
     const { start, callback } = await setup();
     const s1 = await start("instagram");
-    expect(resultOf(await callback("instagram", `error=access_denied&state=${s1.state}`, s1.cookie)).result).toBe("instagram_cancelled");
+    expect(await isGeneric(await callback("instagram", `error=access_denied&state=${s1.state}`, s1.cookie))).toBe(true);
     const s2 = await start("instagram");
     expect(resultOf(await callback("instagram", `code=nope&state=${s2.state}`, s2.cookie)).result).toBe("instagram_error");
   });

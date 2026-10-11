@@ -44,3 +44,7 @@ alter table public.changes add constraint changes_entity_check
 alter table public.venue_destinations drop constraint if exists venue_destinations_kind_check;
 alter table public.venue_destinations add constraint venue_destinations_kind_check
   check (kind in ('wordpress', 'google', 'github', 'facebook', 'instagram'));
+
+-- One push per sync row at a time (claimSync): a run sets leased_until before pushing and clears it after; a row whose lease
+-- ended (a crashed run) can be taken again. Social track, 2026-10-11.
+alter table public.destination_syncs add column if not exists leased_until timestamptz;

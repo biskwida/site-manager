@@ -36,7 +36,7 @@ const NO_STORE = { "cache-control": "no-store" };
 
 export interface SocialConnectDeps {
   store: Store;
-  config: Pick<Config, "publicBaseUrl" | "metaAppId" | "metaAppSecret" | "instagramAppId" | "instagramAppSecret">;
+  config: Pick<Config, "publicBaseUrl" | "metaAppId" | "metaAppSecret" | "metaLoginConfigId" | "instagramAppId" | "instagramAppSecret">;
   /** DESTINATION_SECRET_KEY; null = nothing can be stored, both buttons hidden. */
   secretKey: Buffer | null;
   fetch: typeof fetch;
@@ -118,18 +118,22 @@ function htmlPage(title: string, inner: string, status = 200): Response {
   return new Response(page, { status, headers: { ...NO_STORE, "content-type": "text/html; charset=utf-8", "referrer-policy": "no-referrer", "x-frame-options": "DENY" } });
 }
 
-/** When the state cannot be read there is no safe way back to the dashboard (the admin key is inside it): say what to do. */
-function expiredPage(): Response {
+/**
+ * The one answer when a callback cannot safely return to the dashboard: an unreadable or expired state, a nonce cookie that is
+ * missing or belongs to another start (another browser), or a declined/failed login (?error=). The admin key is never put in a
+ * redirect unless the nonce cookie matches.
+ */
+function genericPage(): Response {
   return htmlPage(
-    "Връзката изтече · The link expired",
-    `<h1>Връзката изтече</h1><p>Връзката за свързване е изтекла или не е валидна. Отворете таблото отново и натиснете „Свържи“.</p><p class="en">The sign-in link expired or is not valid. Open the dashboard again and press Connect.</p>`,
+    "Свързването не завърши · Connecting did not finish",
+    `<h1>Свързването не завърши</h1><p>Връзката е изтекла, отказана или е отворена в друг браузър. Отворете таблото отново и натиснете „Свържи“.</p><p class="en">Connecting did not finish: the link expired, was declined or was opened in another browser. Open the dashboard again and press Connect.</p>`,
     400,
   );
 }
 
 export type SocialResult =
-  | "facebook_connected" | "facebook_cancelled" | "facebook_no_pages" | "facebook_error"
-  | "instagram_connected" | "instagram_cancelled" | "instagram_personal" | "instagram_error";
+  | "facebook_connected" | "facebook_no_pages" | "facebook_error"
+  | "instagram_connected" | "instagram_personal" | "instagram_error";
 
 function backToDashboard(d: SocialConnectDeps, slug: string, adminKey: string, result: SocialResult): Response {
   const secure = d.config.publicBaseUrl.startsWith("https://");
@@ -156,7 +160,9 @@ export async function handleSocialStart(d: SocialConnectDeps, venue: Venue, admi
   url.searchParams.set("client_id", kind === "facebook" ? d.config.metaAppId! : d.config.instagramAppId!);
   url.searchParams.set("redirect_uri", `${base}${kind === "facebook" ? FB_CALLBACK_PATH : IG_PUBLISH_CALLBACK_PATH}`);
   url.searchParams.set("response_type", "code");
-  url.searchParams.set("scope", kind === "facebook" ? FB_SCOPES : IG_PUBLISH_SCOPES);
+  // Facebook Login for Business: a configuration (META_LOGIN_CONFIG_ID) carries the permissions instead of a scope list.
+  if (kind === "facebook" && d.config.metaLoginConfigId) url.searchParams.set("config_id", d.config.metaLoginConfigId);
+  else url.searchParams.set("scope", kind === "facebook" ? FB_SCOPES : IG_PUBLISH_SCOPES);
   url.searchParams.set("state", state);
   return new Response(null, { status: 302, headers: { ...NO_STORE, location: url.toString(), "set-cookie": nonceCookie(nonce, SOCIAL_STATE_TTL_MS / 1000, base.startsWith("https://")), "referrer-policy": "no-referrer" } });
 }
@@ -230,11 +236,9 @@ function chooserPage(pages: FbPage[], selectState: string): Response {
 export async function handleFacebookCallback(req: Request, d: SocialConnectDeps): Promise<Response> {
   const params = new URL(req.url).searchParams;
   const checked = await checkState(d, params.get("state"), "facebook", req.headers.get("cookie"));
-  if (!checked) return expiredPage();
+  if (!checked || !checked.sameBrowser || params.get("error")) return genericPage();
   const { venue, adminKey } = checked;
   const back = (r: SocialResult) => backToDashboard(d, venue.slug, adminKey, r);
-  if (params.get("error")) return back(params.get("error") === "access_denied" ? "facebook_cancelled" : "facebook_error");
-  if (!checked.sameBrowser) return back("facebook_error");
   const code = (params.get("code") ?? "").replace(/#_$/, "");
   if (!code || code.length > 2048) return back("facebook_error");
   const base = d.config.publicBaseUrl;
@@ -267,9 +271,9 @@ export async function handleFacebookSelect(req: Request, d: SocialConnectDeps): 
   const raw = form?.get("state");
   const pageId = form?.get("page");
   const checked = await checkState(d, typeof raw === "string" ? raw : null, "facebook_select", req.headers.get("cookie"));
-  if (!checked) return expiredPage();
+  if (!checked || !checked.sameBrowser) return genericPage();
   const back = (r: SocialResult) => backToDashboard(d, checked.venue.slug, checked.adminKey, r);
-  if (!checked.sameBrowser || typeof pageId !== "string" || !checked.state.t) return back("facebook_error");
+  if (typeof pageId !== "string" || !checked.state.t) return back("facebook_error");
   try {
     const userToken = decryptSecrets(checked.state.t, d.secretKey!).user_token ?? "";
     const page = (await facebookPages(d, userToken)).find((p) => p.id === pageId);
@@ -286,11 +290,9 @@ export async function handleFacebookSelect(req: Request, d: SocialConnectDeps): 
 export async function handleInstagramPublishCallback(req: Request, d: SocialConnectDeps): Promise<Response> {
   const params = new URL(req.url).searchParams;
   const checked = await checkState(d, params.get("state"), "instagram", req.headers.get("cookie"));
-  if (!checked) return expiredPage();
+  if (!checked || !checked.sameBrowser || params.get("error")) return genericPage();
   const { venue, adminKey } = checked;
   const back = (r: SocialResult) => backToDashboard(d, venue.slug, adminKey, r);
-  if (params.get("error")) return back(params.get("error") === "access_denied" ? "instagram_cancelled" : "instagram_error");
-  if (!checked.sameBrowser) return back("instagram_error");
   // Meta may append "#_" to the code; a browser never sends the fragment, but strip it in case it arrives encoded.
   const code = (params.get("code") ?? "").replace(/#_$/, "");
   if (!code || code.length > 2048) return back("instagram_error");
@@ -299,11 +301,12 @@ export async function handleInstagramPublishCallback(req: Request, d: SocialConn
     const long = await metaFetch<{ access_token?: unknown }>(d.fetch, `${IG_EXCHANGE_URL}?${new URLSearchParams({ grant_type: "ig_exchange_token", client_secret: d.config.instagramAppSecret!, access_token: short })}`);
     const token = typeof long.access_token === "string" && long.access_token ? long.access_token : null;
     if (!token) return back("instagram_error");
-    const me = await new GraphClient(IG_GRAPH, token, d.fetch).get<{ user_id?: unknown; id?: unknown; username?: unknown; account_type?: unknown }>("/me?fields=user_id,username,account_type");
+    const me = firstRow(await new GraphClient(IG_GRAPH, token, d.fetch).get<unknown>("/me?fields=user_id,username,account_type")) ?? {};
     const type = typeof me.account_type === "string" ? me.account_type.toUpperCase() : "";
     if (type === "PERSONAL") return back("instagram_personal");
-    // A numeric id may have lost precision in JSON.parse: only a string of digits is used.
-    const igId = [me.user_id, me.id].find((x): x is string => typeof x === "string" && /^\d{1,32}$/.test(x));
+    // Publishing needs the professional account id (user_id), not the app-scoped id. A numeric value may have lost precision in
+    // JSON.parse: only a string of digits is used; without one the connect fails rather than storing a wrong id.
+    const igId = typeof me.user_id === "string" && /^\d{1,32}$/.test(me.user_id) ? me.user_id : null;
     if (!igId) return back("instagram_error");
     const now = d.now().toISOString();
     await d.store.upsertDestination({
@@ -318,6 +321,13 @@ export async function handleInstagramPublishCallback(req: Request, d: SocialConn
     console.error(`[social] instagram callback failed: ${e instanceof Error ? e.name : "error"}`);
     return back("instagram_error");
   }
+}
+
+/** Some Meta answers wrap one object in `data: [...]`; take either shape. */
+function firstRow(j: unknown): Record<string, unknown> | null {
+  const o = j as { data?: unknown } | null;
+  const row = Array.isArray(o?.data) ? o.data[0] : o;
+  return row && typeof row === "object" ? (row as Record<string, unknown>) : null;
 }
 
 /** Removes the stored connection of one network (the post history in sync rows goes with it). */

@@ -1,6 +1,7 @@
 // src/tick.ts
 import type { Messenger } from "./bot/messenger";
 import { runPendingSyncs, type SyncDeps } from "./destinations/sync";
+import { refreshInstagramTokens } from "./destinations/instagram";
 import { pollDeployments } from "./deploy/run";
 import type { Deployer } from "./deploy/types";
 import { planChange } from "./domain/changes";
@@ -126,6 +127,12 @@ export async function runTick(d: TickDeps): Promise<TickReport> {
       report.pushed = r.done;
     } catch (e) {
       console.error("[tick] destination syncs failed:", e instanceof Error ? e.message : e);
+    }
+    // 8. Instagram tokens older than 30 days (social track, appended 2026-10-11): refresh before they expire at 60.
+    try {
+      await refreshInstagramTokens(d.sync, { venueId: d.venueId, now: d.now });
+    } catch (e) {
+      console.error("[tick] instagram token refresh failed:", e instanceof Error ? e.message : e);
     }
   }
   return report;

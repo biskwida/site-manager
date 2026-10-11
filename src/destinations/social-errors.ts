@@ -8,6 +8,9 @@ const KNOWN: Record<string, { bg: string; en: string }> = {
   sm_meta_unreachable: { bg: "Meta не отговори", en: "Meta did not answer" },
   sm_ig_container: { bg: "Instagram не прие снимката (трябва да е JPEG, до 8 MB)", en: "Instagram did not accept the photo (it must be a JPEG up to 8 MB)" },
   sm_ig_processing: { bg: "Instagram още обработва снимката", en: "Instagram is still processing the photo" },
+  sm_fb_check: { bg: "не е ясно дали публикацията излезе; проверете страницата и, ако я няма, поискайте я отново", en: "it is unclear whether the post went out; check the Page and, if it is not there, ask again" },
+  sm_fb_unknown: { bg: "Facebook не потвърди публикацията", en: "Facebook did not confirm the post" },
+  sm_ig_publish_unknown: { bg: "Instagram не потвърди публикацията", en: "Instagram did not confirm the post" },
   sm_social_not_connected: { bg: "не е свързан; свържете от таблото", en: "not connected; connect it from the dashboard" },
 };
 

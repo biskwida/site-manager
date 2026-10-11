@@ -101,9 +101,11 @@ describe("publishing", () => {
     await store.applyChangeSet(cs.id, T0.toISOString());
     const rows = await store.listSyncs({ changeSetId: cs.id });
     expect(rows.map((r) => [r.payload.kind, r.status, r.attempts])).toEqual([["facebook", "pending", 1], ["instagram", "pending", 1]]);
-    expect(rows[0].result).toMatchObject({ published: [{ target: "facebook_post" }] });
+    expect(rows[0].result).toMatchObject({ published: [{ target: "facebook_post", state: "published" }, { target: "facebook_story", state: "attempted" }] });
     expect(rows[1].result).toMatchObject({ published: [{ target: "instagram_post" }] });
-    expect(await syncLines(store, cs.id, "bg")).toEqual(["Facebook: не успях да публикувам, ще опитам пак", "Instagram: не успях да публикувам, ще опитам пак"]);
+    const retryLines = await syncLines(store, cs.id, "bg");
+    expect(retryLines[0]).toMatch(/^Facebook: не успях да публикувам, ще опитам пак \(вече публикувано: https:\/\/www\.facebook\.com\/\S+\)$/);
+    expect(retryLines[1]).toMatch(/^Instagram: не успях да публикувам, ще опитам пак \(вече публикувано: https:\/\/www\.instagram\.com\/p\/\S+\)$/);
     meta.failOn = null;
     const r = await runPendingSyncs(d, { venueId: rows[0].venue_id, now: at(BACKOFF_MS[0]) });
     expect(r.done).toHaveLength(2);
@@ -169,17 +171,17 @@ describe("publishing", () => {
 });
 
 describe("undo", () => {
-  it("deletes the Facebook post and story and tells the owner to delete the Instagram ones by hand, with the links", async () => {
+  it("deletes the Facebook post (the story expires by itself) and tells the owner to delete the Instagram ones by hand, with the links", async () => {
     const { store, set, meta } = await connected();
     const cs = await set([post(ALL)]);
     await store.applyChangeSet(cs.id, T0.toISOString());
     const igLinks = [...meta.igMedia.values()].map((m) => m.permalink);
     const undo = await set(invertChanges(cs.changes), { undoes_id: cs.id, source: "undo" });
     expect(await store.applyChangeSet(undo.id, T0.toISOString())).toBe("applied");
-    expect([...meta.posts.values()].every((p) => p.deleted)).toBe(true);
-    expect(meta.calls.filter((c) => c.method === "DELETE")).toHaveLength(2);
-    expect(await syncLines(store, undo.id, "bg")).toEqual(["Facebook: изтрито ✅", `Instagram: изтрийте публикацията ръчно: ${igLinks.join(" ")}`]);
-    expect(await syncLines(store, undo.id, "en")).toEqual(["Facebook: deleted ✅", `Instagram: delete the post by hand: ${igLinks.join(" ")}`]);
+    expect([...meta.posts.values()].map((p) => [p.kind, p.deleted])).toEqual([["photo", true], ["story", false]]);
+    expect(meta.calls.filter((c) => c.method === "DELETE")).toHaveLength(1);
+    expect(await syncLines(store, undo.id, "bg")).toEqual(["Facebook: изтрито ✅; историята изчезва сама до 24 часа", `Instagram: изтрийте публикацията ръчно: ${igLinks.join(" ")}`]);
+    expect(await syncLines(store, undo.id, "en")).toEqual(["Facebook: deleted ✅; the story disappears on its own within 24 hours", `Instagram: delete the post by hand: ${igLinks.join(" ")}`]);
     const igRow = (await store.listSyncs({ changeSetId: undo.id })).find((r) => r.payload.kind === "instagram")!;
     expect(igRow.result).toMatchObject({ manual_delete: [{ target: "instagram_post", permalink: igLinks[0] }, { target: "instagram_story", permalink: igLinks[1] }] });
   });

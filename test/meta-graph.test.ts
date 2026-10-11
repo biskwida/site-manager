@@ -46,6 +46,10 @@ describe("metaFetch / GraphClient", () => {
     await expect(fb.get(`/${page.id}`)).rejects.toMatchObject({ status: 400, code: "meta_100", message: "Invalid parameter", retryable: false });
     meta.failNext = { status: 400, code: 4, message: "Application request limit reached", transient: true };
     await expect(fb.get(`/${page.id}`)).rejects.toMatchObject({ retryable: true });
+    for (const code of [4, 17, 32, 613]) {
+      meta.failNext = { status: 400, code, message: "rate limited" };
+      await expect(fb.get(`/${page.id}`)).rejects.toMatchObject({ code: `meta_${code}`, retryable: true });
+    }
     await expect(fb.delete("/123_456")).rejects.toMatchObject({ code: "meta_100", metaCode: 100, subcode: 33, retryable: false });
   });
 

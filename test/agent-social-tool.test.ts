@@ -1,4 +1,5 @@
 // test/agent-social-tool.test.ts
+import sharp from "sharp";
 import { describe, expect, it } from "vitest";
 import { SYSTEM_PROMPT } from "@/src/agent/prompt";
 import { makeTools, type AgentDeps } from "@/src/agent/tools";
@@ -12,7 +13,8 @@ import { call } from "./tool-call";
 
 const T0 = new Date("2026-10-11T09:00:00.000Z");
 const KEY = parseSecretKey("ab".repeat(32));
-const JPEG = new Uint8Array([0xff, 0xd8, 0xff, 0xe0]);
+const jpeg = async (width: number, height: number, background = { r: 180, g: 40, b: 30 }) => new Uint8Array(await sharp({ create: { width, height, channels: 3, background } }).jpeg().toBuffer());
+const JPEG = await jpeg(800, 800);
 
 async function setup(over: Partial<AgentDeps> = {}, connect: { facebook?: boolean; instagram?: boolean } = { facebook: true, instagram: true }) {
   const demo = await makeDemo();
@@ -21,19 +23,31 @@ async function setup(over: Partial<AgentDeps> = {}, connect: { facebook?: boolea
   const ig = meta.addInstagramUser("agala.cafe");
   if (connect.facebook) await demo.store.upsertDestination({ venue_id: demo.venue.id, kind: "facebook", config: { page_id: page.id, page_name: page.name, connected_at: T0.toISOString() }, secrets: encryptSecrets({ page_token: page.access_token }, KEY) });
   if (connect.instagram) await demo.store.upsertDestination({ venue_id: demo.venue.id, kind: "instagram", config: { ig_user_id: ig.user_id, username: ig.username, connected_at: T0.toISOString(), token_refreshed_at: T0.toISOString() }, secrets: encryptSecrets({ token: ig.token }, KEY) });
-  // The memory store serves photos from memory://; production storage URLs are https (Supabase Storage).
+  // The memory store serves photos from memory://; production storage URLs are https (Supabase Storage). `files` serves them.
+  const files = new Map<string, Uint8Array>();
+  const https = <T extends { public_url: string }>(m: T): T => ({ ...m, public_url: m.public_url.replace("memory://media/", "https://media.example/storage/") });
   const getMedia = demo.store.getMedia.bind(demo.store);
+  const saveMedia = demo.store.saveMedia.bind(demo.store);
   demo.store.getMedia = async (id: string) => {
     const m = await getMedia(id);
-    return m && { ...m, public_url: m.public_url.replace("memory://media/", "https://media.example/storage/") };
+    return m && https(m);
   };
+  demo.store.saveMedia = async (venueId: string, bytes: Uint8Array, type: string) => {
+    const m = https(await saveMedia(venueId, bytes, type));
+    files.set(m.public_url, bytes);
+    return m;
+  };
+  const mediaFetch = (async (input: RequestInfo | URL) => {
+    const b = files.get(String(input));
+    return b ? new Response(b as BodyInit, { headers: { "content-type": "image/jpeg" } }) : new Response("nope", { status: 404 });
+  }) as typeof fetch;
   const store = withDestinationSync(demo.store, { store: demo.store, secretKey: KEY, fetch: meta.fetch, log: () => undefined, sleep: async () => undefined }, () => T0);
   const messenger = new FakeMessenger();
   const member = (await store.findMember("tg:1001"))!;
   const social = await socialConnections(demo.store, demo.venue.id);
-  const deps: AgentDeps = { store, venueId: demo.venue.id, chatRef: "tg:1001", member, messenger, now: () => T0, baseUrl: "https://site.example", social, source: "photo", ...over };
+  const deps: AgentDeps = { store, venueId: demo.venue.id, chatRef: "tg:1001", member, messenger, now: () => T0, baseUrl: "https://site.example", social, source: "photo", fetch: mediaFetch, ...over };
   const photo = await store.saveMedia(demo.venue.id, JPEG, "image/jpeg");
-  return { ...demo, store, meta, messenger, deps, photo, tools: makeTools(deps) };
+  return { ...demo, store, meta, messenger, deps, photo, files, tools: makeTools(deps) };
 }
 const input = (media_id: string, extra: Record<string, unknown> = {}) => ({ summary_bg: "Публикация: днешното предложение", summary_en: "Post: today's special", media_id, caption: "Днешното предложение: тиквена супа 🎃 #кафе", targets: ["facebook_post", "instagram_post"], ...extra });
 
@@ -131,5 +145,57 @@ describe("social_post", () => {
     const r = await call(fresh.tools, "social_post", input(fresh.photo.id, { targets: ["facebook_post", "facebook_post"] }));
     expect(r.status).toBe("proposed");
     expect((await fresh.store.getChangeSet(r.change_set_id as string)).changes[0].after?.targets).toEqual(["facebook_post"]);
+  });
+
+  it("refuses more than 20 @-mentions for an Instagram post", async () => {
+    const { tools, photo } = await setup();
+    const caption = Array.from({ length: 21 }, (_, i) => `@friend${i}`).join(" ");
+    expect((await call(tools, "social_post", input(photo.id, { caption }))).error).toMatch(/20 @-mentions/);
+  });
+});
+
+describe("Instagram feed aspect ratio", () => {
+  const dims = async (bytes: Uint8Array) => {
+    const m = await sharp(bytes).metadata();
+    return [m.width, m.height];
+  };
+  it("pads a tall photo to 4:5 with an edge colour, stores it, and the Instagram feed post uses it (Facebook keeps the original)", async () => {
+    const { tools, store, venue, files, meta } = await setup();
+    const tall = await store.saveMedia(venue.id, await jpeg(600, 1200, { r: 20, g: 120, b: 200 }), "image/jpeg");
+    const r = await call(tools, "social_post", input(tall.id, { targets: ["facebook_post", "instagram_post", "instagram_story"] }));
+    expect(r.status).toBe("proposed");
+    const cs = await store.getChangeSet(r.change_set_id as string);
+    const row = cs.changes[0].after as Record<string, unknown>;
+    expect(row.image_url).toBe(tall.public_url);
+    expect(row.ig_feed_ratio).toBe("4:5");
+    expect(row.ig_feed_image_url).toMatch(/^https:\/\/media\.example\/storage\/.+\.jpg$/);
+    expect(row.ig_feed_image_url).not.toBe(tall.public_url);
+    const padded = files.get(String(row.ig_feed_image_url))!;
+    expect(await dims(padded)).toEqual([960, 1200]);
+    const { data } = await sharp(padded).extract({ left: 2, top: 600, width: 1, height: 1 }).raw().toBuffer({ resolveWithObject: true });
+    expect(Math.abs(data[0] - 20) + Math.abs(data[1] - 120) + Math.abs(data[2] - 200)).toBeLessThan(30);
+    expect(r.preview).toContain("за Instagram снимката е допълнена до формат 4:5");
+    await handleDecision({ store, messenger: new FakeMessenger(), now: () => T0 }, "tg:1001", "apply", cs.id);
+    const containers = [...meta.containers.values()];
+    expect(containers.map((c) => [c.media_type, c.image_url])).toEqual([["IMAGE", row.ig_feed_image_url], ["STORIES", tall.public_url]]);
+    expect([...meta.posts.values()][0].url).toBe(tall.public_url);
+  });
+  it("pads a wide photo to 1.91:1", async () => {
+    const { tools, store, venue, files } = await setup();
+    const wide = await store.saveMedia(venue.id, await jpeg(2000, 800), "image/jpeg");
+    const r = await call(tools, "social_post", input(wide.id, { targets: ["instagram_post"] }));
+    const row = (await store.getChangeSet(r.change_set_id as string)).changes[0].after as Record<string, unknown>;
+    expect(row.ig_feed_ratio).toBe("1.91:1");
+    expect(await dims(files.get(String(row.ig_feed_image_url))!)).toEqual([2000, 1048]);
+    expect(r.preview).toContain("1.91:1");
+  });
+  it("leaves photos inside 4:5..1.91:1, Facebook-only and story-only posts alone", async () => {
+    const square = await setup();
+    const r1 = await call(square.tools, "social_post", input(square.photo.id));
+    expect((await square.store.getChangeSet(r1.change_set_id as string)).changes[0].after).not.toHaveProperty("ig_feed_image_url");
+    const tallFb = await setup();
+    const t1 = await tallFb.store.saveMedia(tallFb.venue.id, await jpeg(600, 1200), "image/jpeg");
+    const r2 = await call(tallFb.tools, "social_post", input(t1.id, { targets: ["facebook_post", "instagram_story"] }));
+    expect((await tallFb.store.getChangeSet(r2.change_set_id as string)).changes[0].after).not.toHaveProperty("ig_feed_image_url");
   });
 });

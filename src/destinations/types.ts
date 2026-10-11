@@ -20,6 +20,8 @@ export interface PushContext {
   saveConnection?: (config: Record<string, unknown>, secrets: Record<string, string>) => Promise<void>;
   /** Waits between polls (Instagram containers); tests pass a fake. */
   sleep?: (ms: number) => Promise<void>;
+  /** Stores a partial result on the sync row right away (before a call whose answer might be lost). */
+  checkpoint?: (partial: Record<string, unknown>) => Promise<void>;
 }
 export type PushResult =
   | { ok: true; result: Record<string, unknown>; line: { bg: string; en: string } }

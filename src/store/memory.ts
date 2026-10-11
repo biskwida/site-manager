@@ -423,7 +423,7 @@ export class InMemoryStore implements Store {
   }
   async createSync(s: NewSync): Promise<DestinationSync> {
     const now = this.clock();
-    const row: DestinationSync = { id: crypto.randomUUID(), venue_id: s.venue_id, destination_id: s.destination_id, change_set_id: s.change_set_id, status: "pending", attempts: 0, next_at: s.next_at, last_error: null, payload: clone(s.payload), result: null, created_at: now, updated_at: now };
+    const row: DestinationSync = { id: crypto.randomUUID(), venue_id: s.venue_id, destination_id: s.destination_id, change_set_id: s.change_set_id, status: "pending", attempts: 0, next_at: s.next_at, last_error: null, payload: clone(s.payload), result: null, created_at: now, updated_at: now, leased_until: null };
     this.syncs.set(row.id, row);
     return clone(row);
   }
@@ -437,6 +437,12 @@ export class InMemoryStore implements Store {
       .filter((s) => (!opts.venueId || s.venue_id === opts.venueId) && (!opts.changeSetId || s.change_set_id === opts.changeSetId) && (!opts.status || opts.status.includes(s.status)) && (!opts.dueBefore || s.next_at <= opts.dueBefore))
       .sort((a, b) => a.created_at.localeCompare(b.created_at) || a.id.localeCompare(b.id));
     return (opts.limit ? rows.slice(0, opts.limit) : rows).map(clone);
+  }
+  async claimSync(id: string, now: string, leaseUntil: string) {
+    const s = this.syncs.get(id);
+    if (!s || s.status !== "pending" || (s.leased_until && s.leased_until > now)) return false;
+    s.leased_until = leaseUntil;
+    return true;
   }
   async updateSync(id: string, patch: SyncPatch) {
     const s = this.syncs.get(id);

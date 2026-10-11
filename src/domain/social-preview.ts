@@ -30,5 +30,7 @@ export function socialPreviewLines(c: Change, lang: Lang): string[] {
   const lines = [`• ${tr(lang, "Публикация", "Post")}: ${socialTargetsText(targetsOf(c.after), lang)}`];
   const caption = typeof c.after.caption === "string" ? c.after.caption.trim() : "";
   if (caption) lines.push(...quote(caption, lang).split("\n").map((l) => `  ${l}`));
+  const ratio = c.after.ig_feed_ratio;
+  if (ratio === "4:5" || ratio === "1.91:1") lines.push(`  (${tr(lang, `за Instagram снимката е допълнена до формат ${ratio}`, `for Instagram the photo is padded to ${ratio}`)})`);
   return lines;
 }

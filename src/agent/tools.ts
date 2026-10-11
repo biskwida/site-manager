@@ -34,6 +34,8 @@ export interface AgentDeps {
   wordpress?: WordPressClient | null;
   /** Networks connected for posting (registers social_post when either is true). */
   social?: { facebook: boolean; instagram: boolean } | null;
+  /** Outbound HTTP for reading the owner's photo (social_post checks its shape for Instagram); default the global fetch. */
+  fetch?: typeof fetch;
 }
 
 const STAFF_OPS = new Set<ChangeOp["op"]>(["set_sold_out", "add_item"]);

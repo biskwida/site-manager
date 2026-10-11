@@ -4,12 +4,22 @@ import type { Change, SocialTarget } from "../domain/types";
 import { SOCIAL_TARGETS } from "../domain/types";
 
 export type SocialNetwork = "facebook" | "instagram";
-/** One target that went out: our media id, Meta's id for it (post id / media id) and its public link when Meta gave one. */
+/**
+ * One target of a post as the sync row remembers it. "attempted" is written before the call that publishes (its answer may be
+ * lost); "published" once Meta confirmed it. Meta's id may be null when a retry only learned that it went out.
+ */
 export interface SocialPublished {
   target: SocialTarget;
   media_id: string;
-  id: string;
+  state: "attempted" | "published";
+  id: string | null;
   permalink: string | null;
+  /** ISO: when the publishing call was sent (Facebook: a retry looks for a post after it). */
+  attempted_at?: string;
+  /** Instagram container id (creation_id), reused by a retry. */
+  container?: string;
+  /** Facebook story: the unpublished photo uploaded for it, reused by a retry. */
+  photo_id?: string;
 }
 
 /** The targets of a social_post row (from `after`, or from `before` for an undo row). */
@@ -29,19 +39,40 @@ export function relevantFor(network: SocialNetwork) {
   return (changes: Change[]) => changes.filter((c) => networkTargets(c, network).length > 0).sort((a, b) => a.position - b.position);
 }
 
-function isPublished(x: unknown): x is SocialPublished {
+function asEntry(x: unknown): SocialPublished | null {
   const o = x as Partial<SocialPublished> | null;
-  return !!o && typeof o.target === "string" && typeof o.media_id === "string" && typeof o.id === "string";
+  if (!o || typeof o.target !== "string" || typeof o.media_id !== "string") return null;
+  const id = typeof o.id === "string" && o.id ? o.id : null;
+  // Rows written before the attempted/published states: an entry with an id was published.
+  const state = o.state === "attempted" || o.state === "published" ? o.state : id ? "published" : null;
+  if (!state) return null;
+  return {
+    target: o.target, media_id: o.media_id, state, id, permalink: typeof o.permalink === "string" ? o.permalink : null,
+    ...(typeof o.attempted_at === "string" ? { attempted_at: o.attempted_at } : {}),
+    ...(typeof o.container === "string" ? { container: o.container } : {}),
+    ...(typeof o.photo_id === "string" ? { photo_id: o.photo_id } : {}),
+  };
 }
 
-/** Every `published` entry of the given sync results (deduplicated by target + media id, first wins). */
-export function publishedIn(results: readonly (Record<string, unknown> | null | undefined)[]): SocialPublished[] {
-  const out: SocialPublished[] = [];
+/** One entry per target + media id from the given sync results (oldest first): a published entry wins over an attempted one. */
+export function entriesIn(results: readonly (Record<string, unknown> | null | undefined)[]): SocialPublished[] {
+  const out = new Map<string, SocialPublished>();
   for (const r of results) {
-    const list = Array.isArray(r?.published) ? r.published : [];
-    for (const p of list) if (isPublished(p) && !out.some((x) => x.target === p.target && x.media_id === p.media_id)) out.push({ target: p.target, media_id: p.media_id, id: p.id, permalink: typeof p.permalink === "string" ? p.permalink : null });
+    for (const raw of Array.isArray(r?.published) ? r.published : []) {
+      const e = asEntry(raw);
+      if (!e) continue;
+      const key = `${e.target}|${e.media_id}`;
+      const had = out.get(key);
+      if (had?.state === "published" && e.state !== "published") continue;
+      out.set(key, e);
+    }
   }
-  return out;
+  return [...out.values()];
+}
+
+/** The entries Meta confirmed. */
+export function publishedIn(results: readonly (Record<string, unknown> | null | undefined)[]): SocialPublished[] {
+  return entriesIn(results).filter((e) => e.state === "published");
 }
 
 /** Ids already deleted by earlier attempts of an undo. */

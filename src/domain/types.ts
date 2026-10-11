@@ -313,6 +313,9 @@ export interface SocialPostRow {
   image_url: string;
   caption: string;
   targets: SocialTarget[];
+  /** Instagram feed only: a padded JPEG copy (our storage) when the photo is outside 4:5..1.91:1. */
+  ig_feed_image_url?: string;
+  ig_feed_ratio?: "4:5" | "1.91:1";
 }
 /** Entities that live outside our database (the owner's WordPress site, Facebook, Instagram): applied as no-ops, written by destination pushes. */
 export function isExternalEntity(e: string): e is WpEntity | SocialEntity {

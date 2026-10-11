@@ -544,7 +544,31 @@ export class SupabaseStore implements Store {
   async updateSync(id: string, patch: SyncPatch) {
     const row: Row = { updated_at: patch.updated_at ?? new Date().toISOString() };
     for (const k of ["status", "attempts", "next_at", "last_error", "result"] as const) if (patch[k] !== undefined) row[k] = patch[k];
+    if (patch.leased_until !== undefined && this.hasSyncLease !== false) row.leased_until = patch.leased_until;
     await mustRows(this.db.from("destination_syncs").update(row).eq("id", id).select("id"), `updateSync ${id}`);
+  }
+  /** False once the database answered that destination_syncs.leased_until does not exist (schema-integrations.sql not applied yet). */
+  private hasSyncLease: boolean | undefined;
+  /** Conditional update: only a free row (no lease, or an ended one) is taken; Postgres row locking makes it one winner. */
+  async claimSync(id: string, now: string, leaseUntil: string) {
+    if (this.hasSyncLease === false) return true;
+    const { data, error } = await this.db
+      .from("destination_syncs")
+      .update({ leased_until: leaseUntil })
+      .eq("id", id)
+      .eq("status", "pending")
+      .or(`leased_until.is.null,leased_until.lte."${now}"`)
+      .select("id");
+    if (error) {
+      // Before the column exists every push would fail; keep pushing unleased and say so once.
+      if (/leased_until/.test(error.message)) {
+        this.hasSyncLease = false;
+        console.warn("[destinations] destination_syncs.leased_until is missing; apply supabase/schema-integrations.sql (pushes run without a lease until then)");
+        return true;
+      }
+      throw new Error(`claimSync ${id}: ${error.message}`);
+    }
+    return (data ?? []).length > 0;
   }
 }
 
@@ -576,5 +600,6 @@ export function toSync(r: Row): DestinationSync {
     result: (r.result as Record<string, unknown> | null) ?? null,
     created_at: iso(r.created_at),
     updated_at: iso(r.updated_at),
+    leased_until: r.leased_until ? iso(r.leased_until) : null,
   };
 }

@@ -61,7 +61,7 @@ describe("SocialCard", () => {
   it("writes the prerequisites exactly as agreed", () => {
     expect(DICTS.en["admin.social.prereqInstagram"]).toBe("Instagram: a professional account (Business or Creator) — Settings → Account type and tools → Switch to professional account; while the app is in development, the account must be added as Instagram Tester and accept the invite.");
     expect(DICTS.en["admin.social.prereqFacebook"]).toBe("Facebook: a Facebook Page for the venue where you are an admin (or have full control); you sign in with your personal Facebook profile that manages the Page.");
-    expect(DICTS.en["admin.social.prereqPublic"]).toBe("Posts are public on your profile/Page; undo deletes Facebook posts, Instagram posts must be deleted by hand.");
+    expect(DICTS.en["admin.social.prereqPublic"]).toBe("Posts are public on your profile/Page once the app is live (while it is in development, only people with a role on the app see them); undo deletes Facebook posts, Instagram posts must be deleted by hand.");
   });
 
   it("hides a Connect button this server cannot serve", () => {

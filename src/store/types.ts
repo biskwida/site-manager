@@ -232,6 +232,8 @@ export interface DestinationSync {
   result: Record<string, unknown> | null;
   created_at: string;
   updated_at: string;
+  /** Set while one run pushes the row (claimSync); null/absent when free. Social track, 2026-10-11. */
+  leased_until?: string | null;
 }
 export interface NewSync {
   venue_id: string;
@@ -240,7 +242,7 @@ export interface NewSync {
   payload: Record<string, unknown>;
   next_at: string;
 }
-export type SyncPatch = Partial<Pick<DestinationSync, "status" | "attempts" | "next_at" | "last_error" | "result" | "updated_at">>;
+export type SyncPatch = Partial<Pick<DestinationSync, "status" | "attempts" | "next_at" | "last_error" | "result" | "updated_at" | "leased_until">>;
 
 // Declaration merging: the Store interface above gains the destination methods.
 export interface Store {
@@ -256,4 +258,9 @@ export interface Store {
   /** Oldest first (created_at). `dueBefore` keeps rows with next_at <= dueBefore. */
   listSyncs(opts: { venueId?: string; changeSetId?: string; status?: SyncStatus[]; dueBefore?: string; limit?: number }): Promise<DestinationSync[]>;
   updateSync(id: string, patch: SyncPatch): Promise<void>;
+  /**
+   * Takes a pending row for one push: sets leased_until = leaseUntil only when the row is free (no lease, or the lease ended at
+   * or before `now`). True when this caller got it; a concurrent run gets false and leaves the row alone.
+   */
+  claimSync(id: string, now: string, leaseUntil: string): Promise<boolean>;
 }

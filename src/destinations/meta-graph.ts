@@ -10,6 +10,8 @@ export const IG_GRAPH = "https://graph.instagram.com/v25.0";
 /** Meta's OAuthException code for an access token that expired, was revoked or lost its permissions. */
 export const META_TOKEN_INVALID = 190;
 const TIMEOUT_MS = 20_000;
+/** Meta's throttling codes (app, user, page, API-call limits): worth another attempt later. */
+const RATE_LIMIT_CODES = new Set([4, 17, 32, 613]);
 
 export class MetaApiError extends Error {
   readonly metaCode: number | null;
@@ -51,7 +53,8 @@ function errorFrom(status: number, json: unknown): MetaApiError {
   if (metaCode === META_TOKEN_INVALID) return new MetaApiError(status, "sm_meta_token", "The access token is no longer valid.", { metaCode });
   if (metaCode === 10 || (metaCode !== null && metaCode >= 200 && metaCode < 300)) return new MetaApiError(status, "sm_meta_permission", message, { metaCode });
   const code = metaCode !== null ? `meta_${metaCode}` : `http_${status}`;
-  return new MetaApiError(status, code, message, { metaCode, subcode, ...(err.is_transient === true ? { retry: true } : {}) });
+  const transient = err.is_transient === true || (metaCode !== null && RATE_LIMIT_CODES.has(metaCode));
+  return new MetaApiError(status, code, message, { metaCode, subcode, ...(transient ? { retry: true } : {}) });
 }
 
 /** One Graph request; JSON in, JSON out. `init.headers` may carry the bearer token. Never logs anything. */

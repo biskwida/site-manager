@@ -13,7 +13,7 @@ const TONE = { done: "good", pending: "warn", failed: "warn" } as const;
 const SYNC_LABEL = { done: "admin.social.sync.done", pending: "admin.social.sync.pending", failed: "admin.social.sync.failed" } as const;
 const CONNECT: Record<Kind, MessageKey> = { facebook: "admin.social.connectFacebook", instagram: "admin.social.connectInstagram" };
 const CONFIRM: Record<Kind, MessageKey> = { facebook: "admin.social.disconnectConfirmFacebook", instagram: "admin.social.disconnectConfirmInstagram" };
-const RESULTS = ["facebook_connected", "facebook_cancelled", "facebook_no_pages", "facebook_error", "instagram_connected", "instagram_cancelled", "instagram_personal", "instagram_error"] as const;
+const RESULTS = ["facebook_connected", "facebook_no_pages", "facebook_error", "instagram_connected", "instagram_personal", "instagram_error"] as const;
 type Result = (typeof RESULTS)[number];
 
 // The OAuth callbacks return to the dashboard with ?social_result=<code>#social. Read once per page load (the effect below then
