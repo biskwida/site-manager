@@ -168,9 +168,10 @@ export interface AdminSiteDeps {
 }
 export type SetTemplateResult =
   | { ok: true; template: TemplateId; deploy: DeployInfo | null }
-  | { ok: false; code: "unknown_template" | "busy"; error: string; bg: string; en: string };
+  | { ok: false; code: "unknown_template" | "busy" | "failed"; error: string; bg: string; en: string };
 
 const UNKNOWN_TEMPLATE: SetTemplateResult = { ok: false, code: "unknown_template", error: "Unknown template.", bg: "Непознат шаблон.", en: "Unknown template." };
+const SAVE_FAILED: SetTemplateResult = { ok: false, code: "failed", error: "The template could not be saved.", bg: "Шаблонът не можа да бъде запазен. Опитайте отново.", en: "The template could not be saved. Try again." };
 const BUSY: SetTemplateResult = { ok: false, code: "busy", error: "The site is publishing right now.", bg: "Сайтът се публикува в момента. Опитайте след минута.", en: "The site is publishing right now. Try again in a minute." };
 
 /**
@@ -182,31 +183,43 @@ export async function setTemplate(d: AdminSiteDeps, venue: Venue, template: unkn
   if (typeof template !== "string" || !(TEMPLATE_IDS as readonly string[]).includes(template)) return UNKNOWN_TEMPLATE;
   const id = template as TemplateId;
   const deploy = venue.deploy;
-  // Hosted mode: the hosted /<slug> renders the venue's template, so the switch is just the venue field.
-  if (!d.deployer) {
-    await d.store.updateVenue(venue.id, { template: id });
-    return { ok: true, template: id, deploy: null };
-  }
-  if (!deploy) {
-    await d.store.updateVenue(venue.id, { template: id });
-    return { ok: true, template: id, deploy: null };
-  }
+  // Hosted mode or never deployed: the hosted /<slug> renders the venue's template, so the switch is just the venue field.
+  if (!d.deployer || !deploy) return (await saveTemplate(d, venue, id)) ? { ok: true, template: id, deploy: null } : SAVE_FAILED;
   if (deploy.status === "pending" || deploy.status === "building") return BUSY;
+  // The venue field goes first: a store that refuses it (say, a template its schema does not know yet) must not leave a
+  // claimed deploy stuck in "building" until the stale-deploy timeout.
+  if (!(await saveTemplate(d, venue, id))) return SAVE_FAILED;
   const updated_at = d.now().toISOString();
   const claimed: DeployInfo = { ...deploy, deployment_id: "", status: "building", error: null, template: id, updated_at };
-  if (!(await d.store.claimDeploy(venue.id, claimed, { whenStatusIn: ["ready", "error"] }))) return BUSY;
-  await d.store.updateVenue(venue.id, { template: id });
+  if (!(await d.store.claimDeploy(venue.id, claimed, { whenStatusIn: ["ready", "error"] }))) {
+    // A concurrent switch won the claim: the venue field follows the deploy that is actually running.
+    const winner = (await d.store.getVenue(venue.id).catch(() => null))?.deploy?.template;
+    if (winner && winner !== id) await d.store.updateVenue(venue.id, { template: winner }).catch(() => undefined);
+    return BUSY;
+  }
   const input: DeployInput = { slug: venue.slug, templateId: id, feedUrl: d.feedUrlFor(venue.slug) };
   let next: DeployInfo;
   try {
     // An errored first deploy may have no project yet (createSite failed): create it now instead of redeploying into "".
     const r = deploy.project_id ? { projectId: deploy.project_id, ...(await d.deployer.redeploy(deploy.project_id, input)) } : await d.deployer.createSite(input);
     next = { ...claimed, project_id: r.projectId, deployment_id: r.deploymentId };
+    await d.store.setDeploy(venue.id, next);
   } catch {
-    next = { ...claimed, status: "error", error: "Redeploy could not start." }; // the provider message stays out of the stored record
+    // Any failure after the claim ends in "error" (retryable at once); the provider message stays out of the stored record.
+    next = { ...claimed, status: "error", error: "Redeploy could not start." };
+    await d.store.setDeploy(venue.id, next);
   }
-  await d.store.setDeploy(venue.id, next);
   return { ok: true, template: id, deploy: next };
+}
+
+/** Writes the venue's template; false when the store refuses it. */
+async function saveTemplate(d: AdminSiteDeps, venue: Venue, id: TemplateId): Promise<boolean> {
+  try {
+    await d.store.updateVenue(venue.id, { template: id });
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 export type DomainResult =

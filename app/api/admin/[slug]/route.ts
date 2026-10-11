@@ -32,8 +32,8 @@ export async function POST(req: Request, ctx: RouteContext<"/api/admin/[slug]">)
     const r = await setTemplate(siteDeps, venue, body.template);
     // Finish the redeploy (and send the owner's "new design is live") without depending on an open dashboard.
     if (r.ok && (r.deploy?.status === "pending" || r.deploy?.status === "building")) deps.watchDeploy(venue.id);
-    // 409 while a deploy is in flight (the card shows the localized message); 400 for a template id we do not have.
-    return Response.json(r, { status: r.ok ? 200 : r.code === "busy" ? 409 : 400 });
+    // 409 while a deploy is in flight (the card shows the localized message); 400 for a template id we do not have; 500 when the store refused the write.
+    return Response.json(r, { status: r.ok ? 200 : r.code === "busy" ? 409 : r.code === "failed" ? 500 : 400 });
   }
   if (body.action === "add_domain" || body.action === "check_domain") {
     const r = body.action === "add_domain" ? await connectDomain(siteDeps, venue, body.domain) : await checkDomain(siteDeps, venue);

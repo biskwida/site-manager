@@ -18,6 +18,11 @@ function throwing(err: unknown): Deployer {
   return { provider: "fake", createSite: async () => { throw new Error("x"); }, status: async () => ({ state: "building", url: null, error: null }), redeploy: async () => ({ deploymentId: "d" }), deleteSite: async () => {}, addDomain: async () => { throw err; } };
 }
 
+/** The store with some methods replaced (everything else goes to the real store, bound to it). */
+function patched<S extends object>(store: S, over: Record<string, unknown>): S {
+  return new Proxy(store, { get: (t, k, r) => (typeof k === "string" && k in over ? over[k] : (Reflect.get(t, k, r) as unknown)) }) as S;
+}
+
 /** A FakeDeployer that already knows project prj_1 (the demo venue's deploy record points at it). */
 function withProject(): FakeDeployer {
   const d = new FakeDeployer();
@@ -86,6 +91,39 @@ describe("set_template", () => {
     expect(r).toMatchObject({ ok: true, template: "nocturne", deploy: { status: "error", error: "Redeploy could not start.", template: "nocturne" } });
     expect(JSON.stringify(r)).not.toContain("SECRET");
     expect((await store.getVenue(venue.id)).template).toBe("nocturne");
+  });
+
+  it("saves the template before claiming the redeploy: a store that rejects the template leaves the deploy untouched", async () => {
+    const { store, venue } = await makeDemo();
+    await store.setDeploy(venue.id, ready);
+    const deployer = withProject();
+    const rejecting = patched(store, { updateVenue: async () => { throw new Error('new row violates check constraint "venues_template_check"'); } });
+    const r = await setTemplate(deps(rejecting, deployer), await store.getVenue(venue.id), "kvartal");
+    expect(r).toMatchObject({ ok: false, code: "failed" });
+    expect(JSON.stringify(r)).not.toContain("constraint");
+    const after = await store.getVenue(venue.id);
+    expect(after.template).toBe("classic");
+    expect(after.deploy).toEqual(ready);
+    expect(deployer.deployments.size).toBe(0);
+  });
+
+  it("marks the claimed deploy as error when a step after the claim throws, so the owner can retry at once", async () => {
+    const { store, venue } = await makeDemo();
+    await store.setDeploy(venue.id, ready);
+    const failing: Deployer = { ...withProject(), provider: "fake", createSite: async () => { throw new Error("x"); }, status: async () => ({ state: "building", url: null, error: null }), redeploy: async () => { throw new Error("HTTP 500"); }, deleteSite: async () => {} };
+    expect(await setTemplate(deps(store, failing), await store.getVenue(venue.id), "nocturne")).toMatchObject({ ok: true, deploy: { status: "error" } });
+    expect((await store.getVenue(venue.id)).deploy?.status).toBe("error");
+    // Retry straight away with a working provider.
+    const deployer = withProject();
+    expect(await setTemplate(deps(store, deployer), await store.getVenue(venue.id), "nocturne")).toMatchObject({ ok: true, deploy: { status: "building", error: null } });
+    expect(deployer.deployments.size).toBe(1);
+    // Saving the started deploy fails: the record still ends in error rather than stuck in building.
+    await store.setDeploy(venue.id, ready);
+    let writes = 0;
+    const flaky = patched(store, { setDeploy: async (id: string, info: DeployInfo) => { if (writes++ === 0) throw new Error("db down"); return store.setDeploy(id, info); } });
+    const r = await setTemplate(deps(flaky, withProject()), await store.getVenue(venue.id), "lumen");
+    expect(r).toMatchObject({ ok: true, deploy: { status: "error", error: "Redeploy could not start." } });
+    expect((await store.getVenue(venue.id)).deploy).toMatchObject({ status: "error", template: "lumen" });
   });
 
   it("lets only one of two concurrent switches start a redeploy", async () => {
