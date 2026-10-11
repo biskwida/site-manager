@@ -28,6 +28,7 @@ import { resolveSecretKey } from "../destinations/secrets";
 import { withDestinationSync } from "../destinations/store-hook";
 import type { SyncDeps } from "../destinations/sync";
 import { connectWordPress, wordPressClientFor } from "../destinations/connect";
+import { socialConnections } from "../agent/social-tools";
 
 export interface ServerDeps {
   config: Config;
@@ -156,9 +157,10 @@ export async function makeServerDeps(o: DepsOptions): Promise<ServerDeps> {
       console.error("[tick] per-webhook tick failed:", e instanceof Error ? e.message : e);
     }
     const wp = sync ? await wordPressClientFor({ store: s, secretKey: destinationSecretKey }, r.venueId).catch(() => null) : null;
+    const social = sync ? await socialConnections(s, r.venueId).catch(() => null) : null;
     try {
       await runTurn(
-        { store: store2, venueId: r.venueId, chatRef: r.chatRef, member: r.member, messenger, now: () => new Date(), baseUrl: config.publicBaseUrl, wordpress: wp?.client ?? null },
+        { store: store2, venueId: r.venueId, chatRef: r.chatRef, member: r.member, messenger, now: () => new Date(), baseUrl: config.publicBaseUrl, wordpress: wp?.client ?? null, social },
         { text: r.text, source: r.source, image: r.image, mediaId: r.mediaId },
         { model: config.agentModel, effort: config.agentEffort, apiKey: config.anthropicApiKey || undefined },
         o.client,
