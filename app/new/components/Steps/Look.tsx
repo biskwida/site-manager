@@ -1,16 +1,16 @@
 "use client";
-import { useState } from "react";
+import { useState, type ReactNode } from "react";
 import { TEMPLATE_IDS, type Media, type TemplateId } from "@/src/domain/types";
-import { TEMPLATE_ACCENT_DEFAULTS } from "@/src/wizard/schema";
+import { accentAfterTemplateSwitch, LOOK_ACCENT_PRESETS, TEMPLATE_ACCENT_DEFAULTS } from "@/src/wizard/schema";
 import { api, WIZARD_MAX_IMAGE_BYTES } from "../api";
 import { fieldError } from "../errors";
 import { Button, Fieldset, FileButton, Status, TextField } from "../Field";
+import { InstagramImport } from "../InstagramImport";
 import { shrinkImage } from "../image";
 import { MediaThumb } from "../MediaThumb";
 import type { StepProps } from "../types";
 import { useT } from "../useWizardText";
 
-const PRESETS = ["#2f6b4f", "#8f5c10", "#a4442c", "#1d4ed8", "#6b21a8", "#1d2a24"];
 const HEX = /^#[0-9a-fA-F]{6}$/;
 const SWATCH = "inline-flex min-h-11 cursor-pointer items-center gap-2.5 rounded-full bg-panel py-1 pl-1.5 pr-3.5 text-sm text-fg ring-1 ring-line transition-[box-shadow,background-color] duration-150 ease-out hover:bg-sunken has-[:checked]:ring-2 has-[:checked]:ring-fg has-[:focus-visible]:ring-2 has-[:focus-visible]:ring-brand";
 
@@ -19,7 +19,7 @@ export async function prepareUpload(file: File): Promise<File | null> {
   return shrinkImage(file, { maxEdge: 2000, quality: 0.85, maxBytes: WIZARD_MAX_IMAGE_BYTES });
 }
 
-function ImageSlot({ id, label, hint, mediaId, media, onChange, addMedia, wide }: { id: string; label: string; hint?: string; mediaId: string | null; media: Media[]; onChange: (id: string | null) => void; addMedia: StepProps["addMedia"]; wide?: boolean }) {
+function ImageSlot({ id, label, hint, mediaId, media, onChange, addMedia, wide, children }: { id: string; label: string; hint?: string; mediaId: string | null; media: Media[]; onChange: (id: string | null) => void; addMedia: StepProps["addMedia"]; wide?: boolean; children?: ReactNode }) {
   const { t, lang } = useT();
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -43,22 +43,26 @@ function ImageSlot({ id, label, hint, mediaId, media, onChange, addMedia, wide }
         </div>
       </div>
       <Status tone={error ? "danger" : "soft"}>{error ?? (busy ? t("look.uploading") : "")}</Status>
+      {children}
     </Fieldset>
   );
 }
 
-export function Look({ id, draft, media, update, addMedia, fieldErrors }: StepProps) {
+export function Look({ id, draft, media, update, addMedia, fieldErrors, flush, igReturn, onIgConsumed, instagramAvailable }: StepProps) {
   const { t, lang } = useT();
-  const templateDefault = TEMPLATE_ACCENT_DEFAULTS[draft.template];
-  const options = [templateDefault, ...PRESETS.filter((p) => p !== templateDefault)];
-  const custom = !options.includes(draft.theme.accent.toLowerCase());
+  // Accents compare lowercased on both sides, so an uppercase hex stored by an older build still selects its swatch.
+  const accent = draft.theme.accent.toLowerCase();
+  const templateDefault = TEMPLATE_ACCENT_DEFAULTS[draft.template].toLowerCase();
+  const options = [templateDefault, ...LOOK_ACCENT_PRESETS.map((p) => p.toLowerCase()).filter((p) => p !== templateDefault)];
+  const custom = !options.includes(accent);
   const [hex, setHex] = useState(draft.theme.accent);
   // Switching designs keeps everything; an accent still on the old design's default follows the new design's default.
   function chooseTemplate(next: TemplateId) {
     if (next === draft.template) return;
-    const followDefault = draft.theme.accent.toLowerCase() === templateDefault;
-    if (followDefault) setHex(TEMPLATE_ACCENT_DEFAULTS[next]);
-    update({ template: next, ...(followDefault ? { theme: { accent: TEMPLATE_ACCENT_DEFAULTS[next] } } : {}) });
+    const nextAccent = accentAfterTemplateSwitch(draft.theme.accent, draft.template, next);
+    const followDefault = nextAccent !== draft.theme.accent;
+    if (followDefault) setHex(nextAccent);
+    update({ template: next, ...(followDefault ? { theme: { accent: nextAccent } } : {}) });
   }
   return (
     <div className="grid gap-8">
@@ -77,7 +81,7 @@ export function Look({ id, draft, media, update, addMedia, fieldErrors }: StepPr
         <div className="flex flex-wrap gap-2">
           {options.map((c, i) => (
             <label key={c} className={SWATCH}>
-              <input type="radio" name="accent" value={c} checked={draft.theme.accent.toLowerCase() === c} onChange={() => { setHex(c); update({ theme: { accent: c } }); }} className="sr-only" />
+              <input type="radio" name="accent" value={c} checked={accent === c} onChange={() => { setHex(c); update({ theme: { accent: c } }); }} className="sr-only" />
               <span aria-hidden="true" className="size-7 rounded-full ring-1 ring-fg/10" style={{ background: c }} />
               <span>{i === 0 ? t("look.accentDefault") : c}</span>
             </label>
@@ -92,7 +96,9 @@ export function Look({ id, draft, media, update, addMedia, fieldErrors }: StepPr
       </Fieldset>
       <div className="grid gap-8 border-t border-line pt-8">
         <ImageSlot id={id} label={t("look.logo")} mediaId={draft.logo_media_id} media={media} addMedia={addMedia} onChange={(logo_media_id) => update({ logo_media_id })} />
-        <ImageSlot id={id} label={t("look.cover")} hint={t("look.coverHint")} mediaId={draft.cover_media_id} media={media} addMedia={addMedia} onChange={(cover_media_id) => update({ cover_media_id })} wide />
+        <ImageSlot id={id} label={t("look.cover")} hint={t("look.coverHint")} mediaId={draft.cover_media_id} media={media} addMedia={addMedia} onChange={(cover_media_id) => update({ cover_media_id })} wide>
+          <InstagramImport id={id} draft={draft} update={update} addMedia={addMedia} flush={flush} igReturn={igReturn} onIgConsumed={onIgConsumed} instagramAvailable={instagramAvailable} from="look" />
+        </ImageSlot>
       </div>
     </div>
   );

@@ -8,7 +8,7 @@ import { Button, Status } from "../Field";
 import type { StepProps } from "../types";
 import { useT } from "../useWizardText";
 
-export function Review({ id, draft, errors, goTo, onPublished, baseUrl, flush, saveSnapshot }: StepProps & {
+export function Review({ id, draft, errors, goTo, onPublished, baseUrl, flush, saveSnapshot, apps = ["telegram"] }: StepProps & {
   errors: PublishError[];
   goTo: (s: WizardStep) => void;
   onPublished: (r: PublishResponse) => void;
@@ -53,7 +53,7 @@ export function Review({ id, draft, errors, goTo, onPublished, baseUrl, flush, s
     <div className="grid gap-6">
       <div>
         <h2 className="text-xl font-semibold leading-tight">{t("review.title")}</h2>
-        <p className="mt-1 max-w-[60ch] leading-relaxed text-fg-soft">{t("review.lead")}</p>
+        <p className="mt-1 max-w-[60ch] leading-relaxed text-fg-soft">{t(apps.length === 1 && apps[0] === "telegram" ? "review.lead" : "review.leadApps")}</p>
       </div>
       <dl className="grid gap-y-3 rounded-xl bg-panel px-4 py-4 ring-1 ring-line sm:grid-cols-[9rem_1fr] sm:gap-x-4">
         {rows.map(([k, v]) => (<div key={k} className="contents"><dt className="text-sm font-semibold text-fg-soft">{k}</dt><dd className="mb-1 [overflow-wrap:anywhere] sm:mb-0">{v}</dd></div>))}

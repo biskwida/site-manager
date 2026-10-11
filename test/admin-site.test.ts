@@ -9,13 +9,18 @@ import { makeDemo } from "./helpers";
 const T0 = new Date("2026-10-10T10:00:00.000Z");
 const ready: DeployInfo = { provider: "fake", project_id: "prj_1", deployment_id: "dpl_1", url: "https://agala.example.test", status: "ready", error: null, template: "classic", updated_at: "2026-10-10T09:00:00.000Z" };
 
-function deps(store: Awaited<ReturnType<typeof makeDemo>>["store"], deployer: Deployer = new FakeDeployer()) {
+function deps(store: Awaited<ReturnType<typeof makeDemo>>["store"], deployer: Deployer | null = new FakeDeployer()) {
   return { store, deployer, feedUrlFor: (slug: string) => `https://site.example/api/site/${slug}`, now: () => T0 };
 }
 
 /** A deployer whose addDomain throws `err` (createSite/redeploy are never reached by the domain actions). */
 function throwing(err: unknown): Deployer {
   return { provider: "fake", createSite: async () => { throw new Error("x"); }, status: async () => ({ state: "building", url: null, error: null }), redeploy: async () => ({ deploymentId: "d" }), deleteSite: async () => {}, addDomain: async () => { throw err; } };
+}
+
+/** The store with some methods replaced (everything else goes to the real store, bound to it). */
+function patched<S extends object>(store: S, over: Record<string, unknown>): S {
+  return new Proxy(store, { get: (t, k, r) => (typeof k === "string" && k in over ? over[k] : (Reflect.get(t, k, r) as unknown)) }) as S;
 }
 
 /** A FakeDeployer that already knows project prj_1 (the demo venue's deploy record points at it). */
@@ -86,6 +91,53 @@ describe("set_template", () => {
     expect(r).toMatchObject({ ok: true, template: "nocturne", deploy: { status: "error", error: "Redeploy could not start.", template: "nocturne" } });
     expect(JSON.stringify(r)).not.toContain("SECRET");
     expect((await store.getVenue(venue.id)).template).toBe("nocturne");
+  });
+
+  it("saves the template before claiming the redeploy: a store that rejects the template leaves the deploy untouched", async () => {
+    const { store, venue } = await makeDemo();
+    await store.setDeploy(venue.id, ready);
+    const deployer = withProject();
+    const rejecting = patched(store, { updateVenue: async () => { throw new Error('new row violates check constraint "venues_template_check"'); } });
+    const r = await setTemplate(deps(rejecting, deployer), await store.getVenue(venue.id), "kvartal");
+    expect(r).toMatchObject({ ok: false, code: "failed" });
+    expect(JSON.stringify(r)).not.toContain("constraint");
+    const after = await store.getVenue(venue.id);
+    expect(after.template).toBe("classic");
+    expect(after.deploy).toEqual(ready);
+    expect(deployer.deployments.size).toBe(0);
+  });
+
+  it("marks the claimed deploy as error when a step after the claim throws, so the owner can retry at once", async () => {
+    const { store, venue } = await makeDemo();
+    await store.setDeploy(venue.id, ready);
+    const failing: Deployer = { ...withProject(), provider: "fake", createSite: async () => { throw new Error("x"); }, status: async () => ({ state: "building", url: null, error: null }), redeploy: async () => { throw new Error("HTTP 500"); }, deleteSite: async () => {} };
+    expect(await setTemplate(deps(store, failing), await store.getVenue(venue.id), "nocturne")).toMatchObject({ ok: true, deploy: { status: "error" } });
+    expect((await store.getVenue(venue.id)).deploy?.status).toBe("error");
+    // Retry straight away with a working provider.
+    const deployer = withProject();
+    expect(await setTemplate(deps(store, deployer), await store.getVenue(venue.id), "nocturne")).toMatchObject({ ok: true, deploy: { status: "building", error: null } });
+    expect(deployer.deployments.size).toBe(1);
+    // Saving the started deploy fails: the record still ends in error rather than stuck in building.
+    await store.setDeploy(venue.id, ready);
+    let writes = 0;
+    const flaky = patched(store, { setDeploy: async (id: string, info: DeployInfo) => { if (writes++ === 0) throw new Error("db down"); return store.setDeploy(id, info); } });
+    const r = await setTemplate(deps(flaky, withProject()), await store.getVenue(venue.id), "lumen");
+    expect(r).toMatchObject({ ok: true, deploy: { status: "error", error: "Redeploy could not start." } });
+    expect((await store.getVenue(venue.id)).deploy).toMatchObject({ status: "error", template: "lumen" });
+  });
+
+  it("moves an accent still on the old template's default (any letter case) to the new template's default; a custom accent stays", async () => {
+    const { store, venue } = await makeDemo();
+    await store.updateVenue(venue.id, { template: "classic", theme: { accent: "#2F6B4F" } });
+    expect(await setTemplate(deps(store, null), await store.getVenue(venue.id), "kvartal")).toMatchObject({ ok: true });
+    expect((await store.getVenue(venue.id)).theme.accent).toBe("#c23a1c");
+    await store.setDeploy(venue.id, { ...ready, template: "kvartal" });
+    expect(await setTemplate(deps(store, withProject()), await store.getVenue(venue.id), "mehana")).toMatchObject({ ok: true, deploy: { status: "building" } });
+    expect((await store.getVenue(venue.id)).theme.accent).toBe("#6e1f1b");
+    await store.updateVenue(venue.id, { theme: { accent: "#1d4ed8" } });
+    await store.setDeploy(venue.id, { ...ready, template: "mehana" });
+    expect(await setTemplate(deps(store, withProject()), await store.getVenue(venue.id), "lumen")).toMatchObject({ ok: true });
+    expect((await store.getVenue(venue.id))).toMatchObject({ template: "lumen", theme: { accent: "#1d4ed8" } });
   });
 
   it("lets only one of two concurrent switches start a redeploy", async () => {

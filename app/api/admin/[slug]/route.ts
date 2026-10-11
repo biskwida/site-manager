@@ -1,5 +1,6 @@
 import { after } from "next/server";
 import { adminAction, adminOverview, checkDomain, connectDomain, setTemplate, type AdminActionName } from "@/src/server/admin";
+import { newOwnerCode } from "@/src/server/connect-apps";
 import { getServerDeps } from "@/src/server/deps";
 
 export const dynamic = "force-dynamic";
@@ -31,13 +32,18 @@ export async function POST(req: Request, ctx: RouteContext<"/api/admin/[slug]">)
     const r = await setTemplate(siteDeps, venue, body.template);
     // Finish the redeploy (and send the owner's "new design is live") without depending on an open dashboard.
     if (r.ok && (r.deploy?.status === "pending" || r.deploy?.status === "building")) deps.watchDeploy(venue.id);
-    // 409 while a deploy is in flight (the card shows the localized message); 400 for a template id we do not have.
-    return Response.json(r, { status: r.ok ? 200 : r.code === "busy" ? 409 : 400 });
+    // 409 while a deploy is in flight (the card shows the localized message); 400 for a template id we do not have; 500 when the store refused the write.
+    return Response.json(r, { status: r.ok ? 200 : r.code === "busy" ? 409 : r.code === "failed" ? 500 : 400 });
   }
   if (body.action === "add_domain" || body.action === "check_domain") {
     const r = body.action === "add_domain" ? await connectDomain(siteDeps, venue, body.domain) : await checkDomain(siteDeps, venue);
     // 400 for a hostname we cannot use; 409 when there is no ready site, no stored domain, a redeploy in flight, the provider refused, or this server has no deployer.
     return Response.json(r, { status: r.ok ? 200 : r.code === "invalid_domain" ? 400 : 409 });
+  }
+  if (body.action === "new_owner_code") {
+    // "Connect another app": a fresh single-use owner code with one link per enabled app (rate limit shared with the wizard).
+    const r = await newOwnerCode(deps.store, deps.config, venue, new Date());
+    return Response.json(r, { status: r.ok ? 200 : r.error === "rate_limited" ? 429 : 409, headers: { "cache-control": "no-store" } });
   }
   const actions: AdminActionName[] = ["apply", "reject", "cancel", "undo"];
   if (!actions.includes(body.action as AdminActionName) || typeof body.change_set_id !== "string") return Response.json({ error: "bad request" }, { status: 400 });

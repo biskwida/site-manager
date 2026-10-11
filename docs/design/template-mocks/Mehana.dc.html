@@ -1,0 +1,134 @@
+<!doctype html>
+<html lang="bg">
+<head>
+<meta charset="utf-8">
+<title>Механа · начална страница</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Brygada+1918:ital,wght@0,500;0,700;1,500&amp;family=Wix+Madefor+Text:wght@400;600;700&amp;display=swap&amp;subset=cyrillic" rel="stylesheet">
+<style>
+body{margin:0;background:#F3EADB}
+a{color:#2B1B14}a:hover{color:#8E2A22}
+.me-row{display:flex;flex-wrap:wrap;gap:40px}
+.me-col{flex:1 1 300px;min-width:0}
+.me-wide{flex:2 1 560px;min-width:0}
+</style>
+</helmet>
+<div style="background: #F3EADB; color: #2B1B14; font-family: 'Wix Madefor Text', system-ui, sans-serif; font-size: 17px; line-height: 1.6;">
+
+  <div style="background: {{wine}}; color: #F3EADB;">
+    <header style="max-width: 1200px; margin: 0 auto; padding: 20px clamp(16px, 4vw, 48px); display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 16px;">
+      <a href="#top" style="color: #F3EADB; text-decoration: none; font-family: 'Brygada 1918', Georgia, serif; font-weight: 700; font-size: 26px; letter-spacing: 0.02em;">Механа „Чардака“</a>
+      <nav aria-label="Основна" style="display: flex; flex-wrap: wrap; align-items: center; gap: 6px;">
+        <a href="#top" style="min-height: 44px; display: inline-flex; align-items: center; padding: 0 14px; color: #F3EADB; text-decoration: underline; text-underline-offset: 6px; font-weight: 700;">Начало</a>
+        <a href="#menu" style="min-height: 44px; display: inline-flex; align-items: center; padding: 0 14px; color: #F3EADB; text-decoration: none; font-weight: 600;">Меню</a>
+        <a href="tel:+359877555010" style="min-height: 44px; display: inline-flex; align-items: center; padding: 0 18px; border-radius: 8px; background: #C9902F; color: #2B1B14; text-decoration: none; font-weight: 700;">Резервирай маса</a>
+        <button type="button" aria-pressed="true" style="min-height: 44px; min-width: 44px; margin-left: 6px; border-radius: 8px; border: 1px solid #F3EADB; background: #F3EADB; color: #5A1A17; font: 700 15px 'Wix Madefor Text', sans-serif;">БГ</button>
+        <button type="button" aria-pressed="false" style="min-height: 44px; min-width: 44px; border-radius: 8px; border: 1px solid #C98A80; background: transparent; color: #F3EADB; font: 700 15px 'Wix Madefor Text', sans-serif;">EN</button>
+      </nav>
+    </header>
+
+    <section id="top" style="max-width: 1200px; margin: 0 auto; padding: clamp(32px, 6vw, 88px) clamp(16px, 4vw, 48px) clamp(40px, 6vw, 80px); display: grid; gap: 28px;">
+      <p style="margin: 0; font-size: 15px; letter-spacing: 0.14em; text-transform: uppercase; color: #E8C98B;">Стара Загора · от 1998 г.</p>
+      <h1 style="margin: 0; font-family: 'Brygada 1918', Georgia, serif; font-weight: 500; font-size: clamp(46px, 7.5vw, 104px); line-height: 0.95; max-width: 13ch;">Трапеза за цялото село.</h1>
+      <p style="margin: 0; max-width: 52ch; font-size: 20px; color: #F0DCCF;">Капама в гърне, агнешко на жар и наздравица под асмата. Готвим като у баба, само че за повече хора.</p>
+      <div style="display: flex; flex-wrap: wrap; align-items: center; gap: 12px 24px;">
+        <p style="margin: 0; display: inline-flex; align-items: center; gap: 10px; font-weight: 700;"><span style="width: 10px; height: 10px; border-radius: 50%; background: #9BD39B;" aria-hidden="true"></span>Отворено до 00:00 · кухнята до 22:30</p>
+        <a href="#menu" style="color: #E8C98B; font-weight: 700;">Към менюто</a>
+      </div>
+    </section>
+  </div>
+
+  <div aria-hidden="true" style="height: 28px; background-color: #F3EADB; background-image: linear-gradient(45deg, {{wine}} 25%, transparent 25%), linear-gradient(-45deg, {{wine}} 25%, transparent 25%), linear-gradient(45deg, transparent 75%, #C9902F 75%), linear-gradient(-45deg, transparent 75%, #C9902F 75%); background-size: 28px 28px; background-position: 0 0, 0 0, 0 0, 0 0;"></div>
+
+  <section aria-labelledby="tonight-h" style="max-width: 1200px; margin: 0 auto; padding: 48px clamp(16px, 4vw, 48px) 8px;">
+    <div class="me-row" style="align-items: stretch; gap: 24px;">
+      <div class="me-wide" style="border: 2px solid #2B1B14; border-radius: 4px; padding: 24px 28px; display: grid; gap: 8px;">
+        <h2 id="tonight-h" style="margin: 0; font-family: 'Brygada 1918', serif; font-weight: 700; font-size: 28px;">Тази вечер</h2>
+        <p style="margin: 0; font-size: 20px;"><strong>Жива музика от 20:00.</strong> Оркестър „Тракия“, гъдулка и тъпан. Масите на двора са заети, вътре има място.</p>
+      </div>
+      <div class="me-col" style="background: #E7D8BD; border-radius: 4px; padding: 24px 28px; display: grid; gap: 6px; align-content: start;">
+        <h2 style="margin: 0; font-size: 14px; letter-spacing: 0.12em; text-transform: uppercase; color: #6B4A2F;">Ястие на деня</h2>
+        <p style="margin: 0; font-family: 'Brygada 1918', serif; font-size: 26px; font-weight: 700;">Чомлек с телешко</p>
+        <p style="margin: 0;">До 22:30 или до последното гърне · <strong>14,90 €</strong></p>
+      </div>
+    </div>
+  </section>
+
+  <section id="menu" aria-labelledby="menu-h" style="max-width: 1200px; margin: 0 auto; padding: 56px clamp(16px, 4vw, 48px);">
+    <div style="display: flex; flex-wrap: wrap; justify-content: space-between; align-items: end; gap: 16px; margin-bottom: 32px;">
+      <h2 id="menu-h" style="margin: 0; font-family: 'Brygada 1918', serif; font-weight: 500; font-size: clamp(40px, 5vw, 64px); line-height: 1;">Менюто, по ред</h2>
+      <p style="margin: 0; color: #6B4A2F;">Цени в евро · порции за един, освен ако не пише друго</p>
+    </div>
+
+    <div class="me-row" style="gap: 32px 56px;">
+      <div class="me-col">
+        <h3 style="margin: 0 0 4px; display: flex; align-items: baseline; gap: 14px; font-family: 'Brygada 1918', serif; font-size: 30px; font-weight: 700;"><span style="font-size: 18px; color: {{wine}};">I</span>Мезета</h3>
+        <ul style="list-style: none; margin: 0; padding: 0;">
+          <li style="padding: 14px 0; border-top: 1px solid #CDB894;"><div style="display: flex; justify-content: space-between; gap: 12px;"><strong>Шопска салата</strong><strong style="white-space: nowrap;">6,40 €</strong></div><div style="font-size: 15px; color: #6B4A2F;">С домати от Пазарджик · 7 мляко</div></li>
+          <li style="padding: 14px 0; border-top: 1px solid #CDB894;"><div style="display: flex; justify-content: space-between; gap: 12px;"><strong>Пълнени чушки с боб</strong><strong style="white-space: nowrap;">7,20 €</strong></div><div style="font-size: 15px; color: #6B4A2F;">Постно, с чубрица</div></li>
+          <li style="padding: 14px 0; border-top: 1px solid #CDB894; border-bottom: 1px solid #CDB894;"><div style="display: flex; justify-content: space-between; gap: 12px;"><strong>Сирене пане</strong><strong style="white-space: nowrap;">6,90 €</strong></div><div style="font-size: 15px; color: #6B4A2F;">1 глутен · 3 яйца · 7 мляко</div></li>
+        </ul>
+      </div>
+      <div class="me-col">
+        <h3 style="margin: 0 0 4px; display: flex; align-items: baseline; gap: 14px; font-family: 'Brygada 1918', serif; font-size: 30px; font-weight: 700;"><span style="font-size: 18px; color: {{wine}};">II</span>От жарта</h3>
+        <ul style="list-style: none; margin: 0; padding: 0;">
+          <li style="padding: 14px 0; border-top: 1px solid #CDB894;"><div style="display: flex; justify-content: space-between; gap: 12px;"><strong>Агнешки ребра</strong><strong style="white-space: nowrap;">18,50 €</strong></div><div style="font-size: 15px; color: #6B4A2F;">С пресен лук и кисело мляко · 7 мляко</div></li>
+          <li style="padding: 14px 0; border-top: 1px solid #CDB894;"><div style="display: flex; justify-content: space-between; gap: 12px;"><s>Кебапчета, 3 бр.</s><span style="white-space: nowrap; font-weight: 700; color: #8E2A22;">свършиха</span></div><div style="font-size: 15px; color: #6B4A2F;">Отново утре от 12:00</div></li>
+          <li style="padding: 14px 0; border-top: 1px solid #CDB894; border-bottom: 1px solid #CDB894;"><div style="display: flex; justify-content: space-between; gap: 12px;"><strong>Свински вратни пържоли</strong><strong style="white-space: nowrap;">12,90 €</strong></div><div style="font-size: 15px; color: #6B4A2F;">Мариновани в червено вино</div></li>
+        </ul>
+      </div>
+      <div class="me-col">
+        <h3 style="margin: 0 0 4px; display: flex; align-items: baseline; gap: 14px; font-family: 'Brygada 1918', serif; font-size: 30px; font-weight: 700;"><span style="font-size: 18px; color: {{wine}};">III</span>От гърнето</h3>
+        <ul style="list-style: none; margin: 0; padding: 0;">
+          <li style="padding: 14px 0; border-top: 1px solid #CDB894;"><div style="display: flex; justify-content: space-between; gap: 12px;"><strong>Капама, за двама</strong><strong style="white-space: nowrap;">32,00 €</strong></div><div style="font-size: 15px; color: #6B4A2F;">Поръчай час по-рано · 1 глутен</div></li>
+          <li style="padding: 14px 0; border-top: 1px solid #CDB894;"><div style="display: flex; justify-content: space-between; gap: 12px;"><strong>Гювеч със зеленчуци</strong><strong style="white-space: nowrap;">9,80 €</strong></div><div style="font-size: 15px; color: #6B4A2F;">Постно, в глинен съд</div></li>
+          <li style="padding: 14px 0; border-top: 1px solid #CDB894; border-bottom: 1px solid #CDB894;"><div style="display: flex; justify-content: space-between; gap: 12px;"><strong>Боб чорба</strong><strong style="white-space: nowrap;">4,50 €</strong></div><div style="font-size: 15px; color: #6B4A2F;">С джоджен и люта чушка</div></li>
+        </ul>
+      </div>
+    </div>
+  </section>
+
+  <section aria-labelledby="gallery-h" style="max-width: 1200px; margin: 0 auto; padding: 8px clamp(16px, 4vw, 48px) 56px;">
+    <h2 id="gallery-h" style="position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0);">Снимки</h2>
+    <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 12px;">
+      <div style="aspect-ratio: 4 / 3; border-radius: 4px; background: repeating-linear-gradient(135deg, #DCC9A6 0 12px, #E7D8BD 12px 24px); display: grid; place-items: center; color: #6B4A2F; font-size: 15px;">[Снимка: дворът с асмата]</div>
+      <div style="aspect-ratio: 4 / 3; border-radius: 4px; background: repeating-linear-gradient(135deg, #DCC9A6 0 12px, #E7D8BD 12px 24px); display: grid; place-items: center; color: #6B4A2F; font-size: 15px;">[Снимка: капама на масата]</div>
+      <div style="aspect-ratio: 4 / 3; border-radius: 4px; background: repeating-linear-gradient(135deg, #DCC9A6 0 12px, #E7D8BD 12px 24px); display: grid; place-items: center; color: #6B4A2F; font-size: 15px;">[Снимка: музиката вечер]</div>
+    </div>
+  </section>
+
+  <section aria-labelledby="visit-h" style="background: #2B1B14; color: #F3EADB;">
+    <div class="me-row" style="max-width: 1200px; margin: 0 auto; padding: 56px clamp(16px, 4vw, 48px);">
+      <div class="me-col" style="display: grid; gap: 12px; align-content: start;">
+        <h2 id="visit-h" style="margin: 0; font-family: 'Brygada 1918', serif; font-weight: 500; font-size: 44px; line-height: 1;">Заповядайте</h2>
+        <a href="#map" style="color: #F3EADB;">ул. „Митрополит Методий Кусев“ 12, Стара Загора</a>
+        <a href="tel:+359877555010" style="color: #E8C98B; font-size: 22px; font-weight: 700;">0877 555 010</a>
+      </div>
+      <dl class="me-col" style="margin: 0; display: grid; grid-template-columns: auto 1fr; gap: 10px 24px; align-content: start;">
+        <dt style="font-weight: 700;">Пон–Чет</dt><dd style="margin: 0;">12:00–23:00</dd>
+        <dt style="font-weight: 700;">Пет–Съб</dt><dd style="margin: 0;">12:00–00:00</dd>
+        <dt style="font-weight: 700;">Неделя</dt><dd style="margin: 0;">12:00–22:00</dd>
+        <dt style="font-weight: 700; color: #E8C98B;">6 май</dt><dd style="margin: 0; color: #E8C98B;">Гергьовден: само с резервация</dd>
+      </dl>
+    </div>
+    <div style="max-width: 1200px; margin: 0 auto; padding: 0 clamp(16px, 4vw, 48px) 32px; display: flex; flex-wrap: wrap; justify-content: space-between; gap: 12px; font-size: 15px; color: #CDB894;">
+      <span>Наздраве!</span>
+      <a href="#sm" translate="no" style="color: #CDB894;">Сайт от Site Manager</a>
+    </div>
+  </section>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"wine":{"editor":"color","default":"#6E1F1B","options":["#6E1F1B","#2F5D46","#3B2F5C","#7A4A12"]},"$preview":{"width":1280,"height":2240}}'>
+class Component extends DCLogic {
+  renderVals() {
+    return { wine: this.props.wine ?? '#6E1F1B' };
+  }
+}
+</script>
+</body>
+</html>

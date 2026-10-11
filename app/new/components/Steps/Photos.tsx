@@ -3,12 +3,13 @@ import { useState } from "react";
 import { moveIndex } from "@/src/wizard/edit";
 import { api } from "../api";
 import { Button, FileButton, Status } from "../Field";
+import { InstagramImport } from "../InstagramImport";
 import { MediaThumb } from "../MediaThumb";
 import type { StepProps } from "../types";
 import { useT } from "../useWizardText";
 import { prepareUpload } from "./Look";
 
-export function Photos({ id, draft, media, update, addMedia }: StepProps) {
+export function Photos({ id, draft, media, update, addMedia, flush, igReturn, onIgConsumed, instagramAvailable }: StepProps) {
   const { t } = useT();
   const [busy, setBusy] = useState(false);
   const [failed, setFailed] = useState(0);
@@ -31,6 +32,7 @@ export function Photos({ id, draft, media, update, addMedia }: StepProps) {
       <p className="max-w-[60ch] text-sm leading-snug text-fg-soft">{t("photos.hint")}</p>
       <div><FileButton label={busy ? t("look.uploading") : t("photos.add")} accept="image/*" multiple disabled={busy} onFiles={(f) => void upload(f)} /></div>
       <Status tone={failed ? "danger" : "soft"}>{failed ? t("look.uploadFailed") : busy ? t("look.uploading") : ""}</Status>
+      <InstagramImport id={id} draft={draft} update={update} addMedia={addMedia} flush={flush} igReturn={igReturn} onIgConsumed={onIgConsumed} instagramAvailable={instagramAvailable} from="photos" />
       {ids.length === 0 && <p className="text-fg-soft">{t("photos.empty")}</p>}
       <ol className="grid gap-3 sm:grid-cols-2" aria-label={t("photos.title")}>
         {ids.map((mid, i) => (

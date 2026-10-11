@@ -96,6 +96,20 @@ describe("step components render labelled fields in both languages", () => {
     expect(offline).toContain("No preview");
     expect(offline).not.toContain('src="memory');
   });
+  it("Review promises a Telegram code only when Telegram is the one app; otherwise a code for the owner's app", () => {
+    const review = (lang: Lang, apps?: StepProps["apps"]) => render(lang, createElement(Review, { ...props({ apps }), errors: [], goTo: noop, onPublished: noop, flush: async () => true, saveSnapshot }));
+    expect(review("en", ["telegram"])).toContain("get a Telegram code");
+    expect(review("bg", ["telegram"])).toContain("код за Telegram");
+    expect(review("en")).toContain("get a Telegram code"); // the default server answers Telegram only
+    for (const apps of [["telegram", "whatsapp"], ["whatsapp"]] as StepProps["apps"][]) {
+      const en = review("en", apps);
+      expect(en).toContain("a code for your app");
+      expect(en).not.toContain("Telegram");
+      const bg = review("bg", apps);
+      expect(bg).toContain("код за приложението");
+      expect(bg).not.toContain("Telegram");
+    }
+  });
   it("Review lists validation errors with Fix buttons and disables Create", () => {
     const draft = emptyDraft("lumen");
     const r = validateForPublish(draft);
@@ -144,6 +158,15 @@ describe("step components render labelled fields in both languages", () => {
     expect(html).toMatch(/name="template" checked="" value="classic"/);
     expect(html).not.toMatch(/checked="" value="lumen"/);
     expect(render("bg", createElement(Look, props()))).toContain("Дизайн");
+  });
+  it("Look picks the design's default swatch for a stored accent in any letter case", () => {
+    for (const accent of ["#C23A1C", "#c23a1c"]) {
+      const draft = emptyDraft("kvartal");
+      draft.theme.accent = accent;
+      const html = render("en", createElement(Look, props({ draft })));
+      expect(html, accent).toMatch(/name="accent" checked="" value="#c23a1c"/);
+      expect(html, accent).not.toMatch(/checked="" value="custom"/);
+    }
   });
   it("NoDraft links back to the chooser", () => {
     const html = render("bg", createElement(NoDraft));

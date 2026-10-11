@@ -44,9 +44,43 @@ export interface Config {
   whatsappNumber: string | null;
   /** 32-byte key for destination secrets (WordPress plugin tokens); null = destinations cannot be connected (memory mode falls back to a dev key). */
   destinationSecretKey: string | null;
+  /** Meta app (Instagram API with Instagram Login) for the wizard's photo import; the feature is off unless both are set. */
+  instagramAppId: string | null;
+  instagramAppSecret: string | null;
+  /**
+   * CHANNELS_ENABLED (default false): the wizard and dashboard offer Messenger, Instagram and WhatsApp owner links only when
+   * true AND that channel's token is configured (META_PAGE_TOKEN / WHATSAPP_TOKEN), so a link never points at an app this
+   * deployment does not answer. Turn it on once the Meta webhooks point at this deployment (docs/CHANNELS.md). Telegram is unaffected.
+   */
+  channelsEnabled: boolean;
 }
 
 type Env = Record<string, string | undefined>;
+
+const HANDLE = /^[A-Za-z0-9_.]{1,64}$/;
+/**
+ * A Page or Instagram handle from MESSENGER_PAGE_HANDLE / INSTAGRAM_USERNAME: a leading "@" is dropped and a pasted profile
+ * link on one of `hosts` (with or without https://, trailing slash or query) is reduced to its single path segment. Anything
+ * else is null, never an error: the app still starts and that app's link is simply not offered.
+ */
+export function parseHandle(raw: string | null, hosts: readonly string[]): string | null {
+  if (!raw) return null;
+  let v = raw.trim();
+  if (v.includes("/") || v.includes(":")) {
+    let url: URL;
+    try {
+      url = new URL(/^https?:\/\//i.test(v) ? v : `https://${v}`);
+    } catch {
+      return null;
+    }
+    if (!/^https?:$/.test(url.protocol) || !hosts.includes(url.hostname.toLowerCase())) return null;
+    const parts = url.pathname.split("/").filter(Boolean);
+    if (parts.length !== 1) return null;
+    v = parts[0];
+  }
+  v = v.replace(/^@/, "");
+  return HANDLE.test(v) ? v : null;
+}
 
 /** `lenient` (offline memory-store mode) returns "" for missing secrets instead of throwing. */
 export function loadConfig(env: Env = process.env, opts: { lenient?: boolean } = {}): Config {
@@ -95,9 +129,12 @@ export function loadConfig(env: Env = process.env, opts: { lenient?: boolean } =
     metaPageToken,
     whatsappToken,
     whatsappPhoneNumberId,
-    messengerPageHandle: optional("MESSENGER_PAGE_HANDLE"),
-    instagramUsername: optional("INSTAGRAM_USERNAME")?.replace(/^@/, "") ?? null,
-    whatsappNumber: optional("WHATSAPP_NUMBER")?.replace(/\D/g, "") || null,
     destinationSecretKey: optional("DESTINATION_SECRET_KEY"),
+    instagramAppId: optional("INSTAGRAM_APP_ID"),
+    instagramAppSecret: optional("INSTAGRAM_APP_SECRET"),
+    messengerPageHandle: parseHandle(optional("MESSENGER_PAGE_HANDLE"), ["m.me"]),
+    instagramUsername: parseHandle(optional("INSTAGRAM_USERNAME"), ["instagram.com", "www.instagram.com"]),
+    whatsappNumber: optional("WHATSAPP_NUMBER")?.replace(/\D/g, "") || null,
+    channelsEnabled: /^(1|true)$/i.test(optional("CHANNELS_ENABLED") ?? ""),
   };
 }

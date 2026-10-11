@@ -5,7 +5,7 @@ import { readFileSync } from "node:fs";
 import { describe, expect, it, vi } from "vitest";
 import type { DraftInfo, Lang, SiteState } from "@/src/domain/types";
 import { LangProvider } from "@/src/i18n";
-import { makeDemo } from "./helpers";
+import { EXTREME_ACCENTS, LOOK_ACCENT_PRESETS, makeDemo, sweepAccents } from "./helpers";
 
 // next/font/google only works through the Next.js compiler; at test time its module is empty, so stub every family the templates use.
 vi.mock("next/font/google", () => {
@@ -13,7 +13,9 @@ vi.mock("next/font/google", () => {
   return { Literata: font("literata"), Onest: font("onest"), Unbounded: font("unbounded"), Manrope: font("manrope"), Playfair_Display: font("playfair"), Golos_Text: font("golos") };
 });
 
+import { contrastRatio } from "@/src/templates/shared/color";
 import { def } from "@/src/templates/nocturne";
+import { accentVars } from "@/src/templates/nocturne/Template";
 
 // createElement passes children positionally, which LangProvider's required `children` prop type does not model.
 const Provider = LangProvider as (props: { defaultLang: Lang; children?: ReactNode }) => ReactNode;
@@ -88,6 +90,44 @@ describe("nocturne template", () => {
     const html = await render("en", { mutate });
     expect(html).toContain("Item 39");
     expect(html.match(/class="n-chip"/g)?.length).toBe(4);
+  });
+  it("computes the accent text colour in TypeScript (no CSS relative colour) and keeps it readable on near-black for every accent", async () => {
+    const css = readFileSync(new URL("../src/templates/nocturne/styles.css", import.meta.url), "utf8");
+    expect(css).not.toMatch(/oklch\(from/);
+    for (const accent of [def.accentDefault, ...LOOK_ACCENT_PRESETS, ...EXTREME_ACCENTS]) {
+      const html = await render("en", { page: "home", mutate: (s) => { s.venue.theme.accent = accent; } });
+      const text = /--n-accent-text:(#[0-9a-f]{6})/.exec(html)?.[1];
+      expect(text, accent).toBeDefined();
+      // Eyebrow, prices and focus ring on both grounds; the same pair is --n-bg text on the accent button and draft badge.
+      expect(contrastRatio(text!, "#100d08"), `${text} on --n-bg`).toBeGreaterThanOrEqual(8.2);
+      expect(contrastRatio(text!, "#1c1711"), `${text} on --n-bg-2`).toBeGreaterThanOrEqual(8.2);
+    }
+    expect(await render("en", { mutate: (s) => { s.venue.theme.accent = "#f4e7a1"; } })).toContain("--n-accent-text:#f4e7a1"); // already light: unchanged
+  });
+  it("keeps the default and every Look-step preset at exactly the colours they had before the contrast guard", () => {
+    const expected: [string, Record<string, string>][] = [
+      ["#d9a05b", {"--n-accent-text": "#e4ab66"}],
+      ["#2f6b4f", {"--n-accent-text": "#8ac7a7"}],
+      ["#8f5c10", {"--n-accent-text": "#e3ab69"}],
+      ["#a4442c", {"--n-accent-text": "#ff977d"}],
+      ["#1d4ed8", {"--n-accent-text": "#94b6ff"}],
+      ["#6b21a8", {"--n-accent-text": "#caa0ff"}],
+      ["#1d2a24", {"--n-accent-text": "#acbcb4"}],
+    ];
+    expect(expected.map(([a]) => a.toLowerCase())).toEqual(expect.arrayContaining([def.accentDefault.toLowerCase(), ...LOOK_ACCENT_PRESETS]));
+    for (const [accent, vars] of expected) expect(accentVars(accent), accent).toEqual(vars);
+  });
+  it("keeps every promised contrast floor across the colour space (64 hues × 3 lightnesses × 3 chromas)", () => {
+    const misses: string[] = [];
+    for (const accent of [...sweepAccents(), ...EXTREME_ACCENTS]) {
+      const v = accentVars(accent);
+      const pairs: [string, number, number][] = [
+        [`${v["--n-accent-text"]} on --n-bg`, contrastRatio(v["--n-accent-text"], "#100d08"), 8.2],
+        [`${v["--n-accent-text"]} on --n-bg-2`, contrastRatio(v["--n-accent-text"], "#1c1711"), 8.2],
+      ];
+      for (const [what, ratio, floor] of pairs) if (!(ratio >= floor)) misses.push(`${accent}: ${what} ${ratio.toFixed(2)} < ${floor}`);
+    }
+    expect(misses).toEqual([]);
   });
   it("keeps the change flash reaching its final frame under reduced motion", () => {
     // `animation: none` would freeze .n-flash at its base opacity (1) forever, because useLiveSite never clears `changed`.

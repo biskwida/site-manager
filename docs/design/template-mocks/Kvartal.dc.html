@@ -1,0 +1,142 @@
+<!doctype html>
+<html lang="bg">
+<head>
+<meta charset="utf-8">
+<title>Квартал · начална страница</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Geologica:wght@400;600;800;900&amp;family=Fira+Sans:wght@400;500;700&amp;display=swap&amp;subset=cyrillic" rel="stylesheet">
+<style>
+body{margin:0;background:#E9E8E3}
+a{color:#17191B}a:hover{color:#B8361A}
+.kv-grid{display:grid;grid-template-columns:repeat(12,minmax(0,1fr));gap:0 24px}
+.kv-a{grid-column:1 / span 8}.kv-b{grid-column:9 / span 4}
+.kv-t{display:grid;grid-template-columns:56px minmax(0,1fr) minmax(0,180px) 96px;gap:16px;align-items:baseline}
+@media (max-width:900px){.kv-a,.kv-b{grid-column:1 / -1}}
+@media (max-width:640px){.kv-t{grid-template-columns:40px minmax(0,1fr) 80px}.kv-al{display:none}}
+</style>
+</helmet>
+<div style="background: #E9E8E3; color: #17191B; font-family: 'Fira Sans', system-ui, sans-serif; font-size: 17px; line-height: 1.55;">
+
+  <header style="border-bottom: 2px solid #17191B;">
+    <div style="max-width: 1240px; margin: 0 auto; padding: 0 clamp(16px, 3vw, 40px); min-height: 72px; display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px;">
+      <a href="#top" style="text-decoration: none; font-family: 'Geologica', sans-serif; font-weight: 900; font-size: 26px; letter-spacing: -0.02em;">КВАРТАЛ<span style="color: {{accent}};">.</span></a>
+      <nav aria-label="Основна" style="display: flex; align-items: stretch; gap: 0;">
+        <a href="#top" style="min-height: 44px; display: inline-flex; align-items: center; padding: 0 16px; font-weight: 700; text-decoration: none; background: #17191B; color: #E9E8E3;">Начало</a>
+        <a href="#menu" style="min-height: 44px; display: inline-flex; align-items: center; padding: 0 16px; font-weight: 700; text-decoration: none;">Меню</a>
+        <button type="button" aria-pressed="true" style="min-height: 44px; min-width: 48px; margin-left: 12px; border: 2px solid #17191B; background: #17191B; color: #E9E8E3; font: 700 14px 'Fira Sans', sans-serif;">БГ</button>
+        <button type="button" aria-pressed="false" style="min-height: 44px; min-width: 48px; border: 2px solid #17191B; border-left: 0; background: transparent; color: #17191B; font: 700 14px 'Fira Sans', sans-serif;">EN</button>
+      </nav>
+    </div>
+  </header>
+
+  <section id="top" style="max-width: 1240px; margin: 0 auto; padding: clamp(32px, 5vw, 72px) clamp(16px, 3vw, 40px) 40px;">
+    <div class="kv-grid" style="row-gap: 32px; align-items: end;">
+      <div class="kv-a">
+        <p style="margin: 0 0 16px; font-weight: 700; font-size: 15px; letter-spacing: 0.1em; text-transform: uppercase;">Бранч · кафе · коктейли — Лозенец, София</p>
+        <h1 style="margin: 0; font-family: 'Geologica', sans-serif; font-weight: 900; font-size: clamp(56px, 10vw, 148px); line-height: 0.86; letter-spacing: -0.04em;">Яйца до<br>обяд. Негрони<br>до полунощ.</h1>
+      </div>
+      <div class="kv-b" style="display: grid; gap: 12px;">
+        <div style="background: {{accent}}; color: #F6F5F1; padding: 20px 22px; display: grid; gap: 4px;">
+          <span style="font-size: 14px; font-weight: 700; letter-spacing: 0.1em; text-transform: uppercase;">Сега</span>
+          <span style="font-family: 'Geologica', sans-serif; font-weight: 800; font-size: 34px; line-height: 1;">Отворено до 00:00</span>
+          <span style="font-size: 15px;">Бранч до 13:00 · бар от 18:00</span>
+        </div>
+        <p style="margin: 0; font-size: 18px; max-width: 34ch;">Малко място на ъгъла с голяма кафемашина. Без резервации до 18:00, просто ела.</p>
+      </div>
+    </div>
+  </section>
+
+  <div style="border-top: 2px solid #17191B; border-bottom: 2px solid #17191B; overflow: hidden; background: #17191B; color: #E9E8E3;" role="region" aria-label="Днес">
+    <p style="margin: 0; padding: 14px clamp(16px, 3vw, 40px); white-space: nowrap; font-family: 'Geologica', sans-serif; font-weight: 600; font-size: 18px;">ДНЕС&#160;&#160;→&#160;&#160;Шакшука с фета и сумак 9,90 €&#160;&#160;·&#160;&#160;Ябълков пай с тахан 5,40 €&#160;&#160;·&#160;&#160;Коктейл на седмицата: „Лозенец сауър“ 11,00 €&#160;&#160;·&#160;&#160;DJ в събота от 21:00</p>
+  </div>
+
+  <section id="menu" aria-labelledby="menu-h" style="max-width: 1240px; margin: 0 auto; padding: 64px clamp(16px, 3vw, 40px) 24px;">
+    <div class="kv-grid" style="row-gap: 24px;">
+      <h2 id="menu-h" class="kv-a" style="margin: 0; font-family: 'Geologica', sans-serif; font-weight: 900; font-size: clamp(44px, 6vw, 84px); line-height: 0.9; letter-spacing: -0.03em;">Меню</h2>
+      <nav class="kv-b" aria-label="Категории" style="display: flex; flex-wrap: wrap; gap: 8px; align-content: end;">
+        <a href="#brunch" style="min-height: 44px; display: inline-flex; align-items: center; padding: 0 14px; border: 2px solid #17191B; font-weight: 700; text-decoration: none; background: #17191B; color: #E9E8E3;">01 Бранч</a>
+        <a href="#coffee" style="min-height: 44px; display: inline-flex; align-items: center; padding: 0 14px; border: 2px solid #17191B; font-weight: 700; text-decoration: none;">02 Кафе</a>
+        <a href="#bar" style="min-height: 44px; display: inline-flex; align-items: center; padding: 0 14px; border: 2px solid #17191B; font-weight: 700; text-decoration: none;">03 Бар</a>
+      </nav>
+    </div>
+
+    <h3 id="brunch" style="margin: 40px 0 0; padding-bottom: 10px; border-bottom: 2px solid #17191B; display: flex; justify-content: space-between; font-family: 'Geologica', sans-serif; font-weight: 800; font-size: 24px;"><span>01 — Бранч</span><span style="font-weight: 600; font-size: 15px; align-self: end;">до 13:00</span></h3>
+    <div role="table" aria-label="Бранч">
+      <div role="row" class="kv-t" style="padding: 10px 0; border-bottom: 1px solid #B9B8B2; font-size: 13px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; color: #4A4D50;">
+        <span role="columnheader">№</span><span role="columnheader">Ястие</span><span role="columnheader" class="kv-al">Алергени</span><span role="columnheader" style="text-align: right;">Цена</span>
+      </div>
+      <div role="row" class="kv-t" style="padding: 18px 0; border-bottom: 1px solid #B9B8B2;">
+        <span role="cell" style="font-family: 'Geologica', sans-serif; font-weight: 800; font-size: 22px; color: {{accent}};">1.1</span>
+        <span role="cell"><strong style="font-size: 20px;">Шакшука с фета и сумак</strong><br><span style="color: #4A4D50;">Два яйца в пикантен доматен сос, хляб от „Житен клас“.</span></span>
+        <span role="cell" class="kv-al" style="color: #4A4D50;">1 · 3 · 7</span>
+        <strong role="cell" style="text-align: right; font-size: 20px;">9,90 €</strong>
+      </div>
+      <div role="row" class="kv-t" style="padding: 18px 0; border-bottom: 1px solid #B9B8B2;">
+        <span role="cell" style="font-family: 'Geologica', sans-serif; font-weight: 800; font-size: 22px; color: {{accent}};">1.2</span>
+        <span role="cell"><strong style="font-size: 20px;">Яйца Бенедикт с пушена сьомга</strong><br><span style="color: #4A4D50;">Холандез сос, кисел хляб, крес.</span></span>
+        <span role="cell" class="kv-al" style="color: #4A4D50;">1 · 3 · 4 · 7</span>
+        <strong role="cell" style="text-align: right; font-size: 20px;">12,40 €</strong>
+      </div>
+      <div role="row" class="kv-t" style="padding: 18px 0; border-bottom: 1px solid #B9B8B2; color: #6A6D70;">
+        <span role="cell" style="font-family: 'Geologica', sans-serif; font-weight: 800; font-size: 22px;">1.3</span>
+        <span role="cell"><s style="font-size: 20px; font-weight: 700;">Палачинки с рикота</s><br><span>Свършиха за днес · утре от 09:00</span></span>
+        <span role="cell" class="kv-al">1 · 3 · 7</span>
+        <span role="cell" style="text-align: right; font-size: 20px; font-weight: 700;">8,20 €</span>
+      </div>
+    </div>
+
+    <div class="kv-grid" style="margin-top: 48px; row-gap: 40px;">
+      <div class="kv-a">
+        <h3 id="bar" style="margin: 0; padding-bottom: 10px; border-bottom: 2px solid #17191B; display: flex; justify-content: space-between; font-family: 'Geologica', sans-serif; font-weight: 800; font-size: 24px;"><span>03 — Бар</span><span style="font-weight: 600; font-size: 15px; align-self: end;">от 18:00</span></h3>
+        <div role="table" aria-label="Бар">
+          <div role="row" class="kv-t" style="padding: 18px 0; border-bottom: 1px solid #B9B8B2;">
+            <span role="cell" style="font-family: 'Geologica', sans-serif; font-weight: 800; font-size: 22px; color: {{accent}};">3.1</span>
+            <span role="cell"><strong style="font-size: 20px;">„Лозенец сауър“</strong><br><span style="color: #4A4D50;">Ракия от дюли, лимон, мед от Витоша.</span></span>
+            <span role="cell" class="kv-al" style="color: #4A4D50;">—</span>
+            <strong role="cell" style="text-align: right; font-size: 20px;">11,00 €</strong>
+          </div>
+          <div role="row" class="kv-t" style="padding: 18px 0; border-bottom: 1px solid #B9B8B2;">
+            <span role="cell" style="font-family: 'Geologica', sans-serif; font-weight: 800; font-size: 22px; color: {{accent}};">3.2</span>
+            <span role="cell"><strong style="font-size: 20px;">Негрони</strong><br><span style="color: #4A4D50;">Класически, със запечен портокал.</span></span>
+            <span role="cell" class="kv-al" style="color: #4A4D50;">—</span>
+            <strong role="cell" style="text-align: right; font-size: 20px;">10,00 €</strong>
+          </div>
+        </div>
+      </div>
+      <div class="kv-b" style="display: grid; gap: 12px; align-content: start;">
+        <div style="aspect-ratio: 3 / 4; background: repeating-linear-gradient(90deg, #D3D2CC 0 2px, #E1E0DA 2px 16px); display: grid; place-items: center; color: #4A4D50; font-size: 15px; text-align: center; padding: 20px;">[Снимка: барът вечер]</div>
+        <p style="margin: 0; font-size: 15px; color: #4A4D50;">Алергени по номер на ЕС: 1 глутен · 3 яйца · 4 риба · 7 мляко</p>
+      </div>
+    </div>
+  </section>
+
+  <section aria-labelledby="visit-h" style="max-width: 1240px; margin: 48px auto 0; padding: 0 clamp(16px, 3vw, 40px);">
+    <div class="kv-grid" style="border-top: 2px solid #17191B; padding-top: 32px; row-gap: 24px;">
+      <h2 id="visit-h" class="kv-a" style="margin: 0; font-family: 'Geologica', sans-serif; font-weight: 900; font-size: clamp(36px, 5vw, 64px); line-height: 0.95; letter-spacing: -0.03em;">ул. „Хенрик Ибсен“ 7<br><a href="#map" style="color: {{accent}}; font-size: 0.45em; letter-spacing: 0;">Отвори в картите →</a></h2>
+      <dl class="kv-b" style="margin: 0; display: grid; grid-template-columns: auto 1fr; gap: 6px 20px; font-size: 18px;">
+        <dt style="font-weight: 700;">Пон–Пет</dt><dd style="margin: 0;">08:00–00:00</dd>
+        <dt style="font-weight: 700;">Съб–Нед</dt><dd style="margin: 0;">09:00–01:00</dd>
+        <dt style="font-weight: 700;">Телефон</dt><dd style="margin: 0;"><a href="tel:+359899700707">0899 700 707</a></dd>
+      </dl>
+    </div>
+    <div style="display: flex; flex-wrap: wrap; justify-content: space-between; gap: 12px; padding: 40px 0 32px; font-size: 14px; color: #4A4D50;">
+      <span>© Квартал</span>
+      <a href="#sm" translate="no" style="color: #4A4D50;">Сайт от Site Manager</a>
+    </div>
+  </section>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"accent":{"editor":"color","default":"#C23A1C","options":["#C23A1C","#1F5F8B","#3E7A3A","#17191B"]},"$preview":{"width":1280,"height":2240}}'>
+class Component extends DCLogic {
+  renderVals() {
+    return { accent: this.props.accent ?? '#C23A1C' };
+  }
+}
+</script>
+</body>
+</html>

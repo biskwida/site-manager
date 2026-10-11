@@ -26,6 +26,15 @@ if (demo.data) {
   const demoItems = await db.from("items").select("id", { count: "exact", head: true }).eq("venue_id", demo.data.id);
   check(`anon sees the "${demoSlug}" menu`, !demoItems.error && (demoItems.count ?? 0) > 0, demoItems.error?.code ?? `${demoItems.count} items`);
 } else console.log(`SKIP anon sees the "${demoSlug}" menu (no such venue yet)`);
+// R27: column-level grants. Owner-only venue columns are refused by the grant itself (42501), even on live rows.
+for (const col of ["deploy", "wizard_draft", "draft_token_hash", "instagram_import"]) {
+  const r = await db.from("venues").select(col).limit(1);
+  check(`anon cannot select venues.${col}: permission denied`, r.error?.code === "42501", r.error?.code ?? `no error, ${r.data?.length ?? 0} rows`);
+}
+const star = await db.from("venues").select("*").limit(1);
+check("anon cannot select venues.*: permission denied", star.error?.code === "42501", star.error?.code ?? `no error, ${star.data?.length ?? 0} rows`);
+const liveCols = await db.from("venues").select("id, slug, name").eq("status", "live").limit(1);
+check("anon can read id, slug, name of a live venue", !liveCols.error && (liveCols.data?.length ?? 0) === 1 && typeof liveCols.data?.[0]?.name === "string", liveCols.error?.code ?? `${liveCols.data?.length ?? 0} rows`);
 for (const t of ["venue_members", "venue_invites", "venue_admin_tokens", "change_sets", "changes", "conversations"]) {
   const r = await db.from(t).select("*").limit(1);
   check(`anon cannot read ${t}`, !!r.error || (r.data?.length ?? 0) === 0, r.error?.code ?? `${r.data?.length ?? 0} rows`);

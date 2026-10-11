@@ -15,7 +15,7 @@ const ready: DeployInfo = { provider: "vercel", project_id: "prj_1", deployment_
 const base: AdminOverview = {
   venue: { id: "v1", slug: "agala", name: "Кафене „Ъгъла“", tz: "Europe/Sofia", default_lang: "bg" },
   now: "2026-10-10T10:00:00.000Z", public_url: "https://site.example/agala", template: "classic", status: "live", hosted: false, deploy: null, site_url: "https://site.example/agala",
-  custom_domain: null, domain_verified: null, pending: [], scheduled: [], log: [], sold_out: [],
+  custom_domain: null, domain_verified: null, pending: [], scheduled: [], log: [], sold_out: [], connected_apps: [],
 };
 const post = async () => ({ ok: true, data: null });
 const render = (lang: Lang, over: Partial<AdminOverview> = {}) =>

@@ -2,6 +2,7 @@
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { Media } from "@/src/domain/types";
+import type { AppChannel } from "@/src/server/connect-apps";
 import { LangToggle } from "@/src/i18n";
 import { stepForPath, validateForPublish, type WizardDraft, type WizardStep } from "@/src/wizard/schema";
 import { api } from "./api";
@@ -16,7 +17,7 @@ import { Menu } from "./Steps/Menu";
 import { Photos } from "./Steps/Photos";
 import { Review } from "./Steps/Review";
 import { Texts } from "./Steps/Texts";
-import type { StepProps } from "./types";
+import type { IgReturn, StepProps } from "./types";
 import { useT } from "./useWizardText";
 
 const AUTOSAVE_MS = 800;
@@ -27,13 +28,23 @@ function referencedMedia(d: WizardDraft): Set<string> {
   return new Set(ids.filter((x): x is string => typeof x === "string"));
 }
 
-export function Wizard({ id, initialDraft, initialMedia, baseUrl, aiAvailable, now }: { id: string; initialDraft: WizardDraft; initialMedia: Media[]; baseUrl: string; aiAvailable: boolean; now: number }) {
+export function Wizard({ id, initialDraft, initialMedia, baseUrl, aiAvailable, now, instagramAvailable = false, igReturn = null, apps }: {
+  id: string; initialDraft: WizardDraft; initialMedia: Media[]; baseUrl: string; aiAvailable: boolean; now: number;
+  /** INSTAGRAM_APP_ID/SECRET are set on this server. */
+  instagramAvailable?: boolean;
+  /** The messaging apps this server answers (enabledApps). */
+  apps?: AppChannel[];
+  /** Back from Instagram's sign-in (`?step=…&ig=…`): opens that step and tells it how the sign-in went. */
+  igReturn?: IgReturn | null;
+}) {
   const { t, lang } = useT();
   const router = useRouter();
   const [draft, setDraft] = useState(initialDraft);
   const [media, setMedia] = useState(initialMedia);
   const [localUrls, setLocalUrls] = useState<Record<string, string>>({});
-  const [step, setStep] = useState<WizardStep>(FORM_STEPS.includes(initialDraft.step) ? initialDraft.step : "basics");
+  const [ig, setIg] = useState(igReturn);
+  const consumeIg = useCallback(() => setIg(null), []);
+  const [step, setStep] = useState<WizardStep>(igReturn ? igReturn.step : FORM_STEPS.includes(initialDraft.step) ? initialDraft.step : "basics");
   const [save, setSave] = useState<SaveSnapshot>({ state: "idle", errors: [], message: null });
   const [showErrors, setShowErrors] = useState(false);
   const [previewOpen, setPreviewOpen] = useState(false);
@@ -81,8 +92,14 @@ export function Wizard({ id, initialDraft, initialMedia, baseUrl, aiAvailable, n
 
   useEffect(() => () => { for (const u of Object.values(localUrlsRef.current)) URL.revokeObjectURL(u); }, []);
 
-  const addMedia = useCallback((m: Media, file: File) => {
+  // The ?step=&ig= of the return from Instagram is read once: a reload shows the plain wizard.
+  useEffect(() => {
+    if (igReturn) window.history.replaceState(window.history.state, "", window.location.pathname);
+  }, [igReturn]);
+
+  const addMedia = useCallback((m: Media, file?: File) => {
     setMedia((list) => [...list, m]);
+    if (!file) return;
     localUrlsRef.current = { ...localUrlsRef.current, [m.id]: URL.createObjectURL(file) };
     setLocalUrls(localUrlsRef.current);
   }, []);
@@ -115,7 +132,7 @@ export function Wizard({ id, initialDraft, initialMedia, baseUrl, aiAvailable, n
   }
 
   const closePreview = useCallback(() => setPreviewOpen(false), []);
-  const stepProps: StepProps = { id, draft, media: shownMedia, update, addMedia, baseUrl, aiAvailable, fieldErrors };
+  const stepProps: StepProps = { id, draft, media: shownMedia, update, addMedia, baseUrl, aiAvailable, fieldErrors, instagramAvailable, apps, igReturn: ig, onIgConsumed: consumeIg, flush: () => flush() };
   const saveText = {
     idle: "",
     saving: t("save.saving"),

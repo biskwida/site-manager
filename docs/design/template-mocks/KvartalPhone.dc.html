@@ -1,0 +1,50 @@
+<!doctype html>
+<html lang="bg">
+<head>
+<meta charset="utf-8">
+<title>Квартал · телефон</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link href="https://fonts.googleapis.com/css2?family=Geologica:wght@600;800;900&amp;family=Fira+Sans:wght@400;700&amp;display=swap&amp;subset=cyrillic" rel="stylesheet">
+<style>body{margin:0}a{color:#17191B}</style>
+</helmet>
+<div style="width: 390px; height: 844px; box-sizing: border-box; overflow: hidden; background: #E9E8E3; color: #17191B; font-family: 'Fira Sans', system-ui, sans-serif; font-size: 16px; line-height: 1.5; display: flex; flex-direction: column;">
+  <header style="min-height: 60px; padding: 0 16px; display: flex; align-items: center; justify-content: space-between; border-bottom: 2px solid #17191B;">
+    <span style="font-family: 'Geologica', sans-serif; font-weight: 900; font-size: 22px; letter-spacing: -0.02em;">КВАРТАЛ<span style="color: {{accent}};">.</span></span>
+    <div style="display: flex;">
+      <button type="button" aria-pressed="true" style="min-height: 44px; min-width: 46px; border: 2px solid #17191B; background: #17191B; color: #E9E8E3; font: 700 13px 'Fira Sans', sans-serif;">БГ</button>
+      <button type="button" aria-pressed="false" style="min-height: 44px; min-width: 46px; border: 2px solid #17191B; border-left: 0; background: transparent; color: #17191B; font: 700 13px 'Fira Sans', sans-serif;">EN</button>
+    </div>
+  </header>
+  <div style="padding: 20px 16px 0;">
+    <h1 style="margin: 0; font-family: 'Geologica', sans-serif; font-weight: 900; font-size: 54px; line-height: 0.86; letter-spacing: -0.04em;">Яйца до обяд. Негрони до полунощ.</h1>
+  </div>
+  <div style="margin: 18px 16px 0; background: {{accent}}; color: #F6F5F1; padding: 14px 16px;">
+    <div style="font-size: 12px; font-weight: 700; letter-spacing: 0.1em; text-transform: uppercase;">Сега</div>
+    <div style="font-family: 'Geologica', sans-serif; font-weight: 800; font-size: 26px; line-height: 1.05;">Отворено до 00:00</div>
+    <div style="font-size: 14px;">Бранч до 13:00 · бар от 18:00</div>
+  </div>
+  <section aria-labelledby="ph-today" style="margin: 20px 16px 0;">
+    <h2 id="ph-today" style="margin: 0; padding-bottom: 8px; border-bottom: 2px solid #17191B; font-family: 'Geologica', sans-serif; font-weight: 800; font-size: 20px;">Днес</h2>
+    <div style="display: grid; grid-template-columns: 36px minmax(0, 1fr) auto; gap: 10px; padding: 12px 0; border-bottom: 1px solid #B9B8B2; align-items: baseline;"><span style="font-family: 'Geologica', sans-serif; font-weight: 800; color: {{accent}};">1.1</span><strong>Шакшука с фета</strong><strong>9,90 €</strong></div>
+    <div style="display: grid; grid-template-columns: 36px minmax(0, 1fr) auto; gap: 10px; padding: 12px 0; border-bottom: 1px solid #B9B8B2; align-items: baseline;"><span style="font-family: 'Geologica', sans-serif; font-weight: 800; color: {{accent}};">1.2</span><strong>Яйца Бенедикт</strong><strong>12,40 €</strong></div>
+    <div style="display: grid; grid-template-columns: 36px minmax(0, 1fr) auto; gap: 10px; padding: 12px 0; border-bottom: 1px solid #B9B8B2; align-items: baseline; color: #6A6D70;"><span style="font-family: 'Geologica', sans-serif; font-weight: 800;">1.3</span><span><s style="font-weight: 700;">Палачинки</s> · свършиха</span><span style="font-weight: 700;">8,20 €</span></div>
+  </section>
+  <nav aria-label="Действия" style="margin-top: auto; display: grid; grid-template-columns: 1fr 1fr; border-top: 2px solid #17191B;">
+    <a href="#menu" style="min-height: 56px; display: flex; align-items: center; justify-content: center; background: #17191B; color: #E9E8E3; text-decoration: none; font-weight: 700;">Цялото меню</a>
+    <a href="#map" style="min-height: 56px; display: flex; align-items: center; justify-content: center; text-decoration: none; font-weight: 700;">Как да стигна</a>
+  </nav>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"accent":{"editor":"color","default":"#C23A1C","options":["#C23A1C","#1F5F8B","#3E7A3A","#17191B"]},"$preview":{"width":390,"height":844}}'>
+class Component extends DCLogic {
+  renderVals() {
+    return { accent: this.props.accent ?? '#C23A1C' };
+  }
+}
+</script>
+</body>
+</html>

@@ -5,7 +5,10 @@
 import { TEMPLATE_IDS, type TemplateId } from "@/src/domain/types";
 import type { TemplateDef } from "./shared/types";
 import { def as classic } from "./classic";
+import { def as furna } from "./furna";
+import { def as kvartal } from "./kvartal";
 import { def as lumen } from "./lumen";
+import { def as mehana } from "./mehana";
 import { def as nocturne } from "./nocturne";
 
 // Defined in shared/types.ts so a deployed venue site (which ships only the type-only stand-in) can type-check the templates.
@@ -15,6 +18,9 @@ export const TEMPLATES: Record<TemplateId, TemplateDef> = {
   classic,
   nocturne,
   lumen,
+  furna,
+  mehana,
+  kvartal,
 };
 
 /** The template for an id from the database or a query string; unknown or missing ids fall back to classic. */

@@ -59,6 +59,8 @@ export interface ServerDeps {
   watchDeploy: (venueId: string) => void;
   /** Shared Anthropic client for the wizard AI routes; null without ANTHROPIC_API_KEY (offline mode). Tests inject `client`. */
   anthropic: Anthropic | null;
+  /** Outbound HTTP for the wizard's Instagram import (Instagram API and CDN); tests inject a fake. */
+  fetch: typeof fetch;
 }
 
 export interface DepsOptions {
@@ -72,6 +74,7 @@ export interface DepsOptions {
   deployer?: Deployer;
   /** watchDeploy's wait between polls; tests pass a no-op. */
   sleep?: (ms: number) => Promise<void>;
+  fetch?: typeof fetch;
 }
 
 export async function makeServerDeps(o: DepsOptions): Promise<ServerDeps> {
@@ -165,7 +168,8 @@ export async function makeServerDeps(o: DepsOptions): Promise<ServerDeps> {
     }
   }
 
-  return { config, store: store2, messenger, bot, botDeps, waDownload, fetchUrl, handleRun, isMemory, deployer, startDeploy, watchDeploy, anthropic, destinationSecretKey, sync };
+  const outbound: typeof fetch = o.fetch ?? ((input, init) => fetch(input, init));
+  return { config, store: store2, messenger, bot, botDeps, waDownload, fetchUrl, handleRun, isMemory, deployer, startDeploy, watchDeploy, anthropic, destinationSecretKey, sync, fetch: outbound };
 }
 
 // On globalThis, not a module variable: `next dev` (HMR, separate route bundles) then shares one in-memory store between pages and API routes.

@@ -27,7 +27,16 @@ The same sequence runs offline, without a phone or keys: `npm run e2e`.
 
 ## Creating a site with the wizard
 
-Anyone can create a venue site at `/new` (linked from the landing). The owner picks one of three templates (`classic` warm editorial, `nocturne` dark for bars and evenings, `lumen` light and photo-first for daytime coffee), each shown live with the demo café, then fills seven steps with the chosen template rendering their data on the right: Basics (name, web address, main language, contact), Look (accent colour, logo, cover), Hours, Menu (type it, or upload photos or a PDF of the current menu and let Claude read it into a review list you accept row by row), Texts (both languages; "Write for me" drafts all of them from a few facts), Photos (gallery), Review. "Create my site" makes the venue live in our database and shows a one-use Telegram code with a QR (`https://t.me/<bot>?start=<code>`). Pressing Start in Telegram links the owner's chat as the owner and, when `VERCEL_TOKEN` is set, starts the deploy: a new Vercel project named after the slug, built from the thin template shell, polled until READY; the bot then messages "your site is live" with the URL and the done page shows it. The deploy finishes without anyone watching: after Start (and after a template switch) the server polls the deployment every 10 s for up to 4 minutes inside `after()`, and the 5-minute cron, the done page and the dashboard (both nudge `POST /api/tick?key=`) cover anything slower. A chat that is already linked (to the demo café, say) can redeem the new code: the bot answers "You now manage <name>." and the chat moves to the new venue. Coming back to `/new` in the same browser offers "Continue your draft"; the Look step switches templates without starting over, and a failed publish has a "Try again" button on the dashboard. From that moment the Telegram agent manages the content; the deployed site reads `/api/site/<slug>` every 10 s (server) and 5 s (client), so a price change from Telegram is visible on it in seconds. Content never needs a new deployment; only a template switch redeploys.
+Anyone can create a venue site at `/new` (linked from the landing). The owner picks one of six templates, each shown live with the demo café:
+
+- `classic`: warm, editorial pages on cream paper (cafés, restaurants).
+- `nocturne`: dark and bold, for bars and evening venues.
+- `lumen`: light and airy, photos first, for specialty coffee.
+- `furna`: warm and homely, with each tray from the oven by the hour, for bakeries and breakfast places.
+- `mehana`: wine red, an embroidery border and the menu course by course, for taverns and Bulgarian kitchens.
+- `kvartal`: Swiss grid, huge type and a numbered menu, for brunch by day and cocktails by night.
+
+The owner then fills seven steps with the chosen template rendering their data on the right: Basics (name, web address, main language, contact), Look (accent colour, logo, cover), Hours, Menu (type it, or upload photos or a PDF of the current menu and let Claude read it into a review list you accept row by row), Texts (both languages; "Write for me" drafts all of them from a few facts), Photos (gallery), Review. "Create my site" makes the venue live in our database and shows a one-use Telegram code with a QR (`https://t.me/<bot>?start=<code>`; with more apps enabled, one link per app, see [Channels](#channels-telegram-messenger-instagram-whatsapp)). Pressing Start in Telegram links the owner's chat as the owner and, when `VERCEL_TOKEN` is set, starts the deploy: a new Vercel project named after the slug, built from the thin template shell, polled until READY; the bot then messages "your site is live" with the URL and the done page shows it. The deploy finishes without anyone watching: after Start (and after a template switch) the server polls the deployment every 10 s for up to 4 minutes inside `after()`, and the 5-minute cron, the done page and the dashboard (both nudge `POST /api/tick?key=`) cover anything slower. A chat that is already linked (to the demo café, say) can redeem the new code: the bot answers "You now manage <name>." and the chat moves to the new venue. Coming back to `/new` in the same browser offers "Continue your draft"; the Look step switches templates without starting over (an accent still on the old template's default follows the new template's default; the dashboard's template switch does the same), and a failed publish has a "Try again" button on the dashboard. From that moment the Telegram agent manages the content; the deployed site reads `/api/site/<slug>` every 10 s (server) and 5 s (client), so a price change from Telegram is visible on it in seconds. Content never needs a new deployment; only a template switch redeploys.
 
 Guards:
 
@@ -37,13 +46,15 @@ Guards:
 - Uploads are capped at 4 MB per image (the browser downscales photos before sending them) and 30 images per draft; menu extraction accepts up to 6 files and 3 MB in total. Photos and PDFs sent for extraction go to Claude and are not stored; only images the owner places on the site are saved.
 - Abandoned drafts are deleted after 48 h, with their stored images, by the global tick (the cron; per-venue ticks skip this).
 
+- "Import photos from Instagram" (Photos step, and under the cover in Look) signs the owner in to their own Instagram professional account and copies the photos they pick; see [Instagram import](#instagram-import).
+
 Without `ANTHROPIC_API_KEY` the wizard still works: the AI routes answer 503 and the two AI buttons are replaced by a one-line explanation. With `SITE_MANAGER_STORE=memory` the fake deployer reports READY after two polls at `https://<slug>.example.test`, so the whole flow runs offline. The fake deployer is offline-only: in production, per-venue Vercel projects need `VERCEL_TOKEN`. Without it no project is created and every site is served from the hosted `<PUBLIC_BASE_URL>/<slug>`: the done page shows that address as live once the owner pressed Start, a template switch applies at once, and custom domains answer "not available on this server".
 
 ## Demo (3 minutes): wizard to live site
 
 | # | You do | What happens |
 |---|---|---|
-| 1 | Open `/new` on the projector | Three live cards: the demo café in Classic, Nocturne and Lumen. |
+| 1 | Open `/new` on the projector | Six live cards: the demo café in Classic, Nocturne, Lumen, Furna, Mehana and Kvartal. |
 | 2 | Pick Nocturne, type the name and address | The right pane is the bar's site, updating as you type; the web address fills itself from the name. |
 | 3 | Menu step: upload a photo of the printed menu | "Reading your menu…", then a review list in Bulgarian and English with EUR prices (BGN converted and flagged) and allergen codes. Accept all. |
 | 4 | Texts: type two facts, press "Write for me" | Tagline, about, greeting and footer in both languages appear in the fields and on the preview. |
@@ -81,7 +92,7 @@ Owner's phone ── Telegram ──► POST /api/telegram (Next route, webhook 
                          agent/     Anthropic tool runner, prompt, tools, memory
                          domain/    change ops apply/invert, preview, allergens, hours, pricing
                          bot/       commands, media, voice, approval buttons, bot copy
-                         templates/ classic, nocturne, lumen (shared with the deployed sites)
+                         templates/ classic, nocturne, lumen, furna, mehana, kvartal (shared with the deployed sites)
                          wizard/    draft schema, menu extraction, text drafting
                          deploy/    Vercel deployer (+ fake), file manifest of the thin site shell
                          store/     Store interface: Supabase (prod) + memory (tests, offline mode)
@@ -129,6 +140,8 @@ npm run env:set -- ANTHROPIC_API_KEY   # asks for the value with echo off, write
 | `RATE_SALT` | Any random string: `openssl rand -hex 16`. Hashed with the visitor's IP for the wizard's rate limits, so raw IPs are never stored. When unset it falls back to `dev-salt`, which works but makes the hashes guessable | Yes in production |
 | `MAX_SITES_PER_DAY` | Default `50`: the global cap on new wizard drafts per 24 h | No |
 | `TELEGRAM_BOT_USERNAME` | The bot's username without `@` (from @BotFather). Builds the `https://t.me/<bot>?start=<code>` link and QR on the wizard's done page | For the done page's Start link; without it only the code is shown |
+| `INSTAGRAM_APP_ID` | developers.facebook.com → your Business app → Instagram → API setup with Instagram login → **Instagram app ID** (not the Facebook app id). See [Instagram import](#instagram-import) | No: without it (or the secret) the wizard hides "Import photos from Instagram" |
+| `INSTAGRAM_APP_SECRET` | The same page → **Instagram app secret**. Server-only, never `NEXT_PUBLIC_`; it also signs the OAuth `state` (through a derived key) | With `INSTAGRAM_APP_ID` |
 | `META_APP_SECRET` | Meta app → App settings → Basic → App secret. Verifies webhook signatures ([docs/CHANNELS.md](docs/CHANNELS.md)) | With any Meta token |
 | `META_VERIFY_TOKEN` | Any random string (`openssl rand -hex 16`), also pasted into the app's Webhooks "Verify token" field | With any Meta token |
 | `META_PAGE_TOKEN` | Meta app → Messenger → Access Tokens → Generate token for the Page. Enables Messenger and Instagram | No: without it, no Messenger/Instagram |
@@ -186,6 +199,26 @@ Other scripts:
 | `npm run test:templates` | Writes each template's thin shell to a temp dir, runs `npm install` (needs network) and `next build` there: the offline proof that a deployed site builds. Slow; not part of `npm test`. Run before a release. |
 | `npm run site:delete -- --slug my-cafe` | Deletes a venue (typically one created by the wizard) and its Vercel project. Prints the venue and the project id and asks you to type the slug again before deleting. Storage objects are not removed. |
 
+## Instagram import
+
+In the wizard's Photos step (and under the cover in Look) the owner can press "Import photos from Instagram": they sign in to **their own** Instagram Business or Creator account on instagram.com (Meta's official OAuth, "Instagram API with Instagram Login", scope `instagram_business_basic`), come back to a grid of their recent photos (images and carousel images, newest 50; videos are skipped), tick the ones they want and choose for each one: gallery, cover, logo or a dish on the menu. The picked images are copied into our media storage; nothing is scraped and no handle-only lookup exists.
+
+How it is kept safe: the start route redirects to `https://www.instagram.com/oauth/authorize` with an HMAC-signed `state` (draft id, nonce, 10-minute expiry) and sets a matching httpOnly `sm_ig_nonce` cookie; the callback (`/api/new/instagram/callback`) checks the signature, the expiry, the nonce cookie and that the `sm_draft` cookie is the same draft, exchanges the code for a short-lived token server-side, reads the media once, stores only a sanitized list (`venues.instagram_import`: id, CDN URL, caption up to 280 characters, permalink, date) and drops the token: it is never stored, logged or sent to the browser. The list expires after an hour (Instagram's CDN URLs are signed and short-lived) and is cleared on publish. The import fetches only URLs from that stored list, only on `*.cdninstagram.com` / `*.fbcdn.net` over https (redirects re-checked), with a 10 s timeout, 4 MB per image on the actual bytes, the type sniffed from the bytes; it counts toward the 30-image draft cap and allows 10 imports per draft per hour. The public feed and `GET /api/new/<id>` never include the list, and `PUT /api/new/<id>` cannot set it.
+
+Owner setup (once):
+
+1. Apply the schema change: `npm run db:apply` (adds `venues.instagram_import`; publishing works without it, the import needs it).
+2. developers.facebook.com → My Apps → Create app → type **Business** (Instagram Login needs a Business app).
+3. Add the **Instagram** product → **API setup with Instagram login**.
+4. Under "Set up Instagram business login" → **Business login settings** → **OAuth redirect URIs**: add exactly `<PUBLIC_BASE_URL>/api/new/instagram/callback`. For the current production deployment that is `https://site-manager-lovat.vercel.app/api/new/instagram/callback`. Meta generally wants https redirect URIs, so test on the deployment rather than `localhost`.
+5. Copy the **Instagram app ID** and **Instagram app secret** from the same page (they differ from the Facebook app id and secret) and set them: `npm run env:set -- INSTAGRAM_APP_ID`, `npm run env:set -- INSTAGRAM_APP_SECRET`, and the same two in Vercel (Production). Redeploy.
+6. While the app is in **Development** mode only accounts with a role on the app can sign in: App roles → Roles → add the café's Instagram account as an **Instagram Tester**, then accept the invite on instagram.com (Settings → Apps and websites → Tester invites; Meta moves this menu now and then). The account must be a Business or Creator account.
+7. For cafés you do not manage: Meta requires **Advanced Access** to `instagram_business_basic`, which goes through **App Review** (a screencast of this flow, a privacy policy URL) and **Business verification** of the business that owns the app; then switch the app to **Live**. Check the current requirements in the App Dashboard's App Review section.
+
+Without the two keys the button is hidden and `/api/new/<id>/instagram/*` answers 503 `instagram_unavailable`.
+
+The Graph API version is pinned: `IG_GRAPH_URL = "https://graph.instagram.com/v25.0"` in `src/server/instagram.ts` (the version Meta's Instagram Login docs used on 2026-10-11). Meta supports each version for about two years and announces the retirement date in the App Dashboard and its changelog; bump the constant (and re-run one real import) before that date, or when a newer field or behaviour is needed.
+
 ## Channels: Telegram, Messenger, Instagram, WhatsApp
 
 The owner can use Facebook Messenger, Instagram Direct or WhatsApp instead of Telegram, with the same invite code, the same agent and the same three approval buttons. One Facebook Page, one Instagram professional account and one WhatsApp number serve every venue. A channel is on when its token is set (`META_PAGE_TOKEN` for Messenger and Instagram, `WHATSAPP_TOKEN` for WhatsApp); without them the app is Telegram-only.
@@ -194,6 +227,7 @@ The owner can use Facebook Messenger, Instagram Direct or WhatsApp instead of Te
 - **Webhook.** `POST /api/meta` serves all three Meta channels (signature check with `META_APP_SECRET`, `GET` verification with `META_VERIFY_TOKEN`).
 - **The 24-hour rule.** Meta channels only accept messages within 24 hours of the owner's last one. Replies and previews always arrive; reminders and other messages the service starts on its own are skipped on Meta channels when the owner has been silent that long (Telegram gets them all).
 - **Invite links.** `npm run venue:create` prints one link per enabled channel (`startLinks`, `src/channels/links.ts`): `t.me/<bot>?start=<code>`, `m.me/<page>?ref=<code>`, `ig.me/m/<user>?ref=<code>`, `wa.me/<digits>?text=<code>`. Sending the bare code also links a chat.
+- **Owner setup in several apps.** The done page and the dashboard list one owner link per enabled app (`enabledApps` / `connectLinks`, `src/server/connect-apps.ts`): Telegram whenever `TELEGRAM_BOT_USERNAME` is set; WhatsApp, Messenger and Instagram only when `CHANNELS_ENABLED=true` **and** that channel's token (`WHATSAPP_TOKEN`, `META_PAGE_TOKEN`) and handle (`WHATSAPP_NUMBER`, `MESSENGER_PAGE_HANDLE`, `INSTAGRAM_USERNAME`) are set, so an owner is never sent to an app this deployment does not answer. With several apps the done page offers "Connect another app" after the first one links; the dashboard's "Your apps" card shows the linked chats per app (owners and staff) and "Connect another" makes a fresh single-use owner code (`new_owner_code`, rate-limited) for one more app or a second phone. Keep `CHANNELS_ENABLED=false` until the Meta webhooks point at this deployment.
 - **Scripts.** `npm run meta:setup` (checks the tokens, subscribes the Page, sets the Messenger Get Started button, prints the webhook URL), `npm run meta:sim -- fb text "…"` (a signed fake webhook against `npm run dev:offline`), `npm run db:dry-run` (the `chat_ref` migration inside a rolled-back transaction).
 
 Setup, step by step (Meta app, tokens, Testers, webhooks, App Review, WhatsApp test number, Vercel preview, database migration): **[docs/CHANNELS.md](docs/CHANNELS.md)**.
@@ -230,7 +264,7 @@ Cron: `vercel.json` runs `/api/tick` every 5 minutes (`*/5 * * * *`; the team is
 
 ## Security notes
 
-- **Anon key.** The browser no longer uses it: public pages, the dashboard and the wizard read through the app's own server routes. Its grants stay locked down anyway: it can read only live venues and their public site tables (`venues`, `site_texts`, `categories`, `items`, `holidays`, `announcements`, `media`), never drafts, members, invites, admin tokens, change sets, changes, conversations or `rate_limits`; it cannot call `bump_rate_limit`; every write is refused (`42501`). `npm run check:rls` proves this against the live project.
+- **Anon key.** The browser no longer uses it: public pages, the dashboard and the wizard read through the app's own server routes. Its grants stay locked down anyway: it can read only live venues (and of `venues` only the public feed's columns, granted column by column; `deploy`, `wizard_draft`, `draft_token_hash`, `publishing_at` and `instagram_import` answer `42501`) and their public site tables (`venues`, `site_texts`, `categories`, `items`, `holidays`, `announcements`, `media`), never drafts, members, invites, admin tokens, change sets, changes, conversations or `rate_limits`; it cannot call `bump_rate_limit`; every write is refused (`42501`). `npm run check:rls` proves this against the live project.
 - **Service-role key.** Only in server code (`src/server/deps.ts`, the route handlers) and the scripts. The build is checked for it: `grep -rl "SUPABASE_SERVICE_ROLE\|service_role" .next/static` finds nothing.
 - **The admin link is the key.** Whoever has `/admin/<slug>?key=…` can approve, cancel and undo changes for that venue. Share it only with the owner. The dev server's request log skips admin URLs, the admin API, the tick and any URL with `?key=`.
 - **Webhook secret.** `/api/telegram` rejects any request without Telegram's `X-Telegram-Bot-Api-Secret-Token` header matching `TELEGRAM_WEBHOOK_SECRET`. `/api/tick` needs `TICK_SECRET` (header or Bearer) or a venue's admin key (that venue only).
@@ -241,6 +275,7 @@ Cron: `vercel.json` runs `/api/tick` every 5 minutes (`*/5 * * * *`; the team is
 - **Vercel token.** `VERCEL_TOKEN` is read only in `src/config.ts` and used only by the server-side deployer; it is never logged. The deployer logs short lines only (method, path, status, error code, project and deployment ids), never a Vercel response body, and `deploy.error` keeps a short message plus at most the last 20 build-log lines. Check a build with `grep -rl VERCEL_TOKEN .next/static` (it must find nothing).
 - **Rate limits.** 5 new drafts per IP per hour and `MAX_SITES_PER_DAY` per day; 20 AI calls per draft per hour and 500 per day. The IP is hashed with `RATE_SALT` before it is stored; set `RATE_SALT` in production.
 - **Uploaded menus.** Photos and PDFs sent for extraction go to Claude and are not stored; only images the owner places on the site are saved.
+- **Instagram import.** The owner's Instagram access token exists only during the OAuth callback request: never stored, logged or sent to the browser. The app secret never leaves the server (the OAuth `state` is signed with a key derived from it). The callback path is excluded from the dev request log (its query holds the one-time code). Only Instagram CDN URLs from the list read at sign-in are ever fetched. See [Instagram import](#instagram-import).
 - **Deleting a venue** never deletes its Vercel project automatically; `npm run site:delete` does both, with a typed confirmation.
 
 ## Known gaps
@@ -266,6 +301,7 @@ Checked on 2026-10-11 on `build/templates`:
 - `npm run e2e`: the demo sequence offline (proposal and approve, instant sold-out, a special until closing, scheduled holidays, undo, a bulk change applied from the dashboard, the tick writing auto sets and applying the schedule): `OFFLINE E2E OK`.
 - Live against the real Supabase project (on `64cdf1f`, after the final fixes): `db:apply`, `check:rls` 19/19, the store contract (`SUPABASE_CONTRACT=1`) 23/23, including `deleteVenue` with storage, `findOpenInvite` and `claimDeploy` by deployment id.
 - `npm run test:templates`: the classic, nocturne and lumen venue shells build standalone (on `2a75740`; classic rebuilt after the `<html lang>` change).
+- `npm run test:templates`: all six venue shells (classic, nocturne, lumen, furna, mehana, kvartal) build standalone on `build/merge-main` (2026-10-11, after the final fix pass; template fonts use `preload: false`).
 - Live Claude calls: menu extraction from a photo and "Write for me" return usable bilingual results; `npm run smoke -- --dry` turned "Капучиното става 3,20" into a `set_price` proposal 2,90 € → 3,20 €.
 - `npm run dev:offline`: the chooser offers "Continue your draft" after a reload, and the Look step switches the preview between templates.
 - The bot token is valid (`getMe` answers as @restaurant_site_manager_bot), and the Vercel production deployment at https://site-manager-lovat.vercel.app serves `/agala`, answers the tick and receives the Telegram webhook.
