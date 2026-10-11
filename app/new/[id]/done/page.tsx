@@ -6,6 +6,7 @@ import { notFound, redirect } from "next/navigation";
 import { after } from "next/server";
 import { LangProvider } from "@/src/i18n";
 import { DICTS } from "@/src/i18n/dicts";
+import { connectedApps, connectLinks, enabledApps } from "@/src/server/connect-apps";
 import { getServerDeps } from "@/src/server/deps";
 import { DRAFT_COOKIE, venueFromDraftCookie } from "@/src/server/draft-cookie";
 import { doneInviteCode } from "@/src/server/wizard";
@@ -35,7 +36,6 @@ export default async function Page(props: PageProps<"/new/[id]/done">) {
   const code = await doneInviteCode(deps.store, venue.id, one(sp.code), new Date());
   const joined = code === null;
   const adminKey = one(sp.key) || (await deps.store.getAdminToken(venue.id));
-  const bot = deps.config.telegramBotUsername;
   const hosted = deps.deployer === null;
   const deploy = hosted ? null : venue.deploy;
   const initial: DoneStatusResponse = {
@@ -44,10 +44,11 @@ export default async function Page(props: PageProps<"/new/[id]/done">) {
     site_url: deploy?.status === "ready" ? deploy.url : hosted ? `${deps.config.publicBaseUrl}/${venue.slug}` : null,
     owner_joined: joined,
     hosted,
+    connected_apps: connectedApps(await deps.store.listMembers(venue.id)),
   };
   return (
     <LangProvider defaultLang={venue.default_lang}>
-      <DoneStatus id={id} slug={venue.slug} code={code} startUrl={bot && code ? `https://t.me/${bot}?start=${code}` : null} adminKey={adminKey} baseUrl={deps.config.publicBaseUrl} initial={initial} />
+      <DoneStatus id={id} slug={venue.slug} code={code} links={code ? connectLinks(deps.config, code) : []} apps={enabledApps(deps.config)} adminKey={adminKey} baseUrl={deps.config.publicBaseUrl} initial={initial} />
     </LangProvider>
   );
 }
