@@ -32,6 +32,7 @@ const COPY = {
   tomorrowAt: { bg: "утре в {time}", en: "tomorrow at {time}" },
   hoursLabel: { bg: "Работно време по дни", en: "Opening hours by day" },
   menuShort: { bg: "Витрината", en: "See the menu" },
+  fullMenu: { bg: "Виж цялото меню", en: "See the full menu" },
   dock: { bg: "Бързи действия", en: "Quick actions" },
 } as const;
 export type CopyKey = keyof typeof COPY;

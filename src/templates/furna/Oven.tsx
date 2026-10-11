@@ -7,11 +7,36 @@ import { formatDateTime, localDate, localTime } from "@/src/time";
 import type { Changed } from "../shared/types";
 import { copy, Flash, nearTime, type MediaLookup } from "./bits";
 
-/** Specials in the order they run out: the earliest `special_expires_at` first, open-ended ones last, then by when they were posted. */
-export function ovenOrder(a: Item, b: Item): number {
-  const ea = a.special_expires_at ? Date.parse(a.special_expires_at) : Infinity;
-  const eb = b.special_expires_at ? Date.parse(b.special_expires_at) : Infinity;
-  return ea - eb || Date.parse(a.created_at) - Date.parse(b.created_at) || a.position - b.position;
+/**
+ * The panel reads as the day's timetable, like the bakery's own board: what came out today, by the time it came out (oldest
+ * bake first; sold-out trays keep their slot), then specials posted on an earlier day (no time to show), soonest to expire first.
+ */
+export function ovenSpecials(state: SiteState, now: number): Item[] {
+  const tz = state.venue.tz;
+  const today = localDate(new Date(now), tz);
+  const posted = (i: Item) => Date.parse(i.created_at);
+  const expires = (i: Item) => (i.special_expires_at ? Date.parse(i.special_expires_at) : Infinity);
+  const isToday = (i: Item) => localDate(new Date(i.created_at), tz) === today;
+  return visibleItems(state.items, now)
+    .filter((i) => i.is_special)
+    .sort((a, b) => {
+      const ta = isToday(a), tb = isToday(b);
+      if (ta !== tb) return ta ? -1 : 1;
+      return (ta ? posted(a) - posted(b) : expires(a) - expires(b) || posted(a) - posted(b)) || a.position - b.position;
+    });
+}
+
+/**
+ * With no specials, the home page's panel shows up to four things from the window instead (photos and available items
+ * first, then menu order). Computed once in Template.tsx so the window below can leave these out.
+ */
+export function ovenPicks(state: SiteState, now: number, media: MediaLookup): Item[] {
+  const catPos = new Map(state.categories.filter((c) => c.active).map((c) => [c.id, c.position]));
+  return visibleItems(state.items, now)
+    .filter((i) => !i.is_special && catPos.has(i.category_id))
+    .sort((a, b) => Number(!media(a.image_media_id)) - Number(!media(b.image_media_id)) || Number(isSoldOut(a, now)) - Number(isSoldOut(b, now))
+      || (catPos.get(a.category_id) ?? 0) - (catPos.get(b.category_id) ?? 0) || a.position - b.position)
+    .slice(0, 4);
 }
 
 /** "out 40 min ago" for a tray posted today; null for anything posted on an earlier day (its time of day would mislead). */
@@ -30,28 +55,16 @@ function dayLabel(now: number, tz: string, lang: Lang): string {
 }
 
 /**
- * The signature panel beside the hero. Today's specials, each with the time it came out (when posted today), how long ago
- * or until when it runs, and its price; sold-out trays stay, struck through, with when they are back.
- * With no specials the home page shows a few things from the window instead (photos and available items first);
- * the menu page then shows nothing here, since the full window is right below.
+ * The signature panel beside the hero. `specials` (from ovenSpecials) each with the time it came out when posted today,
+ * how long ago or until when it runs, and its price; sold-out trays stay, struck through, with when they are back.
+ * With no specials it shows `picks` (from ovenPicks; empty on the menu page, where the full window is right below).
  */
-export function Oven({ state, now, changed, media, page }: { state: SiteState; now: number; changed: Changed; media: MediaLookup; page: "home" | "menu" }) {
+export function Oven({ state, now, changed, specials, picks }: { state: SiteState; now: number; changed: Changed; specials: Item[]; picks: Item[] }) {
   const { lang, t } = useLang();
   const tz = state.venue.tz;
-  const visible = visibleItems(state.items, now);
-  const specials = visible.filter((i) => i.is_special).sort(ovenOrder);
   const fallback = specials.length === 0;
-  let rows = specials;
-  if (fallback) {
-    if (page !== "home") return null;
-    const catPos = new Map(state.categories.filter((c) => c.active).map((c) => [c.id, c.position]));
-    rows = visible
-      .filter((i) => catPos.has(i.category_id))
-      .sort((a, b) => Number(!media(a.image_media_id)) - Number(!media(b.image_media_id)) || Number(isSoldOut(a, now)) - Number(isSoldOut(b, now))
-        || (catPos.get(a.category_id) ?? 0) - (catPos.get(b.category_id) ?? 0) || a.position - b.position)
-      .slice(0, 4);
-    if (rows.length === 0) return null;
-  }
+  const rows = fallback ? picks : specials;
+  if (rows.length === 0) return null;
   const today = localDate(new Date(now), tz);
   const times = rows.map((i) => (!fallback && localDate(new Date(i.created_at), tz) === today ? localTime(new Date(i.created_at), tz) : ""));
   const timed = times.some(Boolean);

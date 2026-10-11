@@ -9,9 +9,9 @@ import { useLang } from "@/src/i18n";
 import { formatDateTime } from "@/src/time";
 import { pageHref } from "../shared/links";
 import type { Changed } from "../shared/types";
-import { copy, Flash, type MediaLookup } from "./bits";
+import { copy, Flash, nearTime, type MediaLookup } from "./bits";
 
-type Props = { state: SiteState; now: number; changed: Changed; media: MediaLookup; slug: string; variant: "highlights" | "full" };
+type Props = { state: SiteState; now: number; changed: Changed; media: MediaLookup; slug: string; variant: "highlights" | "full"; exclude?: ReadonlySet<string> };
 type T = ReturnType<typeof useLang>["t"];
 
 /** One shop-window row: a square photo on the left when the item has one, name / description / allergens, price on the right. */
@@ -31,7 +31,11 @@ function Row({ i, lang, now, tz, changed, media, t }: { i: Item; lang: Lang; now
       <div className="fu-item-body">
         <h4 className="fu-item-name">{name}</h4>
         {desc && <p className="fu-item-desc">{desc}</p>}
-        {sold && <p className="fu-badge">{i.sold_out_until ? t("site.soldOutUntil", { when: formatDateTime(i.sold_out_until, lang, tz) }) : t("site.soldOut")}</p>}
+        {sold && (
+          <p className="fu-badge" suppressHydrationWarning>
+            {i.sold_out_until ? t("site.soldOutUntil", { when: nearTime(i.sold_out_until, now, tz, lang) ?? formatDateTime(i.sold_out_until, lang, tz) }) : t("site.soldOut")}
+          </p>
+        )}
         {i.allergens.length > 0 && (
           <p className="fu-item-allergens">
             {t("site.allergens")}: {i.allergens.map((a) => `${a} ${allergenName(a, lang).toLocaleLowerCase(lang)}`).join(" · ")}
@@ -74,10 +78,11 @@ function SidePhoto({ state, media }: { state: SiteState; media: MediaLookup }) {
 }
 
 /**
- * "The shop window". Home: up to six picks (photos first) grouped under their categories, the cover beside them and a link
- * to the menu. Menu page: every active category with a sticky row of jump links, the cover and the allergen legend beside.
+ * "The shop window". Home: up to six picks (photos first; never one the oven panel already shows) grouped under their
+ * categories, the cover beside them and a link to the menu. Menu page: every active category with a sticky row of jump
+ * links, the cover and the allergen legend beside.
  */
-export function Window({ state, now, changed, media, slug, variant }: Props) {
+export function Window({ state, now, changed, media, slug, variant, exclude }: Props) {
   const { lang, t } = useLang();
   const tz = state.venue.tz;
   const items = visibleItems(state.items, now);
@@ -90,7 +95,7 @@ export function Window({ state, now, changed, media, slug, variant }: Props) {
     const catPos = new Map(cats.map((c) => [c.id, c.position]));
     const picks = new Set(
       items
-        .filter((i) => !i.is_special && catPos.has(i.category_id))
+        .filter((i) => !i.is_special && catPos.has(i.category_id) && !exclude?.has(i.id))
         .sort((a, b) => Number(!media(a.image_media_id)) - Number(!media(b.image_media_id)) || (catPos.get(a.category_id) ?? 0) - (catPos.get(b.category_id) ?? 0) || a.position - b.position)
         .slice(0, 6)
         .map((i) => i.id),
@@ -106,7 +111,7 @@ export function Window({ state, now, changed, media, slug, variant }: Props) {
           </div>
           <div className="fu-split-side">
             <SidePhoto state={state} media={media} />
-            <Link href={pageHref(slug, "menu")} className="fu-btn fu-btn-dark">{t("site.fullMenu")}</Link>
+            <Link href={pageHref(slug, "menu")} className="fu-btn fu-btn-dark">{copy(lang, "fullMenu")}</Link>
           </div>
         </div>
       </section>
@@ -130,7 +135,7 @@ export function Window({ state, now, changed, media, slug, variant }: Props) {
             <div className="fu-split-main">
               {all.map(({ c, items: list }) => <CategoryBlock key={c.id} c={c} list={list} lang={lang} now={now} tz={tz} changed={changed} media={media} t={t} anchor />)}
             </div>
-            <div className="fu-split-side fu-split-sticky">
+            <div className="fu-split-side">
               <SidePhoto state={state} media={media} />
               {used.length > 0 && (
                 <section aria-labelledby="allergens" className="fu-legend">

@@ -146,6 +146,47 @@ describe("furna template", () => {
     expect(bg).toContain("петък, 9 октомври");
   });
 
+  it("reads the oven panel as a timetable: today's bakes by the time they came out, earlier days' specials after, by expiry", async () => {
+    const mutate = (s: SiteState) => {
+      const base = { ...s.items[4], is_special: true, sold_out_until: null };
+      // Expiry order (late, sold, early-open, old-b, old-a) differs from creation order on purpose.
+      s.items.push({ ...base, id: "t-open", name_bg: "Хляб", name_en: "Open loaf", special_expires_at: null, created_at: "2026-10-09T03:30:00.000Z" }); // 06:30, no expiry
+      s.items.push({ ...base, id: "t-late", name_bg: "Кифли", name_en: "Late buns", special_expires_at: "2026-10-09T10:00:00.000Z", created_at: "2026-10-09T07:00:00.000Z" }); // 10:00, expires first
+      s.items.push({ ...base, id: "t-sold", name_bg: "Тиквеник", name_en: "Sold pie", special_expires_at: "2026-10-09T12:00:00.000Z", created_at: "2026-10-09T04:15:00.000Z", sold_out_until: "2026-10-10T04:15:00.000Z" }); // 07:15
+      s.items.push({ ...base, id: "t-old-b", name_bg: "Стар Б", name_en: "Old B", special_expires_at: "2026-10-09T17:00:00.000Z", created_at: "2026-10-08T05:00:00.000Z" });
+      s.items.push({ ...base, id: "t-old-a", name_bg: "Стар А", name_en: "Old A", special_expires_at: "2026-10-09T09:30:00.000Z", created_at: "2026-10-07T05:00:00.000Z" });
+    };
+    const html = await render("en", { page: "home", mutate });
+    const oven = html.slice(html.indexOf('aria-labelledby="oven-h"'), html.indexOf("</aside>"));
+    const times = [...oven.matchAll(/class="fu-oven-time"[^>]*>([^<]*)</g)].map((m) => m[1]);
+    expect(times).toEqual(["06:30", "07:15", "10:00", "", ""]);
+    const names = ["Open loaf", "Sold pie", "Late buns", "Old A", "Old B"].map((n) => oven.indexOf(n));
+    expect(names.every((i) => i > 0)).toBe(true);
+    expect([...names].sort((a, b) => a - b)).toEqual(names);
+    expect(oven).toMatch(/class="fu-oven-row is-sold">.*?Sold pie/);
+  });
+
+  it("never shows the same item in the no-specials oven picks and the home page window", async () => {
+    for (const lang of ["en", "bg"] as const) {
+      const html = await render(lang, { page: "home" });
+      const oven = html.slice(html.indexOf('aria-labelledby="oven-h"'), html.indexOf("</aside>"));
+      const windowHtml = html.slice(html.indexOf('id="window"'), html.indexOf('id="visit"'));
+      const ovenNames = [...oven.matchAll(/class="fu-oven-name">([^<]*)</g)].map((m) => m[1]);
+      const windowNames = [...windowHtml.matchAll(/class="fu-item-name">([^<]*)</g)].map((m) => m[1]);
+      expect(ovenNames.length).toBeGreaterThan(0);
+      expect(windowNames.length).toBeGreaterThan(0);
+      expect(ovenNames.filter((n) => windowNames.includes(n))).toEqual([]);
+    }
+  });
+
+  it("says when a sold-out row is back the way the oven panel does, and links the full menu in the informal voice", async () => {
+    const mutate = (s: SiteState) => { s.items[1].sold_out_until = "2026-10-10T04:15:00.000Z"; };
+    expect(await render("en", { mutate })).toContain("Sold out until tomorrow at 07:15");
+    expect(await render("bg", { mutate })).toContain("Изчерпано до утре в 07:15");
+    expect(await render("bg", { page: "home" })).toContain(">Виж цялото меню</a>");
+    expect(await render("en", { page: "home" })).toContain(">See the full menu</a>");
+  });
+
   it("falls back to picks from the window in the oven panel on the home page when there are no specials, and hides it on the menu page", async () => {
     const home = await render("en", { page: "home" });
     expect(home).toContain("In the window today");

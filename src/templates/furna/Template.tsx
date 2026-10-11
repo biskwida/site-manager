@@ -10,7 +10,7 @@ import { Dock, Footer } from "./Footer";
 import { Gallery } from "./Gallery";
 import { Hero } from "./Hero";
 import { Notice } from "./Notice";
-import { Oven } from "./Oven";
+import { Oven, ovenPicks, ovenSpecials } from "./Oven";
 import { Visit } from "./Visit";
 import { Window } from "./Window";
 import "./styles.css";
@@ -36,15 +36,19 @@ export function Template({ state: initial, now: initialNow, slug, page, draft, l
   const now = useNow(initialNow);
   const accent = ACCENT_RE.test(state.venue.theme.accent) ? state.venue.theme.accent : "#b8432a";
   const media: MediaLookup = (id) => mediaUrl(id ? state.media.find((m) => m.id === id) : null, { preview });
+  const specials = ovenSpecials(state, now);
+  // No specials: the home page's oven panel shows a few picks, and the window below leaves those out (no item twice).
+  const picks = specials.length === 0 && page === "home" ? ovenPicks(state, now, media) : [];
+  const inOven = new Set(picks.map((i) => i.id));
   return (
     <div className={`tpl-furna ${fontVars}`} style={{ "--accent": accent } as CSSProperties} data-page={page}>
       {draft && <DraftNote summary_bg={draft.summary_bg} summary_en={draft.summary_en} />}
-      <Hero state={state} now={now} slug={slug} page={page} media={media} oven={<Oven state={state} now={now} changed={changed} media={media} page={page} />} />
+      <Hero state={state} now={now} slug={slug} page={page} media={media} oven={<Oven state={state} now={now} changed={changed} specials={specials} picks={picks} />} />
       <main id="main" className="fu-main">
         <Notice state={state} now={now} />
         {page === "home" ? (
           <>
-            <Window variant="highlights" state={state} now={now} changed={changed} media={media} slug={slug} />
+            <Window variant="highlights" state={state} now={now} changed={changed} media={media} slug={slug} exclude={inOven} />
             <Visit state={state} now={now} />
             <Gallery state={state} media={media} />
           </>
