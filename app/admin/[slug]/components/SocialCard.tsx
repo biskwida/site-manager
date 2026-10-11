@@ -6,6 +6,7 @@ import { socialErrorText } from "@/src/destinations/social-errors";
 import type { SocialAccountOverview, SocialOverview } from "@/src/server/admin";
 import { formatDateTime } from "@/src/time";
 import { Chip, Section } from "./bits";
+import { InstagramPhotos } from "./InstagramPhotos";
 
 type Kind = "facebook" | "instagram";
 const NAME: Record<Kind, string> = { facebook: "Facebook", instagram: "Instagram" };
@@ -128,6 +129,8 @@ export function SocialCard({ overview, slug, adminKey, tz }: { overview: SocialO
             <li>{t("admin.social.prereqPublic")}</li>
           </ul>
         </div>
+
+        {o.available.instagram && <InstagramPhotos slug={slug} adminKey={adminKey} connected={o.instagram !== null && o.instagram.status !== "disconnected"} />}
 
         {connectedAny && (
           <div className="mt-5 border-t border-ink/10 pt-4">

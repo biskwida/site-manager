@@ -243,6 +243,19 @@ const en = {
   "done.social.title": "Connect Facebook and Instagram",
   "done.social.text": "The bot can post your photos to your Page and profile: you need a Facebook Page where you are an admin and a professional Instagram account (Business or Creator).",
   "done.social.link": "Connect on the dashboard",
+  "admin.igImport.title": "Photos from Instagram",
+  "admin.igImport.hint": "Pick photos from your connected Instagram account and choose where each one goes: the gallery, the cover, the logo or a dish.",
+  "admin.igImport.button": "Import photos from Instagram",
+  "admin.igImport.connectFirst": "Connect Instagram first, with the Connect Instagram button above. Then you can import photos from the account here.",
+  "admin.igImport.loading": "Loading your Instagram photos…",
+  "admin.igImport.empty": "We found no photos on this account. Videos are not shown.",
+  "admin.igImport.import": "Import selected ({n})",
+  "admin.igImport.importing": "Importing the photos…",
+  "admin.igImport.close": "Close",
+  "admin.igImport.refresh": "Refresh the list",
+  "admin.igImport.done": "Done: {n} photos imported and already on the site. If something isn't right, undo it from the change log.",
+  "admin.igImport.someFailed": "{n} photos didn't import. Try them again.",
+  "admin.igImport.failed": "The import didn't work. Please try again.",
 };
 export type MessageKey = keyof typeof en;
 
@@ -484,6 +497,19 @@ const bg: Record<MessageKey, string> = {
   "done.social.title": "Свържете Facebook и Instagram",
   "done.social.text": "Ботът може да публикува снимките ви в страницата и профила ви: нужни са страница във Facebook, на която сте администратор, и професионален акаунт в Instagram (Business или Creator).",
   "done.social.link": "Свържете от таблото",
+  "admin.igImport.title": "Снимки от Instagram",
+  "admin.igImport.hint": "Изберете снимки от свързания профил в Instagram и решете къде да отиде всяка: в галерията, за корица, за лого или към ястие.",
+  "admin.igImport.button": "Внеси снимки от Instagram",
+  "admin.igImport.connectFirst": "Първо свържете Instagram с бутона „Свържи Instagram“ по-горе. След това оттук ще можете да внасяте снимки от профила.",
+  "admin.igImport.loading": "Зареждаме снимките от Instagram…",
+  "admin.igImport.empty": "Не намерихме снимки в профила. Видеата не се показват.",
+  "admin.igImport.import": "Внеси избраните ({n})",
+  "admin.igImport.importing": "Внасяме снимките…",
+  "admin.igImport.close": "Затвори",
+  "admin.igImport.refresh": "Обнови списъка",
+  "admin.igImport.done": "Готово: внесохме {n} снимки и вече са на сайта. Ако нещо не ви харесва, отменете го от дневника на промените.",
+  "admin.igImport.someFailed": "Не се внесоха {n} снимки. Опитайте с тях отново.",
+  "admin.igImport.failed": "Внасянето не се получи. Опитайте отново.",
 };
 
 export const DICTS = { en, bg } as const;
