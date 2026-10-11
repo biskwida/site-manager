@@ -135,12 +135,15 @@ describe("furna template", () => {
     expect(order.every((i) => i > 0)).toBe(true);
     expect([...order].sort((a, b) => a - b)).toEqual(order);
     expect(oven).toContain('class="fu-oven-time">07:15'); // 04:15Z posted today, Sofia time
-    expect(oven).toMatch(/class="fu-oven-row is-sold">.*?Pumpkin pie.*?sold out · back tomorrow at 07:15/);
-    expect(oven).toContain("until 18:00");
-    expect(oven).toContain("out 20 min ago");
+    expect(oven).toMatch(/class="fu-oven-row is-sold">.*?Pumpkin pie/);
+    const text = oven.replace(/<[^>]+>/g, "");
+    expect(text).toContain("sold out · back tomorrow at 07:15");
+    expect(oven).toContain('<span class="fu-nowrap">until 18:00</span>'); // a piece never splits across lines
+    expect(text).toContain("out 20 min ago");
     const bg = await render("bg", { page: "home", mutate });
     expect(bg).toContain("Днес от пещта");
-    expect(bg).toContain("свърши · пак от утре в 07:15");
+    expect(bg.replace(/<[^>]+>/g, "")).toContain("свърши · пак от утре в 07:15");
+    expect(bg).toContain("петък, 9 октомври");
   });
 
   it("falls back to picks from the window in the oven panel on the home page when there are no specials, and hides it on the menu page", async () => {

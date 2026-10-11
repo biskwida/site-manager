@@ -24,9 +24,9 @@ function outAgo(createdAt: string, now: number, tz: string, lang: Lang): string 
   return copy(lang, "outHours", { n: Math.floor(min / 60) });
 }
 
-/** "Friday, 9 Oct" / "петък, 9 окт." in the venue's zone. */
+/** "Friday 9 Oct" / "петък, 9 октомври" in the venue's zone (bg-BG abbreviates the month to a number, so bg spells it out). */
 function dayLabel(now: number, tz: string, lang: Lang): string {
-  return new Intl.DateTimeFormat(lang === "bg" ? "bg-BG" : "en-GB", { timeZone: tz, weekday: "long", day: "numeric", month: "short" }).format(new Date(now));
+  return new Intl.DateTimeFormat(lang === "bg" ? "bg-BG" : "en-GB", { timeZone: tz, weekday: "long", day: "numeric", month: lang === "bg" ? "long" : "short" }).format(new Date(now));
 }
 
 /**
@@ -67,14 +67,19 @@ export function Oven({ state, now, changed, media, page }: { state: SiteState; n
           const back = sold && i.sold_out_until ? nearTime(i.sold_out_until, now, tz, lang) ?? formatDateTime(i.sold_out_until, lang, tz) : "";
           const until = i.special_expires_at ? t("site.specialUntil", { time: localTime(new Date(i.special_expires_at), tz) }) : "";
           const ago = fallback ? null : outAgo(i.created_at, now, tz, lang);
-          const note = sold ? [copy(lang, "gone"), back && copy(lang, "backAt", { when: back })].filter(Boolean).join(" · ") : [ago, until].filter(Boolean).join(" · ");
+          // Each piece stays in one line ("until 18:00" never splits); the line may break between pieces.
+          const note = (sold ? [copy(lang, "gone"), back && copy(lang, "backAt", { when: back })] : [ago, until]).filter((x): x is string => !!x);
           return (
             <li key={i.id} className={`fu-oven-row${sold ? " is-sold" : ""}`}>
               <Flash at={changed.get(i.id)} />
               {timed && <span className="fu-oven-time" aria-hidden={times[n] ? undefined : true} suppressHydrationWarning>{times[n]}</span>}
               <div className="fu-oven-body">
                 <h3 className="fu-oven-name">{itemName(i, lang)}</h3>
-                {note && <p className="fu-oven-note" suppressHydrationWarning>{note}</p>}
+                {note.length > 0 && (
+                  <p className="fu-oven-note" suppressHydrationWarning>
+                    {note.map((x, k) => <span key={k}>{k > 0 && " · "}<span className="fu-nowrap">{x}</span></span>)}
+                  </p>
+                )}
               </div>
               <span className="fu-oven-price">{formatPrice(i.price_eur, lang)}</span>
             </li>
