@@ -5,7 +5,7 @@ import { readFileSync } from "node:fs";
 import { describe, expect, it, vi } from "vitest";
 import type { DraftInfo, Lang, SiteState } from "@/src/domain/types";
 import { LangProvider } from "@/src/i18n";
-import { EXTREME_ACCENTS, LOOK_STEP_ACCENTS, makeDemo } from "./helpers";
+import { EXTREME_ACCENTS, LOOK_ACCENT_PRESETS, makeDemo, sweepAccents } from "./helpers";
 
 // next/font/google only works through the Next.js compiler; at test time its module is empty, so stub every family the templates use.
 // (The global mock in test/setup.ts returns generic names; this file asserts the fv-* values below, so it keeps its own.)
@@ -16,6 +16,7 @@ vi.mock("next/font/google", () => {
 
 import { contrastRatio } from "@/src/templates/shared/color";
 import { def } from "@/src/templates/lumen";
+import { accentVars } from "@/src/templates/lumen/Template";
 
 // createElement passes children positionally, which LangProvider's required `children` prop type does not model.
 const Provider = LangProvider as (props: { defaultLang: Lang; children?: ReactNode }) => ReactNode;
@@ -105,7 +106,7 @@ describe("lumen template", () => {
     const css = readFileSync(new URL("../src/templates/lumen/styles.css", import.meta.url), "utf8");
     expect(css).not.toMatch(/oklch\(from/);
     expect(css).not.toMatch(/--l-accent-soft:\s*color-mix/);
-    for (const accent of [def.accentDefault, ...LOOK_STEP_ACCENTS, ...EXTREME_ACCENTS]) {
+    for (const accent of [def.accentDefault, ...LOOK_ACCENT_PRESETS, ...EXTREME_ACCENTS]) {
       const html = await render("en", { page: "home", mutate: (s) => { s.venue.theme.accent = accent; } });
       const text = /--l-accent-text:(#[0-9a-f]{6})/.exec(html)?.[1];
       const soft = /--l-accent-soft:(#[0-9a-f]{6})/.exec(html)?.[1];
@@ -120,6 +121,32 @@ describe("lumen template", () => {
     const html = await render("en", { mutate: (s) => { s.venue.theme.accent = "#2e5e4e"; } });
     expect(html).toContain("--l-accent-text:#2e5e4e"); // the default is inside the caps: unchanged
     expect(html).toContain("--l-accent-soft:#e3eae6");
+  });
+  it("keeps the default and every Look-step preset at exactly the colours they had before the contrast guard", () => {
+    const expected: [string, Record<string, string>][] = [
+      ["#2e5e4e", {"--l-accent-text": "#2e5e4e", "--l-accent-soft": "#e3eae6"}],
+      ["#2f6b4f", {"--l-accent-text": "#2f6b4f", "--l-accent-soft": "#e3ece7"}],
+      ["#8f5c10", {"--l-accent-text": "#895705", "--l-accent-soft": "#eeeae2"}],
+      ["#a4442c", {"--l-accent-text": "#a04129", "--l-accent-soft": "#f1e8e4"}],
+      ["#1d4ed8", {"--l-accent-text": "#375aae", "--l-accent-soft": "#e1ebf8"}],
+      ["#6b21a8", {"--l-accent-text": "#633990", "--l-accent-soft": "#e9e6f2"}],
+      ["#1d2a24", {"--l-accent-text": "#1d2a24", "--l-accent-soft": "#dfe4e1"}],
+    ];
+    expect(expected.map(([a]) => a.toLowerCase())).toEqual(expect.arrayContaining([def.accentDefault.toLowerCase(), ...LOOK_ACCENT_PRESETS]));
+    for (const [accent, vars] of expected) expect(accentVars(accent), accent).toEqual(vars);
+  });
+  it("keeps every promised contrast floor across the colour space (64 hues × 3 lightnesses × 3 chromas)", () => {
+    const misses: string[] = [];
+    for (const accent of [...sweepAccents(), ...EXTREME_ACCENTS]) {
+      const v = accentVars(accent);
+      const pairs: [string, number, number][] = [
+        [`${v["--l-accent-text"]} on --l-bg`, contrastRatio(v["--l-accent-text"], "#f8fbf9"), 5.3],
+        [`${v["--l-accent-text"]} on --l-bg-2`, contrastRatio(v["--l-accent-text"], "#edf2ed"), 4.9],
+        [`ink on ${v["--l-accent-soft"]}`, contrastRatio("#191f1a", v["--l-accent-soft"]), 11.9],
+      ];
+      for (const [what, ratio, floor] of pairs) if (!(ratio >= floor)) misses.push(`${accent}: ${what} ${ratio.toFixed(2)} < ${floor}`);
+    }
+    expect(misses).toEqual([]);
   });
   it("keeps the change flash reaching its final frame under reduced motion", () => {
     // `animation: none` would freeze .l-flash at its base opacity (1) forever, because useLiveSite never clears `changed`.
