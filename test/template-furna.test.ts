@@ -253,8 +253,8 @@ describe("furna template", () => {
       const html = await render("en", { page: "home", mutate: (s) => { s.venue.theme.accent = accent; } });
       const text = /--fu-accent-text:(#[0-9a-f]{6})/.exec(html)?.[1];
       expect(text, accent).toBeDefined();
-      // Display type only (title, category headings): the floor promised in styles.css, above AA's 3:1 for large text.
-      expect(contrastRatio(text!, "#f6eedb"), `${text} on paper`).toBeGreaterThanOrEqual(4.0);
+      // Accent text on paper: the floor promised in styles.css (4.5:1, so body-size hover links stay readable too).
+      expect(contrastRatio(text!, "#f6eedb"), `${text} on paper`).toBeGreaterThanOrEqual(4.5);
       // The accent button: --fu-on-accent text on the fill.
       expect(contrastRatio("#fff8ea", text!), `button text on ${text}`).toBeGreaterThanOrEqual(4.5);
     }

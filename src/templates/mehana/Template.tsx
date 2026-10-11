@@ -32,7 +32,7 @@ function DraftNote({ summary_bg, summary_en }: { summary_bg: string; summary_en:
 
 /**
  * The band: the accent with OKLCH lightness capped at 0.42 and chroma at 0.13, then darkened if needed until the open dot
- * (#9bd39b) reads >= 4.6:1 and the gold link (#e8c98b) >= 4.9:1 on it; parchment then stays >= 6.6:1. Computed here rather
+ * (#9bd39b) reads >= 4.6:1 and the gold link (#e8c98b) >= 4.9:1 on it; parchment then stays >= 6.5:1 by construction (>= 6.6:1 observed). Computed here rather
  * than with CSS relative colour syntax; test/template-mehana.test.ts sweeps the colour space against these floors.
  */
 export function accentVars(accent: string) {
