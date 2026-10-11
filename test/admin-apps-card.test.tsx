@@ -16,10 +16,10 @@ const FRESH: OwnerCode = {
   code: "WXYZ6789",
   expires_at: "2026-10-18T09:00:00.000Z",
   links: [
-    { app: "telegram", url: "https://t.me/site_bot?start=WXYZ6789" },
-    { app: "whatsapp", url: "https://wa.me/359888123456?text=WXYZ6789" },
-    { app: "messenger", url: "https://m.me/sitemanager?ref=WXYZ6789" },
-    { app: "instagram", url: "https://ig.me/m/site.manager?ref=WXYZ6789" },
+    { app: "telegram", url: "https://t.me/site_bot?start=WXYZ6789", dest: "@site_bot", chat: "https://t.me/site_bot" },
+    { app: "whatsapp", url: "https://wa.me/359888123456?text=WXYZ6789", dest: "+359888123456", chat: "https://wa.me/359888123456" },
+    { app: "messenger", url: "https://m.me/sitemanager?ref=WXYZ6789", dest: "m.me/sitemanager", chat: "https://m.me/sitemanager" },
+    { app: "instagram", url: "https://ig.me/m/site.manager?ref=WXYZ6789", dest: "@site.manager", chat: "https://ig.me/m/site.manager" },
   ],
 };
 

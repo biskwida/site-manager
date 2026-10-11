@@ -8,7 +8,11 @@ import { useId, useRef, useState, type KeyboardEvent } from "react";
 import { useLang } from "@/src/i18n";
 import type { AppChannel, OwnerCode } from "@/src/server/connect-apps";
 
-export type AppLink = { app: AppChannel; url: string };
+/**
+ * `dest` (the bot username, number or page) is written out next to the link and `chat` opens that chat without the code;
+ * both optional so an older payload still renders.
+ */
+export type AppLink = { app: AppChannel; url: string; dest?: string; chat?: string };
 
 export const APP_NAMES: Record<AppChannel, string> = { telegram: "Telegram", whatsapp: "WhatsApp", messenger: "Messenger", instagram: "Instagram" };
 const META_APPS: readonly AppChannel[] = ["whatsapp", "messenger", "instagram"];
@@ -110,6 +114,7 @@ export function ConnectApps({ code, links }: Props) {
   const shown = bare ? code : `/start ${code}`;
   const metaNote = links.some((l) => META_APPS.includes(l.app));
 
+  // Every link also copies the code: if the app opens without it, the owner just pastes.
   async function copy() {
     try {
       await navigator.clipboard.writeText(shown);
@@ -133,17 +138,26 @@ export function ConnectApps({ code, links }: Props) {
       </figure>
       <div className="min-w-0">
         {links.length === 1 && (
-          <a href={links[0].url} className={`flex min-h-12 w-full items-center justify-center rounded-full bg-accent px-6 text-base font-semibold text-white hover:brightness-110 sm:inline-flex sm:w-auto ${press}`}>
+          <a href={links[0].url} onClick={() => void copy()} className={`flex min-h-12 w-full items-center justify-center rounded-full bg-accent px-6 text-base font-semibold text-white hover:brightness-110 sm:inline-flex sm:w-auto ${press}`}>
             {t("apps.open", { app: APP_NAMES[links[0].app] })}
           </a>
+        )}
+        {links.length === 1 && links[0].dest && (
+          <p className="mt-3 text-sm text-ink-soft">
+            {t("apps.where", { app: APP_NAMES[links[0].app] })}{" "}
+            <a href={links[0].chat ?? links[0].url} target="_blank" rel="noopener noreferrer" onClick={() => void copy()} data-dest={links[0].app}
+              className="font-semibold text-ink underline decoration-ink/30 underline-offset-2 hover:decoration-accent">{links[0].dest}</a>
+            <span className="mt-0.5 block text-xs">{t("apps.whereHint")}</span>
+          </p>
         )}
         {several && (
           <ul className="grid gap-2">
             {links.map((l) => (
               <li key={l.app}>
-                <a href={l.url} data-app={l.app} className={`flex min-h-12 items-center gap-2.5 rounded-full bg-card px-4 text-base font-semibold text-ink ring-1 ring-ink/15 hover:ring-accent/60 ${press}`}>
+                <a href={l.url} data-app={l.app} onClick={() => void copy()} className={`flex min-h-12 items-center gap-2.5 rounded-full bg-card px-4 text-base font-semibold text-ink ring-1 ring-ink/15 hover:ring-accent/60 ${press}`}>
                   <AppIcon app={l.app} className="size-5 text-accent" />
                   {t("apps.open", { app: APP_NAMES[l.app] })}
+                  {l.dest && <span className="ml-auto min-w-0 truncate pl-2 text-sm font-normal text-ink-soft">{l.dest}</span>}
                 </a>
               </li>
             ))}

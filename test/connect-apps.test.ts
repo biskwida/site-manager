@@ -63,18 +63,21 @@ describe("enabledApps", () => {
 describe("connectLinks", () => {
   it("builds the same URL shapes as the channels branch's startLinks", () => {
     expect(connectLinks(all, "ABCD2345")).toEqual([
-      { app: "telegram", url: "https://t.me/site_bot?start=ABCD2345" },
-      { app: "whatsapp", url: "https://wa.me/359888123456?text=ABCD2345" },
-      { app: "messenger", url: "https://m.me/sitemanager?ref=ABCD2345" },
-      { app: "instagram", url: "https://ig.me/m/site.manager?ref=ABCD2345" },
+      { app: "telegram", url: "https://t.me/site_bot?start=ABCD2345", dest: "@site_bot", chat: "https://t.me/site_bot" },
+      { app: "whatsapp", url: "https://wa.me/359888123456?text=ABCD2345", dest: "+359888123456", chat: "https://wa.me/359888123456" },
+      { app: "messenger", url: "https://m.me/sitemanager?ref=ABCD2345", dest: "m.me/sitemanager", chat: "https://m.me/sitemanager" },
+      { app: "instagram", url: "https://ig.me/m/site.manager?ref=ABCD2345", dest: "@site.manager", chat: "https://ig.me/m/site.manager" },
     ]);
   });
   it("URL-encodes the code", () => {
     const links = connectLinks(all, "A B&c=1");
-    for (const l of links) expect(l.url).toMatch(/A%20B%26c%3D1$/);
+    for (const l of links) {
+      expect(l.url).toMatch(/A%20B%26c%3D1$/);
+      expect(l.chat).not.toContain("A%20B");
+    }
   });
   it("only for enabled apps (the gate applies)", () => {
-    expect(connectLinks({ ...all, channelsEnabled: false }, "ABCD2345")).toEqual([{ app: "telegram", url: "https://t.me/site_bot?start=ABCD2345" }]);
+    expect(connectLinks({ ...all, channelsEnabled: false }, "ABCD2345")).toEqual([{ app: "telegram", url: "https://t.me/site_bot?start=ABCD2345", dest: "@site_bot", chat: "https://t.me/site_bot" }]);
     expect(connectLinks(none, "ABCD2345")).toEqual([]);
   });
 });
