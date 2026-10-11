@@ -185,3 +185,39 @@ export async function refreshInstagramTokens(d: SyncDeps, o: { venueId?: string;
   }
   return out;
 }
+
+// --- Dashboard photo import (appended 2026-10-11) ---
+
+/**
+ * The venue's stored Instagram token for a read (src/server/dashboard-instagram.ts), under the publish path's rule: refreshed and
+ * stored encrypted when older than 30 days (never one younger than 24 hours); without a readable timestamp the clock starts now;
+ * any refresh failure keeps the old token. Null when the venue has no usable connection. Never logs the token.
+ */
+export async function instagramReadToken(d: { store: SyncDeps["store"]; secretKey: Buffer; fetch: typeof fetch }, venueId: string, now: Date): Promise<string | null> {
+  const dest = await d.store.getDestination(venueId, "instagram");
+  if (!dest || dest.status === "disconnected") return null;
+  let secrets: Record<string, string>;
+  try {
+    secrets = decryptSecrets(dest.secrets, d.secretKey);
+  } catch {
+    return null;
+  }
+  const token = secrets.token;
+  if (!token) return null;
+  const save = (next: string) =>
+    d.store.upsertDestination({ venue_id: venueId, kind: "instagram", config: { ...dest.config, token_refreshed_at: now.toISOString() }, secrets: encryptSecrets({ ...secrets, token: next }, d.secretKey), status: dest.status });
+  const age = tokenAge(dest.config, now);
+  if (age === "unknown") {
+    await save(token).catch(() => undefined);
+    return token;
+  }
+  if (age === "fresh") return token;
+  try {
+    const next = await refreshToken(d.fetch, token);
+    if (!next) return token;
+    await save(next);
+    return next;
+  } catch {
+    return token;
+  }
+}
