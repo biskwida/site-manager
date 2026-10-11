@@ -13,6 +13,7 @@ import { TEMPLATE_IDS, type ChangeOp, type TemplateId, type Venue } from "../dom
 import { seedMenuFrom, type SeedCategory, type SeedItem, type SeedTexts } from "../seed/demo";
 import type { Store, VenuePatch } from "../store/types";
 import { bothLangs, DRAFT_SLUG_PREFIX, emptyDraft, slugError, WIZARD_MAX_IMAGE_BYTES, validateForPublish, WizardPatchSchema, type PublishError, type WizardDraft } from "../wizard/schema";
+import { connectedApps, newOwnerCode, type AppsConfig, type ConnectedApp, type OwnerCode } from "./connect-apps";
 import { readDraftFromRequest, serializeDraftCookie } from "./draft-cookie";
 import { newDraftToken, sha256Hex } from "./hash";
 
@@ -42,7 +43,9 @@ export type WizardErrorCode =
   /** 410: the stored Instagram list is missing or over an hour old; sign in to Instagram again. */
   | "instagram_expired"
   /** 502: none of the picked images could be downloaded from Instagram's CDN. */
-  | "instagram_error";
+  | "instagram_error"
+  /** 409: the action needs a published (live) venue. */
+  | "not_live";
 
 /** Every wizard failure the client can show: a code, both languages, an HTTP status and optional field errors. */
 export class WizardError extends Error {
@@ -413,6 +416,8 @@ export interface WizardStatusResponse {
   owner_joined: boolean;
   /** No deployer on this server: the hosted /<slug> is the site, live as soon as the owner joined. */
   hosted: boolean;
+  /** Linked chats per app (empty until the first app connects). */
+  connected_apps: ConnectedApp[];
 }
 
 /** Polls the deployer for this venue when its deploy is pending/building, then reports status, deploy and the best site URL. */
@@ -430,8 +435,21 @@ export async function handleStatus(d: WizardDeps & { deployer: Deployer | null; 
     const deploy = d.deployer ? v.deploy : null;
     const hostedUrl = v.status === "live" ? publicUrl(d.config.publicBaseUrl, v.slug) : null;
     const site_url = deploy?.status === "ready" && deploy.url ? deploy.url : hostedUrl;
-    const owner_joined = v.status === "live" && (await d.store.listMembers(v.id)).some((m) => m.role === "owner");
-    const body: WizardStatusResponse = { status: v.status, deploy, site_url, owner_joined, hosted: !d.deployer };
+    const members = v.status === "live" ? await d.store.listMembers(v.id) : [];
+    const owner_joined = members.some((m) => m.role === "owner");
+    const body: WizardStatusResponse = { status: v.status, deploy, site_url, owner_joined, hosted: !d.deployer, connected_apps: connectedApps(members) };
+    return Response.json(body, { headers: NO_STORE });
+  } catch (e) {
+    return wizardErrorResponse(e);
+  }
+}
+
+/** POST /api/new/[id]/invite: a fresh owner code and one link per enabled app ("connect another app" on the done page). */
+export async function handleInvite(d: { store: Store; config: AppsConfig; now: () => Date }, venue: Venue): Promise<Response> {
+  try {
+    const r = await newOwnerCode(d.store, d.config, venue, d.now());
+    if (!r.ok) throw new WizardError(r.error, r.error === "rate_limited" ? 429 : 409, r.bg, r.en);
+    const body: OwnerCode = { code: r.code, links: r.links, expires_at: r.expires_at };
     return Response.json(body, { headers: NO_STORE });
   } catch (e) {
     return wizardErrorResponse(e);

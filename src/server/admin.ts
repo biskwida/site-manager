@@ -8,6 +8,7 @@ import type { Deployer, DeployInput, DomainInstructions } from "../deploy/types"
 import { normalizeDomain } from "../deploy/vercel-domains";
 import type { DestinationStatus, Store, SyncStatus } from "../store/types";
 import { formatDateTime } from "../time";
+import { connectedApps, type ConnectedApp } from "./connect-apps";
 
 export interface AdminOverview {
   venue: Pick<Venue, "id" | "slug" | "name" | "tz" | "default_lang">;
@@ -29,14 +30,17 @@ export interface AdminOverview {
   log: ChangeSet[];
   sold_out: { id: string; name_bg: string; name_en: string; sold_out_until: string }[];
   wordpress?: WordPressOverview | null;
+  /** Linked chats per app ("Your apps" card). */
+  connected_apps: ConnectedApp[];
 }
 
 export async function adminOverview(store: Store, venue: Venue, now: Date, baseUrl = "", opts: { hosted?: boolean } = {}): Promise<AdminOverview> {
-  const [pending, scheduled, log, site] = await Promise.all([
+  const [pending, scheduled, log, site, members] = await Promise.all([
     store.listChangeSets(venue.id, { status: ["proposed"], limit: 20 }),
     store.listChangeSets(venue.id, { status: ["scheduled"], limit: 50 }),
     store.listChangeSets(venue.id, { status: ["applied", "reverted", "rejected", "expired", "cancelled"], limit: 50 }),
     store.getSite(venue.id),
+    store.listMembers(venue.id),
   ]);
   const nowMs = now.getTime();
   const hosted = opts.hosted ?? false;
@@ -58,6 +62,7 @@ export async function adminOverview(store: Store, venue: Venue, now: Date, baseU
     log,
     sold_out: site.items.filter((i) => i.active && isSoldOut(i, nowMs)).map((i) => ({ id: i.id, name_bg: i.name_bg, name_en: i.name_en, sold_out_until: i.sold_out_until as string })),
     wordpress: await wordPressOverview(store, venue.id),
+    connected_apps: connectedApps(members),
   };
 }
 

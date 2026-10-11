@@ -111,7 +111,7 @@ describe("GET/PUT /api/new/[id], media, publish, status", () => {
     expect(await put.json()).toMatchObject({ draft: { name: "Нощ", slug: "nosht", logo_media_id: media.id } });
 
     const early = await handleStatus({ ...deps, deployer: fakeDeployer(), messenger: null }, await store.getVenue(id));
-    expect(await early.json()).toEqual({ status: "draft", deploy: null, site_url: null, owner_joined: false, hosted: false });
+    expect(await early.json()).toEqual({ status: "draft", deploy: null, site_url: null, owner_joined: false, hosted: false, connected_apps: [] });
 
     const pub = await handlePublish(deps, await store.getVenue(id));
     expect(pub.status).toBe(200);
@@ -146,7 +146,7 @@ describe("GET/PUT /api/new/[id], media, publish, status", () => {
 
     // status after publish: live and our own url; with a pending deploy it polls the deployer
     const live = await handleStatus({ ...deps, deployer: fakeDeployer(), messenger: null }, await store.getVenue(id));
-    expect(await live.json()).toEqual({ status: "live", deploy: null, site_url: "https://site.example/nosht", owner_joined: false, hosted: false });
+    expect(await live.json()).toEqual({ status: "live", deploy: null, site_url: "https://site.example/nosht", owner_joined: false, hosted: false, connected_apps: [] });
     await store.setDeploy(id, { provider: "fake", project_id: "p1", deployment_id: "d1", url: null, status: "pending", error: null, template: "nocturne", updated_at: T0.toISOString() });
     const polled = await handleStatus({ ...deps, deployer: fakeDeployer(), messenger: null }, await store.getVenue(id));
     const pj = (await polled.json()) as { status: string; deploy: { status: string; url: string | null }; site_url: string | null };
@@ -156,9 +156,9 @@ describe("GET/PUT /api/new/[id], media, publish, status", () => {
 
     // without a deployer (production without VERCEL_TOKEN): no deploy record, the hosted URL, live once an owner joined
     const hosted = async () => (await handleStatus({ ...deps, deployer: null, messenger: null }, await store.getVenue(id))).json();
-    expect(await hosted()).toEqual({ status: "live", deploy: null, site_url: "https://site.example/nosht", owner_joined: false, hosted: true });
+    expect(await hosted()).toEqual({ status: "live", deploy: null, site_url: "https://site.example/nosht", owner_joined: false, hosted: true, connected_apps: [] });
     await store.upsertMember({ venue_id: id, tg_chat_id: 9001, role: "owner", lang: "bg" });
-    expect(await hosted()).toEqual({ status: "live", deploy: null, site_url: "https://site.example/nosht", owner_joined: true, hosted: true });
+    expect(await hosted()).toEqual({ status: "live", deploy: null, site_url: "https://site.example/nosht", owner_joined: true, hosted: true, connected_apps: [{ app: "telegram", owners: 1, staff: 0 }] });
   });
 });
 

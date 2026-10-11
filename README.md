@@ -133,6 +133,8 @@ npm run env:set -- ANTHROPIC_API_KEY   # asks for the value with echo off, write
 | `TELEGRAM_BOT_USERNAME` | The bot's username without `@` (from @BotFather). Builds the `https://t.me/<bot>?start=<code>` link and QR on the wizard's done page | For the done page's Start link; without it only the code is shown |
 | `INSTAGRAM_APP_ID` | developers.facebook.com → your Business app → Instagram → API setup with Instagram login → **Instagram app ID** (not the Facebook app id). See [Instagram import](#instagram-import) | No: without it (or the secret) the wizard hides "Import photos from Instagram" |
 | `INSTAGRAM_APP_SECRET` | The same page → **Instagram app secret**. Server-only, never `NEXT_PUBLIC_`; it also signs the OAuth `state` (through a derived key) | With `INSTAGRAM_APP_ID` |
+| `MESSENGER_PAGE_HANDLE`, `INSTAGRAM_USERNAME`, `WHATSAPP_NUMBER` | The Page username (`m.me/<handle>`), the Instagram username without `@` (`ig.me/m/<user>`) and the WhatsApp number with country code (`wa.me/<digits>`), as in the channels guide. Owner links on the done page and in the dashboard's "Your apps" card (`src/server/connect-apps.ts`) | No; shown only with `CHANNELS_ENABLED` |
+| `CHANNELS_ENABLED` | `true` offers Messenger, Instagram and WhatsApp next to Telegram. Keep it unset (false) until the channels code that answers those apps is deployed, or owners would message a bot that never replies | No (default false: Telegram only) |
 
 Offline mode also reads two keys that are not in `.env.example`: `SITE_MANAGER_STORE=memory` (set by the scripts below) and `DEMO_OWNER_CHAT_ID` (optional: links that Telegram chat as the demo owner in the memory store).
 
