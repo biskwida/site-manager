@@ -60,3 +60,20 @@ describe("src/templates import boundary", () => {
     expect(specifiers('import x from "a";\nexport { y } from "./b";\nconst z = await import("c");')).toEqual(["a", "./b", "c"]);
   });
 });
+
+describe("template fonts", () => {
+  // The app routes import all six templates; preloading every face would make each page fetch ~30 font files up front.
+  it("every next/font/google call opts out of preloading and keeps display: swap", () => {
+    const dirs = readdirSync(TEMPLATES).filter((d) => d !== "shared" && statSync(join(TEMPLATES, d)).isDirectory());
+    expect(dirs.length).toBeGreaterThanOrEqual(6);
+    for (const d of dirs) {
+      const src = readFileSync(join(TEMPLATES, d, "fonts.ts"), "utf8");
+      const calls = [...src.matchAll(/=\s*[A-Z][A-Za-z0-9_]*\(\{([^}]*)\}\)/g)].map((m) => m[1]);
+      expect(calls.length, d).toBeGreaterThanOrEqual(2);
+      for (const opts of calls) {
+        expect(opts, d).toContain("preload: false");
+        expect(opts, d).toContain('display: "swap"');
+      }
+    }
+  });
+});
