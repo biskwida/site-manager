@@ -22,11 +22,36 @@ const COPY = {
   backFrom: { bg: "Отново от {when}", en: "Back from {when}" },
   visit: { bg: "Заповядайте", en: "Come on in" },
   cheers: { bg: "Наздраве!", en: "Cheers!" },
+  actions: { bg: "Действия", en: "Actions" },
+  /** The phone bar's call link: starts with its visible label (WCAG 2.5.3 label in name) and says that it dials. */
+  reserveCall: { bg: "Резервирай: обади се на {phone}", en: "Book a table: call {phone}" },
 } as const;
 export type CopyKey = keyof typeof COPY;
 
 export function copy(lang: Lang, key: CopyKey, vars: Record<string, string> = {}): string {
   return COPY[key][lang].replace(/\{(\w+)\}/g, (m, k: string) => vars[k] ?? m);
+}
+
+/** Abbreviations that end in a full stop without ending the sentence (Bulgarian addresses and titles, a few English ones). */
+const ABBREVIATIONS = new Set(["ул", "бул", "пл", "гр", "кв", "ж.к", "жк", "бл", "вх", "ет", "ап", "им", "св", "проф", "д-р", "др", "доц", "инж", "арх", "г", "ч", "мин", "лв", "напр", "вкл", "т.е", "т.н", "ок", "мр", "mr", "mrs", "ms", "dr", "st", "ave", "rd", "no", "approx", "vs"]);
+
+/**
+ * Splits an announcement into its first sentence and the rest, for the mockup's "bold lead" rhythm. A sentence ends at . ! ? or …
+ * followed by a space and a capital letter; a full stop after a known abbreviation ("ул.", "Dr.") or a single letter (an initial)
+ * does not count. No clear sentence end → null (nothing is bolded).
+ */
+export function boldLead(text: string): [string, string] | null {
+  for (const m of text.matchAll(/[.!?…]\s+(?=\p{Lu})/gu)) {
+    const at = m.index;
+    if (text[at] === ".") {
+      const word = (text.slice(0, at).split(/\s/).pop() ?? "").toLocaleLowerCase();
+      if (ABBREVIATIONS.has(word) || word.replace(/[^\p{L}]/gu, "").length === 1) continue;
+    }
+    const lead = text.slice(0, at + 1).trim();
+    const rest = text.slice(at + m[0].length).trim();
+    return lead && rest ? [lead, rest] : null;
+  }
+  return null;
 }
 
 /** 1 → "I", 4 → "IV", 12 → "XII": course numbers follow the category order. */

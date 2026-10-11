@@ -13,7 +13,8 @@ vi.mock("next/font/google", () => {
   return { Brygada_1918: font("brygada"), Wix_Madefor_Text: font("wix") };
 });
 
-import { roman } from "@/src/templates/mehana/bits";
+import { boldLead, roman } from "@/src/templates/mehana/bits";
+import { contrastRatio } from "@/src/templates/shared/color";
 import { def } from "@/src/templates/mehana";
 import { TEMPLATE_ACCENT_DEFAULTS } from "@/src/wizard/schema";
 
@@ -44,7 +45,7 @@ describe("mehana template", () => {
     expect(def.id).toBe("mehana");
     expect(def.fontVars).toContain("fv-brygada");
     expect(def.fontVars).toContain("fv-wix");
-    expect(def.accentDefault).toBe("#6E1F1B");
+    expect(def.accentDefault).toBe("#6e1f1b");
     expect(TEMPLATE_ACCENT_DEFAULTS.mehana).toBe(def.accentDefault);
     expect(def.business_types).toEqual(["restaurant", "bar"]);
   });
@@ -138,10 +139,21 @@ describe("mehana template", () => {
     expect(withPhone).toContain("Резервирай маса");
     expect(withPhone).toContain('href="tel:+35920000000"');
     expect(withPhone).toContain("me-actionbar");
+    expect(withPhone).toContain('aria-label="Действия"');
     const none = await render("bg", { page: "home", mutate: (s) => { s.venue.phone = ""; } });
     expect(none).not.toContain("Резервирай");
     expect(none).not.toContain("tel:");
     expect(none).not.toContain("me-actionbar");
+  });
+  it("shows the phone number on the menu page too: in the call button, in the footer, and in the action bar's name", async () => {
+    for (const page of ["home", "menu"] as const) {
+      const bg = await render("bg", { page });
+      expect(bg).toMatch(/me-reserve-top"><span>Резервирай маса<span aria-hidden="true"> · <\/span><span class="me-nowrap">\+359 2 000 0000<\/span><\/span><\/a>/);
+      expect(bg).toMatch(/<footer[\s\S]*href="tel:\+35920000000"[^>]*>\+359 2 000 0000<\/a>[\s\S]*<\/footer>/);
+      // The accessible name starts with the visible label (WCAG 2.5.3) and says that it calls.
+      expect(bg).toContain('aria-label="Резервирай: обади се на +359 2 000 0000"');
+      expect(await render("en", { page })).toContain('aria-label="Book a table: call +359 2 000 0000"');
+    }
   });
   it("renders the home page: courses, the dark visit section, grouped hours, no gallery without photos", async () => {
     const html = await render("en", { page: "home" });
@@ -164,6 +176,8 @@ describe("mehana template", () => {
     const html = await render("en", { mutate: withPhoto });
     expect(html.match(/class="me-plate"/g)?.length).toBe(1);
     expect(html).toContain("<img");
+    // The plate sits beside the visible dish name, so the photo itself is decorative.
+    expect(html).toMatch(/<span class="me-plate"><img alt=""/);
     expect(html).toContain(encodeURIComponent(PHOTO));
   });
   it("shows the cover on the home page band and nothing in its place without one", async () => {
@@ -173,6 +187,44 @@ describe("mehana template", () => {
     };
     expect(await render("en", { page: "home", mutate: cover })).toContain("me-frame-photo");
     expect(await render("en", { page: "home" })).not.toContain("me-frame");
+  });
+  it("shows three courses on the home page even when the first one holds only specials", async () => {
+    const mutate = (s: SiteState) => {
+      for (const i of s.items) if (i.category_id === s.categories[0].id) { i.is_special = true; i.special_expires_at = null; }
+    };
+    const html = await render("en", { page: "home", mutate });
+    expect(html.match(/class="me-course"/g)?.length).toBe(3);
+    expect(html).toContain("Drinks"); // the fourth category moves up
+    expect(html).toMatch(/class="me-numeral">II<\/span><span>Pastries/); // numbering still follows the category order
+  });
+  it("lays out four or fewer courses in two columns and longer menus in up to three", async () => {
+    expect(await render("en")).toContain('class="me-courses-full is-few"');
+    const mutate = (s: SiteState) => {
+      s.categories.push({ ...s.categories[0], id: "c5", name_bg: "Десерти", name_en: "Desserts", position: 9 });
+      s.items.push({ ...s.items[0], id: "d1", category_id: "c5", name_bg: "Баклава", name_en: "Baklava" });
+    };
+    expect(await render("en", { mutate })).toContain('class="me-courses-full"');
+  });
+  it("bolds an announcement's first sentence without stopping at abbreviations", () => {
+    expect(boldLead("Жива музика от 20:00. Вътре има места.")).toEqual(["Жива музика от 20:00.", "Вътре има места."]);
+    expect(boldLead("Затворено на ул. Раковски днес. Отваряме утре.")).toEqual(["Затворено на ул. Раковски днес.", "Отваряме утре."]);
+    expect(boldLead("Party with Dr. Smith tonight! Book now.")).toEqual(["Party with Dr. Smith tonight!", "Book now."]);
+    expect(boldLead("Само една фраза")).toBeNull();
+    expect(boldLead("Ще има музика. и танци")).toBeNull(); // no capital after the stop: ambiguous, bold nothing
+  });
+  it("computes the band colour in TypeScript (no CSS relative colour) and keeps band text readable on every accent", async () => {
+    const css = readFileSync(new URL("../src/templates/mehana/styles.css", import.meta.url), "utf8");
+    expect(css).not.toMatch(/oklch\(from/);
+    for (const accent of ["#6e1f1b", "#2f5d46", "#3b2f5c", "#7a4a12", "#e8b4b8", "#f5d547", "#9ad1d4"]) {
+      const html = await render("bg", { page: "home", mutate: (s) => { s.venue.theme.accent = accent; } });
+      const wine = /--me-wine:(#[0-9a-f]{6})/.exec(html)?.[1];
+      expect(wine, accent).toBeDefined();
+      expect(contrastRatio("#f3eadb", wine!), `parchment on ${wine}`).toBeGreaterThanOrEqual(4.5); // title, nav, status
+      expect(contrastRatio("#e8c98b", wine!), `gold on ${wine}`).toBeGreaterThanOrEqual(4.5); // "To the menu" link
+      expect(contrastRatio(wine!, "#f3eadb"), `${wine} numerals on paper`).toBeGreaterThanOrEqual(4.5);
+      expect(contrastRatio("#9bd39b", wine!), `open dot on ${wine}`).toBeGreaterThanOrEqual(3); // non-text indicator
+    }
+    expect(await render("bg", { mutate: (s) => { s.venue.theme.accent = "#6e1f1b"; } })).toContain("--me-wine:#6e1f1b");
   });
   it("adds numbered course jump links for a long menu", async () => {
     const mutate = (s: SiteState) => {

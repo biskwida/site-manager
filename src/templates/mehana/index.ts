@@ -10,7 +10,7 @@ export const def: TemplateDef = {
   tagline_en: "Wine red, an embroidery border and the menu course by course. For taverns and Bulgarian kitchens.",
   business_types: ["restaurant", "bar"],
   // Wine red from the approved mockup: the header band is this colour, and the parchment on it reads at 9.4:1 (the gold link at 7.0:1).
-  accentDefault: "#6E1F1B",
+  accentDefault: "#6e1f1b",
   fontVars,
   Component: Template,
 };

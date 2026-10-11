@@ -14,19 +14,23 @@ function poweredHref(feedUrl: string): string {
   }
 }
 
-/** The last dark line: the footer note (or the house "Cheers!") and the Site Manager credit. */
+/** The last dark line on every page: name, footer note (or the house "Cheers!"), the phone, and the Site Manager credit. */
 export function Footer({ state, feedUrl }: { state: SiteState; feedUrl: string }) {
   const { lang, t } = useLang();
   const note = state.texts.find((x) => x.key === "footer_note");
   const noteText = note ? pick(lang, note.text_bg, note.text_en) : "";
+  const phone = state.venue.phone;
   return (
     <footer className="me-footer">
-      <div className="me-wrap me-footer-inner">
-        <p>
-          <span translate="no" className="me-footer-name">{state.venue.name}</span>
-          <span className="me-footer-note">{noteText || copy(lang, "cheers")}</span>
-        </p>
-        <a href={poweredHref(feedUrl)} className="me-powered" translate="no">{t("site.poweredBy")}</a>
+      <div className="me-wrap">
+        <div className="me-footer-inner">
+          <p className="me-footer-text">
+            <span translate="no" className="me-footer-name">{state.venue.name}</span>
+            <span className="me-footer-note">{noteText || copy(lang, "cheers")}</span>
+          </p>
+          {phone && <a href={telHref(phone)} className="me-footer-phone">{phone}</a>}
+          <a href={poweredHref(feedUrl)} className="me-powered" translate="no">{t("site.poweredBy")}</a>
+        </div>
       </div>
     </footer>
   );
@@ -42,11 +46,11 @@ export function ActionBar({ state, slug, page }: { state: SiteState; slug: strin
   const phone = state.venue.phone;
   if (!phone) return null;
   return (
-    <nav aria-label={copy(lang, "reserve")} className="me-actionbar">
+    <nav aria-label={copy(lang, "actions")} className="me-actionbar">
       {page === "home"
         ? <Link href={pageHref(slug, "menu")} className="me-btn me-btn-outline">{copy(lang, "fullMenu")}</Link>
         : <Link href={pageHref(slug, "home")} className="me-btn me-btn-outline">{t("site.home")}</Link>}
-      <a href={telHref(phone)} className="me-btn me-btn-ochre">{copy(lang, "reserveShort")}</a>
+      <a href={telHref(phone)} aria-label={copy(lang, "reserveCall", { phone })} className="me-btn me-btn-ochre">{copy(lang, "reserveShort")}</a>
     </nav>
   );
 }

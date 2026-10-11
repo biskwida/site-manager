@@ -2,6 +2,7 @@
 import type { CSSProperties } from "react";
 import { useLang } from "@/src/i18n";
 import type { TemplateProps } from "../index";
+import { capAccent } from "../shared/color";
 import { mediaUrl } from "../shared/media";
 import { useLiveSite, useNow } from "../shared/useLiveSite";
 import { Band } from "./Band";
@@ -33,10 +34,13 @@ function DraftNote({ summary_bg, summary_en }: { summary_bg: string; summary_en:
 export function Template({ state: initial, now: initialNow, slug, page, draft, live, feedUrl, preview = false }: TemplateProps) {
   const { state, changed } = useLiveSite(initial, feedUrl, live);
   const now = useNow(initialNow);
-  const accent = ACCENT_RE.test(state.venue.theme.accent) ? state.venue.theme.accent : "#6E1F1B";
+  const accent = ACCENT_RE.test(state.venue.theme.accent) ? state.venue.theme.accent : "#6e1f1b";
+  // The band is the accent with lightness capped at 0.42 and chroma at 0.13 (OKLCH), computed here rather than with CSS relative
+  // colour syntax: parchment on it stays >= 6.8:1 and the gold link >= 5.1:1 for any accent (test/template-mehana.test.ts).
+  const wine = capAccent(accent, { maxL: 0.42, maxC: 0.13 });
   const media: MediaLookup = (id) => mediaUrl(id ? state.media.find((m) => m.id === id) : null, { preview });
   return (
-    <div className={`tpl-mehana ${fontVars}`} style={{ "--accent": accent } as CSSProperties} data-page={page}>
+    <div className={`tpl-mehana ${fontVars}`} style={{ "--accent": accent, "--me-wine": wine } as CSSProperties} data-page={page}>
       {draft && <DraftNote summary_bg={draft.summary_bg} summary_en={draft.summary_en} />}
       <Band state={state} slug={slug} page={page} now={now} media={media} />
       <Shevitsa />

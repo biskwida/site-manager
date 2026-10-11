@@ -24,7 +24,7 @@ function Row({ i, img, lang, now, tz, changed, t }: { i: Item; img: string | nul
       <Flash at={changed.get(i.id)} />
       {img && (
         <span className="me-plate">
-          <Image src={img} alt={name} fill sizes="64px" className="me-cover" />
+          <Image src={img} alt="" fill sizes="64px" className="me-cover" />
         </span>
       )}
       <div className="me-row-body">
@@ -66,7 +66,7 @@ function Course({ c, n, list, home, lang, now, tz, changed, t, media }: { c: Cat
 
 /**
  * The menu as numbered courses (I, II, III… in category order). Home: the first three courses, three dishes each (photos first,
- * specials left to the dish-of-the-day box), and a link to the full menu. Menu page: every course in up to three columns, with a
+ * specials left to the dish-of-the-day box), and a link to the full menu. Menu page: every course in two columns (up to four courses) or three, with a
  * sticky row of numbered jump links. Course headings are h3 on both pages (under the h2 "The menu"), dishes h4.
  */
 export function MenuList({ state, now, changed, media, slug, variant }: Props) {
@@ -81,15 +81,19 @@ export function MenuList({ state, now, changed, media, slug, variant }: Props) {
     .filter((s) => s.items.length > 0)
     .map((s, n) => ({ ...s, n: n + 1 }));
   if (home) {
-    const shown = courses.slice(0, 3).map((s) => ({
-      ...s,
-      items: s.items
-        .filter((i) => !i.is_special)
-        .map((i) => ({ i, photo: Boolean(media(i.image_media_id)) }))
-        .sort((a, b) => Number(b.photo) - Number(a.photo) || a.i.position - b.i.position)
-        .slice(0, 3)
-        .map((x) => x.i),
-    })).filter((s) => s.items.length > 0);
+    // Specials live in the dish-of-the-day box, so they are dropped first; a course left empty gives its place to the next one.
+    const shown = courses
+      .map((s) => ({
+        ...s,
+        items: s.items
+          .filter((i) => !i.is_special)
+          .map((i) => ({ i, photo: Boolean(media(i.image_media_id)) }))
+          .sort((a, b) => Number(b.photo) - Number(a.photo) || a.i.position - b.i.position)
+          .slice(0, 3)
+          .map((x) => x.i),
+      }))
+      .filter((s) => s.items.length > 0)
+      .slice(0, 3);
     if (shown.length === 0) return null;
     return (
       <section aria-labelledby="menu-h" className="me-wrap me-menu me-menu-home">
@@ -124,7 +128,7 @@ export function MenuList({ state, now, changed, media, slug, variant }: Props) {
           <h2 id="menu-h" className="me-h-section">{copy(lang, "menuTitle")}</h2>
           <p className="me-soft">{copy(lang, "menuNote")}</p>
         </div>
-        <div className="me-courses-full">
+        <div className={`me-courses-full${courses.length <= 4 ? " is-few" : ""}`}>
           {courses.map((s) => <Course key={s.c.id} c={s.c} n={s.n} list={s.items} home={false} lang={lang} now={now} tz={tz} changed={changed} t={t} media={media} />)}
         </div>
         <a href="#status" className="me-btn me-btn-ghost me-totop">{t("site.toTop")}</a>

@@ -33,7 +33,7 @@ function Status({ state, now }: { state: SiteState; now: number }) {
 }
 
 /**
- * The wine band: top bar (logo, Home/Menu, "Book a table" call button, language), then the big serif name, the tagline, the
+ * The wine band: top bar (logo, Home/Menu, the "Book a table · <phone>" call button from 768 px, language), then the big serif name, the tagline, the
  * welcome line and today's status. With a cover photo the band splits from 1024 px and the photo hangs on the right like a
  * framed picture; without one the band is the mockup's single text column. The menu page keeps a compact band.
  */
@@ -67,7 +67,12 @@ export function Band({ state, slug, page, now, media }: { state: SiteState; slug
           </nav>
         </div>
         <div className="me-topbar-end">
-          {v.phone && <a href={telHref(v.phone)} className="me-btn me-btn-ochre me-reserve-top">{copy(lang, "reserve")}</a>}
+          {v.phone && (
+            <a href={telHref(v.phone)} className="me-btn me-btn-ochre me-reserve-top">
+              {/* One inline box: as separate flex items the spaces around the dot would be trimmed. */}
+              <span>{copy(lang, "reserve")}<span aria-hidden="true"> · </span><span className="me-nowrap">{v.phone}</span></span>
+            </a>
+          )}
           <LangToggle className="me-lang" />
         </div>
       </div>

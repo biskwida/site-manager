@@ -6,15 +6,15 @@ import type { Lang, SiteState } from "@/src/domain/types";
 import { useLang } from "@/src/i18n";
 import { localTime } from "@/src/time";
 import type { Changed } from "../shared/types";
-import { copy, Flash, pick, type MediaLookup } from "./bits";
+import { boldLead, copy, Flash, pick, type MediaLookup } from "./bits";
 
 /** "Live music from 20:00. Inside there is room." → the first sentence in bold, the rest plain (the mockup's rhythm). */
 function Announcement({ text }: { text: string }) {
-  const m = /^(.+?[.!?…])\s+(\S[\s\S]*)$/u.exec(text);
-  if (!m) return <p className="me-news-item">{text}</p>;
+  const parts = boldLead(text);
+  if (!parts) return <p className="me-news-item">{text}</p>;
   return (
     <p className="me-news-item">
-      <strong>{m[1]}</strong> {m[2]}
+      <strong>{parts[0]}</strong> {parts[1]}
     </p>
   );
 }
@@ -63,7 +63,7 @@ export function Tonight({ state, now, changed, media }: { state: SiteState; now:
           <div className="me-dish-main">
             {dish.img && (
               <span className="me-plate me-plate-lg">
-                <Image src={dish.img} alt={itemName(dish.i, lang)} fill sizes="88px" className="me-cover" />
+                <Image src={dish.img} alt="" fill sizes="88px" className="me-cover" />
               </span>
             )}
             <div className="me-dish-text">
