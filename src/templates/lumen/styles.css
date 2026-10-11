@@ -14,11 +14,14 @@
   --l-line: color-mix(in oklab, var(--l-ink) 12%, transparent);
   --l-line-strong: color-mix(in oklab, var(--l-ink) 30%, transparent);
   --l-accent: var(--accent, #2e5e4e);
-  /* Accent as text/fill: cap lightness and chroma so a light owner-picked accent still reads on paper (#2e5e4e itself is 7.1:1).
-     Browsers without relative colour syntax keep the plain accent (first declaration). */
-  --l-accent-text: var(--l-accent);
-  --l-accent-text: oklch(from var(--l-accent) min(l, 0.5) min(c, 0.14) h);
-  --l-accent-soft: color-mix(in oklab, var(--l-accent) 10%, var(--l-bg));
+  /* Accent as text/fill: OKLCH lightness capped at 0.5 and chroma at 0.14, so a light owner-picked accent still reads on paper
+     (>= 5.3:1 on --l-bg and >= 4.9:1 on --l-bg-2 for any accent; #2e5e4e itself is 7.1:1, and the paper on it as a button
+     fill reads the same). The soft tint is 10% accent on --l-bg in OKLab (the pill and photo-less hero ground; ink on it
+     >= 11.9:1). Both are computed in Template.tsx (src/templates/shared/color.ts capAccent, mixHex) and set inline, so no
+     browser needs CSS relative colour syntax or color-mix for them; these values are only the defaults for a render without
+     the inline properties. */
+  --l-accent-text: #2e5e4e;
+  --l-accent-soft: #e3eae6;
   --l-amber: oklch(0.62 0.13 70);        /* #b77610, opens-later dot */
   --l-red: oklch(0.55 0.16 30);          /* #bd4334, closed dot, 5.0:1 */
   --l-ease: cubic-bezier(0.22, 1, 0.36, 1);

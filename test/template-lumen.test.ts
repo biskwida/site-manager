@@ -5,7 +5,7 @@ import { readFileSync } from "node:fs";
 import { describe, expect, it, vi } from "vitest";
 import type { DraftInfo, Lang, SiteState } from "@/src/domain/types";
 import { LangProvider } from "@/src/i18n";
-import { makeDemo } from "./helpers";
+import { EXTREME_ACCENTS, LOOK_STEP_ACCENTS, makeDemo } from "./helpers";
 
 // next/font/google only works through the Next.js compiler; at test time its module is empty, so stub every family the templates use.
 // (The global mock in test/setup.ts returns generic names; this file asserts the fv-* values below, so it keeps its own.)
@@ -14,6 +14,7 @@ vi.mock("next/font/google", () => {
   return { Literata: font("literata"), Onest: font("onest"), Unbounded: font("unbounded"), Manrope: font("manrope"), Playfair_Display: font("playfair"), Golos_Text: font("golos") };
 });
 
+import { contrastRatio } from "@/src/templates/shared/color";
 import { def } from "@/src/templates/lumen";
 
 // createElement passes children positionally, which LangProvider's required `children` prop type does not model.
@@ -99,6 +100,26 @@ describe("lumen template", () => {
     const html = await render("en", { mutate });
     expect(html).toContain("Item 39");
     expect(html.match(/class="l-jumplink"/g)?.length).toBe(4);
+  });
+  it("computes the accent text and soft tint in TypeScript (no CSS relative colour) and keeps both readable for every accent", async () => {
+    const css = readFileSync(new URL("../src/templates/lumen/styles.css", import.meta.url), "utf8");
+    expect(css).not.toMatch(/oklch\(from/);
+    expect(css).not.toMatch(/--l-accent-soft:\s*color-mix/);
+    for (const accent of [def.accentDefault, ...LOOK_STEP_ACCENTS, ...EXTREME_ACCENTS]) {
+      const html = await render("en", { page: "home", mutate: (s) => { s.venue.theme.accent = accent; } });
+      const text = /--l-accent-text:(#[0-9a-f]{6})/.exec(html)?.[1];
+      const soft = /--l-accent-soft:(#[0-9a-f]{6})/.exec(html)?.[1];
+      expect(text, accent).toBeDefined();
+      expect(soft, accent).toBeDefined();
+      // Eyebrow, open dot and focus ring on both papers; the same pair is the paper on the accent button.
+      expect(contrastRatio(text!, "#f8fbf9"), `${text} on --l-bg`).toBeGreaterThanOrEqual(5.3);
+      expect(contrastRatio(text!, "#edf2ed"), `${text} on --l-bg-2`).toBeGreaterThanOrEqual(4.9);
+      // The pill's ink on the soft tint.
+      expect(contrastRatio("#191f1a", soft!), `ink on ${soft}`).toBeGreaterThanOrEqual(11.9);
+    }
+    const html = await render("en", { mutate: (s) => { s.venue.theme.accent = "#2e5e4e"; } });
+    expect(html).toContain("--l-accent-text:#2e5e4e"); // the default is inside the caps: unchanged
+    expect(html).toContain("--l-accent-soft:#e3eae6");
   });
   it("keeps the change flash reaching its final frame under reduced motion", () => {
     // `animation: none` would freeze .l-flash at its base opacity (1) forever, because useLiveSite never clears `changed`.

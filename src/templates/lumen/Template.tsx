@@ -2,6 +2,7 @@
 import type { CSSProperties } from "react";
 import { useLang } from "@/src/i18n";
 import type { TemplateProps } from "../index";
+import { capAccent, mixHex } from "../shared/color";
 import { mediaUrl } from "../shared/media";
 import { useLiveSite, useNow } from "../shared/useLiveSite";
 import type { MediaLookup } from "./bits";
@@ -34,9 +35,14 @@ export function Template({ state: initial, now: initialNow, slug, page, draft, l
   const { state, changed } = useLiveSite(initial, feedUrl, live);
   const now = useNow(initialNow);
   const accent = ACCENT_RE.test(state.venue.theme.accent) ? state.venue.theme.accent : "#2e5e4e";
+  // Accent as text and button fill (OKLCH lightness capped at 0.5, chroma at 0.14) and the soft tint (10% accent on the paper,
+  // #f8fbf9), computed here rather than with CSS relative colour syntax: the text reads >= 4.9:1 on either paper and the ink
+  // >= 11.9:1 on the tint for any accent (test/template-lumen.test.ts).
+  const accentText = capAccent(accent, { maxL: 0.5, maxC: 0.14 });
+  const accentSoft = mixHex(accent, "#f8fbf9", 0.1);
   const media: MediaLookup = (id) => mediaUrl(id ? state.media.find((m) => m.id === id) : null, { preview });
   return (
-    <div className={`tpl-lumen ${fontVars}`} style={{ "--accent": accent } as CSSProperties} data-page={page}>
+    <div className={`tpl-lumen ${fontVars}`} style={{ "--accent": accent, "--l-accent-text": accentText, "--l-accent-soft": accentSoft } as CSSProperties} data-page={page}>
       {draft && <DraftNote summary_bg={draft.summary_bg} summary_en={draft.summary_en} />}
       <Hero state={state} slug={slug} page={page} media={media} />
       <main id="main" className="l-wrap l-main">
