@@ -7,6 +7,9 @@ import type { ConnectedApp, OwnerCode } from "@/src/server/connect-apps";
 import { Section } from "./bits";
 import type { Post } from "./useAdminOverview";
 
+// Focus moves here after a new code arrives so screen readers read it; it is not a control, so no focus ring
+// (inline because the global :focus-visible outline in app/globals.css is unlayered and beats utilities).
+const NO_RING = { outline: "none" } as const;
 const isLocalized = (d: unknown): d is { bg: string; en: string } =>
   typeof d === "object" && d !== null && typeof (d as { bg?: unknown }).bg === "string" && typeof (d as { en?: unknown }).en === "string";
 
@@ -59,7 +62,7 @@ export function AppsCard({ apps, post, initialCode = null }: { apps: ConnectedAp
         <div className="border-t border-ink/10 px-4 py-4 sm:px-5">
           {fresh ? (
             <div className="transition-[opacity,transform] duration-200 ease-out starting:translate-y-1 starting:opacity-0 motion-reduce:transition-none">
-              <p ref={lead} tabIndex={-1} className="mb-4 text-sm text-ink-soft text-pretty outline-none">{t("admin.apps.anotherLead")}</p>
+              <p ref={lead} tabIndex={-1} style={NO_RING} className="mb-4 text-sm text-ink-soft text-pretty">{t("admin.apps.anotherLead")}</p>
               <ConnectApps key={fresh.code} code={fresh.code} links={fresh.links} />
               <button type="button" onClick={() => setFresh(null)}
                 className="mt-5 min-h-11 rounded-full px-5 text-sm font-semibold text-ink ring-1 ring-ink/25 transition-[transform,background-color] duration-150 ease-out hover:bg-ink/5 active:scale-[0.98] motion-reduce:transition-none">{t("admin.apps.hide")}</button>

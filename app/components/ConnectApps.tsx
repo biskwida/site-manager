@@ -125,7 +125,7 @@ export function ConnectApps({ code, links }: Props) {
           </a>
         )}
         {several && (
-          <ul className="grid gap-2 sm:grid-cols-2">
+          <ul className="grid gap-2">
             {links.map((l) => (
               <li key={l.app}>
                 <a href={l.url} data-app={l.app} className={`flex min-h-12 items-center gap-2.5 rounded-full bg-card px-4 text-base font-semibold text-ink ring-1 ring-ink/15 hover:ring-accent/60 ${press}`}>

@@ -54,6 +54,9 @@ interface Props {
 
 type Fresh = { code: string; links: AppLink[]; chats: number };
 const chatsOf = (s: DoneStatusResponse) => (s.connected_apps ?? []).reduce((n, a) => n + a.owners + a.staff, 0);
+// Focus moves here after a new code arrives so screen readers read it; it is not a control, so no focus ring
+// (inline because the global :focus-visible outline in app/globals.css is unlayered and beats utilities).
+const NO_RING = { outline: "none" } as const;
 const isLocalized = (d: unknown): d is { bg: string; en: string } =>
   typeof d === "object" && d !== null && typeof (d as { bg?: unknown }).bg === "string" && typeof (d as { en?: unknown }).en === "string";
 
@@ -176,7 +179,7 @@ export function DoneStatus({ id, slug, code, links, apps, adminKey, baseUrl, ini
 
       {fresh && (
         <section aria-labelledby="another" className="mt-5 rounded-3xl bg-card p-4 ring-1 ring-ink/10 transition-[opacity,transform] duration-200 ease-out starting:translate-y-1 starting:opacity-0 motion-reduce:transition-none sm:p-6">
-          <h2 id="another" ref={freshHeading} tabIndex={-1} className="text-xl font-semibold outline-none">{t("done.anotherTitle")}</h2>
+          <h2 id="another" ref={freshHeading} tabIndex={-1} style={NO_RING} className="text-xl font-semibold">{t("done.anotherTitle")}</h2>
           <p className="mb-4 mt-1 text-sm text-ink-soft text-pretty">{t("done.anotherLead")}</p>
           <ConnectApps key={fresh.code} code={fresh.code} links={fresh.links} />
         </section>
