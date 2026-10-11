@@ -74,7 +74,7 @@ export interface NewChangeSet {
 export type ChangeSetPatch = Partial<Pick<ChangeSet, "status" | "apply_at" | "reminded_at" | "decided_at" | "applied_at" | "reverted_by" | "tg_message_id" | "preview_bg" | "preview_en">>;
 export type VenuePatch = Partial<Pick<Venue,
   "slug" | "name" | "tagline_bg" | "tagline_en" | "about_bg" | "about_en" | "address" | "phone" | "maps_url" | "instagram" |
-  "hours" | "tz" | "default_lang" | "theme" | "template" | "business_type" | "status" | "wizard_draft">>;
+  "hours" | "tz" | "default_lang" | "theme" | "template" | "business_type" | "status" | "wizard_draft" | "instagram_import">>;
 
 export interface ExpiredTimer {
   item: Item;

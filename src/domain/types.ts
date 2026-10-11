@@ -83,7 +83,28 @@ export interface Venue {
   deploy: DeployInfo | null;
   /** The wizard's unpublished form; null for every live venue. */
   wizard_draft: WizardDraft | null;
+  /** Server-only: photos the owner may import from their Instagram (wizard drafts; cleared on publish). Never in the public feed. */
+  instagram_import: InstagramImport | null;
   created_at: string;
+}
+
+/** One image the owner can pick (a single-image post or one image of a carousel), as read once from the Instagram API. */
+export interface InstagramCandidate {
+  id: string;
+  /** Instagram CDN URL (https, *.cdninstagram.com or *.fbcdn.net); the import route fetches only these stored URLs. */
+  url: string;
+  thumb: string;
+  /** At most 280 characters. */
+  caption: string;
+  /** https://www.instagram.com/... or "". */
+  permalink: string;
+  /** ISO timestamp or "". */
+  taken_at: string;
+}
+export interface InstagramImport {
+  fetched_at: string;
+  username?: string;
+  items: InstagramCandidate[];
 }
 
 export interface Category {

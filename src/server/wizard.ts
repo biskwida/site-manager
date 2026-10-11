@@ -16,7 +16,7 @@ import { bothLangs, DRAFT_SLUG_PREFIX, emptyDraft, slugError, WIZARD_MAX_IMAGE_B
 import { readDraftFromRequest, serializeDraftCookie } from "./draft-cookie";
 import { newDraftToken, sha256Hex } from "./hash";
 
-/** Error codes the wizard client can branch on. The last four come from the Claude-backed routes (src/server/wizard-ai.ts). */
+/** Error codes the wizard client can branch on. `ai_*` and `refused` come from the Claude-backed routes (src/server/wizard-ai.ts). */
 export type WizardErrorCode =
   | "bad_request"
   | "invalid"
@@ -36,7 +36,13 @@ export type WizardErrorCode =
   /** 502: the model call failed or returned nothing usable; try again. */
   | "ai_error"
   /** 429: this draft's hourly or the server's daily number of AI requests is used up. */
-  | "ai_rate_limited";
+  | "ai_rate_limited"
+  /** 503: no INSTAGRAM_APP_ID / INSTAGRAM_APP_SECRET on this server; the UI hides the Instagram button (src/server/instagram.ts). */
+  | "instagram_unavailable"
+  /** 410: the stored Instagram list is missing or over an hour old; sign in to Instagram again. */
+  | "instagram_expired"
+  /** 502: none of the picked images could be downloaded from Instagram's CDN. */
+  | "instagram_error";
 
 /** Every wizard failure the client can show: a code, both languages, an HTTP status and optional field errors. */
 export class WizardError extends Error {
@@ -242,8 +248,11 @@ async function publishClaimed(store: Store, venue: Venue, d: WizardDraft, now: D
     await store.applyChangeSet(cs.id, nowIso);
   }
 
-  // 3. Live: the last write. From here on the venue is public and the wizard draft is gone.
-  await store.updateVenue(venue.id, { status: "live", wizard_draft: null });
+  // 3. Live: the last write. From here on the venue is public and the wizard draft is gone, with any Instagram import list
+  //    (written only when there is one, so a database without the instagram_import column still publishes).
+  //    The list is checked on a fresh read: the Instagram callback may have stored one after this request read the venue.
+  const latest = await store.getVenue(venue.id);
+  await store.updateVenue(venue.id, { status: "live", wizard_draft: null, ...(latest.instagram_import ? { instagram_import: null } : {}) });
 
   // 4. Owner invite and admin token. A failure here leaves a live venue without a code; the done page issues a fresh invite.
   const inviteCode = await store.createInvite(venue.id, "owner", new Date(now.getTime() + INVITE_TTL_MS).toISOString());
@@ -336,8 +345,9 @@ export async function handlePutDraft(req: Request, d: WizardDeps, venue: Venue):
   }
 }
 
-const TOO_LARGE = () => new WizardError("too_large", 400, "Снимката е над 4 MB.", "The image is over 4 MB.");
-const UNSUPPORTED = () => new WizardError("unsupported_type", 400, "Само снимки: JPEG, PNG, WebP или GIF.", "Images only: JPEG, PNG, WebP or GIF.");
+export const TOO_LARGE = () => new WizardError("too_large", 400, "Снимката е над 4 MB.", "The image is over 4 MB.");
+export const TOO_MANY_MEDIA = () => new WizardError("too_many", 400, `Една чернова може да има до ${MAX_DRAFT_MEDIA} снимки.`, `A draft can have up to ${MAX_DRAFT_MEDIA} images.`);
+export const UNSUPPORTED = () => new WizardError("unsupported_type", 400, "Само снимки: JPEG, PNG, WebP или GIF.", "Images only: JPEG, PNG, WebP or GIF.");
 /** Multipart overhead allowed on top of the image when checking content-length before reading the body. */
 const FORM_OVERHEAD = 64 * 1024;
 
@@ -355,8 +365,7 @@ export async function handleMedia(req: Request, d: WizardDeps, venue: Venue): Pr
   try {
     if (venue.status !== "draft") throw ALREADY_PUBLISHED(venue.slug);
     // Cheap refusals first, before the body is read.
-    if ((await d.store.getSite(venue.id)).media.length >= MAX_DRAFT_MEDIA)
-      throw new WizardError("too_many", 400, `Една чернова може да има до ${MAX_DRAFT_MEDIA} снимки.`, `A draft can have up to ${MAX_DRAFT_MEDIA} images.`);
+    if ((await d.store.getSite(venue.id)).media.length >= MAX_DRAFT_MEDIA) throw TOO_MANY_MEDIA();
     const declared = Number(req.headers.get("content-length"));
     if (Number.isFinite(declared) && declared > WIZARD_MAX_IMAGE_BYTES + FORM_OVERHEAD) throw TOO_LARGE();
     const form = await req.formData().catch(() => null);

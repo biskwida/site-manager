@@ -37,4 +37,10 @@ describe("loadConfig", () => {
     expect(loadConfig(full).destinationSecretKey).toBeNull();
     expect(loadConfig({ ...full, DESTINATION_SECRET_KEY: "ab".repeat(32) }).destinationSecretKey).toBe("ab".repeat(32));
   });
+
+  it("reads the optional Instagram app id and secret (both or nothing)", () => {
+    expect(loadConfig(full)).toMatchObject({ instagramAppId: null, instagramAppSecret: null });
+    expect(loadConfig({ ...full, INSTAGRAM_APP_ID: " 123 ", INSTAGRAM_APP_SECRET: "sec" })).toMatchObject({ instagramAppId: "123", instagramAppSecret: "sec" });
+    expect(loadConfig({ ...full, INSTAGRAM_APP_ID: "123" })).toMatchObject({ instagramAppId: "123", instagramAppSecret: null });
+  });
 });

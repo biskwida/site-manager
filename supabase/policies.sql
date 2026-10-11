@@ -17,7 +17,13 @@ alter table public.rate_limits enable row level security;
 revoke all on public.venue_members, public.venue_invites, public.venue_admin_tokens, public.change_sets, public.changes, public.conversations, public.rate_limits from anon, authenticated;
 revoke execute on function public.bump_rate_limit(text, int, int, timestamptz) from anon, authenticated, public;
 revoke insert, update, delete, truncate on public.venues, public.site_texts, public.categories, public.items, public.holidays, public.announcements, public.media from anon, authenticated;
-grant select on public.venues, public.site_texts, public.categories, public.items, public.holidays, public.announcements, public.media to anon, authenticated;
+grant select on public.site_texts, public.categories, public.items, public.holidays, public.announcements, public.media to anon, authenticated;
+-- R27: venues are readable column by column. The list is exactly PublicVenue (src/server/site.ts, the public feed's venue), so
+-- deploy, wizard_draft, draft_token_hash, publishing_at and instagram_import are never readable with the anon key, not even on
+-- a live row. Revoking the table privilege also drops every column grant, so a re-run (db:apply) starts clean each time.
+-- test/policies-grants.test.ts keeps this list equal to PublicVenue.
+revoke select on public.venues from anon, authenticated;
+grant select (id, slug, name, tagline_bg, tagline_en, about_bg, about_en, address, phone, maps_url, instagram, cover_media_id, logo_media_id, hours, tz, default_lang, theme, template, business_type, status, created_at) on public.venues to anon, authenticated;
 
 -- Anon sees only live venues and their content; wizard drafts are reachable solely through the server with the draft token.
 drop policy if exists "anon read venues" on public.venues;
