@@ -1,6 +1,6 @@
 // test/template-color.test.ts
 import { describe, expect, it } from "vitest";
-import { capAccent, contrastRatio, hexToOklch, oklchToHex } from "@/src/templates/shared/color";
+import { capAccent, contrastRatio, hexToOklch, mixHex, oklchToHex } from "@/src/templates/shared/color";
 
 const channels = (hex: string) => [1, 3, 5].map((i) => parseInt(hex.slice(i, i + 2), 16));
 
@@ -49,6 +49,26 @@ describe("shared/color", () => {
   it("returns invalid input unchanged", () => {
     expect(capAccent("not-a-colour", { maxL: 0.42 })).toBe("not-a-colour");
     expect(capAccent("", { maxL: 0.42 })).toBe("");
+  });
+  it("returns the fallback instead of a NaN hex when a component is not finite", () => {
+    expect(oklchToHex({ l: NaN, c: 0.1, h: 30 })).toBe("#000000");
+    expect(oklchToHex({ l: 0.5, c: Infinity, h: 30 })).toBe("#000000");
+    expect(oklchToHex({ l: 0.5, c: 0.1, h: -Infinity }, "#6e1f1b")).toBe("#6e1f1b");
+    expect(oklchToHex({ l: 0.5, c: 0, h: 0 }, "#6e1f1b")).toMatch(/^#[0-9a-f]{6}$/);
+  });
+  it("mixes in OKLab like color-mix(in oklab, a t%, b)", () => {
+    expect(mixHex("#2e5e4e", "#f8fbf9", 0)).toBe("#f8fbf9");
+    expect(mixHex("#2e5e4e", "#f8fbf9", 1)).toBe("#2e5e4e");
+    expect(mixHex("#000000", "#ffffff", 0.5)).toBe("#636363"); // OKLab L 0.5, not the sRGB midpoint #808080
+    expect(hexToOklch(mixHex("#000000", "#ffffff", 0.5))!.l).toBeCloseTo(0.5, 2);
+    // 10% of the lumen green on its paper: a faint green tint, as the browser computes it.
+    channels(mixHex("#2e5e4e", "#f8fbf9", 0.1)).forEach((v, i) => expect(Math.abs(v - channels("#e3eae6")[i])).toBeLessThanOrEqual(1));
+    expect(mixHex("#2e5e4e", "#f8fbf9", 2)).toBe("#2e5e4e"); // t is clamped to 0..1
+  });
+  it("returns the ground unchanged when a mix input is not a hex colour", () => {
+    expect(mixHex("nope", "#f8fbf9", 0.1)).toBe("#f8fbf9");
+    expect(mixHex("#2e5e4e", "nope", 0.1)).toBe("nope");
+    expect(mixHex("#2e5e4e", "#f8fbf9", NaN)).toBe("#f8fbf9");
   });
   it("computes WCAG contrast ratios", () => {
     expect(contrastRatio("#000000", "#ffffff")).toBeCloseTo(21, 1);

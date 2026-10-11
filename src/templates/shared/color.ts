@@ -57,8 +57,12 @@ export function hexToOklch(hex: string): Oklch | null {
   return { l: L, c, h };
 }
 
-/** OKLCH → "#rrggbb". Out-of-gamut colours keep their lightness and hue and lose chroma until they fit sRGB (then clamp). */
-export function oklchToHex(color: Oklch): string {
+/**
+ * OKLCH → "#rrggbb". Out-of-gamut colours keep their lightness and hue and lose chroma until they fit sRGB (then clamp).
+ * A NaN or infinite component returns `fallback` ("#000000" unless given), so a bad value never reaches a style as "#NaNNaN…".
+ */
+export function oklchToHex(color: Oklch, fallback = "#000000"): string {
+  if (![color.l, color.c, color.h].every(Number.isFinite)) return fallback;
   const l = Math.min(1, Math.max(0, color.l));
   let rgb = oklchToLinear({ ...color, l });
   if (!inGamut(rgb)) {
@@ -89,6 +93,22 @@ export function capAccent(hex: string, caps: { minL?: number; maxL?: number; max
     return `#${rgb.map((v) => Math.round(v * 255).toString(16).padStart(2, "0")).join("")}`;
   }
   return oklchToHex({ l, c, h: o.h });
+}
+
+/**
+ * Mixes two hex colours in OKLab, the TypeScript twin of `color-mix(in oklab, a <t*100>%, b)`: `t` is the share of `a`
+ * (0 gives `b`, 1 gives `a`; clamped to 0..1). `mixHex("#2e5e4e", "#f8fbf9", 0.1)` → "#e3eae6". When either input is not a hex
+ * colour, `b` comes back unchanged (it is the ground the mix sits on, so the result is never a broken value).
+ */
+export function mixHex(a: string, b: string, t: number): string {
+  const x = hexToOklch(a);
+  const y = hexToOklch(b);
+  if (!x || !y || !Number.isFinite(t)) return b;
+  const w = Math.min(1, Math.max(0, t));
+  const lab = (o: Oklch) => [o.l, o.c * Math.cos((o.h * Math.PI) / 180), o.c * Math.sin((o.h * Math.PI) / 180)];
+  const [l, A, B] = lab(x).map((v, i) => v * w + lab(y)[i] * (1 - w));
+  const c = Math.hypot(A, B);
+  return oklchToHex({ l, c, h: c < 1e-4 ? 0 : ((Math.atan2(B, A) * 180) / Math.PI + 360) % 360 });
 }
 
 /** WCAG 2 contrast ratio of two hex colours (1..21); NaN when either is not a hex colour. */

@@ -70,3 +70,8 @@ export function toolSchemaViolations(schema: unknown, path = "$"): string[] {
   if ("items" in node) out.push(...toolSchemaViolations(node.items, `${path}.items`));
   return out;
 }
+
+/** The accent presets the wizard's Look step offers (PRESETS in app/new/components/Steps/Look.tsx; it does not export them). */
+export const LOOK_STEP_ACCENTS = ["#2f6b4f", "#8f5c10", "#a4442c", "#1d4ed8", "#6b21a8", "#1d2a24"];
+/** Owner picks outside every template's comfortable range: a very light butter and a near-black violet. */
+export const EXTREME_ACCENTS = ["#f4e7a1", "#1a0b3d"];
