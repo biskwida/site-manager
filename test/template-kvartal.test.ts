@@ -6,7 +6,7 @@ import { describe, expect, it, vi } from "vitest";
 import type { DraftInfo, Lang, SiteState } from "@/src/domain/types";
 import { LangProvider } from "@/src/i18n";
 import { TEMPLATE_ACCENT_DEFAULTS } from "@/src/wizard/schema";
-import { EXTREME_ACCENTS, LOOK_STEP_ACCENTS, makeDemo } from "./helpers";
+import { EXTREME_ACCENTS, LOOK_ACCENT_PRESETS, makeDemo, sweepAccents } from "./helpers";
 
 // next/font/google only works through the Next.js compiler; this file asserts the fv-* values below, so it keeps its own stub.
 vi.mock("next/font/google", () => {
@@ -15,6 +15,7 @@ vi.mock("next/font/google", () => {
 });
 
 import { def } from "@/src/templates/kvartal";
+import { accentVars } from "@/src/templates/kvartal/Template";
 import { contrastRatio } from "@/src/templates/shared/color";
 import { fitHeadline } from "@/src/templates/kvartal/Hero";
 
@@ -228,7 +229,7 @@ describe("kvartal template", () => {
     const css = readFileSync(new URL("../src/templates/kvartal/styles.css", import.meta.url), "utf8");
     expect(css).not.toMatch(/oklch\(from/);
     expect(css).not.toMatch(/--kv-accent-soft:\s*color-mix/);
-    for (const accent of [def.accentDefault, ...LOOK_STEP_ACCENTS, ...EXTREME_ACCENTS]) {
+    for (const accent of [def.accentDefault, ...LOOK_ACCENT_PRESETS, ...EXTREME_ACCENTS]) {
       const html = await render("en", { page: "home", mutate: (s) => { s.venue.theme.accent = accent; } });
       const read = (name: string) => new RegExp(`--kv-accent-${name}:(#[0-9a-f]{6})`).exec(html)?.[1];
       const [text, fill, soft] = [read("text"), read("fill"), read("soft")];
@@ -244,6 +245,32 @@ describe("kvartal template", () => {
     expect(html).toContain("--kv-accent-text:#b22905");
     expect(html).toContain("--kv-accent-fill:#bc3415");
     expect(html).toContain("--kv-accent-soft:#e7d1c8");
+  });
+  it("keeps the default and every Look-step preset at exactly the colours they had before the contrast guard", () => {
+    const expected: [string, Record<string, string>][] = [
+      ["#C23A1C", {"--kv-accent-text": "#b22905", "--kv-accent-fill": "#bc3415", "--kv-accent-soft": "#e7d1c8"}],
+      ["#2f6b4f", {"--kv-accent-text": "#2f6b4f", "--kv-accent-fill": "#2f6b4f", "--kv-accent-soft": "#ced6cd"}],
+      ["#8f5c10", {"--kv-accent-text": "#895705", "--kv-accent-fill": "#8f5c10", "--kv-accent-soft": "#ddd4c7"}],
+      ["#a4442c", {"--kv-accent-text": "#a04129", "--kv-accent-fill": "#a4442c", "--kv-accent-soft": "#e2d1c8"}],
+      ["#1d4ed8", {"--kv-accent-text": "#1d4ed8", "--kv-accent-fill": "#1d4ed8", "--kv-accent-soft": "#cbd4e5"}],
+      ["#6b21a8", {"--kv-accent-text": "#6b21a8", "--kv-accent-fill": "#6b21a8", "--kv-accent-soft": "#d6cedd"}],
+      ["#1d2a24", {"--kv-accent-text": "#1d2a24", "--kv-accent-fill": "#1d2a24", "--kv-accent-soft": "#c9cbc5"}],
+    ];
+    expect(expected.map(([a]) => a.toLowerCase())).toEqual(expect.arrayContaining([def.accentDefault.toLowerCase(), ...LOOK_ACCENT_PRESETS]));
+    for (const [accent, vars] of expected) expect(accentVars(accent), accent).toEqual(vars);
+  });
+  it("keeps every promised contrast floor across the colour space (64 hues × 3 lightnesses × 3 chromas)", () => {
+    const misses: string[] = [];
+    for (const accent of [...sweepAccents(), ...EXTREME_ACCENTS]) {
+      const v = accentVars(accent);
+      const pairs: [string, number, number][] = [
+        [`${v["--kv-accent-text"]} on paper`, contrastRatio(v["--kv-accent-text"], "#e9e8e3"), 4.5],
+        [`--kv-on on ${v["--kv-accent-fill"]}`, contrastRatio("#f6f5f1", v["--kv-accent-fill"]), 4.5],
+        [`ink on ${v["--kv-accent-soft"]}`, contrastRatio("#17191b", v["--kv-accent-soft"]), 4.5],
+      ];
+      for (const [what, ratio, floor] of pairs) if (!(ratio >= floor)) misses.push(`${accent}: ${what} ${ratio.toFixed(2)} < ${floor}`);
+    }
+    expect(misses).toEqual([]);
   });
   it("keeps the change flash reaching its final frame under reduced motion", () => {
     // `animation: none` would freeze .kv-flash at its base opacity (1) forever, because useLiveSite never clears `changed`.
