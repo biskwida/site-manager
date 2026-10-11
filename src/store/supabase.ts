@@ -570,6 +570,17 @@ export class SupabaseStore implements Store {
     }
     return (data ?? []).length > 0;
   }
+
+  // --- Dashboard Instagram import (appended 2026-10-11) ---
+  async replaceDestinationSecrets(id: string, expectedSecrets: string, next: { config: Record<string, unknown>; secrets: string }) {
+    // Conditional on the secrets read earlier: a reconnect or another refresh in between is never overwritten.
+    const { data, error } = await this.db.from("venue_destinations")
+      .update({ config: next.config, secrets: next.secrets, updated_at: new Date().toISOString() })
+      .eq("id", id).eq("secrets", expectedSecrets)
+      .select("id");
+    if (error) throw new Error(`replaceDestinationSecrets ${id}: ${error.message}`);
+    return (data ?? []).length > 0;
+  }
 }
 
 // --- Destinations (integrations track, appended 2026-10-10) ---

@@ -5,8 +5,8 @@ import { getServerDeps } from "@/src/server/deps";
 import { handleDashboardInstagramImport, handleDashboardInstagramList, type DashboardInstagramDeps } from "@/src/server/dashboard-instagram";
 
 export const dynamic = "force-dynamic";
-// Up to 12 downloads (10 s timeout each, in parallel) plus the Instagram reads.
-export const maxDuration = 60;
+// Up to 12 downloads (a few at a time, 10 s timeout per hop) plus the Instagram reads; the import stops starting downloads at 240 s.
+export const maxDuration = 300;
 
 async function auth(req: Request, slug: string) {
   const deps = await getServerDeps((fn) => after(fn));

@@ -506,7 +506,7 @@ const bg: Record<MessageKey, string> = {
   "admin.igImport.import": "Внеси избраните ({n})",
   "admin.igImport.importing": "Внасяме снимките…",
   "admin.igImport.close": "Затвори",
-  "admin.igImport.refresh": "Обнови списъка",
+  "admin.igImport.refresh": "Опресни списъка",
   "admin.igImport.done": "Готово: внесохме {n} снимки и вече са на сайта. Ако нещо не ви харесва, отменете го от дневника на промените.",
   "admin.igImport.someFailed": "Не се внесоха {n} снимки. Опитайте с тях отново.",
   "admin.igImport.failed": "Внасянето не се получи. Опитайте отново.",

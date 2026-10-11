@@ -264,3 +264,12 @@ export interface Store {
    */
   claimSync(id: string, now: string, leaseUntil: string): Promise<boolean>;
 }
+
+// --- Dashboard Instagram import (appended 2026-10-11) ---
+export interface Store {
+  /**
+   * Replaces one destination's config and secrets only while its secrets are still `expectedSecrets` (a reconnect or another
+   * refresh in between wins). Status and last_error stay as they are. True when the row was written.
+   */
+  replaceDestinationSecrets(id: string, expectedSecrets: string, next: { config: Record<string, unknown>; secrets: string }): Promise<boolean>;
+}

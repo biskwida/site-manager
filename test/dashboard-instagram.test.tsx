@@ -206,14 +206,19 @@ describe("dashboard Instagram list, limits and token writes", () => {
     // A reconnect lands while the refresh is in flight: the reconnect's token stays.
     const r = await setup({ refreshedAt: old });
     r.meta.addFeedPost(r.user.user_id);
+    const other = r.meta.addInstagramUser("agala.new");
+    r.meta.addFeedPost(other.user_id);
     const inner = r.d.fetch;
     r.d.fetch = async (input, init) => {
       const u = String(input instanceof Request ? input.url : input);
-      if (u.includes("/refresh_access_token")) await r.store.upsertDestination({ venue_id: r.venue.id, kind: "instagram", config: { ig_user_id: r.user.user_id, username: "agala.cafe", connected_at: T0.toISOString(), token_refreshed_at: T0.toISOString() }, secrets: encryptSecrets({ token: "RECONNECTED" }, KEY), status: "connected" });
+      if (u.includes("/refresh_access_token")) await r.store.upsertDestination({ venue_id: r.venue.id, kind: "instagram", config: { ig_user_id: other.user_id, username: other.username, connected_at: T0.toISOString(), token_refreshed_at: T0.toISOString() }, secrets: encryptSecrets({ token: other.token }, KEY), status: "connected" });
       return inner(input, init);
     };
-    expect((await list(r)).res.status).toBe(200);
-    expect(decryptSecrets((await r.store.getDestination(r.venue.id, "instagram"))!.secrets, KEY).token).toBe("RECONNECTED");
+    const got = await list(r);
+    expect(got.res.status).toBe(200);
+    // The read follows the new connection, and its token is what stays stored.
+    expect(got.body.username).toBe("agala.new");
+    expect(decryptSecrets((await r.store.getDestination(r.venue.id, "instagram"))!.secrets, KEY).token).toBe(other.token);
   });
 });
 

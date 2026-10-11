@@ -450,4 +450,14 @@ export class InMemoryStore implements Store {
     for (const [k, v] of Object.entries(patch)) if (v !== undefined) (s as unknown as Record<string, unknown>)[k] = typeof v === "object" && v !== null ? clone(v) : v;
     if (patch.updated_at === undefined) s.updated_at = this.clock();
   }
+
+  // --- Dashboard Instagram import (appended 2026-10-11) ---
+  async replaceDestinationSecrets(id: string, expectedSecrets: string, next: { config: Record<string, unknown>; secrets: string }) {
+    const d = this.destinations.get(id);
+    if (!d || d.secrets !== expectedSecrets) return false;
+    d.config = clone(next.config);
+    d.secrets = next.secrets;
+    d.updated_at = this.clock();
+    return true;
+  }
 }

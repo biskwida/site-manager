@@ -204,8 +204,10 @@ export async function instagramReadToken(d: { store: SyncDeps["store"]; secretKe
   }
   const token = secrets.token;
   if (!token) return null;
+  // Only config and secrets, and only while the stored secrets are still the ones read above: status and last_error stay, and a
+  // reconnect that landed meanwhile is never overwritten. The token is re-encrypted only when it changed.
   const save = (next: string) =>
-    d.store.upsertDestination({ venue_id: venueId, kind: "instagram", config: { ...dest.config, token_refreshed_at: now.toISOString() }, secrets: encryptSecrets({ ...secrets, token: next }, d.secretKey), status: dest.status });
+    d.store.replaceDestinationSecrets(dest.id, dest.secrets, { config: { ...dest.config, token_refreshed_at: now.toISOString() }, secrets: next === token ? dest.secrets : encryptSecrets({ ...secrets, token: next }, d.secretKey) });
   const age = tokenAge(dest.config, now);
   if (age === "unknown") {
     await save(token).catch(() => undefined);
@@ -215,8 +217,10 @@ export async function instagramReadToken(d: { store: SyncDeps["store"]; secretKe
   try {
     const next = await refreshToken(d.fetch, token);
     if (!next) return token;
-    await save(next);
-    return next;
+    if (await save(next)) return next;
+    // The connection changed meanwhile (a reconnect): read with what is stored now.
+    const now2 = await d.store.getDestination(venueId, "instagram");
+    return now2 && now2.status !== "disconnected" ? (decryptSecrets(now2.secrets, d.secretKey).token ?? null) : null;
   } catch {
     return token;
   }
