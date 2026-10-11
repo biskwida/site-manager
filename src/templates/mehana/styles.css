@@ -17,11 +17,11 @@
   --me-gold: #e8c98b;        /* links and holidays on the band (>= 4.9:1) and on ink (10.4:1) */
   --me-green: #9bd39b;       /* "open" dot on the band (>= 4.6:1) */
   --me-on-band: #f3eadb;
-  /* The band: the owner's accent with OKLCH lightness capped at 0.42 and chroma at 0.13, computed in Template.tsx
-     (src/templates/shared/color.ts capAccent) and set inline, so no browser needs CSS relative colour syntax. Parchment on it stays
-     >= 6.6:1 and the gold link >= 4.9:1 for any accent, including a light one (#e8b4b8 becomes #6a3f43). Of the four mockup
-     options, #6e1f1b and #3b2f5c pass unchanged; #2f5d46 deepens to #2a5841 and #7a4a12 to #6f4002. This value is only the
-     default for a render without the inline property. */
+  /* The band: the owner's accent with OKLCH lightness capped at 0.42 and chroma at 0.13, computed in Template.tsx accentVars
+     (shared/color.ts capAccent, then ensureContrast as a guard) and set inline, so no browser needs CSS relative colour
+     syntax. Parchment on it stays >= 6.6:1 and the gold link >= 4.9:1 for any accent, including a light one (#e8b4b8 becomes
+     #6a3f43). Of the four mockup options, #6e1f1b and #3b2f5c pass unchanged; #2f5d46 deepens to #2a5841 and #7a4a12 to
+     #6f4002. This value is only the default for a render without the inline property. */
   --me-wine: #6e1f1b;
   --me-on-band-soft: color-mix(in oklab, var(--me-on-band) 90%, var(--me-wine));
   --me-band-line: color-mix(in oklab, var(--me-on-band) 50%, var(--me-wine));

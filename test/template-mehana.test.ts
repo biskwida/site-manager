@@ -5,7 +5,7 @@ import { readFileSync } from "node:fs";
 import { describe, expect, it, vi } from "vitest";
 import type { DraftInfo, Lang, SiteState } from "@/src/domain/types";
 import { LangProvider } from "@/src/i18n";
-import { EXTREME_ACCENTS, LOOK_STEP_ACCENTS, makeDemo } from "./helpers";
+import { EXTREME_ACCENTS, LOOK_ACCENT_PRESETS, makeDemo, sweepAccents } from "./helpers";
 
 // next/font/google only works through the Next.js compiler; at test time its module is empty, so stub the families this template uses.
 vi.mock("next/font/google", () => {
@@ -16,6 +16,7 @@ vi.mock("next/font/google", () => {
 import { boldLead, roman } from "@/src/templates/mehana/bits";
 import { contrastRatio } from "@/src/templates/shared/color";
 import { def } from "@/src/templates/mehana";
+import { accentVars } from "@/src/templates/mehana/Template";
 import { TEMPLATE_ACCENT_DEFAULTS } from "@/src/wizard/schema";
 
 // createElement passes children positionally, which LangProvider's required `children` prop type does not model.
@@ -216,7 +217,7 @@ describe("mehana template", () => {
   it("computes the band colour in TypeScript (no CSS relative colour) and keeps band text readable on every accent", async () => {
     const css = readFileSync(new URL("../src/templates/mehana/styles.css", import.meta.url), "utf8");
     expect(css).not.toMatch(/oklch\(from/);
-    for (const accent of ["#6e1f1b", "#2f5d46", "#3b2f5c", "#7a4a12", "#e8b4b8", "#f5d547", "#9ad1d4", "#19641e", ...LOOK_STEP_ACCENTS, ...EXTREME_ACCENTS]) {
+    for (const accent of ["#6e1f1b", "#2f5d46", "#3b2f5c", "#7a4a12", "#e8b4b8", "#f5d547", "#9ad1d4", "#19641e", ...LOOK_ACCENT_PRESETS, ...EXTREME_ACCENTS]) {
       const html = await render("bg", { page: "home", mutate: (s) => { s.venue.theme.accent = accent; } });
       const wine = /--me-wine:(#[0-9a-f]{6})/.exec(html)?.[1];
       expect(wine, accent).toBeDefined();
@@ -235,6 +236,36 @@ describe("mehana template", () => {
     expect(html).toContain("Item 39");
     expect(html.match(/class="me-jumplink"/g)?.length).toBe(4);
     expect(html).toMatch(/href="#cat-[^"]+" class="me-jumplink"><span aria-hidden="true" class="me-numeral">IV<\/span>/);
+  });
+  it("keeps the default and every Look-step preset at exactly the colours they had before the contrast guard", () => {
+    const expected: [string, Record<string, string>][] = [
+      ["#6e1f1b", {"--me-wine": "#6e1f1b"}],
+      ["#2f6b4f", {"--me-wine": "#1c5a3f"}],
+      ["#8f5c10", {"--me-wine": "#6c4300"}],
+      ["#a4442c", {"--me-wine": "#852a12"}],
+      ["#1d4ed8", {"--me-wine": "#284893"}],
+      ["#6b21a8", {"--me-wine": "#5d3686"}],
+      ["#1d2a24", {"--me-wine": "#1d2a24"}],
+      ["#2f5d46", {"--me-wine": "#2a5841"}],
+      ["#7a4a12", {"--me-wine": "#6f4002"}],
+      ["#3b2f5c", {"--me-wine": "#3b2f5c"}],
+    ];
+    expect(expected.map(([a]) => a.toLowerCase())).toEqual(expect.arrayContaining([def.accentDefault.toLowerCase(), ...LOOK_ACCENT_PRESETS]));
+    for (const [accent, vars] of expected) expect(accentVars(accent), accent).toEqual(vars);
+  });
+  it("keeps every promised contrast floor across the colour space (64 hues × 3 lightnesses × 3 chromas)", () => {
+    const misses: string[] = [];
+    for (const accent of [...sweepAccents(), ...EXTREME_ACCENTS]) {
+      const v = accentVars(accent);
+      const pairs: [string, number, number][] = [
+        [`parchment on ${v["--me-wine"]}`, contrastRatio("#f3eadb", v["--me-wine"]), 6.6],
+        [`gold on ${v["--me-wine"]}`, contrastRatio("#e8c98b", v["--me-wine"]), 4.9],
+        [`open dot on ${v["--me-wine"]}`, contrastRatio("#9bd39b", v["--me-wine"]), 4.6],
+        [`${v["--me-wine"]} numerals on paper`, contrastRatio(v["--me-wine"], "#f3eadb"), 4.5],
+      ];
+      for (const [what, ratio, floor] of pairs) if (!(ratio >= floor)) misses.push(`${accent}: ${what} ${ratio.toFixed(2)} < ${floor}`);
+    }
+    expect(misses).toEqual([]);
   });
   it("keeps the change flash reaching its final frame under reduced motion", () => {
     // `animation: none` would freeze .me-flash at its base opacity (1) forever, because useLiveSite never clears `changed`.
