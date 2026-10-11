@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 import { LangProvider } from "@/src/i18n";
 import { getTemplate } from "@/src/templates";
+import { templatePageProps } from "./props";
 import { DraftBanner } from "./components/DraftBanner";
 import { loadPage, pageMetadata } from "./load";
 
@@ -22,7 +23,7 @@ export default async function Page(props: PageProps<"/[slug]">) {
     <LangProvider defaultLang={site.state.venue.default_lang}>
       {site.draft && <DraftBanner draft={site.draft} slug={slug} />}
       {/* keyed so leaving a draft preview (Apply/Reject → router.replace) remounts with the live state instead of keeping the draft */}
-      <Component key={site.draft?.id ?? "live"} state={site.state} now={now} slug={slug} page="home" draft={site.draft} live={site.draft === null} feedUrl={`/api/site/${encodeURIComponent(slug)}`} />
+      <Component key={site.draft?.id ?? "live"} {...templatePageProps(site, slug, "home", now)} />
     </LangProvider>
   );
 }

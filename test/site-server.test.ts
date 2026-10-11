@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import { planChanges } from "@/src/domain/changes";
 import { newDraftToken, sha256Hex } from "@/src/server/hash";
 import { loadSite, publicSiteState } from "@/src/server/site";
+import { templatePageProps } from "@/app/[slug]/props";
 import { makeDemo } from "./helpers";
 
 describe("loadSite", () => {
@@ -69,3 +70,24 @@ describe("publicSiteState", () => {
     expect(state.venue.deploy).not.toBeNull(); // the input is not mutated
   });
 });
+
+describe("hosted page props", () => {
+  it("hand the client template the public state only: no deploy record, wizard draft or Instagram import in the page payload", async () => {
+    const { store, venue } = await makeDemo();
+    await store.setDeploy(venue.id, { provider: "vercel", project_id: "prj_secret", deployment_id: "dpl_1", url: "https://x.vercel.app", status: "ready", error: null, template: "classic", updated_at: "2026-10-10T09:00:00.000Z" });
+    const site = await loadSite(store, venue.slug);
+    expect(site?.state.venue.deploy).not.toBeNull();
+    for (const page of ["home", "menu"] as const) {
+      const props = templatePageProps(site!, venue.slug, page, 0);
+      expect(props).toMatchObject({ slug: venue.slug, page, live: true, draft: null, feedUrl: `/api/site/${venue.slug}` });
+      // The RSC payload of /[slug] serializes exactly these props.
+      const payload = JSON.stringify(props);
+      expect(payload).not.toContain('"deploy"');
+      expect(payload).not.toContain('"wizard_draft"');
+      expect(payload).not.toContain('"instagram_import"');
+      expect(payload).not.toContain("prj_secret");
+      expect(payload).toContain(venue.name);
+    }
+  });
+});
+
