@@ -37,6 +37,8 @@ Guards:
 - Uploads are capped at 4 MB per image (the browser downscales photos before sending them) and 30 images per draft; menu extraction accepts up to 6 files and 3 MB in total. Photos and PDFs sent for extraction go to Claude and are not stored; only images the owner places on the site are saved.
 - Abandoned drafts are deleted after 48 h, with their stored images, by the global tick (the cron; per-venue ticks skip this).
 
+- "Import photos from Instagram" (Photos step, and under the cover in Look) signs the owner in to their own Instagram professional account and copies the photos they pick; see [Instagram import](#instagram-import).
+
 Without `ANTHROPIC_API_KEY` the wizard still works: the AI routes answer 503 and the two AI buttons are replaced by a one-line explanation. With `SITE_MANAGER_STORE=memory` the fake deployer reports READY after two polls at `https://<slug>.example.test`, so the whole flow runs offline. The fake deployer is offline-only: in production, per-venue Vercel projects need `VERCEL_TOKEN`. Without it no project is created and every site is served from the hosted `<PUBLIC_BASE_URL>/<slug>`: the done page shows that address as live once the owner pressed Start, a template switch applies at once, and custom domains answer "not available on this server".
 
 ## Demo (3 minutes): wizard to live site
@@ -129,6 +131,8 @@ npm run env:set -- ANTHROPIC_API_KEY   # asks for the value with echo off, write
 | `RATE_SALT` | Any random string: `openssl rand -hex 16`. Hashed with the visitor's IP for the wizard's rate limits, so raw IPs are never stored. When unset it falls back to `dev-salt`, which works but makes the hashes guessable | Yes in production |
 | `MAX_SITES_PER_DAY` | Default `50`: the global cap on new wizard drafts per 24 h | No |
 | `TELEGRAM_BOT_USERNAME` | The bot's username without `@` (from @BotFather). Builds the `https://t.me/<bot>?start=<code>` link and QR on the wizard's done page | For the done page's Start link; without it only the code is shown |
+| `INSTAGRAM_APP_ID` | developers.facebook.com → your Business app → Instagram → API setup with Instagram login → **Instagram app ID** (not the Facebook app id). See [Instagram import](#instagram-import) | No: without it (or the secret) the wizard hides "Import photos from Instagram" |
+| `INSTAGRAM_APP_SECRET` | The same page → **Instagram app secret**. Server-only, never `NEXT_PUBLIC_`; it also signs the OAuth `state` (through a derived key) | With `INSTAGRAM_APP_ID` |
 
 Offline mode also reads two keys that are not in `.env.example`: `SITE_MANAGER_STORE=memory` (set by the scripts below) and `DEMO_OWNER_CHAT_ID` (optional: links that Telegram chat as the demo owner in the memory store).
 
@@ -173,6 +177,24 @@ Other scripts:
 | `npm run test:templates` | Writes each template's thin shell to a temp dir, runs `npm install` (needs network) and `next build` there: the offline proof that a deployed site builds. Slow; not part of `npm test`. Run before a release. |
 | `npm run site:delete -- --slug my-cafe` | Deletes a venue (typically one created by the wizard) and its Vercel project. Prints the venue and the project id and asks you to type the slug again before deleting. Storage objects are not removed. |
 
+## Instagram import
+
+In the wizard's Photos step (and under the cover in Look) the owner can press "Import photos from Instagram": they sign in to **their own** Instagram Business or Creator account on instagram.com (Meta's official OAuth, "Instagram API with Instagram Login", scope `instagram_business_basic`), come back to a grid of their recent photos (images and carousel images, newest 50; videos are skipped), tick the ones they want and choose for each one: gallery, cover, logo or a dish on the menu. The picked images are copied into our media storage; nothing is scraped and no handle-only lookup exists.
+
+How it is kept safe: the start route redirects to `https://www.instagram.com/oauth/authorize` with an HMAC-signed `state` (draft id, nonce, 10-minute expiry) and sets a matching httpOnly `sm_ig_nonce` cookie; the callback (`/api/new/instagram/callback`) checks the signature, the expiry, the nonce cookie and that the `sm_draft` cookie is the same draft, exchanges the code for a short-lived token server-side, reads the media once, stores only a sanitized list (`venues.instagram_import`: id, CDN URL, caption up to 280 characters, permalink, date) and drops the token: it is never stored, logged or sent to the browser. The list expires after an hour (Instagram's CDN URLs are signed and short-lived) and is cleared on publish. The import fetches only URLs from that stored list, only on `*.cdninstagram.com` / `*.fbcdn.net` over https (redirects re-checked), with a 10 s timeout, 4 MB per image on the actual bytes, the type sniffed from the bytes; it counts toward the 30-image draft cap and allows 10 imports per draft per hour. The public feed and `GET /api/new/<id>` never include the list, and `PUT /api/new/<id>` cannot set it.
+
+Owner setup (once):
+
+1. Apply the schema change: `npm run db:apply` (adds `venues.instagram_import`; publishing works without it, the import needs it).
+2. developers.facebook.com → My Apps → Create app → type **Business** (Instagram Login needs a Business app).
+3. Add the **Instagram** product → **API setup with Instagram login**.
+4. Under "Set up Instagram business login" → **Business login settings** → **OAuth redirect URIs**: add exactly `<PUBLIC_BASE_URL>/api/new/instagram/callback` (for local tries also `http://localhost:3000/api/new/instagram/callback` if Meta accepts it; otherwise test on the deployment).
+5. Copy the **Instagram app ID** and **Instagram app secret** from the same page (they differ from the Facebook app id and secret) and set them: `npm run env:set -- INSTAGRAM_APP_ID`, `npm run env:set -- INSTAGRAM_APP_SECRET`, and the same two in Vercel (Production). Redeploy.
+6. While the app is in **Development** mode only accounts with a role on the app can sign in: App roles → Roles → add the café's Instagram account as an **Instagram Tester**, then accept the invite on instagram.com (Settings → Apps and websites → Tester invites; Meta moves this menu now and then). The account must be a Business or Creator account.
+7. For cafés you do not manage: Meta requires **Advanced Access** to `instagram_business_basic`, which goes through **App Review** (a screencast of this flow, a privacy policy URL) and **Business verification** of the business that owns the app; then switch the app to **Live**. Check the current requirements in the App Dashboard's App Review section.
+
+Without the two keys the button is hidden and `/api/new/<id>/instagram/*` answers 503 `instagram_unavailable`.
+
 ## Landing page (Lovable)
 
 The public marketing landing is built in [Lovable](https://lovable.dev) from the prompt pack in [docs/lovable/LANDING-PROMPT.md](docs/lovable/LANDING-PROMPT.md) (bilingual copy, the pitch facts, design tokens, the "Create your site" button to `/new` and the demo link). After publishing it in Lovable, set `NEXT_PUBLIC_LANDING_URL` to its address and redeploy: `/` then redirects there. The variable is baked in at build time, so setting it without a redeploy changes nothing. Without it, the app's own `/` renders a short fallback landing.
@@ -215,6 +237,7 @@ Cron: `vercel.json` runs `/api/tick` every 5 minutes (`*/5 * * * *`; the team is
 - **Vercel token.** `VERCEL_TOKEN` is read only in `src/config.ts` and used only by the server-side deployer; it is never logged. The deployer logs short lines only (method, path, status, error code, project and deployment ids), never a Vercel response body, and `deploy.error` keeps a short message plus at most the last 20 build-log lines. Check a build with `grep -rl VERCEL_TOKEN .next/static` (it must find nothing).
 - **Rate limits.** 5 new drafts per IP per hour and `MAX_SITES_PER_DAY` per day; 20 AI calls per draft per hour and 500 per day. The IP is hashed with `RATE_SALT` before it is stored; set `RATE_SALT` in production.
 - **Uploaded menus.** Photos and PDFs sent for extraction go to Claude and are not stored; only images the owner places on the site are saved.
+- **Instagram import.** The owner's Instagram access token exists only during the OAuth callback request: never stored, logged or sent to the browser. The app secret never leaves the server (the OAuth `state` is signed with a key derived from it). The callback path is excluded from the dev request log (its query holds the one-time code). Only Instagram CDN URLs from the list read at sign-in are ever fetched. See [Instagram import](#instagram-import).
 - **Deleting a venue** never deletes its Vercel project automatically; `npm run site:delete` does both, with a typed confirmation.
 
 ## Known gaps
