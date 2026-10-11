@@ -1,0 +1,334 @@
+/* src/templates/kvartal/styles.css
+   Kvartal: Swiss 12-column grid, a poster-sized headline, numbered menu tables; brunch cafés by day, cocktail bars by night.
+   Tokens live on the wrapper only, so the main app's theme is untouched. Palette from the approved mockup: a cool stone
+   paper, a near-black ink with a hint of blue, two greys for secondary and sold-out text; nothing is pure black or white.
+   Square corners everywhere, 2 px ink rules for structure and 1 px stone hairlines between rows.
+   Self-contained: cover images, hidden text, layout and motion are all here (no load-bearing Tailwind utilities), so the
+   standalone shell ships it as is.
+   Motion: transform/opacity only (one headline entrance, the change flash, press feedback), one ease-out curve; colour
+   changes on hover are instant; everything off under prefers-reduced-motion. The "Today" band is static on purpose. */
+.tpl-kvartal {
+  --kv-bg: #e9e8e3;          /* oklch(0.928 0.006 100), the paper */
+  --kv-bg-2: #dcdbd5;        /* pressed/hover tint and the draft note */
+  --kv-ink: #17191b;         /* 14.4:1 on --kv-bg */
+  --kv-soft: #4a4d50;        /* descriptions, labels: 6.9:1 on --kv-bg */
+  --kv-mute: #5a5d60;        /* sold-out rows: 5.4:1 on --kv-bg (the mockup's #6a6d70 is 4.2:1, darkened to pass) */
+  --kv-line: #b9b8b2;        /* row hairlines (decorative, not a boundary) */
+  --kv-on: #f6f5f1;          /* text on ink and on the accent block */
+  --kv-on-soft: #a9aaa6;     /* secondary text on ink: 7.5:1 */
+  --kv-accent: var(--accent, #c23a1c);
+  /* Accent as text on the paper: lightness capped at OKLCH 0.5 so any owner-picked accent reads (vermilion → #b22905,
+     5.3:1; blue #1f5f8b unchanged, 5.6:1; green → #377333, 4.7:1; ink 14.4:1). Browsers without relative colour syntax
+     keep the plain accent (first declaration). */
+  --kv-accent-text: var(--kv-accent);
+  --kv-accent-text: oklch(from var(--kv-accent) min(l, 0.5) c h);
+  /* Accent as the "Now" block fill under --kv-on text: capped at L 0.53 (vermilion → #bc3415, 5.3:1; blue 6.3:1; green
+     #3e7a3a unchanged, 4.8:1; ink 16.2:1; a light owner pick such as #7fd1ae → #277d5e, 4.6:1). */
+  --kv-accent-fill: var(--kv-accent);
+  --kv-accent-fill: oklch(from var(--kv-accent) min(l, 0.53) c h);
+  --kv-accent-soft: color-mix(in oklab, var(--kv-accent) 14%, var(--kv-bg));
+  --kv-ease: cubic-bezier(0.23, 1, 0.32, 1);
+  --kv-gutter: 16px;
+  --kv-gap: 16px;
+  color-scheme: light;
+  background: var(--kv-bg);
+  color: var(--kv-ink);
+  font-family: var(--font-body), ui-sans-serif, system-ui, sans-serif;
+  font-size: 1rem;
+  line-height: 1.55;
+  min-height: 100dvh;
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  overflow-x: clip;
+  isolation: isolate;
+  -webkit-font-smoothing: antialiased;
+}
+@media (min-width: 640px) { .tpl-kvartal { --kv-gutter: clamp(16px, 3vw, 40px); --kv-gap: 24px; font-size: 1.0625rem; } }
+/* Resets sit in :where() so they carry the specificity of the root class alone and every kv- rule after them wins. */
+.tpl-kvartal :where(*, *::before, *::after) { box-sizing: border-box; }
+.tpl-kvartal :where(p, h1, h2, h3, h4, ul, dl, dd) { margin: 0; }
+.tpl-kvartal :where(ul) { padding: 0; list-style: none; }
+.tpl-kvartal :where(a) { color: inherit; text-decoration: none; -webkit-tap-highlight-color: transparent; }
+.tpl-kvartal :where(button) { -webkit-tap-highlight-color: transparent; }
+/* The main app's globals.css puts every h1-h3 in its own display face; inside the template headings start from the body face. */
+.tpl-kvartal :where(h1, h2, h3, h4) { font-family: inherit; font-variation-settings: normal; font-weight: 700; font-size: inherit; line-height: inherit; }
+/* Geologica is an explicit opt-in: the headline, the big section heads, the "Now" status, numbers and prices. */
+.tpl-kvartal .kv-display, .tpl-kvartal .kv-h2, .tpl-kvartal .kv-address, .tpl-kvartal .kv-wordmark, .tpl-kvartal .kv-now-status,
+.tpl-kvartal .kv-cat-h, .tpl-kvartal .kv-td-no, .tpl-kvartal .kv-today-h, .tpl-kvartal .kv-maplink {
+  font-family: var(--font-display), ui-sans-serif, system-ui, sans-serif;
+  font-variation-settings: normal;
+}
+/* next/image `fill` positions the img; this crops it to the box. */
+.kv-cover { object-fit: cover; }
+/* Visually hidden, still read by screen readers. */
+.kv-sr { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }
+.kv-nowrap { white-space: nowrap; }
+
+/* The grid: 12 columns, content on 8 (a) and 4 (b); one column below 900 px. */
+.kv-wrap { width: 100%; max-width: 1240px; margin-inline: auto; padding-inline: var(--kv-gutter); }
+.kv-grid { display: grid; grid-template-columns: repeat(12, minmax(0, 1fr)); column-gap: var(--kv-gap); }
+.kv-a, .kv-b, .kv-full { grid-column: 1 / -1; min-width: 0; }
+@media (min-width: 900px) {
+  .kv-a { grid-column: 1 / span 8; }
+  .kv-b { grid-column: 9 / span 4; }
+}
+.kv-main { flex: 1; padding-bottom: 24px; }
+.kv-photo { position: relative; overflow: hidden; background: var(--kv-bg-2); }
+
+/* Top bar: wordmark with an accent full stop, page tabs, language pair. */
+.kv-header { border-bottom: 2px solid var(--kv-ink); }
+.kv-bar { min-height: 60px; display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px 12px; padding-block: 8px; }
+.kv-brand { display: inline-flex; align-items: center; gap: 12px; min-width: 0; min-height: 44px; }
+.kv-logo { position: relative; display: block; width: 44px; height: 44px; flex: none; overflow: hidden; background: var(--kv-bg-2); }
+.kv-wordmark { min-width: 0; font-weight: 900; font-size: 1.375rem; line-height: 1.05; letter-spacing: -0.02em; text-transform: uppercase; overflow-wrap: anywhere; }
+.kv-stop { color: var(--kv-accent-text); }
+.kv-bar-end { display: flex; align-items: center; gap: 12px; }
+.kv-nav { display: none; }
+.kv-tab { min-height: 44px; display: inline-flex; align-items: center; padding-inline: 16px; font-weight: 700; }
+.kv-tab.is-current { background: var(--kv-ink); color: var(--kv-bg); }
+@media (min-width: 640px) {
+  .kv-bar { min-height: 72px; }
+  .kv-wordmark { font-size: 1.625rem; }
+  .kv-nav { display: flex; }
+}
+
+/* Language pair (shared component) restyled as two square, joined buttons. No transition: the client may flip the
+   language right after hydration, and an animated swap would leave both buttons mid-grey for a moment on every load. */
+.tpl-kvartal .kv-lang { padding: 0; border-radius: 0; background: transparent; box-shadow: none; }
+.tpl-kvartal .kv-lang button { min-height: 44px; min-width: 48px; padding-inline: 8px; border-radius: 0; border: 2px solid var(--kv-ink); background: transparent; color: var(--kv-ink); font-family: inherit; font-size: 0.875rem; font-weight: 700; transition: none; }
+.tpl-kvartal .kv-lang button + button { border-left: 0; }
+.tpl-kvartal .kv-lang button[aria-pressed="true"] { background: var(--kv-ink); color: var(--kv-bg); }
+
+/* Skip link: lands on the "Now" block. Visually hidden (not moved off-screen) until focused, so it can never sit over the
+   draft note or the page's draft banner above the header. Focused, it sits at the top-left of the template root (the root
+   is `isolation: isolate`, so a fixed link would paint under a banner the page draws outside the template). */
+.kv-skip { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }
+.kv-skip:focus-visible { position: absolute; left: var(--kv-gutter); top: 8px; z-index: 20; width: auto; height: auto; margin: 0; padding: 12px 16px; overflow: visible; clip: auto; background: var(--kv-ink); color: var(--kv-bg); font-weight: 700; }
+
+/* Passive draft note (the page renders the real Apply/Reject banner outside the template). */
+.kv-draft { background: var(--kv-bg-2); color: var(--kv-ink); font-size: 0.875rem; border-bottom: 1px solid var(--kv-line); }
+.kv-draft-inner { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; padding-block: 10px; }
+.kv-draft-badge { padding: 2px 8px; font-size: 0.75rem; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; background: var(--kv-ink); color: var(--kv-bg); }
+
+/* Poster: kicker, then the headline sized from its own column (see fitHeadline in Hero.tsx): --kv-fit keeps the longest
+   word on one line, the tier caps the size by sentence length. Browsers without container units keep the clamp. */
+.kv-hero { padding-block: 20px 32px; }
+.kv-hero-grid { row-gap: 18px; align-items: end; }
+.kv-hero-text { container-type: inline-size; }
+.kv-kicker { margin-bottom: 12px; font-size: 0.8125rem; font-weight: 700; letter-spacing: 0.1em; text-transform: uppercase; text-wrap: balance; }
+.kv-display {
+  --kv-cap: 16.5cqi;
+  font-size: clamp(2.5rem, 9vw, 6rem);
+  font-size: min(var(--kv-fit, 16cqi), var(--kv-cap));
+  font-weight: 900;
+  line-height: 0.88;
+  letter-spacing: -0.04em;
+  text-wrap: balance;
+  overflow-wrap: break-word;
+  padding-bottom: 0.06em; /* descenders of the last line stay inside the box */
+}
+.kv-tier-m { --kv-cap: 13cqi; }
+.kv-tier-l { --kv-cap: 10cqi; }
+.kv-hero-side { display: grid; gap: 12px; }
+.kv-welcome { font-size: 1.0625rem; max-width: 34ch; text-wrap: pretty; }
+@media (min-width: 640px) {
+  .kv-hero { padding-block: clamp(32px, 5vw, 72px) 40px; }
+  .kv-hero-grid { row-gap: 32px; }
+  .kv-kicker { margin-bottom: 16px; font-size: 0.9375rem; }
+  .kv-display { --kv-cap: 19.5cqi; line-height: 0.86; }
+  .kv-tier-m { --kv-cap: 14cqi; }
+  .kv-tier-l { --kv-cap: 10.5cqi; }
+  .kv-welcome { font-size: 1.125rem; }
+}
+
+/* "Now": solid accent block with light text (ink when closed, so the colour itself says open/closed). */
+.kv-now { display: grid; gap: 4px; padding: 14px 16px; background: var(--kv-accent-fill); color: var(--kv-on); }
+.kv-now.is-closed { background: var(--kv-ink); }
+.tpl-kvartal .kv-now:focus-visible { outline: none; } /* skip-link target: the ring would box the whole block */
+.kv-now-label { font-size: 0.75rem; font-weight: 700; letter-spacing: 0.1em; text-transform: uppercase; }
+.kv-now-status { font-weight: 800; font-size: 1.625rem; line-height: 1.05; text-wrap: balance; }
+.kv-now-sub { font-size: 0.875rem; }
+@media (min-width: 640px) {
+  .kv-now { padding: 20px 22px; }
+  .kv-now-label { font-size: 0.875rem; }
+  .kv-now-status { font-size: 2.125rem; line-height: 1; }
+  .kv-now-sub { font-size: 0.9375rem; }
+}
+
+/* "Today": the dark band. One wrapping line on a laptop, rows on a phone. Static: nothing scrolls by itself. */
+.kv-today { background: var(--kv-ink); color: var(--kv-on); border-block: 2px solid var(--kv-ink); }
+.kv-today-inner { display: flex; flex-direction: column; gap: 6px; padding-block: 12px; }
+.kv-today-h { font-weight: 600; font-size: 1rem; letter-spacing: 0.06em; text-transform: uppercase; white-space: nowrap; }
+.kv-today-arrow { display: none; letter-spacing: 0; } /* on a phone the items sit under the heading, so the arrow would point at nothing */
+.kv-today-list { display: flex; flex-direction: column; }
+.kv-today-item { position: relative; isolation: isolate; display: grid; grid-template-columns: 36px minmax(0, 1fr) auto; gap: 10px; align-items: baseline; padding-block: 10px; font-weight: 500; }
+.kv-today-item + .kv-today-item { border-top: 1px solid color-mix(in oklab, var(--kv-on) 22%, transparent); }
+.kv-today-item.is-news { display: block; }
+.kv-today-no { color: var(--kv-on-soft); font-variant-numeric: tabular-nums; font-weight: 700; }
+.kv-today-price { font-variant-numeric: tabular-nums; white-space: nowrap; font-weight: 700; }
+.kv-today-note { color: var(--kv-on-soft); font-weight: 400; white-space: nowrap; }
+.kv-today-item.is-sold { color: var(--kv-on-soft); }
+@media (min-width: 640px) {
+  .kv-today-inner { flex-direction: row; align-items: baseline; gap: 4px 24px; padding-block: 14px; }
+  .kv-today-h { font-size: 1.125rem; }
+  .kv-today-arrow { display: inline; }
+  .kv-today-list { flex-direction: row; flex-wrap: wrap; gap: 4px 36px; font-family: var(--font-display), ui-sans-serif, system-ui, sans-serif; font-size: 1.125rem; font-weight: 600; }
+  .kv-today-item { display: inline-flex; gap: 8px; padding-block: 0; font-weight: 600; }
+  .kv-today-item + .kv-today-item { border-top: 0; }
+  .kv-today-no { font-weight: 600; }
+  .kv-today-no:empty { display: none; }
+  .kv-today-price, .kv-today-note { font-weight: 400; }
+}
+.kv-today .kv-flash { background: color-mix(in oklab, var(--kv-accent) 40%, var(--kv-ink)); }
+
+/* Menu headings and category chips. */
+.kv-menu-home { padding-top: 48px; }
+.kv-menu-head { row-gap: 20px; align-items: end; }
+.kv-h2 { font-weight: 900; font-size: clamp(2.75rem, 6vw, 5.25rem); line-height: 0.9; letter-spacing: -0.03em; }
+.kv-chips { display: flex; flex-wrap: wrap; gap: 8px; align-content: end; }
+.kv-chip, .kv-jumplink { min-height: 44px; max-width: 100%; display: inline-flex; align-items: baseline; gap: 6px; padding: 9px 14px; border: 2px solid var(--kv-ink); font-weight: 700; line-height: 1.25; overflow-wrap: anywhere; }
+.kv-chip-no { font-variant-numeric: tabular-nums; color: var(--kv-accent-text); }
+@media (min-width: 640px) { .kv-menu-home { padding-top: 64px; } .kv-menu-head { row-gap: 24px; } }
+
+/* Category table. A real table for assistive tech (role=table/row/columnheader/cell), a grid for the eye. */
+.kv-cat { margin-top: 40px; scroll-margin-top: 80px; }
+.kv-cat-h { display: flex; align-items: baseline; gap: 14px; padding-bottom: 10px; border-bottom: 2px solid var(--kv-ink); font-weight: 800; font-size: 1.375rem; line-height: 1.2; }
+.kv-cat-no { font-variant-numeric: tabular-nums; color: var(--kv-accent-text); }
+.kv-tr { position: relative; isolation: isolate; display: grid; grid-template-columns: 40px minmax(0, 1fr) auto; gap: 4px 12px; align-items: baseline; padding-block: 14px; border-bottom: 1px solid var(--kv-line); }
+.kv-thead { padding-block: 8px; font-size: 0.75rem; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; color: var(--kv-soft); }
+.kv-td-no { font-weight: 800; font-size: 1.0625rem; font-variant-numeric: tabular-nums; color: var(--kv-accent-text); }
+.kv-thead .kv-td-no, .kv-thead .kv-td-price { font-family: inherit; font-weight: 700; font-size: inherit; color: inherit; }
+.kv-td-name { display: flex; flex-direction: column; min-width: 0; }
+.kv-name { font-weight: 700; font-size: 1.0625rem; line-height: 1.3; overflow-wrap: anywhere; }
+.kv-desc { margin-top: 2px; font-size: 0.9375rem; line-height: 1.45; color: var(--kv-soft); max-width: 60ch; text-wrap: pretty; }
+.kv-al-inline { margin-top: 4px; font-size: 0.8125rem; color: var(--kv-soft); }
+.kv-td-al { display: none; color: var(--kv-soft); font-variant-numeric: tabular-nums; }
+.kv-td-price { justify-self: end; text-align: right; font-weight: 700; font-size: 1.0625rem; font-variant-numeric: tabular-nums; white-space: nowrap; }
+/* The photo column stays in the accessibility tree at every width, so a row always has as many cells as the header has
+   column headers. Where it shows nothing (the header's photo cell, a row without a photo, every photo cell on a phone row
+   without one) it is visually hidden and taken out of the grid flow, never display:none. */
+.kv-td-img { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }
+.kv-tr.has-img { grid-template-columns: 40px 64px minmax(0, 1fr) auto; }
+.kv-tr.has-img .kv-td-img { position: static; width: auto; height: auto; margin: 0; overflow: visible; clip: auto; white-space: normal; align-self: start; }
+.kv-thumb { position: relative; display: block; width: 100%; aspect-ratio: 1 / 1; overflow: hidden; background: var(--kv-bg-2); }
+.kv-tr.is-sold, .kv-tr.is-sold .kv-desc, .kv-tr.is-sold .kv-td-no, .kv-tr.is-sold .kv-td-al, .kv-tr.is-sold .kv-al-inline { color: var(--kv-mute); }
+.kv-tr.is-sold .kv-thumb { opacity: 0.55; }
+.kv-sold-note { font-weight: 500; }
+@media (min-width: 640px) {
+  .kv-cat-h { font-size: 1.5rem; }
+  .kv-tr { grid-template-columns: 56px minmax(0, 1fr) minmax(0, 180px) 96px; gap: 16px; padding-block: 18px; }
+  .kv-table.has-photos .kv-tr { grid-template-columns: 56px 80px minmax(0, 1fr) minmax(0, 150px) 96px; }
+  .kv-table.has-photos .kv-td-img { position: static; width: auto; height: auto; margin: 0; overflow: visible; clip: auto; white-space: normal; align-self: start; }
+  .kv-thead { padding-block: 10px; font-size: 0.8125rem; }
+  .kv-td-no { font-size: 1.375rem; }
+  .kv-name { font-size: 1.25rem; }
+  .kv-desc { font-size: 1.0625rem; }
+  .kv-al-inline { display: none; }
+  .kv-td-al { display: block; }
+  .kv-td-price { font-size: 1.25rem; }
+}
+
+/* Legend and the full-menu link. */
+.kv-legend { font-size: 0.9375rem; }
+.kv-legend-h { font-size: 0.9375rem; font-weight: 700; }
+.kv-legend dl { display: flex; flex-wrap: wrap; gap: 2px 14px; margin-top: 4px; color: var(--kv-soft); }
+.kv-legend dl > div { display: flex; gap: 5px; }
+.kv-legend dt { font-weight: 700; font-variant-numeric: tabular-nums; color: var(--kv-ink); }
+.kv-menu-body { margin-top: 8px; row-gap: 32px; }
+.kv-menu-side { display: grid; gap: 16px; align-content: start; }
+.kv-menu-body.has-cover .kv-menu-side { margin-top: 40px; }
+.kv-cover-photo { aspect-ratio: 3 / 4; }
+.kv-menu-foot { display: flex; flex-wrap: wrap; align-items: end; justify-content: space-between; gap: 16px 32px; }
+.kv-menu-foot .kv-legend { flex: 1 1 22rem; max-width: 46rem; }
+.kv-btn { min-height: 48px; display: inline-flex; align-items: center; justify-content: center; gap: 4px; padding-inline: 20px; border: 2px solid var(--kv-ink); font-weight: 700; line-height: 1.2; text-align: center; transition: transform 140ms var(--kv-ease); }
+.kv-btn:active, .kv-chip:active, .kv-jumplink:active, .kv-action:active, .kv-tab:active { transform: scale(0.97); }
+.kv-chip, .kv-jumplink, .kv-action, .kv-tab { transition: transform 140ms var(--kv-ease); }
+.kv-btn-ink { background: var(--kv-ink); color: var(--kv-bg); }
+.kv-btn-line { background: transparent; }
+.kv-empty { padding-block: 48px; color: var(--kv-soft); }
+
+/* Menu page: sticky category bar (a solid band; the fade under it is a blurred box-shadow in the page colour, drawn
+   outside the box, so the scroller neither clips it nor counts it in its scrollHeight), tables on 8 columns, a sticky
+   right column with the cover and the legend. */
+.kv-jump { position: sticky; top: 0; z-index: 2; background: var(--kv-bg); border-bottom: 2px solid var(--kv-ink); box-shadow: 0 8px 12px var(--kv-bg); }
+.kv-jump-inner { display: flex; gap: 8px; overflow-x: auto; overscroll-behavior-x: contain; scrollbar-width: none; padding-block: 10px; }
+.kv-jump-inner::-webkit-scrollbar { display: none; }
+.kv-jumplink { flex: none; max-width: 15rem; } /* a long category name wraps inside its chip instead of being clipped */
+.kv-menu-cols { row-gap: 40px; }
+.kv-menu-aside { display: grid; gap: 16px; align-content: start; }
+.kv-top { margin-top: 40px; }
+@media (min-width: 900px) {
+  .kv-menu-aside { position: sticky; top: 96px; align-self: start; margin-top: 40px; }
+}
+
+/* Gallery: photos on the grid, 2 across on a phone, 3 from 900 px. */
+.kv-gallery { margin-top: 56px; }
+.kv-gallery-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--kv-gap); }
+@media (min-width: 900px) { .kv-gallery-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
+.kv-gallery-photo { aspect-ratio: 4 / 5; }
+
+/* Visit: the address as the headline, hours and contacts as a definition list. */
+.kv-visit { margin-top: 56px; }
+.kv-visit-grid { row-gap: 24px; padding-top: 32px; border-top: 2px solid var(--kv-ink); }
+.kv-address { font-weight: 900; font-size: clamp(2rem, 5vw, 4rem); line-height: 0.95; letter-spacing: -0.03em; text-wrap: balance; overflow-wrap: anywhere; }
+.kv-maplink { display: inline-flex; align-items: center; gap: 0.3em; min-height: 44px; margin-top: 8px; font-weight: 800; font-size: clamp(1.125rem, 2.2vw, 1.75rem); color: var(--kv-accent-text); text-decoration: underline; text-decoration-thickness: 2px; text-underline-offset: 0.18em; }
+.kv-about { margin-top: 16px; max-width: 60ch; color: var(--kv-soft); text-wrap: pretty; }
+.kv-hours { display: grid; gap: 6px; font-size: 1.0625rem; }
+.kv-hours > div { display: grid; grid-template-columns: 7.5rem minmax(0, 1fr); gap: 16px; }
+.kv-hours dt { font-weight: 700; }
+.kv-hours dd { color: var(--kv-soft); font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+.kv-hours > .is-today dd { color: var(--kv-ink); font-weight: 700; }
+.kv-contacts { display: grid; gap: 6px; margin-top: 16px; font-size: 1.0625rem; }
+.kv-contacts li { display: grid; grid-template-columns: 7.5rem minmax(0, 1fr); gap: 16px; }
+.kv-contacts-label { font-weight: 700; }
+.kv-contacts .kv-link { justify-self: start; overflow-wrap: anywhere; }
+.kv-link { display: inline-flex; align-items: center; min-height: 44px; margin-block: -10px; text-decoration: underline; text-decoration-thickness: 1px; text-underline-offset: 0.2em; }
+.kv-closures { margin-top: 20px; padding-top: 12px; border-top: 1px solid var(--kv-line); font-size: 0.9375rem; }
+.kv-closures-h { font-weight: 700; }
+.kv-closures ul { margin-top: 4px; color: var(--kv-soft); }
+.kv-closures b { color: var(--kv-ink); font-variant-numeric: tabular-nums; }
+@media (min-width: 640px) { .kv-hours, .kv-contacts { font-size: 1.125rem; } }
+
+/* Footer. */
+.kv-footer { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px 16px; padding-block: 32px; font-size: 0.875rem; color: var(--kv-soft); }
+.kv-footer-note { margin-left: 12px; }
+.kv-powered { display: inline-flex; align-items: center; min-height: 44px; text-decoration: underline; text-decoration-thickness: 1px; text-underline-offset: 4px; }
+
+/* Phone action bar: full menu (or home) and directions, stuck to the bottom of the screen; gone from 640 px. */
+.kv-actions { position: sticky; bottom: 0; z-index: 3; display: grid; grid-template-columns: 1fr 1fr; background: var(--kv-bg); border-top: 2px solid var(--kv-ink); }
+.kv-action { min-height: 56px; display: flex; align-items: center; justify-content: center; padding-inline: 8px; font-weight: 700; text-align: center; }
+.kv-action.is-solid { background: var(--kv-ink); color: var(--kv-bg); }
+@media (min-width: 640px) { .kv-actions { display: none; } }
+/* Keyboard focus never lands under the bar: focused elements scroll clear of its 58 px. */
+@media (max-width: 639.98px) { .tpl-kvartal :where(a, button, [tabindex]) { scroll-margin-bottom: 64px; } }
+
+/* Focus: a 3 px ink ring outside the box; light on the dark band; inside the box where the box touches the screen edge. */
+.tpl-kvartal :focus-visible { outline: 3px solid var(--kv-ink); outline-offset: 3px; }
+.tpl-kvartal .kv-today :focus-visible, .tpl-kvartal .kv-skip:focus-visible { outline-color: var(--kv-on); }
+.tpl-kvartal .kv-action:focus-visible, .tpl-kvartal .kv-jumplink:focus-visible { outline-offset: -7px; }
+.tpl-kvartal .kv-action.is-solid:focus-visible { outline-color: var(--kv-bg); }
+
+/* Hover only where a pointer exists (touch would latch it). Colour changes are instant; only transform animates. */
+@media (hover: hover) {
+  .kv-tab:not(.is-current):hover { background: var(--kv-bg-2); }
+  .tpl-kvartal .kv-lang button:not([aria-pressed="true"]):hover { background: var(--kv-bg-2); }
+  .kv-chip:hover, .kv-jumplink:hover, .kv-btn-line:hover { background: var(--kv-ink); color: var(--kv-bg); }
+  .kv-chip:hover .kv-chip-no, .kv-jumplink:hover .kv-chip-no { color: var(--kv-bg); }
+  .kv-btn-ink:hover { background: color-mix(in oklab, var(--kv-ink) 86%, var(--kv-accent)); }
+  .kv-maplink:hover, .kv-link:hover, .kv-powered:hover { text-decoration-thickness: 3px; }
+  .kv-powered:hover { color: var(--kv-ink); }
+}
+
+/* Motion: the headline and the "Now" block rise once on load; the change flash; press feedback. */
+.kv-rise { animation: kv-rise 420ms var(--kv-ease) both; }
+@keyframes kv-rise { from { opacity: 0; transform: translateY(12px); } to { opacity: 1; transform: none; } }
+.kv-flash { position: absolute; inset: 0; z-index: -1; pointer-events: none; background: var(--kv-accent-soft); animation: kv-flash 2.2s ease-out both; }
+@keyframes kv-flash { 0%, 65% { opacity: 1; } 100% { opacity: 0; } }
+@media (prefers-reduced-motion: reduce) {
+  .tpl-kvartal *, .tpl-kvartal *::before, .tpl-kvartal *::after { animation: none !important; transition: none !important; scroll-behavior: auto !important; }
+  /* The flash must still reach its final frame (opacity 0): `useLiveSite` never clears `changed`, so `animation: none` would
+     leave a permanent accent wash on every row that ever changed. A 1 ms run with `both` fill lands on the end state at once.
+     test/template-kvartal.test.ts asserts this rule stays inside the reduced-motion block. */
+  .tpl-kvartal .kv-flash { animation: kv-flash 1ms linear both !important; }
+}
