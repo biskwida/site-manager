@@ -27,7 +27,16 @@ The same sequence runs offline, without a phone or keys: `npm run e2e`.
 
 ## Creating a site with the wizard
 
-Anyone can create a venue site at `/new` (linked from the landing). The owner picks one of three templates (`classic` warm editorial, `nocturne` dark for bars and evenings, `lumen` light and photo-first for daytime coffee), each shown live with the demo café, then fills seven steps with the chosen template rendering their data on the right: Basics (name, web address, main language, contact), Look (accent colour, logo, cover), Hours, Menu (type it, or upload photos or a PDF of the current menu and let Claude read it into a review list you accept row by row), Texts (both languages; "Write for me" drafts all of them from a few facts), Photos (gallery), Review. "Create my site" makes the venue live in our database and shows a one-use Telegram code with a QR (`https://t.me/<bot>?start=<code>`). Pressing Start in Telegram links the owner's chat as the owner and, when `VERCEL_TOKEN` is set, starts the deploy: a new Vercel project named after the slug, built from the thin template shell, polled until READY; the bot then messages "your site is live" with the URL and the done page shows it. The deploy finishes without anyone watching: after Start (and after a template switch) the server polls the deployment every 10 s for up to 4 minutes inside `after()`, and the 5-minute cron, the done page and the dashboard (both nudge `POST /api/tick?key=`) cover anything slower. A chat that is already linked (to the demo café, say) can redeem the new code: the bot answers "You now manage <name>." and the chat moves to the new venue. Coming back to `/new` in the same browser offers "Continue your draft"; the Look step switches templates without starting over, and a failed publish has a "Try again" button on the dashboard. From that moment the Telegram agent manages the content; the deployed site reads `/api/site/<slug>` every 10 s (server) and 5 s (client), so a price change from Telegram is visible on it in seconds. Content never needs a new deployment; only a template switch redeploys.
+Anyone can create a venue site at `/new` (linked from the landing). The owner picks one of six templates, each shown live with the demo café:
+
+- `classic`: warm, editorial pages on cream paper (cafés, restaurants).
+- `nocturne`: dark and bold, for bars and evening venues.
+- `lumen`: light and airy, photos first, for specialty coffee.
+- `furna`: warm and homely, with each tray from the oven by the hour, for bakeries and breakfast places.
+- `mehana`: wine red, an embroidery border and the menu course by course, for taverns and Bulgarian kitchens.
+- `kvartal`: Swiss grid, huge type and a numbered menu, for brunch by day and cocktails by night.
+
+The owner then fills seven steps with the chosen template rendering their data on the right: Basics (name, web address, main language, contact), Look (accent colour, logo, cover), Hours, Menu (type it, or upload photos or a PDF of the current menu and let Claude read it into a review list you accept row by row), Texts (both languages; "Write for me" drafts all of them from a few facts), Photos (gallery), Review. "Create my site" makes the venue live in our database and shows a one-use Telegram code with a QR (`https://t.me/<bot>?start=<code>`; with more apps enabled, one link per app, see [Channels](#channels-telegram-messenger-instagram-whatsapp)). Pressing Start in Telegram links the owner's chat as the owner and, when `VERCEL_TOKEN` is set, starts the deploy: a new Vercel project named after the slug, built from the thin template shell, polled until READY; the bot then messages "your site is live" with the URL and the done page shows it. The deploy finishes without anyone watching: after Start (and after a template switch) the server polls the deployment every 10 s for up to 4 minutes inside `after()`, and the 5-minute cron, the done page and the dashboard (both nudge `POST /api/tick?key=`) cover anything slower. A chat that is already linked (to the demo café, say) can redeem the new code: the bot answers "You now manage <name>." and the chat moves to the new venue. Coming back to `/new` in the same browser offers "Continue your draft"; the Look step switches templates without starting over (an accent still on the old template's default follows the new template's default; the dashboard's template switch does the same), and a failed publish has a "Try again" button on the dashboard. From that moment the Telegram agent manages the content; the deployed site reads `/api/site/<slug>` every 10 s (server) and 5 s (client), so a price change from Telegram is visible on it in seconds. Content never needs a new deployment; only a template switch redeploys.
 
 Guards:
 
@@ -45,7 +54,7 @@ Without `ANTHROPIC_API_KEY` the wizard still works: the AI routes answer 503 and
 
 | # | You do | What happens |
 |---|---|---|
-| 1 | Open `/new` on the projector | Three live cards: the demo café in Classic, Nocturne and Lumen. |
+| 1 | Open `/new` on the projector | Six live cards: the demo café in Classic, Nocturne, Lumen, Furna, Mehana and Kvartal. |
 | 2 | Pick Nocturne, type the name and address | The right pane is the bar's site, updating as you type; the web address fills itself from the name. |
 | 3 | Menu step: upload a photo of the printed menu | "Reading your menu…", then a review list in Bulgarian and English with EUR prices (BGN converted and flagged) and allergen codes. Accept all. |
 | 4 | Texts: type two facts, press "Write for me" | Tagline, about, greeting and footer in both languages appear in the fields and on the preview. |
@@ -83,7 +92,7 @@ Owner's phone ── Telegram ──► POST /api/telegram (Next route, webhook 
                          agent/     Anthropic tool runner, prompt, tools, memory
                          domain/    change ops apply/invert, preview, allergens, hours, pricing
                          bot/       commands, media, voice, approval buttons, bot copy
-                         templates/ classic, nocturne, lumen (shared with the deployed sites)
+                         templates/ classic, nocturne, lumen, furna, mehana, kvartal (shared with the deployed sites)
                          wizard/    draft schema, menu extraction, text drafting
                          deploy/    Vercel deployer (+ fake), file manifest of the thin site shell
                          store/     Store interface: Supabase (prod) + memory (tests, offline mode)
@@ -218,6 +227,7 @@ The owner can use Facebook Messenger, Instagram Direct or WhatsApp instead of Te
 - **Webhook.** `POST /api/meta` serves all three Meta channels (signature check with `META_APP_SECRET`, `GET` verification with `META_VERIFY_TOKEN`).
 - **The 24-hour rule.** Meta channels only accept messages within 24 hours of the owner's last one. Replies and previews always arrive; reminders and other messages the service starts on its own are skipped on Meta channels when the owner has been silent that long (Telegram gets them all).
 - **Invite links.** `npm run venue:create` prints one link per enabled channel (`startLinks`, `src/channels/links.ts`): `t.me/<bot>?start=<code>`, `m.me/<page>?ref=<code>`, `ig.me/m/<user>?ref=<code>`, `wa.me/<digits>?text=<code>`. Sending the bare code also links a chat.
+- **Owner setup in several apps.** The done page and the dashboard list one owner link per enabled app (`enabledApps` / `connectLinks`, `src/server/connect-apps.ts`): Telegram whenever `TELEGRAM_BOT_USERNAME` is set; WhatsApp, Messenger and Instagram only when `CHANNELS_ENABLED=true` **and** that channel's token (`WHATSAPP_TOKEN`, `META_PAGE_TOKEN`) and handle (`WHATSAPP_NUMBER`, `MESSENGER_PAGE_HANDLE`, `INSTAGRAM_USERNAME`) are set, so an owner is never sent to an app this deployment does not answer. With several apps the done page offers "Connect another app" after the first one links; the dashboard's "Your apps" card shows the linked chats per app (owners and staff) and "Connect another" makes a fresh single-use owner code (`new_owner_code`, rate-limited) for one more app or a second phone. Keep `CHANNELS_ENABLED=false` until the Meta webhooks point at this deployment.
 - **Scripts.** `npm run meta:setup` (checks the tokens, subscribes the Page, sets the Messenger Get Started button, prints the webhook URL), `npm run meta:sim -- fb text "…"` (a signed fake webhook against `npm run dev:offline`), `npm run db:dry-run` (the `chat_ref` migration inside a rolled-back transaction).
 
 Setup, step by step (Meta app, tokens, Testers, webhooks, App Review, WhatsApp test number, Vercel preview, database migration): **[docs/CHANNELS.md](docs/CHANNELS.md)**.
@@ -291,6 +301,7 @@ Checked on 2026-10-11 on `build/templates`:
 - `npm run e2e`: the demo sequence offline (proposal and approve, instant sold-out, a special until closing, scheduled holidays, undo, a bulk change applied from the dashboard, the tick writing auto sets and applying the schedule): `OFFLINE E2E OK`.
 - Live against the real Supabase project (on `64cdf1f`, after the final fixes): `db:apply`, `check:rls` 19/19, the store contract (`SUPABASE_CONTRACT=1`) 23/23, including `deleteVenue` with storage, `findOpenInvite` and `claimDeploy` by deployment id.
 - `npm run test:templates`: the classic, nocturne and lumen venue shells build standalone (on `2a75740`; classic rebuilt after the `<html lang>` change).
+- `npm run test:templates`: all six venue shells (classic, nocturne, lumen, furna, mehana, kvartal) build standalone on `build/merge-main` (2026-10-11, after the final fix pass; template fonts use `preload: false`).
 - Live Claude calls: menu extraction from a photo and "Write for me" return usable bilingual results; `npm run smoke -- --dry` turned "Капучиното става 3,20" into a `set_price` proposal 2,90 € → 3,20 €.
 - `npm run dev:offline`: the chooser offers "Continue your draft" after a reload, and the Look step switches the preview between templates.
 - The bot token is valid (`getMe` answers as @restaurant_site_manager_bot), and the Vercel production deployment at https://site-manager-lovat.vercel.app serves `/agala`, answers the tick and receives the Telegram webhook.
