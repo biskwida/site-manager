@@ -64,9 +64,9 @@ export function wpTools(d: AgentDeps, k: ToolKit) {
     await k.ensureNoPending();
     const s = await k.site();
     const p = k.previews(s, changes);
-    const cs = await d.store.createChangeSet({ venue_id: d.venueId, chat_id: d.chatId, summary_bg, summary_en, ...p, source: d.source ?? "text", status: "proposed", changes });
-    const messageId = await d.messenger.sendProposal(d.chatId, proposalText(k.mine(p), k.lang, null, s.venue.tz), cs.id, k.lang);
-    if (messageId !== null) await d.store.updateChangeSet(cs.id, { tg_message_id: messageId });
+    const cs = await d.store.createChangeSet({ venue_id: d.venueId, chat_ref: d.chatRef, summary_bg, summary_en, ...p, source: d.source ?? "text", status: "proposed", changes });
+    const messageRef = await d.messenger.sendProposal(d.chatRef, proposalText(k.mine(p), k.lang, null, s.venue.tz), cs.id, k.lang);
+    if (messageRef !== null) await d.store.updateChangeSet(cs.id, { message_ref: messageRef });
     return { change_set_id: cs.id, status: "proposed", preview: k.mine(p), ...extra, next: "The owner decides with the buttons. Reply with at most one short sentence, or nothing." };
   };
 

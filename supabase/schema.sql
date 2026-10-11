@@ -60,14 +60,17 @@ $$;
 
 create table if not exists public.venue_members (
   venue_id uuid not null references public.venues(id) on delete cascade,
-  tg_chat_id bigint not null,
+  chat_ref text not null,                 -- "<channel>:<id>", src/channels/ref.ts
+  tg_chat_id bigint,                      -- legacy, tg: refs only; dropped by migrations/2026-10-11-drop-legacy-chat-ids.sql
   role text not null check (role in ('owner', 'staff')),
   lang text not null default 'bg' check (lang in ('bg', 'en')),
+  last_seen_at timestamptz,
   created_at timestamptz not null default now(),
-  primary key (venue_id, tg_chat_id)
+  primary key (venue_id, chat_ref)
 );
--- One venue per Telegram chat: the bot looks members up by chat id alone.
-create unique index if not exists venue_members_chat_idx on public.venue_members (tg_chat_id);
+-- One venue per chat: the bot looks members up by chat_ref alone.
+create unique index if not exists venue_members_chat_ref_key on public.venue_members (chat_ref);
+create unique index if not exists venue_members_tg_chat_id_key on public.venue_members (venue_id, tg_chat_id);
 
 create table if not exists public.venue_invites (
   code text primary key check (length(code) >= 8),
@@ -151,7 +154,8 @@ create table if not exists public.media (
 create table if not exists public.change_sets (
   id uuid primary key default gen_random_uuid(),
   venue_id uuid not null references public.venues(id) on delete cascade,
-  chat_id bigint,
+  chat_ref text,
+  chat_id bigint,                          -- legacy, see venue_members
   summary_bg text not null default '',
   summary_en text not null default '',
   preview_bg text not null default '',
@@ -165,11 +169,13 @@ create table if not exists public.change_sets (
   applied_at timestamptz,
   reverted_by uuid,
   undoes_id uuid,
-  tg_message_id bigint,
+  message_ref text,
+  tg_message_id bigint,                    -- legacy
   created_at timestamptz not null default now()
 );
 create index if not exists change_sets_venue_idx on public.change_sets (venue_id, created_at desc);
 create index if not exists change_sets_status_idx on public.change_sets (status, apply_at);
+create index if not exists change_sets_chat_ref_idx on public.change_sets (venue_id, chat_ref) where status = 'proposed';
 
 create table if not exists public.changes (
   id uuid primary key default gen_random_uuid(),
@@ -185,12 +191,33 @@ create index if not exists changes_set_idx on public.changes (change_set_id, pos
 
 create table if not exists public.conversations (
   venue_id uuid not null references public.venues(id) on delete cascade,
-  chat_id bigint not null,
+  chat_ref text not null,
+  chat_id bigint,                          -- legacy
   turns jsonb not null default '[]'::jsonb,
   correction_for uuid,
   updated_at timestamptz not null default now(),
-  primary key (venue_id, chat_id)
+  primary key (venue_id, chat_ref)
 );
+create unique index if not exists conversations_chat_id_key on public.conversations (venue_id, chat_id);
+-- Legacy bridge: production (Telegram-only) still writes the bigint columns. Dropped by migrations/2026-10-11-drop-legacy-chat-ids.sql.
+create or replace function public.fill_chat_ref() returns trigger language plpgsql as $$
+begin
+  if tg_table_name = 'venue_members' then
+    if new.chat_ref is null and new.tg_chat_id is not null then new.chat_ref := 'tg:' || new.tg_chat_id; end if;
+  elsif tg_table_name = 'change_sets' then
+    if new.chat_ref is null and new.chat_id is not null then new.chat_ref := 'tg:' || new.chat_id; end if;
+    if new.message_ref is null and new.tg_message_id is not null then new.message_ref := new.tg_message_id::text; end if;
+  elsif tg_table_name = 'conversations' then
+    if new.chat_ref is null and new.chat_id is not null then new.chat_ref := 'tg:' || new.chat_id; end if;
+  end if;
+  return new;
+end $$;
+drop trigger if exists fill_chat_ref on public.venue_members;
+create trigger fill_chat_ref before insert or update on public.venue_members for each row execute function public.fill_chat_ref();
+drop trigger if exists fill_chat_ref on public.change_sets;
+create trigger fill_chat_ref before insert or update on public.change_sets for each row execute function public.fill_chat_ref();
+drop trigger if exists fill_chat_ref on public.conversations;
+create trigger fill_chat_ref before insert or update on public.conversations for each row execute function public.fill_chat_ref();
 
 -- items.updated_at maintenance
 create or replace function public.touch_updated_at() returns trigger language plpgsql as $$

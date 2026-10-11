@@ -36,7 +36,7 @@ export function pickEffort(base: Effort, input: { hasImage: boolean; text: strin
 export async function runTurn(deps: AgentDeps, input: TurnInput, cfg: AgentConfig, client?: Anthropic): Promise<string> {
   const now = deps.now();
   const venue = await deps.store.getVenue(deps.venueId);
-  const memory = await loadMemory(deps.store, deps.venueId, deps.chatId, now);
+  const memory = await loadMemory(deps.store, deps.venueId, deps.chatRef, now);
   const lang = deps.member.lang;
   const text = userMessage({
     venueName: venue.name, slug: venue.slug, nowText: nowText(now, venue.tz), lang, role: deps.member.role,
@@ -50,8 +50,8 @@ export async function runTurn(deps: AgentDeps, input: TurnInput, cfg: AgentConfi
   const ownerLine = `${input.source === "voice" ? "[voice] " : input.source === "photo" ? "[photo] " : ""}${input.text}`.trim();
 
   const closeOut = async (reply: string, outcome?: string) => {
-    if (reply) await deps.messenger.send(deps.chatId, reply);
-    await appendMemory(deps.store, deps.venueId, deps.chatId, { at: now.toISOString(), owner: ownerLine, agent: reply || "(no reply)", outcome }, now);
+    if (reply) await deps.messenger.send(deps.chatRef, reply);
+    await appendMemory(deps.store, deps.venueId, deps.chatRef, { at: now.toISOString(), owner: ownerLine, agent: reply || "(no reply)", outcome }, now);
   };
 
   let final: { stop_reason: string | null; content: { type: string; text?: string }[] };
@@ -81,7 +81,7 @@ export async function runTurn(deps: AgentDeps, input: TurnInput, cfg: AgentConfi
     return "refused";
   }
   const reply = final.content.flatMap((b) => (b.type === "text" && b.text ? [b.text] : [])).join("\n").trim();
-  const pending = await deps.store.findProposed(deps.venueId, deps.chatId);
+  const pending = await deps.store.findProposed(deps.venueId, deps.chatRef);
   const outcome = pending ? `proposed: ${lang === "bg" ? pending.summary_bg : pending.summary_en} (waiting for the owner's decision)` : undefined;
   await closeOut(reply, outcome);
   return reply;

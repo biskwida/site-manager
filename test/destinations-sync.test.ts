@@ -25,7 +25,7 @@ async function connected() {
   await demo.store.upsertDestination({ venue_id: demo.venue.id, kind: "wordpress", config: { site_url: wp.siteUrl, site_name: "Smoke Café" }, secrets: encryptSecrets({ token }, KEY) });
   const logs: string[] = [];
   const d = { store: demo.store, secretKey: KEY, fetch: wp.fetch, log: (s: string) => logs.push(s) };
-  const set = (changes: Change[]) => demo.store.createChangeSet({ venue_id: demo.venue.id, chat_id: 1001, summary_bg: "s", summary_en: "s", preview_bg: "p", preview_en: "p", source: "text", status: "proposed", changes });
+  const set = (changes: Change[]) => demo.store.createChangeSet({ venue_id: demo.venue.id, chat_ref: "tg:1001", summary_bg: "s", summary_en: "s", preview_bg: "p", preview_en: "p", source: "text", status: "proposed", changes });
   return { ...demo, wp, d, logs, set };
 }
 
@@ -46,7 +46,7 @@ describe("withDestinationSync", () => {
   it("pushes right after a successful apply and reports the line", async () => {
     const demo = await connected();
     const store = withDestinationSync(demo.store, demo.d, () => T0);
-    const cs = await store.createChangeSet({ venue_id: demo.venue.id, chat_id: 1001, summary_bg: "s", summary_en: "s", preview_bg: "p", preview_en: "p", source: "text", status: "proposed", changes: [edit] });
+    const cs = await store.createChangeSet({ venue_id: demo.venue.id, chat_ref: "tg:1001", summary_bg: "s", summary_en: "s", preview_bg: "p", preview_en: "p", source: "text", status: "proposed", changes: [edit] });
     expect(await store.applyChangeSet(cs.id, T0.toISOString())).toBe("applied");
     expect(demo.wp.pages.get(2)?.content).toContain("kozunak");
     expect(await syncLines(store, cs.id, "bg")).toEqual(["WordPress: обновено ✅"]);
@@ -60,7 +60,7 @@ describe("withDestinationSync", () => {
     const demo = await connected();
     const store = withDestinationSync(demo.store, demo.d, () => T0);
     demo.wp.unreachable = true;
-    const cs = await store.createChangeSet({ venue_id: demo.venue.id, chat_id: 1001, summary_bg: "s", summary_en: "s", preview_bg: "p", preview_en: "p", source: "text", status: "proposed", changes: [edit] });
+    const cs = await store.createChangeSet({ venue_id: demo.venue.id, chat_ref: "tg:1001", summary_bg: "s", summary_en: "s", preview_bg: "p", preview_en: "p", source: "text", status: "proposed", changes: [edit] });
     expect(await store.applyChangeSet(cs.id, T0.toISOString())).toBe("applied");
     const [row] = await store.listSyncs({ changeSetId: cs.id });
     expect(row).toMatchObject({ status: "pending", attempts: 1, next_at: at(BACKOFF_MS[0]).toISOString() });
@@ -78,7 +78,7 @@ describe("withDestinationSync", () => {
     const demo = await connected();
     demo.wp.unreachable = true;
     const store = withDestinationSync(demo.store, demo.d, () => T0);
-    const cs = await store.createChangeSet({ venue_id: demo.venue.id, chat_id: 1001, summary_bg: "s", summary_en: "s", preview_bg: "p", preview_en: "p", source: "text", status: "proposed", changes: [edit] });
+    const cs = await store.createChangeSet({ venue_id: demo.venue.id, chat_ref: "tg:1001", summary_bg: "s", summary_en: "s", preview_bg: "p", preview_en: "p", source: "text", status: "proposed", changes: [edit] });
     await store.applyChangeSet(cs.id, T0.toISOString());
     let clock = 0;
     for (let i = 1; i < 5; i++) {
@@ -92,7 +92,7 @@ describe("withDestinationSync", () => {
     expect(await store.getDestination(demo.venue.id, "wordpress")).toMatchObject({ status: "error", last_error: expect.stringMatching(/unreachable/) });
     expect(await syncLines(store, cs.id, "en")).toEqual([expect.stringMatching(/^WordPress: error: WordPress unreachable/)]);
     demo.wp.unreachable = false;
-    const again = await store.createChangeSet({ venue_id: demo.venue.id, chat_id: 1001, summary_bg: "s", summary_en: "s", preview_bg: "p", preview_en: "p", source: "text", status: "proposed", changes: [edit] });
+    const again = await store.createChangeSet({ venue_id: demo.venue.id, chat_ref: "tg:1001", summary_bg: "s", summary_en: "s", preview_bg: "p", preview_en: "p", source: "text", status: "proposed", changes: [edit] });
     await store.applyChangeSet(again.id, T0.toISOString());
     expect(await store.getDestination(demo.venue.id, "wordpress")).toMatchObject({ status: "connected", last_error: null }); // recovers
   });
@@ -100,7 +100,7 @@ describe("withDestinationSync", () => {
   it("fails at once on a non-retryable error", async () => {
     const demo = await connected();
     const store = withDestinationSync(demo.store, demo.d, () => T0);
-    const cs = await store.createChangeSet({ venue_id: demo.venue.id, chat_id: 1001, summary_bg: "s", summary_en: "s", preview_bg: "p", preview_en: "p", source: "text", status: "proposed", changes: [{ ...edit, entity_id: "999" }] });
+    const cs = await store.createChangeSet({ venue_id: demo.venue.id, chat_ref: "tg:1001", summary_bg: "s", summary_en: "s", preview_bg: "p", preview_en: "p", source: "text", status: "proposed", changes: [{ ...edit, entity_id: "999" }] });
     await store.applyChangeSet(cs.id, T0.toISOString());
     expect((await store.listSyncs({ changeSetId: cs.id }))[0]).toMatchObject({ status: "failed", attempts: 1, last_error: "sm_not_found: No such page." });
     expect(await syncLines(store, cs.id, "en")).toEqual(["WordPress: error: No such page."]);
@@ -118,7 +118,7 @@ const editB: Change = {
 
 describe("per-destination queue", () => {
   const propose = (demo: Awaited<ReturnType<typeof connected>>, changes: Change[], extra: Record<string, unknown> = {}) =>
-    demo.store.createChangeSet({ venue_id: demo.venue.id, chat_id: 1001, summary_bg: "s", summary_en: "s", preview_bg: "p", preview_en: "p", source: "text", status: "proposed", changes, ...extra });
+    demo.store.createChangeSet({ venue_id: demo.venue.id, chat_ref: "tg:1001", summary_bg: "s", summary_en: "s", preview_bg: "p", preview_en: "p", source: "text", status: "proposed", changes, ...extra });
 
   it("pushes an earlier failed set before a newer set on the same page, so the newer content wins", async () => {
     const demo = await connected();
@@ -188,7 +188,7 @@ describe("lease on rows created by the hook", () => {
     const demo = await connected();
     const store = withDestinationSync(demo.store, demo.d, () => T0);
     demo.wp.unreachable = true;
-    const cs = await store.createChangeSet({ venue_id: demo.venue.id, chat_id: 1001, summary_bg: "s", summary_en: "s", preview_bg: "p", preview_en: "p", source: "text", status: "proposed", changes: [edit] });
+    const cs = await store.createChangeSet({ venue_id: demo.venue.id, chat_ref: "tg:1001", summary_bg: "s", summary_en: "s", preview_bg: "p", preview_en: "p", source: "text", status: "proposed", changes: [edit] });
     await store.applyChangeSet(cs.id, T0.toISOString());
     expect((await store.listSyncs({ changeSetId: cs.id }))[0].next_at).toBe(at(BACKOFF_MS[0]).toISOString());
   });
@@ -206,7 +206,7 @@ describe("lease on rows created by the hook", () => {
 
 describe("concurrent approvals and permanently failed rows", () => {
   const propose = (demo: Awaited<ReturnType<typeof connected>>, changes: Change[]) =>
-    demo.store.createChangeSet({ venue_id: demo.venue.id, chat_id: 1001, summary_bg: "s", summary_en: "s", preview_bg: "p", preview_en: "p", source: "text", status: "proposed", changes });
+    demo.store.createChangeSet({ venue_id: demo.venue.id, chat_ref: "tg:1001", summary_bg: "s", summary_en: "s", preview_bg: "p", preview_en: "p", source: "text", status: "proposed", changes });
   const applies = (demo: Awaited<ReturnType<typeof connected>>) => demo.wp.calls.filter((c) => c.path === "/page/2/apply").map((c) => (c.body as { content: string }).content);
 
   it("a second approval leaves a row another approval is still pushing alone, and hands its own row back to the queue", async () => {
@@ -254,7 +254,7 @@ describe("concurrent approvals and permanently failed rows", () => {
 
 describe("runSync error classes and owner-facing lines", () => {
   const propose = (demo: Awaited<ReturnType<typeof connected>>, changes: Change[]) =>
-    demo.store.createChangeSet({ venue_id: demo.venue.id, chat_id: 1001, summary_bg: "s", summary_en: "s", preview_bg: "p", preview_en: "p", source: "text", status: "proposed", changes });
+    demo.store.createChangeSet({ venue_id: demo.venue.id, chat_ref: "tg:1001", summary_bg: "s", summary_en: "s", preview_bg: "p", preview_en: "p", source: "text", status: "proposed", changes });
 
   it("treats a transient store error as retryable", async () => {
     const demo = await connected();
@@ -295,7 +295,7 @@ describe("runSync error classes and owner-facing lines", () => {
     const demo = await connected();
     const store = withDestinationSync(demo.store, demo.d, () => T0);
     demo.wp.failNext = { status: 401, code: "sm_unauthorized", message: "Missing or invalid plugin token." };
-    const cs = await store.createChangeSet({ venue_id: demo.venue.id, chat_id: 1001, summary_bg: "s", summary_en: "s", preview_bg: "p", preview_en: "p", source: "text", status: "proposed", changes: [edit] });
+    const cs = await store.createChangeSet({ venue_id: demo.venue.id, chat_ref: "tg:1001", summary_bg: "s", summary_en: "s", preview_bg: "p", preview_en: "p", source: "text", status: "proposed", changes: [edit] });
     await store.applyChangeSet(cs.id, T0.toISOString());
     expect((await store.listSyncs({ changeSetId: cs.id }))[0]).toMatchObject({ status: "failed", last_error: "sm_unauthorized: Missing or invalid plugin token." });
     expect(await store.getDestination(demo.venue.id, "wordpress")).toMatchObject({ status: "error", last_error: "sm_unauthorized: Missing or invalid plugin token." });
@@ -305,14 +305,14 @@ describe("runSync error classes and owner-facing lines", () => {
 
   it("says the change was not sent when the venue has no WordPress connection", async () => {
     const demo = await makeDemo();
-    const cs = await demo.store.createChangeSet({ venue_id: demo.venue.id, chat_id: 1001, summary_bg: "s", summary_en: "s", preview_bg: "p", preview_en: "p", source: "text", status: "proposed", changes: [edit] });
+    const cs = await demo.store.createChangeSet({ venue_id: demo.venue.id, chat_ref: "tg:1001", summary_bg: "s", summary_en: "s", preview_bg: "p", preview_en: "p", source: "text", status: "proposed", changes: [edit] });
     expect(await syncLines(demo.store, cs.id, "bg")).toEqual(["WordPress: не е свързан, промяната не е изпратена"]);
     expect(await syncLines(demo.store, cs.id, "en")).toEqual(["WordPress: not connected, the change was not sent"]);
     const dest = await demo.store.upsertDestination({ venue_id: demo.venue.id, kind: "wordpress", config: { site_url: "https://cafe.example" }, secrets: "x" });
     await demo.store.updateDestination(dest.id, { status: "disconnected" });
     expect(await syncLines(demo.store, cs.id, "en")).toEqual(["WordPress: not connected, the change was not sent"]);
     const site = await demo.store.getSite(demo.venue.id);
-    const plain = await demo.store.createChangeSet({ venue_id: demo.venue.id, chat_id: 1001, summary_bg: "s", summary_en: "s", preview_bg: "p", preview_en: "p", source: "text", status: "proposed", changes: planChanges(site, [{ op: "set_price", item_id: demo.items.Cappuccino.id, price_eur: 3.2 }], { newId: () => "n", now: T0.toISOString() }) });
+    const plain = await demo.store.createChangeSet({ venue_id: demo.venue.id, chat_ref: "tg:1001", summary_bg: "s", summary_en: "s", preview_bg: "p", preview_en: "p", source: "text", status: "proposed", changes: planChanges(site, [{ op: "set_price", item_id: demo.items.Cappuccino.id, price_eur: 3.2 }], { newId: () => "n", now: T0.toISOString() }) });
     expect(await syncLines(demo.store, plain.id, "bg")).toEqual([]); // nothing for WordPress in the set
   });
 });

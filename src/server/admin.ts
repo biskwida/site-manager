@@ -69,11 +69,13 @@ export interface AdminDeps {
   baseUrl: string;
 }
 
-async function editTelegram(d: AdminDeps, cs: ChangeSet, mark: { bg: string; en: string }) {
-  if (cs.chat_id === null || cs.tg_message_id === null) return;
-  const member = await d.store.findMember(cs.chat_id);
+async function concludeOnChannel(d: AdminDeps, cs: ChangeSet, mark: { bg: string; en: string }) {
+  if (cs.chat_ref === null) return;
+  const member = await d.store.findMember(cs.chat_ref);
   const lang = member?.lang ?? "bg";
-  await d.messenger.edit(cs.chat_id, cs.tg_message_id, `${lang === "bg" ? cs.preview_bg : cs.preview_en}\n\n${lang === "bg" ? mark.bg : mark.en}`);
+  const preview = lang === "bg" ? cs.preview_bg : cs.preview_en;
+  const line = lang === "bg" ? mark.bg : mark.en;
+  await d.messenger.conclude(cs.chat_ref, cs.message_ref, `${preview}\n\n${line}`, line, { proactive: true });
 }
 
 /** The owner's dashboard decisions. The owner's key is the authority, so "apply" applies at once (or schedules a future apply_at). */
@@ -92,34 +94,34 @@ export async function adminAction(d: AdminDeps, venue: Venue, action: AdminActio
     const site = await d.store.getSite(venue.id);
     const changes = invertChanges(cs.changes);
     const undo = await d.store.createChangeSet({
-      venue_id: venue.id, chat_id: cs.chat_id, summary_bg: `Отмяна: ${cs.summary_bg}`, summary_en: `Undo: ${cs.summary_en}`,
+      venue_id: venue.id, chat_ref: cs.chat_ref, summary_bg: `Отмяна: ${cs.summary_bg}`, summary_en: `Undo: ${cs.summary_en}`,
       preview_bg: renderPreview(site, changes, "bg", venue.tz), preview_en: renderPreview(site, changes, "en", venue.tz),
       source: "undo", status: "proposed", undoes_id: cs.id, changes,
     });
     await d.store.applyChangeSet(undo.id, nowIso);
-    if (cs.chat_id !== null) await d.messenger.send(cs.chat_id, (await d.store.findMember(cs.chat_id))?.lang === "en" ? `↩️ Reverted from the dashboard: ${cs.summary_en}` : `↩️ Отменено от таблото: ${cs.summary_bg}`);
+    if (cs.chat_ref !== null) await d.messenger.send(cs.chat_ref, (await d.store.findMember(cs.chat_ref))?.lang === "en" ? `↩️ Reverted from the dashboard: ${cs.summary_en}` : `↩️ Отменено от таблото: ${cs.summary_bg}`, { proactive: true });
     return { ok: true, status: "applied", change_set_id: undo.id };
   }
   if (action === "cancel") {
     if (cs.status !== "proposed" && cs.status !== "scheduled") return { ok: false, error: `Change set is "${cs.status}".` };
     await d.store.updateChangeSet(cs.id, { status: "cancelled", decided_at: nowIso });
-    await editTelegram(d, cs, { bg: "❌ Отказано от таблото.", en: "❌ Cancelled from the dashboard." });
+    await concludeOnChannel(d, cs, { bg: "❌ Отказано от таблото.", en: "❌ Cancelled from the dashboard." });
     return { ok: true, status: "cancelled", change_set_id: cs.id };
   }
   if (cs.status !== "proposed") return { ok: false, error: `Change set is "${cs.status}".` };
   if (action === "reject") {
     await d.store.updateChangeSet(cs.id, { status: "rejected", decided_at: nowIso });
-    await editTelegram(d, cs, { bg: "❌ Отхвърлено от таблото.", en: "❌ Rejected from the dashboard." });
+    await concludeOnChannel(d, cs, { bg: "❌ Отхвърлено от таблото.", en: "❌ Rejected from the dashboard." });
     return { ok: true, status: "rejected", change_set_id: cs.id };
   }
   if (cs.apply_at && Date.parse(cs.apply_at) > now.getTime()) {
     await d.store.updateChangeSet(cs.id, { status: "scheduled", decided_at: nowIso });
-    await editTelegram(d, cs, { bg: `⏰ Насрочено от таблото за ${formatDateTime(cs.apply_at, "bg", venue.tz)}`, en: `⏰ Scheduled from the dashboard for ${formatDateTime(cs.apply_at, "en", venue.tz)}` });
+    await concludeOnChannel(d, cs, { bg: `⏰ Насрочено от таблото за ${formatDateTime(cs.apply_at, "bg", venue.tz)}`, en: `⏰ Scheduled from the dashboard for ${formatDateTime(cs.apply_at, "en", venue.tz)}` });
     return { ok: true, status: "scheduled", change_set_id: cs.id };
   }
   const r = await d.store.applyChangeSet(cs.id, nowIso);
   if (r === "skipped") return { ok: false, error: `Change set is "${(await d.store.getChangeSet(cs.id)).status}".` };
-  await editTelegram(d, cs, { bg: "✅ Приложено от таблото.", en: "✅ Applied from the dashboard." });
+  await concludeOnChannel(d, cs, { bg: "✅ Приложено от таблото.", en: "✅ Applied from the dashboard." });
   return { ok: true, status: "applied", change_set_id: cs.id };
 }
 

@@ -12,7 +12,7 @@ describe("admin", () => {
     const d = { store, messenger, now: () => T0, baseUrl: "https://site.example" };
     const site = await store.getSite(venue.id);
     const mk = (status: "proposed" | "scheduled", price: number, applyAt: string | null = null) =>
-      store.createChangeSet({ venue_id: venue.id, chat_id: 1001, summary_bg: `Капучино ${price}`, summary_en: `Cappuccino ${price}`, preview_bg: "p", preview_en: "p", source: "text", status, apply_at: applyAt, tg_message_id: 42, changes: planChanges(site, [{ op: "set_price", item_id: items.Cappuccino.id, price_eur: price }], { newId: () => "n", now: T0.toISOString() }) });
+      store.createChangeSet({ venue_id: venue.id, chat_ref: "tg:1001", summary_bg: `Капучино ${price}`, summary_en: `Cappuccino ${price}`, preview_bg: "p", preview_en: "p", source: "text", status, apply_at: applyAt, message_ref: "42", changes: planChanges(site, [{ op: "set_price", item_id: items.Cappuccino.id, price_eur: price }], { newId: () => "n", now: T0.toISOString() }) });
     const p1 = await mk("proposed", 3.2);
     const p2 = await mk("proposed", 3.3);
     const s1 = await mk("scheduled", 3.4, "2026-12-01T08:00:00.000Z");
@@ -23,8 +23,8 @@ describe("admin", () => {
     expect(o.log).toEqual([]);
 
     expect(await adminAction(d, venue, "apply", p1.id)).toEqual({ ok: true, status: "applied", change_set_id: p1.id });
-    expect(messenger.edits[0]).toMatchObject({ chatId: 1001, messageId: 42 });
-    expect(messenger.edits[0].text).toContain("✅");
+    expect(messenger.concluded[0]).toMatchObject({ chatRef: "tg:1001", messageRef: "42", proactive: true });
+    expect(messenger.concluded[0].full).toContain("✅");
     expect((await store.getSite(venue.id)).items.find((i) => i.id === items.Cappuccino.id)?.price_eur).toBe(3.2);
     expect(await adminAction(d, venue, "reject", p2.id)).toEqual({ ok: true, status: "rejected", change_set_id: p2.id });
     expect(await adminAction(d, venue, "cancel", s1.id)).toEqual({ ok: true, status: "cancelled", change_set_id: s1.id });
@@ -41,7 +41,7 @@ describe("admin", () => {
   it("lists sold-out items with return times", async () => {
     const { store, venue, items } = await makeDemo();
     const site = await store.getSite(venue.id);
-    const cs = await store.createChangeSet({ venue_id: venue.id, chat_id: null, summary_bg: "", summary_en: "", preview_bg: "", preview_en: "", source: "text", status: "proposed", changes: planChanges(site, [{ op: "set_sold_out", item_id: items["Cheese banitsa"].id, until: "2026-10-10T06:00:00.000Z" }], { newId: () => "n", now: T0.toISOString() }) });
+    const cs = await store.createChangeSet({ venue_id: venue.id, chat_ref: null, summary_bg: "", summary_en: "", preview_bg: "", preview_en: "", source: "text", status: "proposed", changes: planChanges(site, [{ op: "set_sold_out", item_id: items["Cheese banitsa"].id, until: "2026-10-10T06:00:00.000Z" }], { newId: () => "n", now: T0.toISOString() }) });
     await store.applyChangeSet(cs.id, T0.toISOString());
     const o = await adminOverview(store, venue, T0);
     expect(o.sold_out).toEqual([{ id: items["Cheese banitsa"].id, name_bg: "Баница със сирене", name_en: "Cheese banitsa", sold_out_until: "2026-10-10T06:00:00.000Z" }]);

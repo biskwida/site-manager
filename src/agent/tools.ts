@@ -19,7 +19,7 @@ import { wpTools } from "./wp-tools";
 export interface AgentDeps {
   store: Store;
   venueId: string;
-  chatId: number;
+  chatRef: string;
   member: Member;
   messenger: Messenger;
   now: () => Date;
@@ -119,15 +119,15 @@ export function makeTools(d: AgentDeps) {
     }
   };
 
-  /** Cancels a pending proposal (because the owner asked to change it) and edits its message. */
+  /** Cancels a pending proposal (because the owner asked to change it) and concludes its message. */
   const cancelPending = async (cs: ChangeSet, mark: string) => {
     await d.store.updateChangeSet(cs.id, { status: "cancelled", decided_at: d.now().toISOString() });
-    if (cs.chat_id !== null && cs.tg_message_id !== null) await d.messenger.edit(cs.chat_id, cs.tg_message_id, `${mine(cs)}\n\n${mark}`);
+    if (cs.chat_ref !== null) await d.messenger.conclude(cs.chat_ref, cs.message_ref, `${mine(cs)}\n\n${mark}`, mark);
   };
 
   /** One proposal per chat: replace it when the owner pressed ✏️, otherwise refuse. */
   const ensureNoPending = async () => {
-    const pending = await d.store.findProposed(d.venueId, d.chatId);
+    const pending = await d.store.findProposed(d.venueId, d.chatRef);
     if (!pending) return;
     if (d.correctionFor && pending.id === d.correctionFor) {
       await cancelPending(pending, tr(lang, "✏️ Заменено с ново предложение.", "✏️ Replaced by a new proposal."));
@@ -146,17 +146,17 @@ export function makeTools(d: AgentDeps) {
     const instant = applyAt === null && ops.every((o) => o.op === "set_sold_out");
     if (!instant) await ensureNoPending();
     const cs = await d.store.createChangeSet({
-      venue_id: d.venueId, chat_id: d.chatId, summary_bg: input.summary_bg, summary_en: input.summary_en, ...p,
+      venue_id: d.venueId, chat_ref: d.chatRef, summary_bg: input.summary_bg, summary_en: input.summary_en, ...p,
       source: d.source ?? "text", status: "proposed", apply_at: applyAt, changes,
     });
     if (instant) {
       await d.store.applyChangeSet(cs.id, d.now().toISOString());
-      await d.messenger.send(d.chatId, `✅ ${mine(p).replace(/^• /gm, "")}`);
+      await d.messenger.send(d.chatRef, `✅ ${mine(p).replace(/^• /gm, "")}`);
       const first = ops[0] as Extract<ChangeOp, { op: "set_sold_out" }>;
       return { change_set_id: cs.id, status: "applied", preview: mine(p), sold_out_until: first.until };
     }
-    const messageId = await d.messenger.sendProposal(d.chatId, proposalText(mine(p), lang, applyAt, s.venue.tz), cs.id, lang);
-    if (messageId !== null) await d.store.updateChangeSet(cs.id, { tg_message_id: messageId });
+    const messageRef = await d.messenger.sendProposal(d.chatRef, proposalText(mine(p), lang, applyAt, s.venue.tz), cs.id, lang);
+    if (messageRef !== null) await d.store.updateChangeSet(cs.id, { message_ref: messageRef });
     return { change_set_id: cs.id, status: "proposed", preview: mine(p), apply_at: applyAt, next: "The owner decides with the buttons. Reply with at most one short sentence, or nothing." };
   };
 
@@ -168,7 +168,7 @@ export function makeTools(d: AgentDeps) {
       attempt(async () => {
         const s = await site();
         const now = d.now();
-        const pending = await d.store.findProposed(d.venueId, d.chatId);
+        const pending = await d.store.findProposed(d.venueId, d.chatRef);
         return {
           venue: {
             name: s.venue.name, slug: s.venue.slug, tz: s.venue.tz, default_lang: s.venue.default_lang,
@@ -349,11 +349,11 @@ function extraTools(d: AgentDeps, k: ToolKit) {
         const changes = invertChanges(target.changes);
         const p = k.previews(s, changes);
         const cs = await d.store.createChangeSet({
-          venue_id: d.venueId, chat_id: d.chatId, summary_bg: `Отмяна: ${target.summary_bg}`, summary_en: `Undo: ${target.summary_en}`, ...p,
+          venue_id: d.venueId, chat_ref: d.chatRef, summary_bg: `Отмяна: ${target.summary_bg}`, summary_en: `Undo: ${target.summary_en}`, ...p,
           source: "undo", status: "proposed", undoes_id: target.id, changes,
         });
-        const messageId = await d.messenger.sendProposal(d.chatId, proposalText(k.mine(p), k.lang, null, s.venue.tz), cs.id, k.lang);
-        if (messageId !== null) await d.store.updateChangeSet(cs.id, { tg_message_id: messageId });
+        const messageRef = await d.messenger.sendProposal(d.chatRef, proposalText(k.mine(p), k.lang, null, s.venue.tz), cs.id, k.lang);
+        if (messageRef !== null) await d.store.updateChangeSet(cs.id, { message_ref: messageRef });
         return { change_set_id: cs.id, status: "proposed", undoes: target.id, preview: k.mine(p), next: "The owner decides with the buttons." };
       }),
   });

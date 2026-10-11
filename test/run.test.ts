@@ -33,8 +33,8 @@ function fakeClient(script: { tool: string; input: unknown }[] = [], final: { st
 async function setup() {
   const demo = await makeDemo();
   const messenger = new FakeMessenger();
-  const member = (await demo.store.findMember(1001))!;
-  const deps: AgentDeps = { store: demo.store, venueId: demo.venue.id, chatId: 1001, member, messenger, now: () => T0, baseUrl: "https://site.example" };
+  const member = (await demo.store.findMember("tg:1001"))!;
+  const deps: AgentDeps = { store: demo.store, venueId: demo.venue.id, chatRef: "tg:1001", member, messenger, now: () => T0, baseUrl: "https://site.example" };
   return { ...demo, messenger, deps };
 }
 
@@ -52,7 +52,7 @@ describe("pickEffort", () => {
 describe("runTurn", () => {
   it("sends the right params, memory and image block, relays the final text and stores memory", async () => {
     const { deps, messenger, store, venue } = await setup();
-    await appendMemory(store, venue.id, 1001, { at: T0.toISOString(), owner: "здравей", agent: "Здравейте!" }, T0);
+    await appendMemory(store, venue.id, "tg:1001", { at: T0.toISOString(), owner: "здравей", agent: "Здравейте!" }, T0);
     const { client, calls } = fakeClient([], { stop_reason: "end_turn", text: "Готово, върнах я." });
     const out = await runTurn(deps, { text: "това е новата корица", source: "photo", image: { data: "AAAA", media_type: "image/jpeg" }, mediaId: "m-1" }, { model: "claude-opus-5-5", effort: "medium" }, client);
     expect(out).toBe("Готово, върнах я.");
@@ -64,8 +64,8 @@ describe("runTurn", () => {
     expect(msg.content[1].text).toContain("Owner: здравей");
     expect(msg.content[1].text).toContain("media_id: m-1");
     expect(msg.content[1].text).toContain("GMT+03:00");
-    expect(messenger.sent[0]).toMatchObject({ chatId: 1001, text: "Готово, върнах я." });
-    const conv = await store.getConversation(venue.id, 1001);
+    expect(messenger.sent[0]).toMatchObject({ chatRef: "tg:1001", text: "Готово, върнах я." });
+    const conv = await store.getConversation(venue.id, "tg:1001");
     expect(conv?.turns).toHaveLength(2);
     expect(conv?.turns[1]).toMatchObject({ owner: "[photo] това е новата корица", agent: "Готово, върнах я." });
   });
@@ -75,7 +75,7 @@ describe("runTurn", () => {
     await runTurn(deps, { text: "капучиното става три и двайсет", source: "voice" }, { model: "m", effort: "medium" }, client);
     expect(messenger.sent).toHaveLength(1); // only the proposal
     expect(messenger.sent[0].setId).toBeDefined();
-    const conv = await store.getConversation(venue.id, 1001);
+    const conv = await store.getConversation(venue.id, "tg:1001");
     expect(conv?.turns[0].outcome).toBe("proposed: Капучино 3,20 € (waiting for the owner's decision)");
   });
   it("tells the owner when the model refuses or errors", async () => {
@@ -92,11 +92,11 @@ describe("runTurn", () => {
     const { setCorrection } = await import("@/src/agent/memory");
     const site = await store.getSite(venue.id);
     const { planChanges } = await import("@/src/domain/changes");
-    const old = await store.createChangeSet({ venue_id: venue.id, chat_id: 1001, summary_bg: "x", summary_en: "x", preview_bg: "p", preview_en: "p", source: "text", status: "proposed", tg_message_id: 7, changes: planChanges(site, [{ op: "set_price", item_id: items.Latte.id, price_eur: 3.5 }], { newId: () => "n", now: T0.toISOString() }) });
-    await setCorrection(store, venue.id, 1001, old.id, T0);
+    const old = await store.createChangeSet({ venue_id: venue.id, chat_ref: "tg:1001", summary_bg: "x", summary_en: "x", preview_bg: "p", preview_en: "p", source: "text", status: "proposed", message_ref: "7", changes: planChanges(site, [{ op: "set_price", item_id: items.Latte.id, price_eur: 3.5 }], { newId: () => "n", now: T0.toISOString() }) });
+    await setCorrection(store, venue.id, "tg:1001", old.id, T0);
     const { client } = fakeClient([{ tool: "propose_changes", input: { summary_bg: "y", summary_en: "y", changes: [{ op: "set_price", item_id: items.Latte.id, price_eur: 3.4 }] } }], { stop_reason: "end_turn", text: "" });
     await runTurn(deps, { text: "не, 3,40", source: "text" }, { model: "m", effort: "medium" }, client);
     expect((await store.getChangeSet(old.id)).status).toBe("cancelled");
-    expect(await store.findProposed(venue.id, 1001)).not.toBeNull();
+    expect(await store.findProposed(venue.id, "tg:1001")).not.toBeNull();
   });
 });

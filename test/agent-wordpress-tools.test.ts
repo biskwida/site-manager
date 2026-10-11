@@ -19,8 +19,8 @@ async function setup(over: Partial<AgentDeps> = {}) {
   await demo.store.upsertDestination({ venue_id: demo.venue.id, kind: "wordpress", config: { site_url: wp.siteUrl, site_name: "Smoke Café" }, secrets: encryptSecrets({ token }, KEY) });
   const store = withDestinationSync(demo.store, { store: demo.store, secretKey: KEY, fetch: wp.fetch, log: () => undefined }, () => T0);
   const messenger = new FakeMessenger();
-  const member = (await store.findMember(1001))!;
-  const deps: AgentDeps = { store, venueId: demo.venue.id, chatId: 1001, member, messenger, now: () => T0, baseUrl: "https://site.example", wordpress: client, ...over };
+  const member = (await store.findMember("tg:1001"))!;
+  const deps: AgentDeps = { store, venueId: demo.venue.id, chatRef: "tg:1001", member, messenger, now: () => T0, baseUrl: "https://site.example", wordpress: client, ...over };
   const photo = await store.saveMedia(demo.venue.id, new Uint8Array([1, 2, 3]), "image/jpeg");
   return { ...demo, store, wp, messenger, deps, photo, tools: makeTools(deps) };
 }
@@ -62,8 +62,8 @@ describe("wp_edit_page", () => {
     expect(cs.changes[0]).toMatchObject({ op: "wp_edit_page", entity: "wp_page", entity_id: "2", before: { title: "About", page_title: "About", page_url: "https://cafe.example/about/" }, after: { content: "<!-- wp:paragraph --><p>We bake banitsa and kozunak every morning.</p><!-- /wp:paragraph -->" } });
     expect(wp.pages.get(2)?.content).not.toContain("kozunak"); // nothing written yet
     expect(messenger.sent[0]).toMatchObject({ setId: cs.id, lang: "bg" });
-    const decision = await handleDecision({ store, messenger, now: () => T0 }, 1001, "apply", cs.id);
-    expect(decision.edit).toContain("✅ Приложено\nWordPress: обновено ✅");
+    const decision = await handleDecision({ store, messenger, now: () => T0 }, "tg:1001", "apply", cs.id);
+    expect(decision.edit?.full).toContain("✅ Приложено\nWordPress: обновено ✅");
     expect(wp.pages.get(2)?.content).toContain("kozunak");
     expect(wp.pending.has(2)).toBe(false);
   });
@@ -78,7 +78,7 @@ describe("wp_edit_page", () => {
     expect(full.error).toMatch(/Elementor; send replacements/);
     const same = await call(tools, "wp_edit_page", { summary_bg: "x", summary_en: "x", page_id: 2, title: "About" });
     expect(same.error).toMatch(/Nothing would change/);
-    const { tools: staffTools } = await setup({ chatId: 1002, member: { venue_id: "", tg_chat_id: 1002, role: "staff", lang: "en", created_at: "" } });
+    const { tools: staffTools } = await setup({ chatRef: "tg:1002", member: { venue_id: "", chat_ref: "tg:1002", role: "staff", lang: "en", last_seen_at: null, created_at: "" } });
     const staff = await call(staffTools, "wp_edit_page", { summary_bg: "x", summary_en: "x", page_id: 2, title: "X" });
     expect(staff.error).toMatch(/only the owner/);
   });

@@ -2,18 +2,18 @@
 import { Bot, type Context } from "grammy";
 import type { UserFromGetMe } from "grammy/types";
 import type { ImageInput } from "../agent/run";
-import { detectLang } from "../domain/format";
-import type { Lang, Member } from "../domain/types";
+import { makeRef } from "../channels/ref";
+import type { Member } from "../domain/types";
 import type { ConnectResult } from "../destinations/connect";
 import type { Store } from "../store/types";
-import { handleDecision, parseCallback } from "./approvals";
 import { copy, langFromCode } from "./copy";
-import { registerMediaHandlers } from "./media";
-import { type Messenger, TelegramMessenger } from "./messenger";
+import { handleInbound, type InboundMedia } from "./inbound";
+import type { Messenger } from "./messenger";
+import type { Transcriber } from "./voice";
 
 export interface RunRequest {
   venueId: string;
-  chatId: number;
+  chatRef: string;
   member: Member;
   text: string;
   source: "text" | "voice" | "photo";
@@ -30,7 +30,7 @@ export interface BotDeps {
   /** Schedules the agent turn (after() on Vercel, a floating promise in dev-bot). Must not throw. */
   startRun: (r: RunRequest) => void;
   /** null when STT is not configured. */
-  transcribe: ((bytes: Uint8Array, lang: Lang) => Promise<string>) | null;
+  transcribe: Transcriber | null;
   /** Downloads a Telegram file by file_path; the URL (with the bot token) stays inside. */
   download: (filePath: string) => Promise<{ bytes: Uint8Array; contentType: string }>;
   /** Tests pass this to skip getMe. */
@@ -41,149 +41,37 @@ export interface BotDeps {
   onOwnerJoined?: (venueId: string) => void;
 }
 
-const INVITE_TTL_MS = 7 * 24 * 3_600_000;
-export { INVITE_TTL_MS };
-
-export function adminUrl(baseUrl: string, slug: string, token: string): string {
-  return `${baseUrl}/admin/${slug}?key=${token}`;
-}
-export function publicUrl(baseUrl: string, slug: string): string {
-  return `${baseUrl}/${slug}`;
-}
-
-/** Resolves the member for a chat, or replies with the no-access hint and returns null. */
-export async function requireMember(d: BotDeps, ctx: Context): Promise<Member | null> {
-  const chatId = ctx.chat?.id;
-  if (chatId === undefined) return null;
-  const member = await d.store.findMember(chatId);
-  if (member) return member;
-  await ctx.reply(copy(langFromCode(ctx.from?.language_code)).noAccess);
-  return null;
-}
+export { adminUrl, INVITE_TTL_MS, publicUrl } from "./links";
 
 export function createBot(d: BotDeps): Bot {
   const bot = new Bot(d.token, d.botInfo ? { botInfo: d.botInfo } : undefined);
-
-  bot.command("start", async (ctx) => {
-    const chatId = ctx.chat.id;
-    const uiLang = langFromCode(ctx.from?.language_code);
-    const existing = await d.store.findMember(chatId);
-    const code = (ctx.match ?? "").trim().toUpperCase();
-    // A code is tried first, even from a linked chat: the owner may be setting up another venue (the demo phone, a second
-    // café). redeemInvite moves the chat to the code's venue. Only without a usable code does a linked chat get welcome-back.
-    const member = code ? await d.store.redeemInvite(code, chatId, uiLang, d.now().toISOString()) : null;
-    // An owner tapping a staff code for their own venue must not demote themselves (the code is still used up).
-    if (member && existing && existing.venue_id === member.venue_id && existing.role === "owner" && member.role !== "owner") {
-      Object.assign(member, await d.store.upsertMember({ venue_id: existing.venue_id, tg_chat_id: chatId, role: "owner", lang: existing.lang }));
-    }
-    if (!member) {
-      if (existing) {
-        const venue = await d.store.getVenue(existing.venue_id);
-        const c = copy(existing.lang);
-        if (existing.role === "owner") await ctx.reply(c.welcomeBack(venue.name, adminUrl(d.baseUrl, venue.slug, await d.store.getAdminToken(venue.id))));
-        else await ctx.reply(c.welcomeStaff(venue.name, publicUrl(d.baseUrl, venue.slug)));
-      } else await ctx.reply(code ? copy(uiLang).badCode : copy(uiLang).noAccess);
-      return;
-    }
-    const venue = await d.store.getVenue(member.venue_id);
-    const c = copy(member.lang);
-    if (existing && existing.venue_id !== member.venue_id) await ctx.reply(c.switched(venue.name));
-    if (member.role === "owner") {
-      await ctx.reply(c.welcome(venue.name, adminUrl(d.baseUrl, venue.slug, await d.store.getAdminToken(venue.id)), publicUrl(d.baseUrl, venue.slug)));
-      if (d.onOwnerJoined) {
-        // The first owner join is the human check that publishes the site; startDeploy ignores venues that already have one.
-        if (venue.status === "live" && venue.deploy === null) await ctx.reply(c.publishing);
-        try {
-          d.onOwnerJoined(venue.id);
-        } catch (e) {
-          console.error("[bot] onOwnerJoined failed:", e instanceof Error ? e.message : e);
-        }
-      }
-    } else await ctx.reply(c.welcomeStaff(venue.name, publicUrl(d.baseUrl, venue.slug)));
+  // Translates Bot API updates into InboundMessage; every behaviour lives in handleInbound.
+  const ref = (ctx: Context) => makeRef("tg", ctx.chat!.id);
+  const hint = (ctx: Context) => langFromCode(ctx.from?.language_code);
+  const tgMedia = (ctx: Context, fileId: string): InboundMedia => ({
+    download: async () => {
+      const file = await ctx.api.getFile(fileId);
+      if (!file.file_path) throw new Error("no file_path");
+      const dl = await d.download(file.file_path);
+      return { ...dl, name: file.file_path };
+    },
   });
 
-  bot.command("lang", async (ctx) => {
-    const member = await requireMember(d, ctx);
-    if (!member) return;
-    const arg = (ctx.match ?? "").trim().toLowerCase();
-    if (arg !== "bg" && arg !== "en") {
-      await ctx.reply(copy(member.lang).langUsage);
-      return;
-    }
-    await d.store.setMemberLang(member.venue_id, member.tg_chat_id, arg);
-    await ctx.reply(copy(arg).langSet);
+  bot.on("message:text", (ctx) => handleInbound(d, { chatRef: ref(ctx), kind: "text", text: ctx.message.text, langHint: hint(ctx), messageRef: String(ctx.message.message_id) }));
+  bot.on("message:photo", (ctx) => handleInbound(d, { chatRef: ref(ctx), kind: "photo", text: ctx.message.caption, langHint: hint(ctx), media: tgMedia(ctx, ctx.message.photo.at(-1)!.file_id) }));
+  bot.on("message:document", async (ctx) => {
+    const doc = ctx.message.document;
+    if (!doc.mime_type?.startsWith("image/")) return;
+    await handleInbound(d, { chatRef: ref(ctx), kind: "photo", text: ctx.message.caption, langHint: hint(ctx), media: tgMedia(ctx, doc.file_id) });
   });
-
-  bot.command("help", async (ctx) => {
-    const member = await requireMember(d, ctx);
-    if (member) await ctx.reply(copy(member.lang).help);
-  });
-
-  bot.command("menu", async (ctx) => {
-    const member = await requireMember(d, ctx);
-    if (!member) return;
-    const venue = await d.store.getVenue(member.venue_id);
-    const admin = member.role === "owner" ? adminUrl(d.baseUrl, venue.slug, await d.store.getAdminToken(venue.id)) : null;
-    await ctx.reply(copy(member.lang).menu(publicUrl(d.baseUrl, venue.slug), admin));
-  });
-
-  bot.command("undo", async (ctx) => {
-    const member = await requireMember(d, ctx);
-    if (!member) return;
-    const lang = detectLang(ctx.message?.text ?? "") ?? member.lang;
-    d.startRun({ venueId: member.venue_id, chatId: member.tg_chat_id, member: { ...member, lang }, text: "Undo the last change.", source: "text" });
-    await ctx.replyWithChatAction("typing").catch(() => undefined);
-  });
-
-  bot.command("connect", async (ctx) => {
-    const member = await requireMember(d, ctx);
-    if (!member) return;
-    const lang = detectLang(ctx.message?.text ?? "") ?? member.lang;
-    const c = copy(lang);
-    if (member.role !== "owner") {
-      await ctx.reply(c.connectOwnerOnly);
-      return;
-    }
-    const [siteUrl, code] = (ctx.match ?? "").trim().split(/\s+/);
-    if (!siteUrl || !code) {
-      await ctx.reply(c.connectUsage);
-      return;
-    }
-    if (!d.connect) {
-      await ctx.reply(c.connectUnavailable);
-      return;
-    }
-    const r = await d.connect(member.venue_id, siteUrl, code);
-    await ctx.reply(r.ok ? c.connectOk(r.site.name, String(r.destination.config.site_url)) : c.connectFailed(lang === "bg" ? r.reason.bg : r.reason.en));
-  });
-
-  bot.on("message:text", async (ctx) => {
-    if (ctx.message.text.startsWith("/")) return; // unknown command
-    const member = await requireMember(d, ctx);
-    if (!member) return;
-    // Start first: a failed acknowledgement must not lose the message.
-    const lang = detectLang(ctx.message.text) ?? member.lang;
-    d.startRun({ venueId: member.venue_id, chatId: member.tg_chat_id, member: { ...member, lang }, text: ctx.message.text, source: "text" });
-    await ctx.replyWithChatAction("typing").catch(() => undefined);
-  });
-
+  bot.on("message:voice", (ctx) => handleInbound(d, { chatRef: ref(ctx), kind: "voice", langHint: hint(ctx), media: tgMedia(ctx, ctx.message.voice.file_id) }));
+  bot.on("message:audio", (ctx) => handleInbound(d, { chatRef: ref(ctx), kind: "voice", langHint: hint(ctx), media: tgMedia(ctx, ctx.message.audio.file_id) }));
   bot.on("callback_query:data", async (ctx) => {
-    const parsed = parseCallback(ctx.callbackQuery.data);
-    const chatId = ctx.chat?.id;
-    if (!parsed || chatId === undefined) {
-      await ctx.answerCallbackQuery().catch(() => undefined);
-      return;
-    }
-    // Answer first so the client stops spinning, then do the work, then edit the message.
-    await ctx.answerCallbackQuery().catch(() => undefined);
-    const r = await handleDecision({ store: d.store, messenger: d.messenger, now: d.now }, chatId, parsed.decision, parsed.setId);
+    await ctx.answerCallbackQuery().catch(() => undefined); // stop the client's spinner first
+    if (ctx.chat === undefined) return;
     const messageId = ctx.callbackQuery.message?.message_id;
-    // Edit through this update's API (removes the buttons); best-effort, never throws.
-    if (r.edit && messageId !== undefined) await new TelegramMessenger(ctx.api).edit(chatId, messageId, r.edit);
-    if (r.reply) await ctx.reply(r.reply);
+    await handleInbound(d, { chatRef: ref(ctx), kind: "button", text: ctx.callbackQuery.data, langHint: hint(ctx), messageRef: messageId !== undefined ? String(messageId) : undefined });
   });
-
-  registerMediaHandlers(bot, d);
 
   bot.catch(async (err) => {
     console.error("bot error:", err.error instanceof Error ? err.error.message : err.error);

@@ -40,9 +40,9 @@ const REMIND_WINDOW_MS = 24 * HOUR;
 /** Wizard drafts nobody published are deleted after this. */
 export const DRAFT_TTL_MS = 48 * HOUR;
 
-async function langFor(store: Store, venueId: string, chatId: number | null): Promise<{ lang: Lang; tz: string }> {
+async function langFor(store: Store, venueId: string, chatRef: string | null): Promise<{ lang: Lang; tz: string }> {
   const venue = await store.getVenue(venueId);
-  const member = chatId === null ? null : await store.findMember(chatId);
+  const member = chatRef === null ? null : await store.findMember(chatRef);
   return { lang: member?.lang ?? venue.default_lang, tz: venue.tz };
 }
 
@@ -57,10 +57,11 @@ export async function runTick(d: TickDeps): Promise<TickReport> {
     // Conditional: a tap that confirmed the set between the list and this write wins.
     if ((await d.store.expireChangeSet(cs.id, now)) !== "expired") continue;
     report.expired.push(cs.id);
-    if (d.messenger && cs.chat_id !== null && cs.tg_message_id !== null) {
-      const { lang } = await langFor(d.store, cs.venue_id, cs.chat_id);
+    if (d.messenger && cs.chat_ref !== null) {
+      const { lang } = await langFor(d.store, cs.venue_id, cs.chat_ref);
       const preview = lang === "bg" ? cs.preview_bg : cs.preview_en;
-      await d.messenger.edit(cs.chat_id, cs.tg_message_id, `${preview}\n\n${tr(lang, "⌛ Изтекло: предложението не беше потвърдено в рамките на 2 часа.", "⌛ Expired: the proposal was not confirmed within 2 hours.")}`);
+      const line = tr(lang, "⌛ Изтекло: предложението не беше потвърдено в рамките на 2 часа.", "⌛ Expired: the proposal was not confirmed within 2 hours.");
+      await d.messenger.conclude(cs.chat_ref, cs.message_ref, `${preview}\n\n${line}`, line, { proactive: true });
     }
   }
 
@@ -75,10 +76,10 @@ export async function runTick(d: TickDeps): Promise<TickReport> {
     }
     if (result !== "applied") continue;
     report.applied.push(cs.id);
-    if (d.messenger && cs.chat_id !== null) {
-      const { lang } = await langFor(d.store, cs.venue_id, cs.chat_id);
+    if (d.messenger && cs.chat_ref !== null) {
+      const { lang } = await langFor(d.store, cs.venue_id, cs.chat_ref);
       const summary = lang === "bg" ? cs.summary_bg : cs.summary_en;
-      await d.messenger.send(cs.chat_id, cs.source === "undo" ? `${tr(lang, "↩️ Отменено", "↩️ Reverted")}: ${summary}` : `${tr(lang, "✅ Приложено по график", "✅ Applied as scheduled")}: ${summary}`);
+      await d.messenger.send(cs.chat_ref, cs.source === "undo" ? `${tr(lang, "↩️ Отменено", "↩️ Reverted")}: ${summary}` : `${tr(lang, "✅ Приложено по график", "✅ Applied as scheduled")}: ${summary}`, { proactive: true });
     }
   }
 
@@ -97,10 +98,10 @@ export async function runTick(d: TickDeps): Promise<TickReport> {
   for (const cs of await d.store.listUpcoming(now, until, d.venueId)) {
     await d.store.updateChangeSet(cs.id, { reminded_at: now });
     report.reminded.push(cs.id);
-    if (d.messenger && cs.chat_id !== null && cs.apply_at) {
-      const { lang, tz } = await langFor(d.store, cs.venue_id, cs.chat_id);
+    if (d.messenger && cs.chat_ref !== null && cs.apply_at) {
+      const { lang, tz } = await langFor(d.store, cs.venue_id, cs.chat_ref);
       const summary = lang === "bg" ? cs.summary_bg : cs.summary_en;
-      await d.messenger.send(cs.chat_id, `${tr(lang, "⏰ Напомняне: на", "⏰ Reminder: on")} ${formatDateTime(cs.apply_at, lang, tz)} ${tr(lang, "ще се приложи", "this will be applied")}: ${summary}`);
+      await d.messenger.send(cs.chat_ref, `${tr(lang, "⏰ Напомняне: на", "⏰ Reminder: on")} ${formatDateTime(cs.apply_at, lang, tz)} ${tr(lang, "ще се приложи", "this will be applied")}: ${summary}`, { proactive: true });
     }
   }
 
@@ -170,7 +171,7 @@ async function writeAutoSet(store: Store, t: ExpiredTimer, now: string): Promise
   const nameEn = itemName(t.item, "en");
   const cs = await store.createChangeSet({
     venue_id: t.item.venue_id,
-    chat_id: null,
+    chat_ref: null,
     summary_bg: t.kind === "sold_out" ? `${nameBg} отново в наличност` : `Специалното „${nameBg}“ изтече`,
     summary_en: t.kind === "sold_out" ? `${nameEn} back in stock` : `Special “${nameEn}” expired`,
     preview_bg: t.kind === "sold_out" ? `• ${nameBg}: отново в наличност` : `• Премахва ${nameBg}`,

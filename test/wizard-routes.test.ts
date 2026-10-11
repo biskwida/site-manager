@@ -157,7 +157,7 @@ describe("GET/PUT /api/new/[id], media, publish, status", () => {
     // without a deployer (production without VERCEL_TOKEN): no deploy record, the hosted URL, live once an owner joined
     const hosted = async () => (await handleStatus({ ...deps, deployer: null, messenger: null }, await store.getVenue(id))).json();
     expect(await hosted()).toEqual({ status: "live", deploy: null, site_url: "https://site.example/nosht", owner_joined: false, hosted: true });
-    await store.upsertMember({ venue_id: id, tg_chat_id: 9001, role: "owner", lang: "bg" });
+    await store.upsertMember({ venue_id: id, chat_ref: "tg:9001", role: "owner", lang: "bg" });
     expect(await hosted()).toEqual({ status: "live", deploy: null, site_url: "https://site.example/nosht", owner_joined: true, hosted: true });
   });
 });

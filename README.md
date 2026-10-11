@@ -129,8 +129,17 @@ npm run env:set -- ANTHROPIC_API_KEY   # asks for the value with echo off, write
 | `RATE_SALT` | Any random string: `openssl rand -hex 16`. Hashed with the visitor's IP for the wizard's rate limits, so raw IPs are never stored. When unset it falls back to `dev-salt`, which works but makes the hashes guessable | Yes in production |
 | `MAX_SITES_PER_DAY` | Default `50`: the global cap on new wizard drafts per 24 h | No |
 | `TELEGRAM_BOT_USERNAME` | The bot's username without `@` (from @BotFather). Builds the `https://t.me/<bot>?start=<code>` link and QR on the wizard's done page | For the done page's Start link; without it only the code is shown |
+| `META_APP_SECRET` | Meta app → App settings → Basic → App secret. Verifies webhook signatures ([docs/CHANNELS.md](docs/CHANNELS.md)) | With any Meta token |
+| `META_VERIFY_TOKEN` | Any random string (`openssl rand -hex 16`), also pasted into the app's Webhooks "Verify token" field | With any Meta token |
+| `META_PAGE_TOKEN` | Meta app → Messenger → Access Tokens → Generate token for the Page. Enables Messenger and Instagram | No: without it, no Messenger/Instagram |
+| `WHATSAPP_TOKEN` | Meta app → WhatsApp → API Setup (24 h) or a system-user token (permanent). Enables WhatsApp | No: without it, no WhatsApp |
+| `WHATSAPP_PHONE_NUMBER_ID` | Meta app → WhatsApp → API Setup → Phone number ID | With `WHATSAPP_TOKEN` |
+| `MESSENGER_PAGE_HANDLE` | The Page username, for the `m.me/<handle>?ref=<code>` invite link | No (link only) |
+| `INSTAGRAM_USERNAME` | The Instagram professional account's username, for the `ig.me/m/<user>?ref=<code>` link | No (link only) |
+| `WHATSAPP_NUMBER` | The WhatsApp number with country code, for the `wa.me/<digits>?text=<code>` link | No (link only) |
+| `DEMO_OWNER_CHAT_REF` | Memory mode only, not in `.env.example`: links that chat as the demo owner, e.g. `fb:4242` or `tg:<chat id>` (for `npm run meta:sim`) | No |
 
-Offline mode also reads two keys that are not in `.env.example`: `SITE_MANAGER_STORE=memory` (set by the scripts below) and `DEMO_OWNER_CHAT_ID` (optional: links that Telegram chat as the demo owner in the memory store).
+Offline mode also reads keys that are not in `.env.example`: `SITE_MANAGER_STORE=memory` (set by the scripts below), `DEMO_OWNER_CHAT_REF` (optional: links that chat, on any channel, as the demo owner in the memory store) and the older `DEMO_OWNER_CHAT_ID` (the same for a Telegram chat id).
 
 ### Offline mode (no keys, no database)
 
@@ -145,10 +154,12 @@ npm test              # unit and integration tests
 ### Real mode (Supabase, Telegram, Anthropic)
 
 ```bash
-npm run db:apply      # applies supabase/schema.sql and policies.sql (idempotent)
+npm run db:apply      # applies supabase/schema.sql, policies.sql, schema-integrations.sql and policies-integrations.sql (idempotent); with file arguments, only those
 npm run check:rls     # proves with the anon key what the browser can and cannot do; every line must say PASS (or SKIP before the demo venue exists)
 npm run venue:create -- --name "Кафене „Ъгъла“" --slug agala --lang bg --seed demo
 ```
+
+On a database created before the channels change, run the `chat_ref` migration before `db:apply` (see [docs/CHANNELS.md → Database migration](docs/CHANNELS.md#database-migration)).
 
 `venue:create` prints the site URL, the admin link and two one-use invite codes (owner and staff, valid 7 days) once. Keep them; they are not shown again. With `--seed demo` the demo café's own name and menu are used. Without it you get an empty venue with default hours and `--name` is required.
 
@@ -174,6 +185,18 @@ Other scripts:
 | `npm run wp:smoke` | Throwaway WordPress + MySQL in Docker: installs WP, renders the plugin's blocks from the production feed, then connect → preview → apply → undo → options → menus → rate limit → log through our code; `-- --keep` leaves it at http://localhost:8088, `-- --feed <url>` picks another feed. |
 | `npm run test:templates` | Writes each template's thin shell to a temp dir, runs `npm install` (needs network) and `next build` there: the offline proof that a deployed site builds. Slow; not part of `npm test`. Run before a release. |
 | `npm run site:delete -- --slug my-cafe` | Deletes a venue (typically one created by the wizard) and its Vercel project. Prints the venue and the project id and asks you to type the slug again before deleting. Storage objects are not removed. |
+
+## Channels: Telegram, Messenger, Instagram, WhatsApp
+
+The owner can use Facebook Messenger, Instagram Direct or WhatsApp instead of Telegram, with the same invite code, the same agent and the same three approval buttons. One Facebook Page, one Instagram professional account and one WhatsApp number serve every venue. A channel is on when its token is set (`META_PAGE_TOKEN` for Messenger and Instagram, `WHATSAPP_TOKEN` for WhatsApp); without them the app is Telegram-only.
+
+- **Identity.** A chat is a `chat_ref`: `tg:<chat id>`, `fb:<PSID>`, `ig:<id>`, `wa:<digits>`. Incoming messages from every channel go through one function (`handleInbound`, `src/bot/inbound.ts`); outgoing ones through `ChannelRouter` (`src/channels/router.ts`).
+- **Webhook.** `POST /api/meta` serves all three Meta channels (signature check with `META_APP_SECRET`, `GET` verification with `META_VERIFY_TOKEN`).
+- **The 24-hour rule.** Meta channels only accept messages within 24 hours of the owner's last one. Replies and previews always arrive; reminders and other messages the service starts on its own are skipped on Meta channels when the owner has been silent that long (Telegram gets them all).
+- **Invite links.** `npm run venue:create` prints one link per enabled channel (`startLinks`, `src/channels/links.ts`): `t.me/<bot>?start=<code>`, `m.me/<page>?ref=<code>`, `ig.me/m/<user>?ref=<code>`, `wa.me/<digits>?text=<code>`. Sending the bare code also links a chat.
+- **Scripts.** `npm run meta:setup` (checks the tokens, subscribes the Page, sets the Messenger Get Started button, prints the webhook URL), `npm run meta:sim -- fb text "…"` (a signed fake webhook against `npm run dev:offline`), `npm run db:dry-run` (the `chat_ref` migration inside a rolled-back transaction).
+
+Setup, step by step (Meta app, tokens, Testers, webhooks, App Review, WhatsApp test number, Vercel preview, database migration): **[docs/CHANNELS.md](docs/CHANNELS.md)**.
 
 ## Landing page (Lovable)
 
@@ -203,6 +226,7 @@ Cron: `vercel.json` runs `/api/tick` every 5 minutes (`*/5 * * * *`; the team is
 - [ ] The whiteboard photo and the new cover photo ready in the phone's gallery.
 - [ ] Backup: if voice fails, type the same sentence. If something goes wrong on stage, `/undo` reverts the last change.
 - [ ] Rehearse the full script once and run `npm run demo:reset` again.
+- [ ] Messenger/Instagram/WhatsApp: the owner's account is a Tester on the Meta app; send the code via the deep link from `venue:create`.
 
 ## Security notes
 
@@ -245,6 +269,10 @@ Checked on 2026-10-11 on `build/templates`:
 - Live Claude calls: menu extraction from a photo and "Write for me" return usable bilingual results; `npm run smoke -- --dry` turned "Капучиното става 3,20" into a `set_price` proposal 2,90 € → 3,20 €.
 - `npm run dev:offline`: the chooser offers "Continue your draft" after a reload, and the Look step switches the preview between templates.
 - The bot token is valid (`getMe` answers as @restaurant_site_manager_bot), and the Vercel production deployment at https://site-manager-lovat.vercel.app serves `/agala`, answers the tick and receives the Telegram webhook.
+- Channels branch (`build/channels`), offline: `npm test` 241 tests pass (37 files, 1 skipped), `npm run typecheck` and `npm run lint` clean; `npm run e2e` (`OFFLINE E2E OK`) includes the Messenger leg (a `fb:` owner links with a bare code, taps apply, a proactive reminder inside the 24 h window is sent and one after 25 h of silence is skipped); `npm run meta:sim -- fb text "help"` against `npm run dev:offline` answered `200 EVENT_RECEIVED` and the reply appeared as `→ [fb:4242] …`.
+- Channels branch, `chat_ref` migration on the live (shared) database: the first `npm run db:dry-run` caught a defect (`drop not null` on a primary-key column before the key swap), fixed in the migration; then the dry run passed (alone and with `schema.sql` + `policies.sql`, including production's Telegram-only upserts), and `db:apply -- supabase/migrations/2026-10-10-chat-ref.sql`, `db:apply` and `check:rls` (16 × PASS) ran. Live: 0 rows without `chat_ref` in `venue_members` (1 row) and `conversations` (1 row), both primary keys on `(venue_id, chat_ref)`, 3 `fill_chat_ref` triggers.
+- Channels branch, Vercel preview (2026-10-11): https://site-manager-channels-biskwida.vercel.app with Vercel Authentication off; `GET /api/meta` handshake → `ping`, wrong verify token → `403`, unsigned `POST` → `401`. Live on a phone: WhatsApp (Meta test number) and Messenger (Page "Site Manager") each linked an owner of the `kanali-test` venue with a one-use code, and a working-hours change went through preview → ✅ → applied. `npm run meta:setup` now registers the app's webhook objects (`whatsapp_business_account`, `page`, `instagram`) and subscribes the WhatsApp Business Account to the app; without those two steps Meta delivered nothing.
+- Merge of `origin/main` (templates + WordPress) into `build/channels` (2026-10-11), offline: `npx vitest run` 576 passed / 3 skipped (75 files, 1 skipped), `npm run typecheck` and `npm run lint` clean, `npm run build` succeeds with no service-role key, destination key or Meta secret in `.next/static`, `npm run e2e` `OFFLINE E2E OK`, `npm run wp:test` ALL PASSED. `/connect` now goes through `handleInbound`, so it works from Messenger, Instagram and WhatsApp too.
 
 ## What is not verified
 
@@ -255,6 +283,9 @@ Checked on 2026-10-11 on `build/templates`:
 - The real phone run: `/start` with an invite code, voice notes, the whiteboard photo, the cover photo, the approval buttons and `/undo` on a phone have not been run end to end against the deployment.
 - The Lovable landing is not published yet, so the `/` redirect has not been seen with a real `NEXT_PUBLIC_LANDING_URL`.
 - Voice transcription with the configured provider and image turns at `high` effort were not part of the live smoke run.
+- Instagram live: the Instagram professional account is not yet linked to the Page as far as the Graph API sees it, and the owner's Instagram account is not yet an Instagram Tester. The webhook object is registered. Remaining: link the account (Page → Settings → Linked accounts), add the tester, then send code via `ig.me/m/<username>?ref=<code>`.
+- Not yet tried on the phone: a voice note and a photo on WhatsApp/Messenger, a dashboard undo inside the 24 h window, and a proactive reminder being skipped after 24 h of silence (covered offline by `npm run e2e`). The WhatsApp API Setup token lasts 24 hours; replace it with a system-user token before relying on WhatsApp.
+- How Meta delivers the `?ref=` code on a first contact (the Get Started postback set by `meta:setup`, a `referral` on the first message, or a separate referral event) is covered by parser tests only; the bare code sent as a message is the fallback `venue:create` prints.
 
 ## Works with your existing website
 

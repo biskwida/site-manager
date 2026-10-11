@@ -230,7 +230,7 @@ async function publishClaimed(store: Store, venue: Venue, d: WizardDraft, now: D
     const changes = planChanges(site, ops, { newId: () => crypto.randomUUID(), now: nowIso });
     const cs = await store.createChangeSet({
       venue_id: venue.id,
-      chat_id: null,
+      chat_ref: null,
       summary_bg: "Първоначални снимки",
       summary_en: "Initial photos",
       preview_bg: renderPreview(site, changes, "bg", updated.tz),

@@ -150,12 +150,12 @@ describe("createDraft → updateDraft → publishDraft", () => {
     expect(site.media.filter((m) => m.is_gallery).sort((a, b) => a.position - b.position).map((m) => m.id)).toEqual([g2.id, g1.id]);
     const sets = await store.listChangeSets(venue.id);
     expect(sets).toHaveLength(1);
-    expect(sets[0]).toMatchObject({ status: "applied", source: "dashboard", summary_bg: "Първоначални снимки", summary_en: "Initial photos", chat_id: null });
+    expect(sets[0]).toMatchObject({ status: "applied", source: "dashboard", summary_bg: "Първоначални снимки", summary_en: "Initial photos", chat_ref: null });
     expect(sets[0].changes.map((c) => c.op)).toEqual(["set_logo_image", "set_cover_image", "add_gallery_image", "add_gallery_image"]);
     expect(sets[0].preview_bg.length).toBeGreaterThan(0);
     // owner invite, 7 days
-    const member = await store.redeemInvite(r.inviteCode, 5001, "bg", new Date(T0.getTime() + INVITE_TTL_MS - 1000).toISOString());
-    expect(member).toMatchObject({ venue_id: venue.id, role: "owner", tg_chat_id: 5001 });
+    const member = await store.redeemInvite(r.inviteCode, "tg:5001", "bg", new Date(T0.getTime() + INVITE_TTL_MS - 1000).toISOString());
+    expect(member).toMatchObject({ venue_id: venue.id, role: "owner", chat_ref: "tg:5001" });
     expect((await store.findVenueByAdminToken(r.adminToken))?.id).toBe(venue.id);
     // the done page still authenticates with the cookie after publish
     expect((await store.findVenueByDraftToken(sha256Hex(token)))?.id).toBe(venue.id);
@@ -316,7 +316,7 @@ describe("doneInviteCode", () => {
     const second = await doneInviteCode(store, v.id, null, later);
     expect(second).not.toBe(first);
     expect(count()).toBe(2);
-    await store.redeemInvite(second!, 5001, "bg", later.toISOString());
+    await store.redeemInvite(second!, "tg:5001", "bg", later.toISOString());
     expect(await doneInviteCode(store, v.id, null, later)).toBeNull(); // an owner exists: no code at all
     expect(count()).toBe(2);
   });
