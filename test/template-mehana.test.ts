@@ -5,7 +5,7 @@ import { readFileSync } from "node:fs";
 import { describe, expect, it, vi } from "vitest";
 import type { DraftInfo, Lang, SiteState } from "@/src/domain/types";
 import { LangProvider } from "@/src/i18n";
-import { makeDemo } from "./helpers";
+import { EXTREME_ACCENTS, LOOK_STEP_ACCENTS, makeDemo } from "./helpers";
 
 // next/font/google only works through the Next.js compiler; at test time its module is empty, so stub the families this template uses.
 vi.mock("next/font/google", () => {
@@ -148,7 +148,8 @@ describe("mehana template", () => {
   it("shows the phone number on the menu page too: in the call button, in the footer, and in the action bar's name", async () => {
     for (const page of ["home", "menu"] as const) {
       const bg = await render("bg", { page });
-      expect(bg).toMatch(/me-reserve-top"><span>Резервирай маса<span aria-hidden="true"> · <\/span><span class="me-nowrap">\+359 2 000 0000<\/span><\/span><\/a>/);
+      // Spaces outside the hidden dot: the link's accessible name is "Резервирай маса +359 2 000 0000", words apart.
+      expect(bg).toMatch(/me-reserve-top"><span>Резервирай маса <span aria-hidden="true">·<\/span> <span class="me-nowrap">\+359 2 000 0000<\/span><\/span><\/a>/);
       expect(bg).toMatch(/<footer[\s\S]*href="tel:\+35920000000"[^>]*>\+359 2 000 0000<\/a>[\s\S]*<\/footer>/);
       // The accessible name starts with the visible label (WCAG 2.5.3) and says that it calls.
       expect(bg).toContain('aria-label="Резервирай: обади се на +359 2 000 0000"');
@@ -215,14 +216,14 @@ describe("mehana template", () => {
   it("computes the band colour in TypeScript (no CSS relative colour) and keeps band text readable on every accent", async () => {
     const css = readFileSync(new URL("../src/templates/mehana/styles.css", import.meta.url), "utf8");
     expect(css).not.toMatch(/oklch\(from/);
-    for (const accent of ["#6e1f1b", "#2f5d46", "#3b2f5c", "#7a4a12", "#e8b4b8", "#f5d547", "#9ad1d4"]) {
+    for (const accent of ["#6e1f1b", "#2f5d46", "#3b2f5c", "#7a4a12", "#e8b4b8", "#f5d547", "#9ad1d4", "#19641e", ...LOOK_STEP_ACCENTS, ...EXTREME_ACCENTS]) {
       const html = await render("bg", { page: "home", mutate: (s) => { s.venue.theme.accent = accent; } });
       const wine = /--me-wine:(#[0-9a-f]{6})/.exec(html)?.[1];
       expect(wine, accent).toBeDefined();
-      expect(contrastRatio("#f3eadb", wine!), `parchment on ${wine}`).toBeGreaterThanOrEqual(4.5); // title, nav, status
-      expect(contrastRatio("#e8c98b", wine!), `gold on ${wine}`).toBeGreaterThanOrEqual(4.5); // "To the menu" link
+      expect(contrastRatio("#f3eadb", wine!), `parchment on ${wine}`).toBeGreaterThanOrEqual(6.6); // title, nav, status
+      expect(contrastRatio("#e8c98b", wine!), `gold on ${wine}`).toBeGreaterThanOrEqual(4.9); // "To the menu" link
       expect(contrastRatio(wine!, "#f3eadb"), `${wine} numerals on paper`).toBeGreaterThanOrEqual(4.5);
-      expect(contrastRatio("#9bd39b", wine!), `open dot on ${wine}`).toBeGreaterThanOrEqual(3); // non-text indicator
+      expect(contrastRatio("#9bd39b", wine!), `open dot on ${wine}`).toBeGreaterThanOrEqual(4.6); // non-text indicator, AA needs 3
     }
     expect(await render("bg", { mutate: (s) => { s.venue.theme.accent = "#6e1f1b"; } })).toContain("--me-wine:#6e1f1b");
   });

@@ -69,8 +69,9 @@ export function Band({ state, slug, page, now, media }: { state: SiteState; slug
         <div className="me-topbar-end">
           {v.phone && (
             <a href={telHref(v.phone)} className="me-btn me-btn-ochre me-reserve-top">
-              {/* One inline box: as separate flex items the spaces around the dot would be trimmed. */}
-              <span>{copy(lang, "reserve")}<span aria-hidden="true"> · </span><span className="me-nowrap">{v.phone}</span></span>
+              {/* One inline box: as separate flex items the spaces around the dot would be trimmed. The spaces sit outside the
+                  hidden dot, so the accessible name reads "Резервирай маса +359 …" rather than running the words together. */}
+              <span>{`${copy(lang, "reserve")} `}<span aria-hidden="true">·</span>{" "}<span className="me-nowrap">{v.phone}</span></span>
             </a>
           )}
           <LangToggle className="me-lang" />

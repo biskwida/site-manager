@@ -36,7 +36,8 @@ export function Template({ state: initial, now: initialNow, slug, page, draft, l
   const now = useNow(initialNow);
   const accent = ACCENT_RE.test(state.venue.theme.accent) ? state.venue.theme.accent : "#6e1f1b";
   // The band is the accent with lightness capped at 0.42 and chroma at 0.13 (OKLCH), computed here rather than with CSS relative
-  // colour syntax: parchment on it stays >= 6.8:1 and the gold link >= 5.1:1 for any accent (test/template-mehana.test.ts).
+  // colour syntax: parchment on it stays >= 6.6:1, the gold link >= 4.9:1 and the open dot >= 4.6:1 for any accent
+  // (test/template-mehana.test.ts).
   const wine = capAccent(accent, { maxL: 0.42, maxC: 0.13 });
   const media: MediaLookup = (id) => mediaUrl(id ? state.media.find((m) => m.id === id) : null, { preview });
   return (
