@@ -124,7 +124,7 @@ export function HomeMenu({ state, now, changed, media, slug, sections, numbers }
   const cover = media(state.venue.cover_media_id);
   const menuHref = pageHref(slug, "menu");
   const codes = usedCodes(shown.flatMap((x) => x.items));
-  const cta = <Link href={menuHref} className="kv-btn kv-btn-ink">{copy(lang, "fullMenu")}<span aria-hidden="true"> →</span></Link>;
+  const cta = <Link href={menuHref} className="kv-btn kv-btn-ink">{copy(lang, "fullMenu")}<span aria-hidden="true">→</span></Link>;
   return (
     <section aria-labelledby="menu-h" className="kv-wrap kv-menu-home">
       <div className="kv-grid kv-menu-head">

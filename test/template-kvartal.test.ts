@@ -188,6 +188,8 @@ describe("kvartal template", () => {
   it("scopes every rule under the template's root class or its own kv- classes", () => {
     const css = readFileSync(new URL("../src/templates/kvartal/styles.css", import.meta.url), "utf8").replace(/\/\*[\s\S]*?\*\//g, "");
     const selectors = [...css.matchAll(/(^|[{}])\s*([^{}@]+?)\s*\{/g)].map((m) => m[2].trim()).filter((s) => !/^(from|to|\d+%)/.test(s));
-    for (const group of selectors) for (const sel of group.split(",")) expect(sel.trim()).toMatch(/^\.(tpl-kvartal|kv-)/);
+    // Split on top-level commas only (":where(a, b)" stays one selector).
+    const split = (g: string) => g.split(/,(?![^(]*\))/).map((x) => x.trim());
+    for (const group of selectors) for (const sel of split(group)) expect(sel).toMatch(/^\.(tpl-kvartal|kv-)/);
   });
 });

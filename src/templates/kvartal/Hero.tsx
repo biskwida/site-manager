@@ -7,15 +7,34 @@ import { formatDateTime, hhmm, localWeekday } from "@/src/time";
 import { businessLabel, copy, NoWrapArg, pick } from "./bits";
 
 /**
- * Approximate advance of one character in Geologica Black, in em. Measured in the browser for Cyrillic and Latin
- * (see the kvartal report); capitals and wide letters are counted wider so an all-caps name is not under-estimated.
+ * Advance of each character in Geologica Black at the headline's -0.04em tracking, in em, rounded up to the next 0.05.
+ * Measured in the browser with the Bulgarian forms (lang="bg"; its т, ш, щ are the wide italic-style shapes, so they also
+ * over-estimate the Russian-style forms, which is the safe side). Unknown characters fall back by class.
  */
+const WIDTHS: [number, string][] = [
+  [0.25, "'"],
+  [0.30, "ijl.,:;"],
+  [0.35, "I!()"],
+  [0.40, "f-"],
+  [0.45, "1rt\""],
+  [0.50, "сГcsz?"],
+  [0.55, "37гзльJL„“"],
+  [0.60, "24589авекоучъяТaegkovyFTZ"],
+  [0.65, "06бдийнпрхБВЕЗРСЬbdhnpquxBCEPSY"],
+  [0.70, "УХЧЯDRX"],
+  [0.75, "мцАКЛЪAGKUV&"],
+  [0.80, "фИЙНОПHNOQ"],
+  [0.85, "Цw"],
+  [0.90, "жюДФ"],
+  [0.95, "МM"],
+  [1.00, "тшm"],
+  [1.05, "щЖW"],
+  [1.15, "ШЮ"],
+  [1.20, "Щ"],
+];
+const EM = new Map<string, number>(WIDTHS.flatMap(([w, chars]) => [...chars].map((c) => [c, w] as [string, number])));
 function charEm(ch: string): number {
-  if (/[ШЩЖМЮЫWM]/u.test(ch)) return 0.92;
-  if (/[шщжмюыwm]/u.test(ch)) return 0.82;
-  if (/\p{Lu}/u.test(ch)) return 0.7;
-  if (/[\p{Ll}\p{N}]/u.test(ch)) return 0.58;
-  return 0.32; // punctuation, quotes
+  return EM.get(ch) ?? (/\p{Lu}/u.test(ch) ? 0.85 : /\p{L}/u.test(ch) ? 0.7 : 0.5);
 }
 
 /**
@@ -25,7 +44,7 @@ function charEm(ch: string): number {
 export function fitHeadline(text: string): { style: CSSProperties; tier: "s" | "m" | "l" } {
   const words = text.split(/\s+/).filter(Boolean);
   const widest = Math.max(1, ...words.map((w) => [...w].reduce((sum, ch) => sum + charEm(ch), 0)));
-  const fit = Math.min(40, (100 / widest) * 0.94); // 6% slack for optical overshoot and the tight negative tracking
+  const fit = Math.min(40, (100 / widest) * 0.98); // 2% slack for kerning
   const len = [...text].length;
   const tier = len <= 40 ? "s" : len <= 72 ? "m" : "l";
   return { style: { "--kv-fit": `${fit.toFixed(2)}cqi` } as CSSProperties, tier };

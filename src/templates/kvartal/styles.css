@@ -44,13 +44,14 @@
   -webkit-font-smoothing: antialiased;
 }
 @media (min-width: 640px) { .tpl-kvartal { --kv-gutter: clamp(16px, 3vw, 40px); --kv-gap: 24px; font-size: 1.0625rem; } }
-.tpl-kvartal *, .tpl-kvartal *::before, .tpl-kvartal *::after { box-sizing: border-box; }
-.tpl-kvartal p, .tpl-kvartal h1, .tpl-kvartal h2, .tpl-kvartal h3, .tpl-kvartal h4, .tpl-kvartal ul, .tpl-kvartal dl, .tpl-kvartal dd { margin: 0; }
-.tpl-kvartal ul { padding: 0; list-style: none; }
-.tpl-kvartal a { color: inherit; text-decoration: none; -webkit-tap-highlight-color: transparent; }
-.tpl-kvartal button { -webkit-tap-highlight-color: transparent; }
+/* Resets sit in :where() so they carry the specificity of the root class alone and every kv- rule after them wins. */
+.tpl-kvartal :where(*, *::before, *::after) { box-sizing: border-box; }
+.tpl-kvartal :where(p, h1, h2, h3, h4, ul, dl, dd) { margin: 0; }
+.tpl-kvartal :where(ul) { padding: 0; list-style: none; }
+.tpl-kvartal :where(a) { color: inherit; text-decoration: none; -webkit-tap-highlight-color: transparent; }
+.tpl-kvartal :where(button) { -webkit-tap-highlight-color: transparent; }
 /* The main app's globals.css puts every h1-h3 in its own display face; inside the template headings start from the body face. */
-.tpl-kvartal h1, .tpl-kvartal h2, .tpl-kvartal h3, .tpl-kvartal h4 { font-family: inherit; font-variation-settings: normal; font-weight: 700; font-size: inherit; line-height: inherit; }
+.tpl-kvartal :where(h1, h2, h3, h4) { font-family: inherit; font-variation-settings: normal; font-weight: 700; font-size: inherit; line-height: inherit; }
 /* Geologica is an explicit opt-in: the headline, the big section heads, the "Now" status, numbers and prices. */
 .tpl-kvartal .kv-display, .tpl-kvartal .kv-h2, .tpl-kvartal .kv-address, .tpl-kvartal .kv-wordmark, .tpl-kvartal .kv-now-status,
 .tpl-kvartal .kv-cat-h, .tpl-kvartal .kv-td-no, .tpl-kvartal .kv-today-h, .tpl-kvartal .kv-maplink {
@@ -163,15 +164,14 @@
 .kv-today-item.is-news { display: block; }
 .kv-today-no { color: var(--kv-on-soft); font-variant-numeric: tabular-nums; font-weight: 700; }
 .kv-today-price { font-variant-numeric: tabular-nums; white-space: nowrap; font-weight: 700; }
-.kv-today-note { color: var(--kv-on-soft); font-weight: 400; }
+.kv-today-note { color: var(--kv-on-soft); font-weight: 400; white-space: nowrap; }
 .kv-today-item.is-sold { color: var(--kv-on-soft); }
 @media (min-width: 640px) {
   .kv-today-inner { flex-direction: row; align-items: baseline; gap: 4px 24px; padding-block: 14px; }
   .kv-today-h { font-size: 1.125rem; }
-  .kv-today-list { flex-direction: row; flex-wrap: wrap; gap: 4px 0; font-family: var(--font-display), ui-sans-serif, system-ui, sans-serif; font-size: 1.125rem; font-weight: 600; }
+  .kv-today-list { flex-direction: row; flex-wrap: wrap; gap: 4px 36px; font-family: var(--font-display), ui-sans-serif, system-ui, sans-serif; font-size: 1.125rem; font-weight: 600; }
   .kv-today-item { display: inline-flex; gap: 8px; padding-block: 0; font-weight: 600; }
   .kv-today-item + .kv-today-item { border-top: 0; }
-  .kv-today-item + .kv-today-item::before { content: "·" / ""; padding-inline: 14px; color: var(--kv-on-soft); }
   .kv-today-no { font-weight: 600; }
   .kv-today-no:empty { display: none; }
   .kv-today-price, .kv-today-note { font-weight: 400; }
@@ -194,7 +194,7 @@
 .kv-tr { position: relative; isolation: isolate; display: grid; grid-template-columns: 40px minmax(0, 1fr) auto; gap: 4px 12px; align-items: baseline; padding-block: 14px; border-bottom: 1px solid var(--kv-line); }
 .kv-thead { padding-block: 8px; font-size: 0.75rem; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; color: var(--kv-soft); }
 .kv-td-no { font-weight: 800; font-size: 1.0625rem; font-variant-numeric: tabular-nums; color: var(--kv-accent-text); }
-.kv-thead .kv-td-no { font-family: inherit; font-weight: 700; font-size: inherit; color: inherit; }
+.kv-thead .kv-td-no, .kv-thead .kv-td-price { font-family: inherit; font-weight: 700; font-size: inherit; color: inherit; }
 .kv-td-name { display: flex; flex-direction: column; min-width: 0; }
 .kv-name { font-weight: 700; font-size: 1.0625rem; line-height: 1.3; overflow-wrap: anywhere; }
 .kv-desc { margin-top: 2px; font-size: 0.9375rem; line-height: 1.45; color: var(--kv-soft); max-width: 60ch; text-wrap: pretty; }
@@ -265,7 +265,7 @@
 .kv-visit { margin-top: 56px; }
 .kv-visit-grid { row-gap: 24px; padding-top: 32px; border-top: 2px solid var(--kv-ink); }
 .kv-address { font-weight: 900; font-size: clamp(2rem, 5vw, 4rem); line-height: 0.95; letter-spacing: -0.03em; text-wrap: balance; overflow-wrap: anywhere; }
-.kv-maplink { display: inline-flex; align-items: center; min-height: 44px; margin-top: 8px; font-weight: 800; font-size: clamp(1.125rem, 2.2vw, 1.75rem); color: var(--kv-accent-text); text-decoration: underline; text-decoration-thickness: 2px; text-underline-offset: 0.18em; }
+.kv-maplink { display: inline-flex; align-items: center; gap: 0.3em; min-height: 44px; margin-top: 8px; font-weight: 800; font-size: clamp(1.125rem, 2.2vw, 1.75rem); color: var(--kv-accent-text); text-decoration: underline; text-decoration-thickness: 2px; text-underline-offset: 0.18em; }
 .kv-about { margin-top: 16px; max-width: 60ch; color: var(--kv-soft); text-wrap: pretty; }
 .kv-hours { display: grid; gap: 6px; font-size: 1.0625rem; }
 .kv-hours > div { display: grid; grid-template-columns: 7.5rem minmax(0, 1fr); gap: 16px; }

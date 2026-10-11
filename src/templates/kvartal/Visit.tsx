@@ -51,7 +51,7 @@ export function Visit({ state, now }: { state: SiteState; now: number }) {
             {v.address ? <><span className="kv-sr">{t("site.findUs")}: </span>{v.address}</> : t("site.visit")}
           </h2>
           {v.maps_url && (
-            <a href={v.maps_url} target="_blank" rel="noopener noreferrer" className="kv-maplink">{t("site.map")}<span aria-hidden="true"> →</span></a>
+            <a href={v.maps_url} target="_blank" rel="noopener noreferrer" className="kv-maplink">{t("site.map")}<span aria-hidden="true">→</span></a>
           )}
           {about && <p className="kv-about">{about}</p>}
         </div>
