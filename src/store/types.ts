@@ -191,7 +191,7 @@ export function extensionFor(contentType: string): string {
 }
 
 // --- Destinations (integrations track, appended 2026-10-10) ---
-export type DestinationKind = "wordpress" | "google" | "github";
+export type DestinationKind = "wordpress" | "google" | "github" | "facebook" | "instagram";
 export type DestinationStatus = "connected" | "error" | "disconnected";
 export interface Destination {
   id: string;

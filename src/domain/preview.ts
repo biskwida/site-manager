@@ -1,6 +1,7 @@
 import { formatDate, formatDateTime, hhmm, localTime } from "../time";
 import { allergenName } from "./allergens";
 import { categoryName, formatPrice, itemName, quote, tr, weekdayLabel } from "./format";
+import { socialPreviewLines } from "./social-preview";
 import { wpPreviewLines } from "./wp-preview";
 import { MONO_TEXT_KEYS, WEEKDAYS, type Change, type Item, type Lang, type Row, type SiteState, type TextKey, type WeekHours } from "./types";
 
@@ -175,6 +176,9 @@ export function renderPreview(s: SiteState, changes: Change[], lang: Lang, tz: s
       case "wp_edit_menu":
       case "wp_edit_product":
         lines.push(...wpPreviewLines(c, lang));
+        break;
+      case "social_post":
+        lines.push(...socialPreviewLines(c, lang));
         break;
     }
   }
