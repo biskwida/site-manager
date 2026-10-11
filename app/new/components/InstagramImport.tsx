@@ -1,5 +1,6 @@
 "use client";
 import { useEffect, useId, useState } from "react";
+import { wizardText, type WizardKey } from "@/src/i18n/wizard";
 import type { WizardDraft } from "@/src/wizard/schema";
 import { api, type IgItem, type IgTarget } from "./api";
 import { Button, Note, Status } from "./Field";
@@ -92,6 +93,11 @@ export function importPatch(local: WizardDraft, server: WizardDraft, targets: Ig
   return patch;
 }
 
+/** A status line in both languages, so it follows the language toggle. */
+type Message = { tone: "soft" | "danger"; bg: string; en: string };
+const msg = (tone: Message["tone"], key: WizardKey, vars?: Record<string, string | number>): Message => ({ tone, bg: wizardText("bg", key, vars), en: wizardText("en", key, vars) });
+const IG_REASONS = ["state", "session", "token", "media"];
+
 type Phase = { kind: "idle" } | { kind: "loading" } | { kind: "list"; items: IgItem[]; username?: string } | { kind: "expired" } | { kind: "empty" } | { kind: "failed" };
 
 /**
@@ -105,12 +111,9 @@ export function InstagramImport({ id, draft, update, addMedia, flush, igReturn, 
   const [picks, setPicks] = useState<Record<string, TargetValue>>({});
   const [busy, setBusy] = useState(false);
   const [leaving, setLeaving] = useState(false);
-  const [message, setMessage] = useState<{ tone: "soft" | "danger"; text: string } | null>(() => {
-    if (here?.status === "cancelled") return { tone: "soft", text: t("ig.cancelled") };
-    if (here?.status === "error") {
-      const key = `ig.error.${here.reason}` as const;
-      return { tone: "danger", text: ["state", "session", "token", "media"].includes(here.reason ?? "") ? t(key as "ig.error.state") : t("ig.failed") };
-    }
+  const [message, setMessage] = useState<Message | null>(() => {
+    if (here?.status === "cancelled") return msg("soft", "ig.cancelled");
+    if (here?.status === "error") return msg("danger", IG_REASONS.includes(here.reason ?? "") ? (`ig.error.${here.reason}` as WizardKey) : "ig.failed");
     return null;
   });
 
@@ -139,25 +142,29 @@ export function InstagramImport({ id, draft, update, addMedia, flush, igReturn, 
     const list = Object.entries(picks).map(([pid, v]) => ({ id: pid, target: toTarget(v) }));
     if (!list.length) return;
     setBusy(true);
-    setMessage({ tone: "soft", text: t("ig.importing") });
+    setMessage(msg("soft", "ig.importing"));
     await flush?.();
     const r = await api.igImport(id, list);
     setBusy(false);
     if (!r.ok) {
       if (r.error.code === "instagram_expired") { setPhase({ kind: "expired" }); setMessage(null); return; }
-      setMessage({ tone: "danger", text: r.status === 400 || r.status === 429 || r.status === 502 ? (lang === "bg" ? r.error.bg : r.error.en) : t("ig.failed") });
+      setMessage(r.status === 400 || r.status === 429 || r.status === 502 ? { tone: "danger", bg: r.error.bg, en: r.error.en } : msg("danger", "ig.failed"));
       return;
     }
     for (const m of r.data.media) addMedia(m);
     update(importPatch(draft, r.data.draft, list.filter((p) => !r.data.failed.some((f) => f.id === p.id)).map((p) => p.target)));
     setPicks({});
     const failed = r.data.failed.length;
-    setMessage(failed ? { tone: "danger", text: `${t("ig.imported", { n: r.data.media.length })} ${t("ig.someFailed", { n: failed })}` } : { tone: "soft", text: t("ig.imported", { n: r.data.media.length }) });
+    const done = msg(failed ? "danger" : "soft", "ig.imported", { n: r.data.media.length });
+    if (failed) {
+      const more = msg("danger", "ig.someFailed", { n: failed });
+      setMessage({ tone: "danger", bg: `${done.bg} ${more.bg}`, en: `${done.en} ${more.en}` });
+    } else setMessage(done);
   }
 
   const count = Object.keys(picks).length;
   const signIn = (
-    <Button variant={phase.kind === "list" || from === "look" ? "quiet" : "secondary"} disabled={leaving || busy} onClick={() => void start()}>
+    <Button variant={phase.kind === "list" ? "quiet" : "secondary"} disabled={leaving || busy} onClick={() => void start()}>
       {leaving ? t("ig.going") : phase.kind === "idle" ? t(from === "look" ? "ig.lookButton" : "ig.button") : t("ig.again")}
     </Button>
   );
@@ -182,7 +189,7 @@ export function InstagramImport({ id, draft, update, addMedia, flush, igReturn, 
           {phase.kind === "empty" && <Note>{t("ig.empty")}</Note>}
         </>
       )}
-      <Status tone={phase.kind === "failed" ? "danger" : message?.tone ?? "soft"}>{phase.kind === "loading" ? t("ig.loading") : phase.kind === "failed" ? t("ig.error.media") : message?.text ?? ""}</Status>
+      <Status tone={phase.kind === "failed" ? "danger" : message?.tone ?? "soft"}>{phase.kind === "loading" ? t("ig.loading") : phase.kind === "failed" ? t("ig.error.media") : (message ? message[lang] : "")}</Status>
     </div>
   );
 }

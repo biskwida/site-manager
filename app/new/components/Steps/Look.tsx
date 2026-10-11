@@ -1,5 +1,5 @@
 "use client";
-import { useState } from "react";
+import { useState, type ReactNode } from "react";
 import { TEMPLATE_IDS, type Media, type TemplateId } from "@/src/domain/types";
 import { TEMPLATE_ACCENT_DEFAULTS } from "@/src/wizard/schema";
 import { api, WIZARD_MAX_IMAGE_BYTES } from "../api";
@@ -20,7 +20,7 @@ export async function prepareUpload(file: File): Promise<File | null> {
   return shrinkImage(file, { maxEdge: 2000, quality: 0.85, maxBytes: WIZARD_MAX_IMAGE_BYTES });
 }
 
-function ImageSlot({ id, label, hint, mediaId, media, onChange, addMedia, wide }: { id: string; label: string; hint?: string; mediaId: string | null; media: Media[]; onChange: (id: string | null) => void; addMedia: StepProps["addMedia"]; wide?: boolean }) {
+function ImageSlot({ id, label, hint, mediaId, media, onChange, addMedia, wide, children }: { id: string; label: string; hint?: string; mediaId: string | null; media: Media[]; onChange: (id: string | null) => void; addMedia: StepProps["addMedia"]; wide?: boolean; children?: ReactNode }) {
   const { t, lang } = useT();
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -44,6 +44,7 @@ function ImageSlot({ id, label, hint, mediaId, media, onChange, addMedia, wide }
         </div>
       </div>
       <Status tone={error ? "danger" : "soft"}>{error ?? (busy ? t("look.uploading") : "")}</Status>
+      {children}
     </Fieldset>
   );
 }
@@ -93,8 +94,9 @@ export function Look({ id, draft, media, update, addMedia, fieldErrors, flush, i
       </Fieldset>
       <div className="grid gap-8 border-t border-line pt-8">
         <ImageSlot id={id} label={t("look.logo")} mediaId={draft.logo_media_id} media={media} addMedia={addMedia} onChange={(logo_media_id) => update({ logo_media_id })} />
-        <ImageSlot id={id} label={t("look.cover")} hint={t("look.coverHint")} mediaId={draft.cover_media_id} media={media} addMedia={addMedia} onChange={(cover_media_id) => update({ cover_media_id })} wide />
-        <InstagramImport id={id} draft={draft} update={update} addMedia={addMedia} flush={flush} igReturn={igReturn} instagramAvailable={instagramAvailable} from="look" />
+        <ImageSlot id={id} label={t("look.cover")} hint={t("look.coverHint")} mediaId={draft.cover_media_id} media={media} addMedia={addMedia} onChange={(cover_media_id) => update({ cover_media_id })} wide>
+          <InstagramImport id={id} draft={draft} update={update} addMedia={addMedia} flush={flush} igReturn={igReturn} instagramAvailable={instagramAvailable} from="look" />
+        </ImageSlot>
       </div>
     </div>
   );
