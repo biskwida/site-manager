@@ -15,7 +15,7 @@ type T = ReturnType<typeof useLang>["t"];
 type Ctx = { lang: Lang; t: T; now: number; tz: string; changed: Changed; media: MediaLookup; numbers: Map<string, string> };
 
 function Allergens({ codes, lang }: { codes: number[]; lang: Lang }) {
-  if (codes.length === 0) return <span aria-hidden="true">—</span>;
+  if (codes.length === 0) return <><span aria-hidden="true">—</span><span className="kv-sr">{copy(lang, "noAllergens")}</span></>;
   return (
     <>
       <span aria-hidden="true" title={codes.map((a) => `${a} ${allergenName(a, lang)}`).join(", ")}>{codes.join(" · ")}</span>

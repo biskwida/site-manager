@@ -33,7 +33,7 @@ function hourGroups(state: SiteState, lang: Lang): { days: Weekday[]; label: str
 
 /**
  * The address is the headline: big type on 8 columns with the map link under it, the about text after; hours (grouped,
- * today in bold), phone and Instagram as a definition list on the other 4, upcoming closures under them.
+ * today in bold) as a definition list on the other 4, phone and Instagram as their own list, upcoming closures under them.
  */
 export function Visit({ state, now }: { state: SiteState; now: number }) {
   const { lang, t } = useLang();
@@ -67,19 +67,23 @@ export function Visit({ state, now }: { state: SiteState; now: number }) {
                 </div>
               );
             })}
-            {v.phone && (
-              <div className="kv-hours-gap">
-                <dt>{copy(lang, "phone")}</dt>
-                <dd><a href={`tel:${v.phone.replace(/[^\d+]/g, "")}`} className="kv-link">{v.phone}</a></dd>
-              </div>
-            )}
-            {ig && (
-              <div className={v.phone ? undefined : "kv-hours-gap"}>
-                <dt>Instagram</dt>
-                <dd><a href={ig.url} target="_blank" rel="noopener noreferrer" className="kv-link">@{ig.handle}</a></dd>
-              </div>
-            )}
           </dl>
+          {(v.phone || ig) && (
+            <ul className="kv-contacts">
+              {v.phone && (
+                <li>
+                  <span className="kv-contacts-label">{copy(lang, "phone")}</span>
+                  <a href={`tel:${v.phone.replace(/[^\d+]/g, "")}`} className="kv-link">{v.phone}</a>
+                </li>
+              )}
+              {ig && (
+                <li>
+                  <span className="kv-contacts-label">Instagram</span>
+                  <a href={ig.url} target="_blank" rel="noopener noreferrer" className="kv-link">@{ig.handle}</a>
+                </li>
+              )}
+            </ul>
+          )}
           {upcoming.length > 0 && (
             <div className="kv-closures">
               <h3 className="kv-closures-h">{t("site.holidays")}</h3>

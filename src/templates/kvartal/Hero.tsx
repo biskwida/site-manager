@@ -33,8 +33,12 @@ const WIDTHS: [number, string][] = [
   [1.20, "Щ"],
 ];
 const EM = new Map<string, number>(WIDTHS.flatMap(([w, chars]) => [...chars].map((c) => [c, w] as [string, number])));
+/** Tied to Geologica: change the display face and this table must be measured again. Anything not in it is sized as
+ *  the widest glyph of its class, so an unexpected character can only make the headline smaller, never overflow. */
+const WIDEST_UPPER = 1.2; // Щ
+const WIDEST_LOWER = 1.05; // щ
 function charEm(ch: string): number {
-  return EM.get(ch) ?? (/\p{Lu}/u.test(ch) ? 0.85 : /\p{L}/u.test(ch) ? 0.7 : 0.5);
+  return EM.get(ch) ?? (/\p{Lu}/u.test(ch) ? WIDEST_UPPER : /\p{L}/u.test(ch) ? WIDEST_LOWER : 1);
 }
 
 /**

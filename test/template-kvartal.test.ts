@@ -178,6 +178,51 @@ describe("kvartal template", () => {
     const fit = (x: ReturnType<typeof fitHeadline>) => parseFloat(String((x.style as Record<string, string>)["--kv-fit"]));
     expect(fit(fitHeadline("Квартал"))).toBeGreaterThan(fit(fitHeadline("Спокойствие")));
   });
+  it("keeps every table row's cell count equal to its header count (photo and text-only tables)", async () => {
+    const html = await render("en", { mutate: withPhoto });
+    const tables = html.split('role="table"').slice(1).map((t) => t.slice(0, t.indexOf("</section>")));
+    expect(tables.length).toBe(4);
+    for (const t of tables) {
+      const rows = t.split('role="row"').slice(1);
+      const head = (rows[0].match(/role="columnheader"/g) ?? []).length;
+      expect(head).toBeGreaterThanOrEqual(4);
+      for (const r of rows.slice(1)) expect((r.match(/role="cell"/g) ?? []).length).toBe(head);
+    }
+  });
+  it("never removes photo or allergen cells from one row but not the header (no display:none on the photo column)", () => {
+    const css = readFileSync(new URL("../src/templates/kvartal/styles.css", import.meta.url), "utf8").replace(/\/\*[\s\S]*?\*\//g, "");
+    for (const m of css.matchAll(/([^{}]*\.kv-td-img[^{}]*)\{([^}]*)\}/g)) expect(m[2]).not.toMatch(/display:\s*none/);
+    // The allergen column is hidden on phones by one selector that matches header and cells alike.
+    expect(css).toMatch(/\.kv-td-al\s*\{[^}]*display:\s*none/);
+  });
+  it("gives empty allergen cells screen-reader text", async () => {
+    const en = await render("en");
+    expect(en).toMatch(/<span role="cell" class="kv-td-al"><span aria-hidden="true">—<\/span><span class="kv-sr">none<\/span><\/span>/);
+    expect(await render("bg")).toContain('<span class="kv-sr">без алергени</span>');
+  });
+  it("keeps the skip link visually hidden until focused, so it never sits over the draft note", async () => {
+    const css = readFileSync(new URL("../src/templates/kvartal/styles.css", import.meta.url), "utf8");
+    const base = css.match(/\.kv-skip\s*\{([^}]*)\}/)![1];
+    expect(base).toMatch(/clip(-path)?:/);
+    expect(base).toMatch(/width:\s*1px/);
+    expect(base).not.toMatch(/top:\s*-100%/);
+    expect(css).toMatch(/\.kv-skip:focus-visible\s*\{[^}]*clip(-path)?:\s*(auto|none)/);
+    const draft: DraftInfo = { id: "d1", status: "proposed", summary_bg: "Капучино 3,20 €", summary_en: "Cappuccino €3.20", preview_bg: "", preview_en: "", key: "k" };
+    const html = await render("en", { draft });
+    expect(html.indexOf('class="kv-draft"')).toBeLessThan(html.indexOf('class="kv-skip"'));
+  });
+  it("lists phone and Instagram in their own list, outside the hours", async () => {
+    const html = await render("en", { page: "home" });
+    const hours = html.slice(html.indexOf('<dl class="kv-hours">'), html.indexOf("</dl>", html.indexOf('<dl class="kv-hours">')));
+    expect(hours).not.toContain("tel:");
+    expect(hours).not.toContain("instagram.com");
+    expect(html).toMatch(/<ul class="kv-contacts">[\s\S]*tel:\+35920000000[\s\S]*instagram\.com\/agala\.cafe[\s\S]*<\/ul>/);
+  });
+  it("sizes unknown glyphs on the safe side", () => {
+    const fit = (x: ReturnType<typeof fitHeadline>) => parseFloat(String((x.style as Record<string, string>)["--kv-fit"]));
+    expect(fit(fitHeadline("★★★"))).toBeLessThanOrEqual((100 / 3) * 0.98 + 0.01); // unmapped symbol: 1em each
+    expect(fit(fitHeadline("ѣѣѣ"))).toBeLessThanOrEqual((100 / (3 * 1.05)) * 0.98 + 0.01); // unmapped lowercase: widest lowercase
+  });
   it("keeps the change flash reaching its final frame under reduced motion", () => {
     // `animation: none` would freeze .kv-flash at its base opacity (1) forever, because useLiveSite never clears `changed`.
     const css = readFileSync(new URL("../src/templates/kvartal/styles.css", import.meta.url), "utf8");
