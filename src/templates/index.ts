@@ -5,6 +5,7 @@
 import { TEMPLATE_IDS, type TemplateId } from "@/src/domain/types";
 import type { TemplateDef } from "./shared/types";
 import { def as classic } from "./classic";
+import { def as furna } from "./furna";
 import { def as lumen } from "./lumen";
 import { def as nocturne } from "./nocturne";
 
@@ -16,7 +17,7 @@ export const TEMPLATES: Record<TemplateId, TemplateDef> = {
   nocturne,
   lumen,
   // Placeholders until each template's own task lands (same pattern as R9): the classic design under the new id.
-  furna: { ...classic, id: "furna" },
+  furna,
   mehana: { ...classic, id: "mehana" },
   kvartal: { ...classic, id: "kvartal" },
 };
