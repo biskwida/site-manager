@@ -29,10 +29,25 @@ export function enabledApps(config: AppsConfig): AppChannel[] {
   return APP_ORDER.filter((a) => on[a]);
 }
 
+/**
+ * An owner link: `url` carries the code; `dest` names where it goes (written out for an owner whose link does not open);
+ * `chat` opens that chat without the code, for an owner who pastes the code by hand.
+ */
+export type ConnectLink = { app: AppChannel; url: string; dest: string; chat: string };
+
+/** What the owner looks for in each app: the bot's username, the WhatsApp number, the Page link, the Instagram account. */
+function destOf(config: AppsConfig, app: AppChannel): { dest: string; chat: string } {
+  const h = (v: string | null) => encodeURIComponent(v ?? "");
+  if (app === "telegram") return { dest: `@${config.telegramBotUsername}`, chat: `https://t.me/${h(config.telegramBotUsername)}` };
+  if (app === "whatsapp") return { dest: `+${config.whatsappNumber}`, chat: `https://wa.me/${h(config.whatsappNumber)}` };
+  if (app === "messenger") return { dest: `m.me/${config.messengerPageHandle}`, chat: `https://m.me/${h(config.messengerPageHandle)}` };
+  return { dest: `@${config.instagramUsername}`, chat: `https://ig.me/m/${h(config.instagramUsername)}` };
+}
+
 /** One owner link per enabled app (startLinks URL-encodes the code). */
-export function connectLinks(config: AppsConfig, code: string): { app: AppChannel; url: string }[] {
+export function connectLinks(config: AppsConfig, code: string): ConnectLink[] {
   const all = startLinks(config, code);
-  return enabledApps(config).flatMap((app) => (all[app] ? [{ app, url: all[app] }] : []));
+  return enabledApps(config).flatMap((app) => (all[app] ? [{ app, url: all[app], ...destOf(config, app) }] : []));
 }
 
 const BY_CHANNEL = { tg: "telegram", wa: "whatsapp", fb: "messenger", ig: "instagram" } as const;
@@ -67,7 +82,7 @@ export const inviteRateKey = (venueId: string) => `invite:${venueId}`;
 
 export interface OwnerCode {
   code: string;
-  links: { app: AppChannel; url: string }[];
+  links: ConnectLink[];
   expires_at: string;
 }
 export type OwnerCodeResult =

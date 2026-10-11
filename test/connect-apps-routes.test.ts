@@ -56,7 +56,7 @@ describe("POST /api/new/[id]/invite", () => {
     const body = (await res.json()) as { code: string; links: { app: string; url: string }[]; expires_at: string };
     expect(body.code).toMatch(/^[A-Z2-9]{8}$/);
     expect(body.code).not.toBe(pub.invite_code);
-    expect(body.links).toEqual([{ app: "telegram", url: `https://t.me/site_bot?start=${body.code}` }]);
+    expect(body.links).toEqual([{ app: "telegram", url: `https://t.me/site_bot?start=${body.code}`, dest: "@site_bot", chat: "https://t.me/site_bot" }]);
     const exp = Date.parse(body.expires_at);
     expect(exp).toBeGreaterThanOrEqual(before + INVITE_TTL_MS);
     expect(exp).toBeLessThanOrEqual(Date.now() + INVITE_TTL_MS);

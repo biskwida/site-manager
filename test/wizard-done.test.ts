@@ -13,12 +13,12 @@ const Provider = LangProvider as (props: { defaultLang: Lang; children?: ReactNo
 const deploy = (status: DeployInfo["status"], url: string | null = null): DeployInfo =>
   ({ provider: "fake", project_id: "prj_1", deployment_id: "dpl_1", url, status, error: null, template: "nocturne", updated_at: "2026-10-10T10:00:00.000Z" });
 
-const TG: AppLink[] = [{ app: "telegram", url: "https://t.me/site_manager_bot?start=ABCD2345" }];
+const TG: AppLink[] = [{ app: "telegram", url: "https://t.me/site_manager_bot?start=ABCD2345", dest: "@site_manager_bot", chat: "https://t.me/site_manager_bot" }];
 const FOUR: AppLink[] = [
   ...TG,
-  { app: "whatsapp", url: "https://wa.me/359888123456?text=ABCD2345" },
-  { app: "messenger", url: "https://m.me/sitemanager?ref=ABCD2345" },
-  { app: "instagram", url: "https://ig.me/m/site.manager?ref=ABCD2345" },
+  { app: "whatsapp", url: "https://wa.me/359888123456?text=ABCD2345", dest: "+359888123456", chat: "https://wa.me/359888123456" },
+  { app: "messenger", url: "https://m.me/sitemanager?ref=ABCD2345", dest: "m.me/sitemanager", chat: "https://m.me/sitemanager" },
+  { app: "instagram", url: "https://ig.me/m/site.manager?ref=ABCD2345", dest: "@site.manager", chat: "https://ig.me/m/site.manager" },
 ];
 const ALL = ["telegram", "whatsapp", "messenger", "instagram"] as const;
 
@@ -106,7 +106,7 @@ describe("DoneStatus: connect an app", () => {
   it("one app (production today): the Telegram block as before, no picker, no 24-hour line", () => {
     for (const lang of ["bg", "en"] as const) {
       const html = render(lang, waiting);
-      expect(count(html, 'href="https://t.me/')).toBe(1);
+      expect(count(html, 'href="https://t.me/site_manager_bot?start=')).toBe(1);
       expect(html).not.toContain('role="radiogroup"');
       expect(html).not.toMatch(/24 (часа|hours)/);
       expect(html).toContain("/start ABCD2345");
@@ -114,6 +114,22 @@ describe("DoneStatus: connect an app", () => {
     expect(render("bg", waiting)).toContain("Отворете Telegram");
     expect(render("en", waiting)).toContain("Open Telegram");
     expect(render("bg", waiting)).toContain("натиснете Start в Telegram");
+  });
+  it("names the bot as a link to its chat (new tab, no code in the URL) with a paste hint, in both languages", () => {
+    const bg = render("bg", waiting);
+    expect(bg).toMatch(/Ботът в Telegram:\s*<a href="https:\/\/t\.me\/site_manager_bot" target="_blank" rel="noopener noreferrer" data-dest="telegram"[^>]*>@site_manager_bot<\/a>/);
+    expect(bg).toContain("Натиснете името: чатът се отваря, а кодът се копира, за да го поставите.");
+    const en = render("en", waiting);
+    expect(en).toContain("The bot on Telegram:");
+    expect(en).toContain("Tap the name: the chat opens and the code is copied, ready to paste.");
+    // an older payload without dest still renders the button and the code, just no name line
+    const old = render("en", waiting, { links: [{ app: "telegram", url: "https://t.me/site_manager_bot?start=ABCD2345" }] });
+    expect(old).toContain("Open Telegram");
+    expect(old).not.toContain("The bot on Telegram:");
+  });
+  it("four apps: each button shows where it goes", () => {
+    const html = render("en", waiting, { links: FOUR, apps: [...ALL] });
+    for (const l of FOUR) expect(html).toContain(`>${l.dest}</span>`);
   });
   it("four apps: a button per app with its icon, a keyboard radio group for the QR (Telegram picked), the bare code and the 24-hour line", () => {
     const bg = render("bg", waiting, { links: FOUR, apps: [...ALL] });
