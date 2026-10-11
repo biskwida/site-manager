@@ -24,7 +24,8 @@ export interface Holiday {
 }
 
 export type TemplateId = "classic" | "nocturne" | "lumen" | "furna" | "mehana" | "kvartal";
-export const TEMPLATE_IDS: readonly TemplateId[] = ["classic", "nocturne", "lumen", "furna", "mehana", "kvartal"];
+// Newest designs first: this order drives the wizard chooser, the Look step and the dashboard template menu.
+export const TEMPLATE_IDS: readonly TemplateId[] = ["furna", "mehana", "kvartal", "classic", "nocturne", "lumen"];
 export type BusinessType = "cafe" | "bar" | "restaurant";
 export const BUSINESS_TYPES: readonly BusinessType[] = ["cafe", "bar", "restaurant"];
 export type VenueStatus = "draft" | "live";
