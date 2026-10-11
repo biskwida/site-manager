@@ -113,7 +113,7 @@
 .me-hero-home { padding-block: clamp(1.5rem, 6vw, 5.5rem) clamp(2.25rem, 6vw, 5rem); }
 .me-hero-text { container-type: inline-size; display: flex; flex-direction: column; align-items: flex-start; gap: clamp(0.75rem, 2.2vw, 1.5rem); min-width: 0; }
 .me-title { font-weight: 500; line-height: 0.98; letter-spacing: -0.01em; text-wrap: balance; overflow-wrap: anywhere; font-size: clamp(2.75rem, 7.5vw, 6.5rem); font-size: clamp(2.75rem, 13cqi, 6.5rem); }
-.me-hero-home.has-cover .me-title { font-size: clamp(2.75rem, 7.5vw, 6rem); font-size: clamp(2.75rem, 16cqi, 6rem); }
+.me-hero-home.has-cover .me-title { font-size: clamp(2.75rem, 7.5vw, 6rem); font-size: clamp(2.75rem, 15cqi, 6rem); }
 .me-hero-menu .me-title { font-size: clamp(2.25rem, 6vw, 4rem); font-size: clamp(2.25rem, 10cqi, 4rem); }
 .me-lead { max-width: 52ch; font-size: 1.125rem; line-height: 1.5; text-wrap: pretty; color: var(--me-on-band-soft); }
 .me-welcome { max-width: 58ch; text-wrap: pretty; color: var(--me-on-band-soft); }
@@ -185,7 +185,8 @@
 
 /* ── The menu, course by course ── */
 .me-menu-home { padding-block: clamp(2.5rem, 6vw, 3.5rem); }
-.me-menu-full .me-wrap { padding-block: 1.5rem 3.5rem; }
+.me-menu-full { margin-top: clamp(1.5rem, 4vw, 2.5rem); }
+.me-menu-body { padding-block: 1.5rem 3.5rem; }
 .me-menu-head { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: end; gap: 0.5rem 1rem; margin-bottom: clamp(1.25rem, 3vw, 2rem); }
 .me-h-section { font-weight: 500; font-size: clamp(2.25rem, 5vw, 4rem); line-height: 1; letter-spacing: -0.01em; text-wrap: balance; }
 .me-courses-home { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 18rem), 1fr)); gap: 2rem 3.5rem; }
@@ -193,7 +194,7 @@
 .me-courses-full { columns: 18rem 3; column-gap: 3.5rem; }
 .me-courses-full .me-course { break-inside: avoid; page-break-inside: avoid; padding-bottom: 2.5rem; scroll-margin-top: 4.5rem; }
 .me-course-h { display: flex; align-items: baseline; gap: 0.75rem; margin-bottom: 0.25rem; font-size: 1.5rem; line-height: 1.2; break-after: avoid; }
-.me-numeral { flex: none; min-width: 1.5em; font-size: 1rem; font-weight: 700; letter-spacing: 0.04em; color: var(--me-wine); }
+.me-numeral { flex: none; font-size: 1rem; font-weight: 700; letter-spacing: 0.04em; color: var(--me-wine); }
 @media (min-width: 768px) { .me-course-h { font-size: 1.875rem; gap: 0.875rem; } .me-numeral { font-size: 1.125rem; } }
 .me-rows > li { border-top: 1px solid var(--me-line); }
 .me-rows > li:last-child { border-bottom: 1px solid var(--me-line); }
@@ -206,6 +207,7 @@
 .me-sold { flex: none; font-weight: 700; white-space: nowrap; color: var(--me-red); }
 .tpl-mehana s { color: var(--me-ink-soft); text-decoration-thickness: 1.5px; }
 .me-row-sub { margin-top: 0.125rem; font-size: 0.9375rem; line-height: 1.5; color: var(--me-ink-soft); text-wrap: pretty; }
+.me-row-sub + .me-row-sub { margin-top: 0; }
 .me-menu-more { margin-top: 2rem; min-height: 48px; padding-inline: 1.5rem; }
 .me-totop { margin-top: 0.5rem; }
 .me-empty { padding-block: 3rem; text-align: center; }
@@ -217,7 +219,7 @@
 .me-jump-inner { display: flex; gap: 1.25rem; overflow-x: auto; overscroll-behavior-x: contain; scrollbar-width: none; }
 .me-jump-inner::-webkit-scrollbar { display: none; }
 .tpl-mehana .me-jumplink { flex: none; min-height: 44px; display: inline-flex; align-items: baseline; gap: 0.375rem; padding-top: 0.75rem; font-size: 0.9375rem; font-weight: 600; color: var(--me-ink-soft); white-space: nowrap; text-decoration: underline; text-decoration-thickness: 1px; text-underline-offset: 0.4em; text-decoration-color: var(--me-line); }
-.me-jumplink .me-numeral { min-width: 0; font-size: 0.875rem; }
+.me-jumplink .me-numeral { font-size: 0.875rem; }
 
 /* Gallery: plain 4:3 photos, as in the mockup. */
 .me-gallery { padding-bottom: 3.5rem; }

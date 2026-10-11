@@ -14,7 +14,7 @@ import { copy, Flash, roman, type MediaLookup } from "./bits";
 type Props = { state: SiteState; now: number; changed: Changed; media: MediaLookup; slug: string; variant: "home" | "full" };
 type T = ReturnType<typeof useLang>["t"];
 
-/** One dish: optional round plate photo, name and price on one line, then the description and allergens as one quiet line. */
+/** One dish: optional round plate photo, name and price on one line, then the description and the allergens (code and name) as quiet lines. */
 function Row({ i, img, lang, now, tz, changed, t }: { i: Item; img: string | null; lang: Lang; now: number; tz: string; changed: Changed; t: T }) {
   const sold = isSoldOut(i, now);
   const name = itemName(i, lang);
@@ -32,11 +32,10 @@ function Row({ i, img, lang, now, tz, changed, t }: { i: Item; img: string | nul
           <h4 className="me-name">{sold ? <s>{name}</s> : name}</h4>
           {sold ? <span className="me-sold">{t("site.soldOut")}</span> : <span className="me-price">{formatPrice(i.price_eur, lang)}</span>}
         </div>
-        {(desc || i.allergens.length > 0) && (
-          <p className="me-row-sub">
-            {desc}
-            {desc && i.allergens.length > 0 && <span aria-hidden="true"> · </span>}
-            {i.allergens.length > 0 && <span className="me-sr">{t("site.allergens")}: </span>}
+        {desc && <p className="me-row-sub">{desc}</p>}
+        {i.allergens.length > 0 && (
+          <p className="me-row-sub me-allergens">
+            <span className="me-sr">{t("site.allergens")}: </span>
             {i.allergens.map((a, n) => (
               <span key={a} className="me-nowrap">
                 {n > 0 && <span aria-hidden="true"> · </span>}
@@ -120,7 +119,7 @@ export function MenuList({ state, now, changed, media, slug, variant }: Props) {
           </div>
         </nav>
       )}
-      <section aria-labelledby="menu-h" className="me-wrap">
+      <section aria-labelledby="menu-h" className="me-wrap me-menu-body">
         <div className="me-menu-head">
           <h2 id="menu-h" className="me-h-section">{copy(lang, "menuTitle")}</h2>
           <p className="me-soft">{copy(lang, "menuNote")}</p>
