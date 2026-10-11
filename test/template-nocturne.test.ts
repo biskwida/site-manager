@@ -5,7 +5,7 @@ import { readFileSync } from "node:fs";
 import { describe, expect, it, vi } from "vitest";
 import type { DraftInfo, Lang, SiteState } from "@/src/domain/types";
 import { LangProvider } from "@/src/i18n";
-import { makeDemo } from "./helpers";
+import { EXTREME_ACCENTS, LOOK_STEP_ACCENTS, makeDemo } from "./helpers";
 
 // next/font/google only works through the Next.js compiler; at test time its module is empty, so stub every family the templates use.
 vi.mock("next/font/google", () => {
@@ -13,6 +13,7 @@ vi.mock("next/font/google", () => {
   return { Literata: font("literata"), Onest: font("onest"), Unbounded: font("unbounded"), Manrope: font("manrope"), Playfair_Display: font("playfair"), Golos_Text: font("golos") };
 });
 
+import { contrastRatio } from "@/src/templates/shared/color";
 import { def } from "@/src/templates/nocturne";
 
 // createElement passes children positionally, which LangProvider's required `children` prop type does not model.
@@ -88,6 +89,19 @@ describe("nocturne template", () => {
     const html = await render("en", { mutate });
     expect(html).toContain("Item 39");
     expect(html.match(/class="n-chip"/g)?.length).toBe(4);
+  });
+  it("computes the accent text colour in TypeScript (no CSS relative colour) and keeps it readable on near-black for every accent", async () => {
+    const css = readFileSync(new URL("../src/templates/nocturne/styles.css", import.meta.url), "utf8");
+    expect(css).not.toMatch(/oklch\(from/);
+    for (const accent of [def.accentDefault, ...LOOK_STEP_ACCENTS, ...EXTREME_ACCENTS]) {
+      const html = await render("en", { page: "home", mutate: (s) => { s.venue.theme.accent = accent; } });
+      const text = /--n-accent-text:(#[0-9a-f]{6})/.exec(html)?.[1];
+      expect(text, accent).toBeDefined();
+      // Eyebrow, prices and focus ring on both grounds; the same pair is --n-bg text on the accent button and draft badge.
+      expect(contrastRatio(text!, "#100d08"), `${text} on --n-bg`).toBeGreaterThanOrEqual(8.2);
+      expect(contrastRatio(text!, "#1c1711"), `${text} on --n-bg-2`).toBeGreaterThanOrEqual(8.2);
+    }
+    expect(await render("en", { mutate: (s) => { s.venue.theme.accent = "#f4e7a1"; } })).toContain("--n-accent-text:#f4e7a1"); // already light: unchanged
   });
   it("keeps the change flash reaching its final frame under reduced motion", () => {
     // `animation: none` would freeze .n-flash at its base opacity (1) forever, because useLiveSite never clears `changed`.

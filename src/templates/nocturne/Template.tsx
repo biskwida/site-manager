@@ -2,6 +2,7 @@
 import type { CSSProperties } from "react";
 import { useLang } from "@/src/i18n";
 import type { TemplateProps } from "../index";
+import { capAccent } from "../shared/color";
 import { mediaUrl } from "../shared/media";
 import { useLiveSite, useNow } from "../shared/useLiveSite";
 import type { MediaLookup } from "./bits";
@@ -34,9 +35,12 @@ export function Template({ state: initial, now: initialNow, slug, page, draft, l
   const { state, changed } = useLiveSite(initial, feedUrl, live);
   const now = useNow(initialNow);
   const accent = ACCENT_RE.test(state.venue.theme.accent) ? state.venue.theme.accent : "#d9a05b";
+  // Accent as text and button fill: OKLCH lightness lifted to >= 0.78, chroma capped at 0.14, computed here rather than with CSS
+  // relative colour syntax, so it reads on near-black (>= 8.2:1) for any accent (test/template-nocturne.test.ts).
+  const accentText = capAccent(accent, { minL: 0.78, maxC: 0.14 });
   const media: MediaLookup = (id) => mediaUrl(id ? state.media.find((m) => m.id === id) : null, { preview });
   return (
-    <div className={`tpl-nocturne ${fontVars}`} style={{ "--accent": accent } as CSSProperties} data-page={page}>
+    <div className={`tpl-nocturne ${fontVars}`} style={{ "--accent": accent, "--n-accent-text": accentText } as CSSProperties} data-page={page}>
       <div aria-hidden="true" className="n-grain" />
       {draft && <DraftNote summary_bg={draft.summary_bg} summary_en={draft.summary_en} />}
       <Hero state={state} slug={slug} page={page} media={media} aside={<Tonight state={state} now={now} />} />
