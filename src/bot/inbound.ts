@@ -128,7 +128,7 @@ export async function handleInbound(d: BotDeps, m: InboundMessage): Promise<void
     }
     // Start first: a failed acknowledgement must not lose the message.
     const lang = detectLang(text) ?? member.lang;
-    d.startRun({ venueId: member.venue_id, chatRef: member.chat_ref, member: { ...member, lang }, text, source: "text" });
+    d.startRun({ venueId: member.venue_id, chatRef: member.chat_ref, member: { ...member, lang }, text, source: "text", replyTo: m.messageRef });
     await d.messenger.typing(m.chatRef, m.messageRef);
     return;
   }
@@ -255,7 +255,7 @@ async function handlePhoto(d: BotDeps, member: Member, m: InboundMessage) {
     if (await holdPhoto(d.store, member.venue_id, member.chat_ref, media.id, c.photoWaiting, d.now())) await d.messenger.send(member.chat_ref, c.photoWaiting);
     return;
   }
-  d.startRun({ venueId: member.venue_id, chatRef: member.chat_ref, member: { ...member, lang }, text: caption, source: "photo", image: { data: Buffer.from(bytes).toString("base64"), media_type }, mediaId: media.id });
+  d.startRun({ venueId: member.venue_id, chatRef: member.chat_ref, member: { ...member, lang }, text: caption, source: "photo", image: { data: Buffer.from(bytes).toString("base64"), media_type }, mediaId: media.id, replyTo: m.messageRef });
   await d.messenger.typing(member.chat_ref, m.messageRef);
 }
 
@@ -280,6 +280,6 @@ async function handleVoice(d: BotDeps, member: Member, m: InboundMessage) {
     return;
   }
   const lang = detectLang(text) ?? member.lang;
-  d.startRun({ venueId: member.venue_id, chatRef: member.chat_ref, member: { ...member, lang }, text, source: "voice" });
+  d.startRun({ venueId: member.venue_id, chatRef: member.chat_ref, member: { ...member, lang }, text, source: "voice", replyTo: m.messageRef });
   await d.messenger.send(member.chat_ref, copy(lang).heard(text));
 }

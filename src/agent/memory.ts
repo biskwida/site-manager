@@ -40,8 +40,10 @@ function release(t: ConversationTurn, claimed: string[]): ConversationTurn {
   if (!t.waiting || claimed.length === 0) return t;
   const left = (t.media_ids ?? []).filter((id) => !claimed.includes(id));
   if (left.length === (t.media_ids ?? []).length) return t;
-  const { waiting: _held, ...rest } = t;
-  return left.length ? { ...t, media_ids: left, owner: heldPhotoLine(left) } : rest;
+  if (left.length) return { ...t, media_ids: left, owner: heldPhotoLine(left) };
+  const rest = { ...t };
+  delete rest.waiting;
+  return rest;
 }
 
 /** `claimed` = the held photos this turn was given; they stop being held. */

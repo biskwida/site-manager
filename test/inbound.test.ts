@@ -158,9 +158,9 @@ describe("handleInbound", () => {
   it("transcribes voice with the media's content type", async () => {
     const seen: string[] = [];
     const { d, runs, messenger } = await setup({ transcribe: async (_b, _l, ct) => { seen.push(ct ?? ""); return "Капучиното става три и двайсет"; } });
-    await handleInbound(d, { chatRef: "tg:1001", kind: "voice", media: { download: async () => ({ bytes: new Uint8Array([1]), contentType: "audio/mp4" }) } });
+    await handleInbound(d, { chatRef: "tg:1001", kind: "voice", messageRef: "wamid.7", media: { download: async () => ({ bytes: new Uint8Array([1]), contentType: "audio/mp4" }) } });
     expect(seen).toEqual(["audio/mp4"]);
-    expect(runs[0]).toMatchObject({ source: "voice", text: "Капучиното става три и двайсет" });
+    expect(runs[0]).toMatchObject({ source: "voice", text: "Капучиното става три и двайсет", replyTo: "wamid.7" });
     expect(texts(messenger)[0]).toBe("🎤 Чух: „Капучиното става три и двайсет“");
   });
   it("guesses the voice type from the file name when the download's content type is uninformative", async () => {

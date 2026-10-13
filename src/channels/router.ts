@@ -54,4 +54,10 @@ export class ChannelRouter implements Messenger {
   async typing(chatRef: string, inReplyTo?: string) {
     await this.pick(chatRef)?.a.typing(chatRef, inReplyTo);
   }
+  async edit(chatRef: string, messageRef: string, text: string) {
+    await this.pick(chatRef)?.a.edit?.(chatRef, messageRef, text);
+  }
+  async remove(chatRef: string, messageRef: string) {
+    await this.pick(chatRef)?.a.remove?.(chatRef, messageRef);
+  }
 }

@@ -30,6 +30,8 @@ export class FakeMessenger implements Messenger {
   sent: { chatRef: string; text: string; setId?: string; lang?: Lang; messageRef: string; proactive?: boolean }[] = [];
   concluded: { chatRef: string; messageRef: string | null; full: string; short: string; proactive?: boolean }[] = [];
   typed: string[] = [];
+  edited: { chatRef: string; messageRef: string; text: string }[] = [];
+  removed: { chatRef: string; messageRef: string }[] = [];
   private next = 100;
   async send(chatRef: string, text: string, opts?: SendOpts) {
     const messageRef = String(this.next++);
@@ -46,6 +48,12 @@ export class FakeMessenger implements Messenger {
   }
   async typing(chatRef: string) {
     this.typed.push(chatRef);
+  }
+  async edit(chatRef: string, messageRef: string, text: string) {
+    this.edited.push({ chatRef, messageRef, text });
+  }
+  async remove(chatRef: string, messageRef: string) {
+    this.removed.push({ chatRef, messageRef });
   }
   last() {
     return this.sent[this.sent.length - 1];

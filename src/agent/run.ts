@@ -3,6 +3,7 @@ import Anthropic from "@anthropic-ai/sdk";
 import type { Effort } from "../config";
 import { tr } from "../domain/format";
 import type { ChangeSource } from "../domain/types";
+import { startProgress } from "../bot/progress";
 import { nowText } from "../time";
 import { appendMemory, loadMemory } from "./memory";
 import { SYSTEM_PROMPT, userMessage } from "./prompt";
@@ -17,6 +18,8 @@ export interface TurnInput {
   source: Extract<ChangeSource, "text" | "voice" | "photo">;
   image?: ImageInput;
   mediaId?: string;
+  /** The owner's inbound message id (WhatsApp ties its typing indicator to it). */
+  replyTo?: string;
 }
 export interface AgentConfig {
   model: string;
@@ -49,46 +52,55 @@ export async function runTurn(deps: AgentDeps, input: TurnInput, cfg: AgentConfi
     { type: "text" as const, text },
   ];
   const turnSets = new Set<string>();
-  const tools = makeTools({ ...deps, correctionFor: memory.correctionFor, source: input.source, turnSets });
+  const progress = startProgress({ messenger: deps.messenger, chatRef: deps.chatRef, lang, hasImage: !!input.image || held.length > 0, inReplyTo: input.replyTo });
+  // Each tool call updates the status line ("Reading the menu…").
+  const tools = makeTools({ ...deps, correctionFor: memory.correctionFor, source: input.source, turnSets }).map((t) => {
+    const run = t.run as (...args: unknown[]) => ReturnType<typeof t.run>;
+    return { ...t, run: ((...args: unknown[]) => { progress.step(t.name); return run(...args); }) as typeof t.run };
+  });
   const tag = input.source === "voice" ? "[voice] " : input.source === "photo" ? `[photo media_id: ${input.mediaId ?? "?"}] ` : "";
   const about = held.length ? `[about the photos above: media_id ${held.join(", ")}] ` : "";
   const ownerLine = `${tag}${about}${input.text}`.trim();
 
   const closeOut = async (reply: string, outcome?: string) => {
+    await progress.stop();
     if (reply) await deps.messenger.send(deps.chatRef, reply);
     await appendMemory(deps.store, deps.venueId, deps.chatRef, { at: now.toISOString(), owner: ownerLine, agent: reply || "(no reply)", outcome }, now, held);
   };
 
-  let final: { stop_reason: string | null; content: { type: string; text?: string }[] };
   try {
-    const anthropic = client ?? new Anthropic(cfg.apiKey ? { apiKey: cfg.apiKey } : undefined);
-    final = await anthropic.beta.messages.toolRunner({
-      model: cfg.model,
-      max_tokens: 16000,
-      max_iterations: 30,
-      output_config: { effort: pickEffort(cfg.effort, { hasImage: !!input.image || held.length > 0, text: input.text }) },
-      // One tool call at a time: proposals must be sequential and the queue in makeTools expects it.
-      tool_choice: { type: "auto", disable_parallel_tool_use: true },
-      betas: ["server-side-fallback-2026-07-01"],
-      fallbacks: "default",
-      system: SYSTEM_PROMPT,
-      tools,
-      messages: [{ role: "user", content }],
-    });
-  } catch (e) {
-    console.error("[agent] turn failed:", e instanceof Error ? e.message : e);
-    await closeOut(tr(lang, "Възникна грешка. Опитайте отново след малко.", "Something went wrong. Please try again in a moment."), "error");
-    return "error";
-  }
+    let final: { stop_reason: string | null; content: { type: string; text?: string }[] };
+    try {
+      const anthropic = client ?? new Anthropic(cfg.apiKey ? { apiKey: cfg.apiKey } : undefined);
+      final = await anthropic.beta.messages.toolRunner({
+        model: cfg.model,
+        max_tokens: 16000,
+        max_iterations: 30,
+        output_config: { effort: pickEffort(cfg.effort, { hasImage: !!input.image || held.length > 0, text: input.text }) },
+        // One tool call at a time: proposals must be sequential and the queue in makeTools expects it.
+        tool_choice: { type: "auto", disable_parallel_tool_use: true },
+        betas: ["server-side-fallback-2026-07-01"],
+        fallbacks: "default",
+        system: SYSTEM_PROMPT,
+        tools,
+        messages: [{ role: "user", content }],
+      });
+    } catch (e) {
+      console.error("[agent] turn failed:", e instanceof Error ? e.message : e);
+      await closeOut(tr(lang, "Възникна грешка. Опитайте отново след малко.", "Something went wrong. Please try again in a moment."), "error");
+      return "error";
+    }
 
-  if (final.stop_reason === "refusal") {
-    await closeOut(tr(lang, "Не мога да изпълня това. Опитайте с друга формулировка.", "I can't do that one. Try putting it differently."), "refused");
-    return "refused";
+    if (final.stop_reason === "refusal") {
+      await closeOut(tr(lang, "Не мога да изпълня това. Опитайте с друга формулировка.", "I can't do that one. Try putting it differently."), "refused");
+      return "refused";
+    }
+    const reply = final.content.flatMap((b) => (b.type === "text" && b.text ? [b.text] : [])).join("\n").trim();
+    await closeOut(reply, await pendingOutcome(deps, turnSets));
+    return reply;
+  } finally {
+    await progress.stop(); // also after an unexpected throw, so typing never outlives the turn
   }
-  const reply = final.content.flatMap((b) => (b.type === "text" && b.text ? [b.text] : [])).join("\n").trim();
-  const outcome = await pendingOutcome(deps, turnSets);
-  await closeOut(reply, outcome);
-  return reply;
 }
 
 /** Every proposal still waiting in this chat (earlier ones first, then this turn's in the order they were made), for the memory line. */

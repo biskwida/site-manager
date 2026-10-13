@@ -119,6 +119,25 @@ describe("runTurn", () => {
     expect(content.map((c) => c.type)).toEqual(["text"]);
     expect(content[0].text).toContain(`media_id: ${a.id}`);
   });
+  it("shows typing for the whole turn and removes the status message before the answer", async () => {
+    const { deps, messenger } = await setup();
+    const slow = {
+      beta: { messages: { toolRunner(params: Record<string, unknown>) {
+        const run = (async () => {
+          const tools = params.tools as { name: string; run: (i: unknown) => Promise<string> }[];
+          await new Promise((r) => setTimeout(r, 3_200));
+          await tools.find((t) => t.name === "get_menu")!.run({});
+          await new Promise((r) => setTimeout(r, 50));
+          return { stop_reason: "end_turn", content: [{ type: "text", text: "Готово." }] };
+        })();
+        return { then: run.then.bind(run) };
+      } } },
+    } as unknown as Anthropic;
+    await runTurn(deps, { text: "колко е капучиното?", source: "text" }, { model: "m", effort: "medium" }, slow);
+    expect(messenger.sent.map((s) => s.text)).toEqual(["⏳ Работя по това…", "Готово."]);
+    expect(messenger.edited.map((e) => e.text)).toEqual(["📖 Чета менюто…"]);
+    expect(messenger.removed).toEqual([{ chatRef: "tg:1001", messageRef: messenger.sent[0].messageRef }]);
+  });
   it("tells the owner when the model refuses or errors", async () => {
     const { deps, messenger } = await setup();
     const { client } = fakeClient([], { stop_reason: "refusal", text: "" });
