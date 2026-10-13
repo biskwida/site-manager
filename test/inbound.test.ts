@@ -1,5 +1,7 @@
 // test/inbound.test.ts
 import { describe, expect, it } from "vitest";
+import { appendMemory } from "@/src/agent/memory";
+import { PHOTO_NO_CAPTION } from "@/src/agent/prompt";
 import type { BotDeps, RunRequest } from "@/src/bot/bot";
 import { handleInbound, normalizeCommand } from "@/src/bot/inbound";
 import { planChanges } from "@/src/domain/changes";
@@ -166,6 +168,39 @@ describe("handleInbound", () => {
     const conv = await store.getConversation(venue.id, "tg:1001");
     expect(conv?.turns[0].media_ids).toHaveLength(2);
     expect(conv?.turns[0].waiting).toBe(true);
+  });
+  it("starts a turn at once for a photo without a caption that follows a fresh agent reply; album siblings join it silently", async () => {
+    const { d, runs, messenger, store, venue } = await setup();
+    const ago = new Date(T0.getTime() - 5 * 60_000);
+    await appendMemory(store, venue.id, "tg:1001", { at: ago.toISOString(), owner: "смени водата на 1.50 и прати стори само в инстаграм", agent: "Изпратете ми снимката и ще я подготвя за стори само в Instagram." }, ago);
+    const photo = { download: async () => ({ bytes: new Uint8Array([9, 9]), contentType: "image/jpeg", name: "a.jpg" }) };
+    await handleInbound(d, { chatRef: "tg:1001", kind: "photo", messageRef: "77", media: photo });
+    const [media] = (await store.getSite(venue.id)).media;
+    expect(runs).toHaveLength(1);
+    expect(runs[0]).toMatchObject({ source: "photo", text: PHOTO_NO_CAPTION, image: { media_type: "image/jpeg", data: Buffer.from([9, 9]).toString("base64") }, mediaId: media.id, replyTo: "77" });
+    expect(texts(messenger)).toEqual([]); // no "what should I do with it?": the agent answers
+    // A second photo of the same album arrives while that turn runs: it waits with the first, no second turn, no message.
+    await handleInbound(d, { chatRef: "tg:1001", kind: "photo", media: photo });
+    expect(runs).toHaveLength(1);
+    expect(texts(messenger)).toEqual([]);
+    expect((await store.getConversation(venue.id, "tg:1001"))?.turns.at(-1)).toMatchObject({ waiting: true, media_ids: [media.id, expect.any(String)] });
+  });
+  it("holds a photo without a caption as before when the agent's last reply is stale or missing", async () => {
+    const photo = { download: async () => ({ bytes: new Uint8Array([9, 9]), contentType: "image/jpeg", name: "a.jpg" }) };
+    const ask = "📷 Получих снимката. Какво да направя с нея? Напишете или изпратете гласово съобщение.";
+    // 20 minutes ago: still in memory (30 min), but too old to be what the photo answers.
+    const stale = await setup();
+    const old = new Date(T0.getTime() - 20 * 60_000);
+    await appendMemory(stale.store, stale.venue.id, "tg:1001", { at: old.toISOString(), owner: "прати стори", agent: "Изпратете ми снимката." }, old);
+    await handleInbound(stale.d, { chatRef: "tg:1001", kind: "photo", media: photo });
+    expect(stale.runs).toHaveLength(0);
+    expect(texts(stale.messenger)).toEqual([ask]);
+    // The last turn made a proposal and said nothing.
+    const silent = await setup();
+    await appendMemory(silent.store, silent.venue.id, "tg:1001", { at: T0.toISOString(), owner: "капучиното е 3,20", agent: "(no reply)", outcome: "proposed: Капучино 3,20 €" }, T0);
+    await handleInbound(silent.d, { chatRef: "tg:1001", kind: "photo", media: photo });
+    expect(silent.runs).toHaveLength(0);
+    expect(texts(silent.messenger)).toEqual([ask]);
   });
   it("transcribes voice with the media's content type", async () => {
     const seen: string[] = [];

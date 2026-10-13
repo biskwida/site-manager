@@ -3,10 +3,11 @@ import Anthropic from "@anthropic-ai/sdk";
 import type { Effort } from "../config";
 import { tr } from "../domain/format";
 import type { ChangeSource } from "../domain/types";
+import { copy } from "../bot/copy";
 import { startProgress } from "../bot/progress";
 import { nowText } from "../time";
-import { appendMemory, loadMemory } from "./memory";
-import { SYSTEM_PROMPT, userMessage } from "./prompt";
+import { appendMemory, loadMemory, NO_REPLY } from "./memory";
+import { PHOTO_NO_CAPTION, SYSTEM_PROMPT, userMessage } from "./prompt";
 import { makeTools, type AgentDeps } from "./tools";
 
 export interface ImageInput {
@@ -39,7 +40,7 @@ export function pickEffort(base: Effort, input: { hasImage: boolean; text: strin
 export async function runTurn(deps: AgentDeps, input: TurnInput, cfg: AgentConfig, client?: Anthropic): Promise<string> {
   const now = deps.now();
   const venue = await deps.store.getVenue(deps.venueId);
-  const memory = await loadMemory(deps.store, deps.venueId, deps.chatRef, now);
+  const memory = await loadMemory(deps.store, deps.venueId, deps.chatRef, now, input.mediaId);
   const lang = deps.member.lang;
   const held = memory.waiting;
   const text = userMessage({
@@ -62,10 +63,18 @@ export async function runTurn(deps: AgentDeps, input: TurnInput, cfg: AgentConfi
   const about = held.length ? `[about the photos above: media_id ${held.join(", ")}] ` : "";
   const ownerLine = `${tag}${about}${input.text}`.trim();
 
-  const closeOut = async (reply: string, outcome?: string) => {
+  // A photo sent without a caption (src/bot/inbound.ts holds it silently first, so an album gathers instead of starting turns).
+  const bare = input.source === "photo" && input.text === PHOTO_NO_CAPTION && !!input.mediaId;
+  const claimed = input.mediaId ? [...held, input.mediaId] : held;
+
+  const closeOut = async (reply: string, outcome?: string, answered = false) => {
     await progress.stop();
+    // A caption-less photo the agent only asked about (no change set this turn) stays held for the owner's answer, like any held photo.
+    const keep = bare && answered && turnSets.size === 0;
+    if (keep && !reply) reply = copy(lang).photoWaiting; // the model said nothing: ask the usual question rather than stay silent
     if (reply) await deps.messenger.send(deps.chatRef, reply);
-    await appendMemory(deps.store, deps.venueId, deps.chatRef, { at: now.toISOString(), owner: ownerLine, agent: reply || "(no reply)", outcome }, now, held);
+    const photos = keep ? { media_ids: [input.mediaId!, ...held], waiting: true } : {};
+    await appendMemory(deps.store, deps.venueId, deps.chatRef, { at: now.toISOString(), owner: ownerLine, agent: reply || NO_REPLY, outcome, ...photos }, now, claimed);
   };
 
   try {
@@ -96,7 +105,7 @@ export async function runTurn(deps: AgentDeps, input: TurnInput, cfg: AgentConfi
       return "refused";
     }
     const reply = final.content.flatMap((b) => (b.type === "text" && b.text ? [b.text] : [])).join("\n").trim();
-    await closeOut(reply, await pendingOutcome(deps, turnSets));
+    await closeOut(reply, await pendingOutcome(deps, turnSets), true);
     return reply;
   } finally {
     await progress.stop(); // also after an unexpected throw, so typing never outlives the turn

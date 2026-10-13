@@ -1,6 +1,7 @@
 // src/bot/inbound.ts
 // Channel-agnostic owner messages. Telegram (bot.ts) and the Meta webhook (server/meta.ts) both translate into InboundMessage and call handleInbound.
-import { holdPhoto } from "../agent/memory";
+import { followsAgentReply, holdPhoto } from "../agent/memory";
+import { PHOTO_NO_CAPTION } from "../agent/prompt";
 import type { ImageInput } from "../agent/run";
 import { channelOf, isMetaChannel, maskRef, type Channel } from "../channels/ref";
 import { detectLang } from "../domain/format";
@@ -268,12 +269,19 @@ async function handlePhoto(d: BotDeps, member: Member, m: InboundMessage) {
     return;
   }
   const media = await d.store.saveMedia(member.venue_id, bytes, media_type);
+  const image = { data: Buffer.from(bytes).toString("base64"), media_type };
   if (!caption) {
-    // No instructions yet: hold the photo for the owner's next message (often a voice note) instead of guessing.
-    if (await holdPhoto(d.store, member.venue_id, member.chat_ref, media.id, c.photoWaiting, d.now())) await d.messenger.send(member.chat_ref, c.photoWaiting);
-    return;
+    // Right after the agent's reply ("send me the photo") the photo is part of that conversation: the agent sees it now and goes
+    // on, or asks. Otherwise there are no instructions yet: hold it for the owner's next message (often a voice note).
+    // Either way it is held first, so the rest of an album joins it instead of starting turns or questions of its own.
+    const follows = await followsAgentReply(d.store, member.venue_id, member.chat_ref, d.now());
+    if (!(await holdPhoto(d.store, member.venue_id, member.chat_ref, media.id, follows ? "" : c.photoWaiting, d.now()))) return;
+    if (!follows) {
+      await d.messenger.send(member.chat_ref, c.photoWaiting);
+      return;
+    }
   }
-  d.startRun({ venueId: member.venue_id, chatRef: member.chat_ref, member: { ...member, lang }, text: caption, source: "photo", image: { data: Buffer.from(bytes).toString("base64"), media_type }, mediaId: media.id, replyTo: m.messageRef });
+  d.startRun({ venueId: member.venue_id, chatRef: member.chat_ref, member: { ...member, lang }, text: caption || PHOTO_NO_CAPTION, source: "photo", image, mediaId: media.id, replyTo: m.messageRef });
   await d.messenger.typing(member.chat_ref, m.messageRef);
 }
 

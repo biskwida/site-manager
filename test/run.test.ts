@@ -4,6 +4,7 @@ import { describe, expect, it } from "vitest";
 import type { AgentDeps } from "@/src/agent/tools";
 import { pickEffort, runTurn } from "@/src/agent/run";
 import { appendMemory, holdPhoto, loadMemory } from "@/src/agent/memory";
+import { PHOTO_NO_CAPTION } from "@/src/agent/prompt";
 import { FakeMessenger, makeDemo } from "./helpers";
 
 const T0 = new Date("2026-10-09T09:00:00.000Z");
@@ -118,6 +119,51 @@ describe("runTurn", () => {
     const content = (calls[0].messages as { content: { type: string; text?: string }[] }[])[0].content;
     expect(content.map((c) => c.type)).toEqual(["text"]);
     expect(content[0].text).toContain(`media_id: ${a.id}`);
+  });
+  it("a photo without a caption that the agent only asks about stays held for the owner's next message", async () => {
+    const { deps, messenger, store, venue } = await setup();
+    const ago = new Date(T0.getTime() - 2 * 60_000);
+    await appendMemory(store, venue.id, "tg:1001", { at: ago.toISOString(), owner: "здравей", agent: "Здравейте! С какво да помогна?" }, ago);
+    const p = await store.saveMedia(venue.id, new Uint8Array([1]), "image/jpeg");
+    await holdPhoto(store, venue.id, "tg:1001", p.id, "", T0); // what inbound does before starting the turn (album guard)
+    const ask = fakeClient([], { stop_reason: "end_turn", text: "Хубава снимка! За корица ли е, или да я публикувам?" });
+    await runTurn(deps, { text: PHOTO_NO_CAPTION, source: "photo", image: { data: "AAAA", media_type: "image/jpeg" }, mediaId: p.id }, { model: "m", effort: "medium" }, ask.client);
+    const content = (ask.calls[0].messages as { content: { type: string; text?: string }[] }[])[0].content;
+    expect(content.map((c) => c.type)).toEqual(["image", "text"]); // the photo once, not again as a held one
+    expect(content[1].text).toContain("without words right after your last reply");
+    expect(content[1].text).not.toContain("(no instructions yet)");
+    expect(content[1].text).not.toContain("waiting for instructions");
+    expect(messenger.sent.map((s) => s.text)).toEqual(["Хубава снимка! За корица ли е, или да я публикувам?"]); // the model's question, no photoWaiting
+    const conv = await store.getConversation(venue.id, "tg:1001");
+    expect(conv?.turns).toHaveLength(2);
+    expect(conv?.turns[1]).toMatchObject({ owner: `[photo media_id: ${p.id}] ${PHOTO_NO_CAPTION}`, agent: "Хубава снимка! За корица ли е, или да я публикувам?", media_ids: [p.id], waiting: true });
+    // The owner's answer gets the photo and uses it up.
+    const next = fakeClient([], { stop_reason: "end_turn", text: "Готово." });
+    await runTurn(deps, { text: "за стори в инстаграм", source: "text" }, { model: "m", effort: "medium" }, next.client);
+    const text = (next.calls[0].messages as { content: { type: string; text?: string }[] }[])[0].content.at(-1)!.text!;
+    expect(text).toContain(`media_id: ${p.id}`);
+    expect(text).toContain("waiting for instructions");
+    expect((await loadMemory(store, venue.id, "tg:1001", T0)).waiting).toEqual([]);
+  });
+  it("a photo without a caption that the agent acts on is used up; with no words and no proposal it falls back to the usual question", async () => {
+    const { deps, messenger, store, venue, items } = await setup();
+    const p = await store.saveMedia(venue.id, new Uint8Array([1]), "image/jpeg");
+    await appendMemory(store, venue.id, "tg:1001", { at: T0.toISOString(), owner: "смени водата на 1.50", agent: "Изпратете ми снимката." }, T0);
+    await holdPhoto(store, venue.id, "tg:1001", p.id, "", T0);
+    const act = fakeClient([{ tool: "propose_changes", input: { summary_bg: "Капучино 3,20 €", summary_en: "Cappuccino €3.20", changes: [{ op: "set_price", item_id: items.Cappuccino.id, price_eur: 3.2 }] } }], { stop_reason: "end_turn", text: "" });
+    await runTurn(deps, { text: PHOTO_NO_CAPTION, source: "photo", image: { data: "AAAA", media_type: "image/jpeg" }, mediaId: p.id }, { model: "m", effort: "medium" }, act.client);
+    expect((await loadMemory(store, venue.id, "tg:1001", T0)).waiting).toEqual([]);
+    const turns = (await store.getConversation(venue.id, "tg:1001"))!.turns;
+    expect(turns.map((t) => t.owner)).toEqual(["смени водата на 1.50", `[photo media_id: ${p.id}] ${PHOTO_NO_CAPTION}`]); // the silent hold is gone
+    expect(turns[1].waiting).toBeUndefined();
+    expect(messenger.sent).toHaveLength(1); // only the proposal
+
+    const quiet = await setup();
+    const q = await quiet.store.saveMedia(quiet.venue.id, new Uint8Array([1]), "image/jpeg");
+    await holdPhoto(quiet.store, quiet.venue.id, "tg:1001", q.id, "", T0);
+    await runTurn(quiet.deps, { text: PHOTO_NO_CAPTION, source: "photo", image: { data: "AAAA", media_type: "image/jpeg" }, mediaId: q.id }, { model: "m", effort: "medium" }, fakeClient([], { stop_reason: "end_turn", text: "" }).client);
+    expect(quiet.messenger.sent.map((s) => s.text)).toEqual(["📷 Получих снимката. Какво да направя с нея? Напишете или изпратете гласово съобщение."]);
+    expect((await loadMemory(quiet.store, quiet.venue.id, "tg:1001", T0)).waiting).toEqual([q.id]);
   });
   it("shows typing for the whole turn and removes the status message before the answer", async () => {
     const { deps, messenger } = await setup();
