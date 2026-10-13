@@ -1,12 +1,15 @@
 // test/change-limit.test.ts
 // Monthly change limit at apply time (store choke point → bot approval, tick, dashboard) and the usage line.
 import { describe, expect, it } from "vitest";
+import { SYSTEM_PROMPT } from "@/src/agent/prompt";
+import { makeTools, type AgentDeps } from "@/src/agent/tools";
 import { handleDecision } from "@/src/bot/approvals";
 import { copy } from "@/src/bot/copy";
 import { planChanges } from "@/src/domain/changes";
 import { adminAction } from "@/src/server/admin";
 import { runTick } from "@/src/tick";
 import { FakeMessenger, makeDemo } from "./helpers";
+import { call } from "./tool-call";
 
 const T0 = new Date("2026-10-09T09:00:00.000Z"); // Fri 9 Oct 2026, 12:00 Sofia
 
@@ -104,5 +107,58 @@ describe("dashboard apply", () => {
     expect(messenger.concluded[0].short).toBe("✅ Приложено от таблото.\nПромени този месец: 3/3");
     expect((await adminAction(d, venue, "undo", cs.id)).ok).toBe(true);
     expect(await price()).toBe(2.9);
+  });
+});
+
+describe("agent propose", () => {
+  async function agent(limit: number | null, used: number) {
+    const s = await setup(limit, used);
+    const member = (await s.store.findMember("tg:1001"))!;
+    const deps: AgentDeps = { store: s.store, venueId: s.venue.id, chatRef: "tg:1001", member, messenger: s.messenger, now: () => T0, baseUrl: "https://site.example" };
+    return { ...s, deps, tools: makeTools(deps) };
+  }
+  const LINE_BG = "Лимитът от 2 промени за този месец е достигнат (2/2). Нови промени от 1 ноември.";
+
+  it("refuses to propose at the limit: no set is created, the error carries the owner's line and says not to retry", async () => {
+    const { tools, store, venue, items, messenger } = await agent(2, 2);
+    const before = (await store.listChangeSets(venue.id)).length;
+    const r = await call(tools, "propose_changes", { summary_bg: "Капучино 3,20 €", summary_en: "Cappuccino €3.20", changes: [{ op: "set_price", item_id: items.Cappuccino.id, price_eur: 3.2 }] });
+    expect(r.error).toContain(LINE_BG);
+    expect(r.error).toMatch(/do not retry/i);
+    expect((await store.listChangeSets(venue.id)).length).toBe(before);
+    expect(messenger.sent).toEqual([]);
+    for (const [name, input] of [
+      ["schedule_changes", { summary_bg: "x", summary_en: "x", apply_at: "2026-12-24T08:00:00+02:00", changes: [{ op: "set_price", item_id: items.Cappuccino.id, price_eur: 3.2 }] }],
+      ["propose_bulk_price_change", { percent: 10, rounding: "0.10" }],
+      ["propose_changes", { summary_bg: "x", summary_en: "x", changes: [{ op: "set_sold_out", item_id: items.Cappuccino.id, until: "next_opening" }] }],
+    ] as const) {
+      expect((await call(tools, name, input)).error, name).toContain(LINE_BG);
+    }
+    expect((await store.listChangeSets(venue.id)).length).toBe(before);
+  });
+
+  it("still proposes below the limit, and undo at the limit", async () => {
+    const below = await agent(3, 2);
+    const ok = await call(below.tools, "propose_changes", { summary_bg: "Капучино 3,20 €", summary_en: "Cappuccino €3.20", changes: [{ op: "set_price", item_id: below.items.Cappuccino.id, price_eur: 3.2 }] });
+    expect(ok.status).toBe("proposed");
+    const { tools } = await agent(2, 2);
+    expect((await call(tools, "undo", { change_set_id: "last" })).status).toBe("proposed");
+  });
+
+  it("tells the model in the system prompt to relay the line instead of retrying", () => {
+    expect(SYSTEM_PROMPT).toMatch(/monthly change limit/i);
+  });
+});
+
+describe("instant sold-out", () => {
+  it("applies below the limit and appends the usage line to the ✅ message", async () => {
+    const { tools, messenger, items } = await (async () => {
+      const s = await setup(5, 1);
+      const member = (await s.store.findMember("tg:1001"))!;
+      return { ...s, tools: makeTools({ store: s.store, venueId: s.venue.id, chatRef: "tg:1001", member, messenger: s.messenger, now: () => T0, baseUrl: "https://site.example" }) };
+    })();
+    const r = await call(tools, "propose_changes", { summary_bg: "Капучино свърши", summary_en: "Cappuccino sold out", changes: [{ op: "set_sold_out", item_id: items.Cappuccino.id, until: "next_opening" }] });
+    expect(r.status).toBe("applied");
+    expect(messenger.sent.at(-1)?.text).toMatch(/\nПромени този месец: 2\/5$/);
   });
 });
