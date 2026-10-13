@@ -10,6 +10,7 @@ import type { BotDeps } from "./bot";
 import { copy } from "./copy";
 import { adminUrl, publicUrl } from "./links";
 import { imageMediaType, MAX_IMAGE_BYTES } from "./media";
+import { memberViews, openInviteViews } from "./members";
 import { audioContentType } from "./voice";
 
 export interface InboundMedia {
@@ -32,7 +33,7 @@ export interface InboundMessage {
 }
 
 const CODE = /^[A-Z0-9-]{8,}$/;
-const COMMANDS = new Set(["lang", "help", "menu", "undo", "connect"]);
+const COMMANDS = new Set(["lang", "help", "menu", "undo", "connect", "members"]);
 /** Command words for Meta channels, where there is no command menu. No word for undo: a plain "отмени" may be meant for a proposal, not the last applied change; "/undo" or asking the agent ("върни последната промяна") still works. */
 const WORDS: [RegExp, string][] = [
   [/^(menu|меню)$/i, "/menu"],
@@ -215,6 +216,17 @@ async function runCommand(d: BotDeps, member: Member, channel: Channel, cmd: str
       }
       const r = await d.connect(member.venue_id, siteUrl, code);
       await d.messenger.send(member.chat_ref, r.ok ? cc.connectOk(r.site.name, String(r.destination.config.site_url)) : cc.connectFailed(lang === "bg" ? r.reason.bg : r.reason.en));
+      return;
+    }
+    case "members": {
+      // Owner-only and read-only: removing access stays with the operator scripts (member:remove, invite:cancel).
+      if (member.role !== "owner") {
+        await d.messenger.send(member.chat_ref, c.membersOwnerOnly);
+        return;
+      }
+      const venue = await d.store.getVenue(member.venue_id);
+      const [members, invites] = await Promise.all([d.store.listMembers(venue.id), d.store.listInvites(venue.id, d.now().toISOString())]);
+      await d.messenger.send(member.chat_ref, c.members(venue.name, memberViews(members, member.lang, venue.tz, member.chat_ref), openInviteViews(invites, member.lang, venue.tz)));
       return;
     }
     case "undo":

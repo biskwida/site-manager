@@ -221,3 +221,63 @@ describe("handleInbound: WordPress /connect and venue switching on Meta channels
     expect(await store.findMember("tg:1001")).toMatchObject({ venue_id: venue.id, role: "owner" });
   });
 });
+
+describe("handleInbound: /members and removed members", () => {
+  it("shows an owner who has access and which codes are still open, in the owner's language, without whole codes", async () => {
+    const { d, messenger, runs, store, venue } = await setup();
+    await store.upsertMember({ venue_id: venue.id, chat_ref: "wa:359888123456", role: "staff", lang: "bg" });
+    const staffCode = await store.createInvite(venue.id, "staff", "2026-10-12T00:00:00.000Z");
+    const used = await store.createInvite(venue.id, "owner", "2026-10-14T00:00:00.000Z");
+    await store.redeemInvite(used, "fb:910", "en", T0.toISOString());
+    await store.createInvite(venue.id, "owner", "2026-10-01T00:00:00.000Z"); // expired: not shown
+    await handleInbound(d, { chatRef: "tg:1001", kind: "text", text: "/members" });
+    const bg = texts(messenger).at(-1) as string;
+    const lines = bg.split("\n");
+    expect(lines[0]).toBe("Достъп до Кафене „Ъгъла“:");
+    expect(lines[1]).toMatch(/^• Собственик \(вие\) · Telegram 1001 · BG · последно писал 09\.10\.2026, 12:00 · добавен \d\d\.\d\d\.\d{4}, \d\d:\d\d$/);
+    expect(lines[2]).toMatch(/^• Персонал · Telegram 1002 · EN · още не е писал · добавен /);
+    expect(lines[3]).toMatch(/^• Персонал · WhatsApp …3456 · BG · още не е писал · добавен /);
+    expect(lines[4]).toMatch(/^• Собственик · Messenger 910 · EN · /);
+    expect(bg).toContain("Неизползвани кодове:\n• Персонал · валиден до 12.10.2026, 03:00");
+    expect(bg).not.toContain("359888123456");
+    expect(bg).not.toContain(staffCode);
+    expect(bg).not.toContain(used);
+    expect(lines.at(-1)).toMatch(/премахва/);
+    expect(runs).toHaveLength(0);
+
+    await store.setMemberLang(venue.id, "tg:1001", "en");
+    await store.cancelInvites(venue.id);
+    await handleInbound(d, { chatRef: "tg:1001", kind: "text", text: "/members@site_manager_bot" });
+    const en = texts(messenger).at(-1) as string;
+    expect(en.split("\n")[0]).toBe("Who has access to Кафене „Ъгъла“:");
+    expect(en.split("\n")[1]).toMatch(/^• Owner \(you\) · Telegram 1001 · EN · last message 9 Oct 2026, 12:00 · joined /);
+    expect(en).toContain("No unused codes.");
+  });
+
+  it("works on Meta channels too, refuses staff, and answers a stranger like any known command", async () => {
+    const { d, messenger, runs, store, venue } = await setup();
+    await store.upsertMember({ venue_id: venue.id, chat_ref: "ig:920", role: "owner", lang: "en" });
+    await handleInbound(d, { chatRef: "ig:920", kind: "text", text: "/members" });
+    expect(texts(messenger).at(-1)).toMatch(/^Who has access to/);
+    await handleInbound(d, { chatRef: "tg:1002", kind: "text", text: "/members" });
+    expect(texts(messenger).at(-1)).toBe("Only the owner can see who has access.");
+    await handleInbound(d, { chatRef: "fb:921", kind: "text", text: "/members" });
+    expect(texts(messenger).at(-1)).toBe("This bot manages one venue's website. Send the code you received from us.");
+    expect(runs).toHaveLength(0);
+  });
+
+  it("treats a removed member as a stranger: no agent run, the no-access answer, and old proposals cannot be applied", async () => {
+    const { d, messenger, runs, store, venue, items } = await setup();
+    const site = await store.getSite(venue.id);
+    const cs = await store.createChangeSet({ venue_id: venue.id, chat_ref: "tg:1002", summary_bg: "", summary_en: "", preview_bg: "p", preview_en: "p", source: "text", status: "proposed", changes: planChanges(site, [{ op: "set_price", item_id: items.Espresso.id, price_eur: 9 }], { newId: () => "n", now: T0.toISOString() }) });
+    expect(await store.removeMember(venue.id, "tg:1002")).toBe(true);
+    await handleInbound(d, { chatRef: "tg:1002", kind: "text", text: "Espresso is 9 now", langHint: "en" });
+    expect(texts(messenger).at(-1)).toBe("This bot manages one venue's website. Send /start <code> with the code you received from us.");
+    await handleInbound(d, { chatRef: "tg:1002", kind: "button", text: `cs:apply:${cs.id}`, messageRef: "55" });
+    expect((await store.getChangeSet(cs.id)).status).toBe("proposed");
+    expect(runs).toHaveLength(0);
+    // A stranger gets the very same answer.
+    await handleInbound(d, { chatRef: "tg:1999", kind: "text", text: "Espresso is 9 now", langHint: "en" });
+    expect(texts(messenger).at(-1)).toBe(texts(messenger).at(-2));
+  });
+});

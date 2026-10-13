@@ -1,6 +1,7 @@
 // src/bot/copy.ts
 import type { Channel } from "../channels/ref";
-import type { Lang } from "../domain/types";
+import type { Lang, Role } from "../domain/types";
+import type { InviteView, MemberView } from "./members";
 
 export function langFromCode(code?: string): Lang {
   return (code ?? "").toLowerCase().startsWith("bg") ? "bg" : "en";
@@ -10,6 +11,12 @@ const HELP_BG_BODY =
   "Пишете какво искате да промените, на български или английски. Примери:\n• „Капучиното става 3,20“\n• „Баницата свърши“\n• „Добави шопска салата 7,50“\n• „Затворени сме на 24 и 25 декември“\n• снимка на дъската с предложенията\n• снимка с текст „това е новата корица“";
 const HELP_EN_BODY =
   "Tell me what to change, in English or Bulgarian. Examples:\n• “Cappuccino is 3.20 now”\n• “Banitsa is sold out”\n• “Add shopska salad 7.50”\n• “We're closed on 24 and 25 December”\n• a photo of the specials board\n• a photo captioned “this is the new cover”";
+
+function membersText(head: string, roles: Record<Role, string>, you: string, lastSeen: string, never: string, joined: string, codesHead: string, validUntil: string, noCodes: string, tail: string, members: MemberView[], invites: InviteView[]): string {
+  const lines = members.map((m) => `• ${roles[m.role]}${m.you ? ` (${you})` : ""} · ${m.channel} ${m.id} · ${m.lang.toUpperCase()} · ${m.lastSeen ? `${lastSeen} ${m.lastSeen}` : never} · ${joined} ${m.joined}`);
+  const codes = invites.length ? `${codesHead}\n${invites.map((i) => `• ${roles[i.role]} · ${validUntil} ${i.expires}`).join("\n")}` : noCodes;
+  return `${head}\n${lines.join("\n")}\n\n${codes}\n\n${tail}`;
+}
 
 const BG = {
   noAccess: (ch: Channel): string =>
@@ -24,7 +31,7 @@ const BG = {
   welcomeBack: (name: string, adminUrl: string) => `Вече сте свързани с ${name}. Табло: ${adminUrl}`,
   switched: (name: string) => `Вече управлявате ${name}.`,
   help: (ch: Channel) =>
-    `${HELP_BG_BODY}\n\n${ch === "tg" ? "Команди: /menu – линкове към сайта, /lang bg|en – език, /undo – връща последната промяна." : "Думи-команди: „меню“ – линкове към сайта, „език bg“ / „език en“ – език. За да отмените последната промяна, напишете /undo или „върни последната промяна“."}`,
+    `${HELP_BG_BODY}\n\n${ch === "tg" ? "Команди: /menu – линкове към сайта, /lang bg|en – език, /undo – връща последната промяна, /members – кой има достъп (за собственика)." : "Думи-команди: „меню“ – линкове към сайта, „език bg“ / „език en“ – език. За да отмените последната промяна, напишете /undo или „върни последната промяна“. Кой има достъп: /members (за собственика)."}`,
   langSet: "Езикът е български.",
   langUsage: (ch: Channel): string => (ch === "tg" ? "Използвайте /lang bg или /lang en." : "Напишете „език bg“ или „език en“."),
   menu: (publicUrl: string, adminUrl: string | null) => `Сайтът: ${publicUrl}\nМеню: ${publicUrl}/menu${adminUrl ? `\nQR код и табло: ${adminUrl}` : ""}`,
@@ -51,6 +58,9 @@ const BG = {
   error: "Възникна грешка. Опитайте отново.",
   connectUsage: "Свържете сайта си на WordPress: инсталирайте плъгина Site Manager, отворете Настройки → Site Manager, натиснете „Генерирай код“ и изпратете тук реда, който плъгинът показва:\n/connect https://вашият-сайт.bg КОД",
   connectOwnerOnly: "Само собственикът може да свързва сайта.",
+  membersOwnerOnly: "Само собственикът може да вижда кой има достъп.",
+  members: (name: string, members: MemberView[], invites: InviteView[]) =>
+    membersText(`Достъп до ${name}:`, { owner: "Собственик", staff: "Персонал" }, "вие", "последно писал", "още не е писал", "добавен", "Неизползвани кодове:", "валиден до", "Няма неизползвани кодове.", "Достъпът се премахва от нас: пишете ни, ако някой вече не бива да управлява сайта.", members, invites),
   connectUnavailable: "Свързването на сайтове не е включено на този сървър.",
   connectOk: (name: string, url: string) => `✅ Свързах WordPress сайта „${name}“ (${url}). Вече мога да редактирам страниците, снимките и менютата му; всяка промяна първо ще ви покажа за одобрение.`,
   connectFailed: (reason: string) => `Не успях да свържа сайта. ${reason}`,
@@ -70,7 +80,7 @@ const EN: typeof BG = {
   welcomeBack: (name, adminUrl) => `You are already linked to ${name}. Dashboard: ${adminUrl}`,
   switched: (name) => `You now manage ${name}.`,
   help: (ch) =>
-    `${HELP_EN_BODY}\n\n${ch === "tg" ? "Commands: /menu – site links, /lang bg|en – language, /undo – reverts the last change." : "Command words: “menu” – site links, “language bg” / “language en” – language. To revert the last change, type /undo or write “undo the last change”."}`,
+    `${HELP_EN_BODY}\n\n${ch === "tg" ? "Commands: /menu – site links, /lang bg|en – language, /undo – reverts the last change, /members – who has access (owner only)." : "Command words: “menu” – site links, “language bg” / “language en” – language. To revert the last change, type /undo or write “undo the last change”. Who has access: /members (owner only)."}`,
   langSet: "Language set to English.",
   langUsage: (ch) => (ch === "tg" ? "Use /lang bg or /lang en." : "Write “language bg” or “language en”."),
   menu: (publicUrl, adminUrl) => `Site: ${publicUrl}\nMenu: ${publicUrl}/menu${adminUrl ? `\nQR code and dashboard: ${adminUrl}` : ""}`,
@@ -97,6 +107,9 @@ const EN: typeof BG = {
   error: "Something went wrong. Please try again.",
   connectUsage: "Connect your WordPress site: install the Site Manager plugin, open Settings → Site Manager, press “Generate code” and send me the line the plugin shows:\n/connect https://your-site.com CODE",
   connectOwnerOnly: "Only the owner can connect the site.",
+  membersOwnerOnly: "Only the owner can see who has access.",
+  members: (name, members, invites) =>
+    membersText(`Who has access to ${name}:`, { owner: "Owner", staff: "Staff" }, "you", "last message", "no messages yet", "joined", "Unused codes:", "valid until", "No unused codes.", "To remove someone's access, ask us.", members, invites),
   connectUnavailable: "Connecting sites is not enabled on this server.",
   connectOk: (name, url) => `✅ Connected the WordPress site “${name}” (${url}). I can now edit its pages, photos and menus; every change is shown to you for approval first.`,
   connectFailed: (reason) => `I could not connect the site. ${reason}`,
