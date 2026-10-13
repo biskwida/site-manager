@@ -226,6 +226,8 @@ async function publishClaimed(store: Store, venue: Venue, d: WizardDraft, now: D
 
   // 2b. Logo, cover and gallery go through one auto-applied change set, so the log explains where the images came from.
   //     A set left proposed by a failed attempt is expired; ops already in place (an earlier attempt applied them) are skipped.
+  //     Source "auto": the owner chose these in the wizard, so like the tick's auto sets the set only records that decision;
+  //     it never counts toward the monthly change limit and is never refused by it (src/domain/limits.ts).
   for (const stale of await store.listChangeSets(venue.id, { status: ["proposed"] })) await store.expireChangeSet(stale.id, nowIso);
   const site = await store.getSite(venue.id);
   const inGallery = new Set(site.media.filter((m) => m.is_gallery).map((m) => m.id));
@@ -244,11 +246,16 @@ async function publishClaimed(store: Store, venue: Venue, d: WizardDraft, now: D
       summary_en: "Initial photos",
       preview_bg: renderPreview(site, changes, "bg", updated.tz),
       preview_en: renderPreview(site, changes, "en", updated.tz),
-      source: "dashboard",
+      source: "auto",
       status: "proposed",
       changes,
     });
-    await store.applyChangeSet(cs.id, nowIso);
+    const applied = await store.applyChangeSet(cs.id, nowIso);
+    // "auto" is exempt from the limit, so a refusal here means the exemption broke: fail loudly instead of publishing without photos.
+    if (applied === "limited") {
+      console.error(`[wizard] initial photos ${cs.id} for venue ${venue.id} were refused by the monthly change limit`);
+      throw new Error("Initial photos were refused by the monthly change limit.");
+    }
   }
 
   // 3. Live: the last write. From here on the venue is public and the wizard draft is gone, with any Instagram import list

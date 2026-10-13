@@ -7,7 +7,9 @@ import type { Deployer } from "./deploy/types";
 import { planChange } from "./domain/changes";
 import { itemName, tr } from "./domain/format";
 import type { Lang } from "./domain/types";
-import type { ExpiredTimer, Store } from "./store/types";
+import type { ApplyResult, ExpiredTimer, Store } from "./store/types";
+import { limitReachedLine, usageLine } from "./bot/limit";
+import { channelOf, isMetaChannel } from "./channels/ref";
 import { formatDateTime } from "./time";
 
 export interface TickDeps {
@@ -33,6 +35,8 @@ export interface TickReport {
   cleaned: string[];
   /** Destination sync rows pushed by this tick. */
   pushed?: string[];
+  /** Due scheduled sets refused by the monthly change limit (now cancelled). */
+  limited?: string[];
 }
 
 const HOUR = 3_600_000;
@@ -50,7 +54,7 @@ async function langFor(store: Store, venueId: string, chatRef: string | null): P
 /** Applies due scheduled sets, writes auto sets for elapsed timers, reminds about upcoming sets, expires stale proposals. */
 export async function runTick(d: TickDeps): Promise<TickReport> {
   const now = d.now.toISOString();
-  const report: TickReport = { applied: [], auto: [], reminded: [], expired: [], deployed: [], deployFailed: [], cleaned: [] };
+  const report: TickReport = { applied: [], auto: [], reminded: [], expired: [], deployed: [], deployFailed: [], cleaned: [], limited: [] };
 
   // 1. Stale proposals (before applying, so a 2 h-old proposal cannot be applied by a late tap).
   const cutoff = new Date(d.now.getTime() - PROPOSAL_TTL_MS).toISOString();
@@ -68,11 +72,27 @@ export async function runTick(d: TickDeps): Promise<TickReport> {
 
   // 2. Due scheduled sets.
   for (const cs of await d.store.listDue(now, d.venueId)) {
-    let result: "applied" | "skipped";
+    let result: ApplyResult;
     try {
       result = await d.store.applyChangeSet(cs.id, now);
     } catch (e) {
       console.error(`[tick] apply ${cs.id} failed:`, e instanceof Error ? e.message : e);
+      continue;
+    }
+    if (result === "limited") {
+      // The store cancelled it (monthly change limit), so later ticks leave it alone; the owner hears why once.
+      // Its "⏰ Scheduled for …" message is concluded with the limit line, like an expired proposal. Telegram edits that message
+      // in place without a notification, so the owner also gets a new message; elsewhere conclude already sends `text` as one.
+      report.limited?.push(cs.id);
+      if (d.messenger && cs.chat_ref !== null) {
+        const { lang } = await langFor(d.store, cs.venue_id, cs.chat_ref);
+        const summary = lang === "bg" ? cs.summary_bg : cs.summary_en;
+        const preview = lang === "bg" ? cs.preview_bg : cs.preview_en;
+        const line = await limitReachedLine(d.store, cs.venue_id, d.now, lang);
+        const text = `${tr(lang, "⛔ Не е приложено по график", "⛔ Not applied as scheduled")}: ${summary}\n${line}`;
+        if (cs.message_ref !== null) await d.messenger.conclude(cs.chat_ref, cs.message_ref, `${preview}\n\n${line}`, text, { proactive: true });
+        if (cs.message_ref === null || !isMetaChannel(channelOf(cs.chat_ref))) await d.messenger.send(cs.chat_ref, text, { proactive: true });
+      }
       continue;
     }
     if (result !== "applied") continue;
@@ -80,7 +100,9 @@ export async function runTick(d: TickDeps): Promise<TickReport> {
     if (d.messenger && cs.chat_ref !== null) {
       const { lang } = await langFor(d.store, cs.venue_id, cs.chat_ref);
       const summary = lang === "bg" ? cs.summary_bg : cs.summary_en;
-      await d.messenger.send(cs.chat_ref, cs.source === "undo" ? `${tr(lang, "↩️ Отменено", "↩️ Reverted")}: ${summary}` : `${tr(lang, "✅ Приложено по график", "✅ Applied as scheduled")}: ${summary}`, { proactive: true });
+      const usage = await usageLine(d.store, cs.venue_id, d.now, lang);
+      const text = cs.source === "undo" ? `${tr(lang, "↩️ Отменено", "↩️ Reverted")}: ${summary}` : `${tr(lang, "✅ Приложено по график", "✅ Applied as scheduled")}: ${summary}`;
+      await d.messenger.send(cs.chat_ref, usage ? `${text}\n${usage}` : text, { proactive: true });
     }
   }
 

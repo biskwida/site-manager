@@ -6,7 +6,7 @@ import { makeTools, type AgentDeps } from "@/src/agent/tools";
 import { handleDecision } from "@/src/bot/approvals";
 import { encryptSecrets, parseSecretKey } from "@/src/destinations/secrets";
 import { withDestinationSync } from "@/src/destinations/store-hook";
-import { socialConnections } from "@/src/agent/social-tools";
+import { SocialPostSchema, socialConnections } from "@/src/agent/social-tools";
 import { FakeMeta } from "./fake-meta";
 import { FakeMessenger, makeDemo } from "./helpers";
 import { call } from "./tool-call";
@@ -65,6 +65,19 @@ describe("social_post availability", () => {
     expect(SYSTEM_PROMPT).toMatch(/история/);
     expect(SYSTEM_PROMPT).toMatch(/default language/i);
   });
+  it("the prompt and the targets description spell out story vs post", () => {
+    // The live case: "смени водата на 1.50 и прати стори само в инстаграм" must become instagram_story only.
+    expect(SYSTEM_PROMPT).toContain(`"прати стори само в инстаграм" → ["instagram_story"]`);
+    expect(SYSTEM_PROMPT).toMatch(/"само стори".*only the \*_story targets/);
+    expect(SYSTEM_PROMPT).toMatch(/"само пост".*"в профила".*"във фийда".*only the \*_post targets/);
+    expect(SYSTEM_PROMPT).toMatch(/names neither story nor post.*feed post/);
+    const targets = SocialPostSchema.shape.targets.description ?? "";
+    expect(targets).toMatch(/"само стори".*only \*_story/);
+    expect(targets).toMatch(/"само пост".*only \*_post/);
+    expect(targets).toMatch(/"и стори, и пост".*both/);
+    expect(targets).toMatch(/"в инстаграм".*only that network/);
+    expect(targets).toMatch(/neither story nor post.*feed post/);
+  });
 });
 
 describe("social_post", () => {
@@ -90,6 +103,16 @@ describe("social_post", () => {
     expect(full).toContain("✅ Приложено");
     expect(full).toMatch(/Facebook: публикувано ✅ https:\/\/www\.facebook\.com\/\S+ https:\/\/www\.facebook\.com\/stories\//);
     expect(full).toContain(`Instagram: публикувано ✅ ${[...meta.igMedia.values()][0].permalink}`);
+  });
+
+  it("a story-only request (\"прати стори само в инстаграм\") proposes only the Instagram story, and the preview says story, not post", async () => {
+    const { tools, store, photo } = await setup();
+    const r = await call(tools, "social_post", input(photo.id, { summary_bg: "История в Instagram", summary_en: "Instagram story", caption: "", targets: ["instagram_story"] }));
+    expect(r.status).toBe("proposed");
+    expect(r.preview).toBe("• Публикуване: Instagram (история)");
+    const cs = await store.getChangeSet(r.change_set_id as string);
+    expect(cs.changes[0].after).toMatchObject({ targets: ["instagram_story"] });
+    expect(cs.changes[0].after).not.toHaveProperty("ig_feed_image_url");
   });
 
   it("is the owner's decision only", async () => {
@@ -198,5 +221,14 @@ describe("Instagram feed aspect ratio", () => {
     const t1 = await tallFb.store.saveMedia(tallFb.venue.id, await jpeg(600, 1200), "image/jpeg");
     const r2 = await call(tallFb.tools, "social_post", input(t1.id, { targets: ["facebook_post", "instagram_story"] }));
     expect((await tallFb.store.getChangeSet(r2.change_set_id as string)).changes[0].after).not.toHaveProperty("ig_feed_image_url");
+  });
+});
+
+describe("social_post and the monthly change limit", () => {
+  it("refuses at the limit without creating a set", async () => {
+    const { tools, store, venue, photo } = await setup();
+    await store.setChangeLimit(venue.id, 0);
+    expect((await call(tools, "social_post", input(photo.id))).error).toMatch(/Monthly change limit reached.*Лимитът от 0 промени/);
+    expect(await store.listChangeSets(venue.id)).toEqual([]);
   });
 });

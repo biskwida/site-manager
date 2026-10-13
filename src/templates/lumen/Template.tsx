@@ -3,6 +3,7 @@ import type { CSSProperties } from "react";
 import { useLang } from "@/src/i18n";
 import type { TemplateProps } from "../index";
 import { capAccent, ensureContrast, mixHex } from "../shared/color";
+import { groundFor, onGround, type Ground } from "../shared/ground";
 import { mediaUrl } from "../shared/media";
 import { useLiveSite, useNow } from "../shared/useLiveSite";
 import type { MediaLookup } from "./bits";
@@ -42,6 +43,25 @@ export function accentVars(accent: string) {
   };
 }
 
+/**
+ * The owner's background (shared/ground.ts): paper, the second paper, cards, ink and soft ink from the ground; the accent as
+ * text moved until it reads >= 4.5:1 on both papers (lighter on a dark ground), its soft tint mixed into the ground.
+ * Nothing without a background, so the approved palette above stays exactly as it is.
+ */
+export function groundVars(g: Ground | null, accent: string): Record<string, string> {
+  if (!g) return {};
+  return {
+    "--l-bg": g.bg,
+    "--l-bg-2": g.bg2,
+    "--l-surface": g.surface,
+    "--l-ink": g.ink,
+    "--l-ink-soft": g.inkSoft,
+    "--l-accent-text": onGround(accent, g, [g.bg, g.bg2]),
+    "--l-accent-soft": mixHex(accent, g.bg, 0.1),
+    colorScheme: g.dark ? "dark" : "light",
+  };
+}
+
 /** Lumen: light, photo-first, airy; for daytime specialty coffee (Playfair Display + Golos Text). */
 export function Template({ state: initial, now: initialNow, slug, page, draft, live, feedUrl, preview = false }: TemplateProps) {
   const { state, changed } = useLiveSite(initial, feedUrl, live);
@@ -49,7 +69,7 @@ export function Template({ state: initial, now: initialNow, slug, page, draft, l
   const accent = ACCENT_RE.test(state.venue.theme.accent) ? state.venue.theme.accent : "#2e5e4e";
   const media: MediaLookup = (id) => mediaUrl(id ? state.media.find((m) => m.id === id) : null, { preview });
   return (
-    <div className={`tpl-lumen ${fontVars}`} style={{ "--accent": accent, ...accentVars(accent) } as CSSProperties} data-page={page}>
+    <div className={`tpl-lumen ${fontVars}`} style={{ "--accent": accent, ...accentVars(accent), ...groundVars(groundFor(state.venue.theme.background), accent) } as CSSProperties} data-page={page}>
       {draft && <DraftNote summary_bg={draft.summary_bg} summary_en={draft.summary_en} />}
       <Hero state={state} slug={slug} page={page} media={media} />
       <main id="main" className="l-wrap l-main">

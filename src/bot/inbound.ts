@@ -1,6 +1,7 @@
 // src/bot/inbound.ts
 // Channel-agnostic owner messages. Telegram (bot.ts) and the Meta webhook (server/meta.ts) both translate into InboundMessage and call handleInbound.
-import { holdPhoto } from "../agent/memory";
+import { followsAgentReply, holdPhoto } from "../agent/memory";
+import { PHOTO_NO_CAPTION } from "../agent/prompt";
 import type { ImageInput } from "../agent/run";
 import { channelOf, isMetaChannel, maskRef, type Channel } from "../channels/ref";
 import { detectLang } from "../domain/format";
@@ -10,6 +11,7 @@ import type { BotDeps } from "./bot";
 import { copy } from "./copy";
 import { adminUrl, publicUrl } from "./links";
 import { imageMediaType, MAX_IMAGE_BYTES } from "./media";
+import { memberViews, openInviteViews } from "./members";
 import { audioContentType } from "./voice";
 
 export interface InboundMedia {
@@ -32,7 +34,7 @@ export interface InboundMessage {
 }
 
 const CODE = /^[A-Z0-9-]{8,}$/;
-const COMMANDS = new Set(["lang", "help", "menu", "undo", "connect"]);
+const COMMANDS = new Set(["lang", "help", "menu", "undo", "connect", "members"]);
 /** Command words for Meta channels, where there is no command menu. No word for undo: a plain "отмени" may be meant for a proposal, not the last applied change; "/undo" or asking the agent ("върни последната промяна") still works. */
 const WORDS: [RegExp, string][] = [
   [/^(menu|меню)$/i, "/menu"],
@@ -153,18 +155,22 @@ async function welcome(d: BotDeps, member: Member, previous: Member | null) {
   const venue = await d.store.getVenue(member.venue_id);
   const c = copy(member.lang);
   if (previous && previous.venue_id !== member.venue_id) await d.messenger.send(member.chat_ref, c.switched(venue.name));
+  // An own site (built and hosted elsewhere, reads our feed) is the site the owner and staff know.
+  const site = venue.site_url || publicUrl(d.baseUrl, venue.slug);
   if (member.role === "owner") {
-    await d.messenger.send(member.chat_ref, c.welcome(venue.name, adminUrl(d.baseUrl, venue.slug, await d.store.getAdminToken(venue.id)), publicUrl(d.baseUrl, venue.slug), channelOf(member.chat_ref)));
+    await d.messenger.send(member.chat_ref, c.welcome(venue.name, adminUrl(d.baseUrl, venue.slug, await d.store.getAdminToken(venue.id)), site, channelOf(member.chat_ref)));
+    if (venue.site_url) await d.messenger.send(member.chat_ref, c.ownSite(venue.site_url));
     if (d.onOwnerJoined) {
-      // The first owner join is the human check that publishes the site; startDeploy ignores venues that already have one.
-      if (venue.status === "live" && venue.deploy === null) await d.messenger.send(member.chat_ref, c.publishing);
+      // The first owner join is the human check that publishes the site; startDeploy ignores venues that already have one
+      // and venues with their own site (nothing to publish, so no "being published" line either).
+      if (!venue.site_url && venue.status === "live" && venue.deploy === null) await d.messenger.send(member.chat_ref, c.publishing);
       try {
         d.onOwnerJoined(venue.id);
       } catch (e) {
         console.error("[bot] onOwnerJoined failed:", e instanceof Error ? e.message : e);
       }
     }
-  } else await d.messenger.send(member.chat_ref, c.welcomeStaff(venue.name, publicUrl(d.baseUrl, venue.slug)));
+  } else await d.messenger.send(member.chat_ref, c.welcomeStaff(venue.name, site));
 }
 
 async function welcomeBack(d: BotDeps, member: Member) {
@@ -194,7 +200,9 @@ async function runCommand(d: BotDeps, member: Member, channel: Channel, cmd: str
     case "menu": {
       const venue = await d.store.getVenue(member.venue_id);
       const admin = member.role === "owner" ? adminUrl(d.baseUrl, venue.slug, await d.store.getAdminToken(venue.id)) : null;
-      await d.messenger.send(member.chat_ref, c.menu(publicUrl(d.baseUrl, venue.slug), admin));
+      // An own-site venue (site_url) is linked as is: its site may not have a /menu path. Hosted venues get site and menu.
+      const hosted = publicUrl(d.baseUrl, venue.slug);
+      await d.messenger.send(member.chat_ref, venue.site_url ? c.menu(venue.site_url, null, admin) : c.menu(hosted, `${hosted}/menu`, admin));
       return;
     }
     case "connect": {
@@ -215,6 +223,17 @@ async function runCommand(d: BotDeps, member: Member, channel: Channel, cmd: str
       }
       const r = await d.connect(member.venue_id, siteUrl, code);
       await d.messenger.send(member.chat_ref, r.ok ? cc.connectOk(r.site.name, String(r.destination.config.site_url)) : cc.connectFailed(lang === "bg" ? r.reason.bg : r.reason.en));
+      return;
+    }
+    case "members": {
+      // Owner-only and read-only: removing access stays with the operator scripts (member:remove, invite:cancel).
+      if (member.role !== "owner") {
+        await d.messenger.send(member.chat_ref, c.membersOwnerOnly);
+        return;
+      }
+      const venue = await d.store.getVenue(member.venue_id);
+      const [members, invites] = await Promise.all([d.store.listMembers(venue.id), d.store.listInvites(venue.id, d.now().toISOString())]);
+      await d.messenger.send(member.chat_ref, c.members(venue.name, memberViews(members, member.lang, venue.tz, member.chat_ref), openInviteViews(invites, member.lang, venue.tz)));
       return;
     }
     case "undo":
@@ -250,12 +269,19 @@ async function handlePhoto(d: BotDeps, member: Member, m: InboundMessage) {
     return;
   }
   const media = await d.store.saveMedia(member.venue_id, bytes, media_type);
+  const image = { data: Buffer.from(bytes).toString("base64"), media_type };
   if (!caption) {
-    // No instructions yet: hold the photo for the owner's next message (often a voice note) instead of guessing.
-    if (await holdPhoto(d.store, member.venue_id, member.chat_ref, media.id, c.photoWaiting, d.now())) await d.messenger.send(member.chat_ref, c.photoWaiting);
-    return;
+    // Right after the agent's reply ("send me the photo") the photo is part of that conversation: the agent sees it now and goes
+    // on, or asks. Otherwise there are no instructions yet: hold it for the owner's next message (often a voice note).
+    // Either way it is held first, so the rest of an album joins it instead of starting turns or questions of its own.
+    const follows = await followsAgentReply(d.store, member.venue_id, member.chat_ref, d.now());
+    if (!(await holdPhoto(d.store, member.venue_id, member.chat_ref, media.id, follows ? "" : c.photoWaiting, d.now()))) return;
+    if (!follows) {
+      await d.messenger.send(member.chat_ref, c.photoWaiting);
+      return;
+    }
   }
-  d.startRun({ venueId: member.venue_id, chatRef: member.chat_ref, member: { ...member, lang }, text: caption, source: "photo", image: { data: Buffer.from(bytes).toString("base64"), media_type }, mediaId: media.id, replyTo: m.messageRef });
+  d.startRun({ venueId: member.venue_id, chatRef: member.chat_ref, member: { ...member, lang }, text: caption || PHOTO_NO_CAPTION, source: "photo", image, mediaId: media.id, replyTo: m.messageRef });
   await d.messenger.typing(member.chat_ref, m.messageRef);
 }
 

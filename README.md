@@ -174,7 +174,7 @@ npm run venue:create -- --name "Кафене „Ъгъла“" --slug agala --la
 
 On a database created before the channels change, run the `chat_ref` migration before `db:apply` (see [docs/CHANNELS.md → Database migration](docs/CHANNELS.md#database-migration)).
 
-`venue:create` prints the site URL, the admin link and two one-use invite codes (owner and staff, valid 7 days) once. Keep them; they are not shown again. With `--seed demo` the demo café's own name and menu are used. Without it you get an empty venue with default hours and `--name` is required.
+`venue:create` prints the site URL, the admin link and two one-use invite codes (owner and staff, valid 7 days) once. Keep them; they are not shown again. With `--seed demo` the demo café's own name and menu are used. Without it you get an empty venue with default hours and `--name` is required. `--site-url https://…` marks the venue as having its own site (see [Venues with their own site](#venues-with-their-own-site)).
 
 Then, in two terminals:
 
@@ -189,6 +189,7 @@ Other scripts:
 
 | Command | What it does |
 |---|---|
+| `npm run invite:create -- --slug my-cafe [--role owner\|staff] [--site-url https://…]` | A one-use invite for an existing venue: reuses the open invite for that role or creates one (valid 7 days), and prints the code and links once. `--site-url` sets the venue's own site first. |
 | `npm run demo:reset` | Wipes the demo venue's content and change log, re-seeds the menu, texts, hours and theme. Linked phones, invite codes and the admin link stay. |
 | `npm run smoke -- --dry` | One real agent turn ("Капучиното става 3,20" by default, `--text "…"` to change it) against an in-memory demo venue; prints the model, effort, reply and resulting proposal. |
 | `npm run smoke -- --chat <chat id>` | The same against Supabase, with the preview really sent to that linked Telegram chat. |
@@ -198,6 +199,24 @@ Other scripts:
 | `npm run wp:smoke` | Throwaway WordPress + MySQL in Docker: installs WP, renders the plugin's blocks from the production feed, then connect → preview → apply → undo → options → menus → rate limit → log through our code; `-- --keep` leaves it at http://localhost:8088, `-- --feed <url>` picks another feed. |
 | `npm run test:templates` | Writes each template's thin shell to a temp dir, runs `npm install` (needs network) and `next build` there: the offline proof that a deployed site builds. Slow; not part of `npm test`. Run before a release. |
 | `npm run site:delete -- --slug my-cafe` | Deletes a venue (typically one created by the wizard) and its Vercel project. Prints the venue and the project id and asks you to type the slug again before deleting. Storage objects are not removed. |
+| `npm run venue:set -- --slug coffique --change-limit 60` | Sets a venue's monthly change limit (`--change-limit none` clears it) and prints the limit and this month's count. See "Monthly change limit". |
+
+## Monthly change limit
+
+Pricing plans include a number of changes per month: Menu plan 40, Everywhere plan 150 (Coffique, the first customer: 60). `venues.change_limit` holds it; `null`, the default, means unlimited.
+
+- **One change** is one change set that reaches status `applied`, however many rows it has. Scheduled sets count when they are applied. A set that is applied and later undone still counts.
+- **Never counted:** undo sets (undo is a safety feature and is never limited) and the automatic sets the tick writes when a sold-out mark or a special runs out. Rejected, expired and cancelled sets never reached `applied`.
+- **The month** is the calendar month in the venue's time zone (`venue.tz`, e.g. Europe/Sofia), so it starts at local midnight on the 1st.
+- **At the limit** the agent proposes nothing new (it relays "This month's limit of 60 changes is reached (60/60). New changes from 1 November."), and `applyChangeSet` refuses any counted set, including a scheduled one that comes due: the set becomes `cancelled` and the owner gets the same line. Every applied confirmation ends with "Changes this month: 12/60", and the dashboard's change log shows the count.
+
+```bash
+npm run venue:create -- --seed coffique --slug coffique --change-limit 60   # a new venue with its limit
+npm run venue:set -- --slug coffique --change-limit 60                    # an existing venue
+npm run venue:set -- --slug coffique --change-limit none                  # back to unlimited
+```
+
+The column comes from `supabase/schema.sql` (`npm run db:apply`); until it is applied every venue reads as unlimited.
 
 ## Instagram import
 
@@ -231,6 +250,25 @@ The owner can use Facebook Messenger, Instagram Direct or WhatsApp instead of Te
 - **Scripts.** `npm run meta:setup` (checks the tokens, subscribes the Page, sets the Messenger Get Started button, prints the webhook URL), `npm run meta:sim -- fb text "…"` (a signed fake webhook against `npm run dev:offline`), `npm run db:dry-run` (the `chat_ref` migration inside a rolled-back transaction).
 
 Setup, step by step (Meta app, tokens, Testers, webhooks, App Review, WhatsApp test number, Vercel preview, database migration): **[docs/CHANNELS.md](docs/CHANNELS.md)**.
+
+## Access
+
+Who can manage a venue:
+
+- **Owner.** Proposes and approves changes from the chat, gets the dashboard link (`/menu`, the welcome message), connects WordPress and social accounts, and can see who has access with `/members`.
+- **Staff.** Marks items sold out and adds today's specials; no dashboard link, no `/members`.
+- **The dashboard key.** `/admin/<slug>?key=…` works without any chat: whoever holds it can approve, cancel and undo changes.
+
+**One code per person.** An invite code links one chat and is then used up; codes expire after 7 days. Give each person (and each extra phone or app) their own code, so you can later remove exactly that chat. A chat belongs to one venue at a time.
+
+| To… | Run |
+| --- | --- |
+| See who has access and which codes are still open | `npm run member:list -- --slug coffique` (WhatsApp numbers show their last four digits; codes only their last four characters) |
+| Remove one chat | `npm run member:remove -- --slug coffique --ref tg:123456` (WhatsApp: the full `wa:<digits>`, or `wa:…3456` as the list shows it). Refuses a chat that is not that venue's member. The bot then treats the chat as a stranger, and its pending proposals can no longer be applied. |
+| Cancel codes that were not used yet | `npm run invite:cancel -- --slug coffique [--role owner\|staff]` (members already linked stay) |
+| Replace the dashboard key | `npm run admin:rotate-key -- --slug coffique`. The old link stops working at once; the new one is printed once (keep it out of git and chat logs). The owner also gets it from the bot with `/menu`. |
+
+Owners see the same list in the chat with `/members`; removing access is deliberately left to these scripts for now.
 
 ## Landing page (Lovable)
 
@@ -266,7 +304,7 @@ Cron: `vercel.json` runs `/api/tick` every 5 minutes (`*/5 * * * *`; the team is
 
 - **Anon key.** The browser no longer uses it: public pages, the dashboard and the wizard read through the app's own server routes. Its grants stay locked down anyway: it can read only live venues (and of `venues` only the public feed's columns, granted column by column; `deploy`, `wizard_draft`, `draft_token_hash`, `publishing_at` and `instagram_import` answer `42501`) and their public site tables (`venues`, `site_texts`, `categories`, `items`, `holidays`, `announcements`, `media`), never drafts, members, invites, admin tokens, change sets, changes, conversations or `rate_limits`; it cannot call `bump_rate_limit`; every write is refused (`42501`). `npm run check:rls` proves this against the live project.
 - **Service-role key.** Only in server code (`src/server/deps.ts`, the route handlers) and the scripts. The build is checked for it: `grep -rl "SUPABASE_SERVICE_ROLE\|service_role" .next/static` finds nothing.
-- **The admin link is the key.** Whoever has `/admin/<slug>?key=…` can approve, cancel and undo changes for that venue. Share it only with the owner. The dev server's request log skips admin URLs, the admin API, the tick and any URL with `?key=`.
+- **The admin link is the key.** Whoever has `/admin/<slug>?key=…` can approve, cancel and undo changes for that venue. Share it only with the owner; if it leaks, `npm run admin:rotate-key` replaces it (see [Access](#access)). The dev server's request log skips admin URLs, the admin API, the tick and any URL with `?key=`.
 - **Webhook secret.** `/api/telegram` rejects any request without Telegram's `X-Telegram-Bot-Api-Secret-Token` header matching `TELEGRAM_WEBHOOK_SECRET`. `/api/tick` needs `TICK_SECRET` (header or Bearer) or a venue's admin key (that venue only).
 - **Telegram file URLs** contain the bot token, so they are never logged. Photos are downloaded server-side and stored in Supabase Storage (the site uses the Storage public URL); voice notes are downloaded, transcribed and not stored.
 - **Invite codes** are one-use and expire after 7 days. Reloading the done page shows the same open code instead of issuing a new one.
@@ -328,6 +366,19 @@ Checked on 2026-10-11 on `build/templates`:
 A café that already has a WordPress site keeps it: the **Site Manager plugin** (`public/wp/site-manager.zip`, source in `integrations/wordpress/site-manager`) shows the live menu, specials, hours, announcements and photos as blocks and shortcodes, and, after the owner sends one `/connect` line to the bot, lets the agent edit the site's pages, photos, title, logo, menus and WooCommerce products through the same preview → ✅ → undo flow. Set `DESTINATION_SECRET_KEY` (32 bytes, `openssl rand -hex 32`) in production to enable connecting. Full guide: [docs/INTEGRATION.md](docs/INTEGRATION.md). Checks: `npm run wp:lint`, `npm run wp:test`, `npm run wp:smoke` (Docker).
 
 A WordPress push that fails (the site is down) is retried with backoff, but only when the tick runs: on the owner's next message to the bot and at the daily cron (03:00 UTC), or every 5 minutes with `supabase/cron.sql` or a Pro cron. So "will retry" can mean a few hours on the Hobby plan.
+
+## Venues with their own site
+
+Use this when the venue's site was built by hand outside Site Manager and reads our public feed (`/api/site/<slug>`), as https://coffique.vercel.app does for `coffique`. The venue gets `site_url`; when the owner redeems the invite **no Vercel project is created** (`startDeploy` logs `own site, skipped`). The bot's welcome names that site and says it is connected and managed by the agent; the dashboard links it with a short note, without deploy status, template switch or custom-domain card. Changes still go through the bot and the dashboard as usual and reach the site through the feed.
+
+```bash
+# a new venue
+npm run venue:create -- --name "Coffique" --slug coffique --site-url https://coffique.vercel.app
+# an existing venue: sets site_url first, then prints an owner invite (reuses an open one)
+npm run invite:create -- --slug coffique --site-url https://coffique.vercel.app
+```
+
+Run `npm run db:apply` once first so the `venues.site_url` column exists. `--site-url` takes an https URL only.
 
 ## Posting to Facebook and Instagram
 

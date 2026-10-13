@@ -4,7 +4,8 @@ import { isExternalEntity, type SocialEntity, type WpEntity } from "../domain/ty
 import type { Announcement, BusinessType, Category, Change, ChangeSet, Conversation, DeployInfo, DeployStatus, Holiday, InstagramImport, Item, Lang, Media, Member, Role, SiteState, SiteText, SiteTextKey, TemplateId, Venue, VenueStatus } from "../domain/types";
 import type { WizardDraft } from "../wizard/schema";
 import { legacyTelegramId } from "../channels/ref";
-import { DEFAULT_HOURS, extensionFor, newInviteCode, newToken, PUBLISH_CLAIM_TTL_MS, type ChangeSetPatch, type ExpiredTimer, type NewCategory, type NewChangeSet, type NewItem, type NewVenue, type Store, type VenuePatch, type Destination, type DestinationKind, type DestinationPatch, type DestinationSync, type DestinationWithSecrets, type NewDestination, type NewSync, type SyncPatch, type SyncStatus } from "./types";
+import { DEFAULT_HOURS, extensionFor, newInviteCode, newToken, PUBLISH_CLAIM_TTL_MS, type ChangeSetPatch, type ExpiredTimer, type NewCategory, type NewChangeSet, type NewItem, type NewVenue, type Store, type VenuePatch, type Destination, type DestinationKind, type DestinationPatch, type DestinationSync, type DestinationWithSecrets, type NewDestination, type NewSync, type SyncPatch, type SyncStatus, type ApplyResult, checkLimitValue } from "./types";
+import { limitBlocks } from "./usage";
 
 type Row = Record<string, unknown>;
 type DbError = { message: string; code?: string } | null;
@@ -31,6 +32,8 @@ export function toVenue(r: Row): Venue {
     cover_media_id: strOrNull(r.cover_media_id),
     logo_media_id: strOrNull(r.logo_media_id),
     hours: (r.hours as Venue["hours"]) ?? DEFAULT_HOURS,
+    // Missing before the column is added (schema.sql): unlimited.
+    change_limit: r.change_limit === null || r.change_limit === undefined ? null : num(r.change_limit),
     tz: str(r.tz) || "Europe/Sofia",
     default_lang: (r.default_lang as Lang) ?? "bg",
     theme: (r.theme as Venue["theme"]) ?? { accent: "#2f6b4f" },
@@ -41,6 +44,8 @@ export function toVenue(r: Row): Venue {
     wizard_draft: (r.wizard_draft as WizardDraft | null) ?? null,
     // Missing before the column is added (schema.sql): read as null, so nothing breaks until it is applied.
     instagram_import: (r.instagram_import as InstagramImport | null) ?? null,
+    // Missing before the column is added: read as null (a hosted or template site).
+    site_url: strOrNull(r.site_url),
     created_at: iso(r.created_at),
   };
 }
@@ -337,6 +342,27 @@ export class SupabaseStore implements Store {
     if (error) throw new Error(`findVenueByAdminToken: ${error.message}`);
     return data ? this.getVenue(data.venue_id as string) : null;
   }
+  async removeMember(venueId: string, chatRef: string) {
+    if (badVenue(venueId)) return false;
+    const rows = await must(this.db.from("venue_members").delete().eq("venue_id", venueId).eq("chat_ref", chatRef).select("chat_ref"), "removeMember");
+    return rows.length > 0;
+  }
+  async listInvites(venueId: string, now: string) {
+    if (badVenue(venueId)) return [];
+    const rows = await must(this.db.from("venue_invites").select("code, role, expires_at, used_at").eq("venue_id", venueId).gt("expires_at", now).order("expires_at"), "listInvites");
+    return rows.map((r) => ({ role: r.role as Role, code_hint: str(r.code).slice(-4), expires_at: iso(r.expires_at), used: r.used_at !== null }));
+  }
+  async cancelInvites(venueId: string, role?: Role) {
+    if (badVenue(venueId)) return 0;
+    let q = this.db.from("venue_invites").delete().eq("venue_id", venueId).is("used_at", null);
+    if (role) q = q.eq("role", role);
+    return (await must(q.select("code"), "cancelInvites")).length;
+  }
+  async rotateAdminToken(venueId: string) {
+    const token = newToken();
+    await mustRows(this.db.from("venue_admin_tokens").upsert({ venue_id: venueId, token }, { onConflict: "venue_id" }).select("venue_id"), "rotateAdminToken");
+    return token;
+  }
 
   async createChangeSet(cs: NewChangeSet) {
     const { changes, message_ref, ...head } = cs;
@@ -387,8 +413,17 @@ export class SupabaseStore implements Store {
    * Conditional status flip first (so two appliers cannot both write), then the entity writes.
    * If any write fails, the set is reset to its prior status so it can be retried (every write is idempotent).
    */
-  async applyChangeSet(id: string, now: string) {
-    const prior = await must<{ status: ChangeSet["status"] }>(this.db.from("change_sets").select("status").eq("id", id).maybeSingle(), `applyChangeSet ${id}`);
+  async applyChangeSet(id: string, now: string): Promise<ApplyResult> {
+    const prior = await must<{ status: ChangeSet["status"]; source: ChangeSet["source"]; venue_id: string }>(this.db.from("change_sets").select("status, source, venue_id").eq("id", id).maybeSingle(), `applyChangeSet ${id}`);
+    if ((prior.status === "proposed" || prior.status === "scheduled") && (await limitBlocks(this, prior, now))) {
+      // Conditional like the apply flip: a set decided meanwhile stays as it is. Two applies racing past the count can
+      // overshoot the limit by one; the count is not a lock.
+      const cancelled = await must(
+        this.db.from("change_sets").update({ status: "cancelled", decided_at: now }).eq("id", id).in("status", ["proposed", "scheduled"]).select("id"),
+        `applyChangeSet ${id} (limit)`,
+      );
+      return cancelled.length === 0 ? "skipped" : "limited";
+    }
     const flipped = await must(
       this.db.from("change_sets").update({ status: "applied", applied_at: now }).eq("id", id).in("status", ["proposed", "scheduled"]).select(SET_SELECT),
       `applyChangeSet ${id}`,
@@ -569,6 +604,28 @@ export class SupabaseStore implements Store {
       throw new Error(`claimSync ${id}: ${error.message}`);
     }
     return (data ?? []).length > 0;
+  }
+
+  // --- Monthly change limit (appended 2026-10-13) ---
+  async countAppliedChangeSets(venueId: string, fromIso: string, toIso: string) {
+    if (badVenue(venueId)) return 0;
+    const { count, error } = await this.db
+      .from("change_sets")
+      .select("id", { count: "exact", head: true })
+      .eq("venue_id", venueId)
+      .gte("applied_at", fromIso)
+      .lt("applied_at", toIso)
+      .not("source", "in", "(undo,auto)"); // countsTowardLimit (src/domain/limits.ts)
+    if (error) throw new Error(`countAppliedChangeSets: ${error.message}`);
+    return count ?? 0;
+  }
+  async setChangeLimit(venueId: string, limit: number | null) {
+    checkLimitValue(limit);
+    if (badVenue(venueId)) throw new Error(`setChangeLimit ${venueId}: not found`);
+    const { data, error } = await this.db.from("venues").update({ change_limit: limit }).eq("id", venueId).select("*").maybeSingle();
+    if (error) throw new Error(`setChangeLimit ${venueId}: ${error.message}`);
+    if (!data) throw new Error(`setChangeLimit ${venueId}: not found`);
+    return this.venue(data);
   }
 }
 

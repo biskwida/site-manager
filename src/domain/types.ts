@@ -75,9 +75,11 @@ export interface Venue {
   cover_media_id: string | null;
   logo_media_id: string | null;
   hours: WeekHours;
+  /** Change sets the owner may apply per calendar month in `tz` (src/domain/limits.ts); null = unlimited. Server-only. */
+  change_limit: number | null;
   tz: string;
   default_lang: Lang;
-  theme: { accent: string };
+  theme: Theme;
   template: TemplateId;
   business_type: BusinessType;
   status: VenueStatus;
@@ -86,6 +88,12 @@ export interface Venue {
   wizard_draft: WizardDraft | null;
   /** Server-only: photos the owner may import from their Instagram (wizard drafts; cleared on publish). Never in the public feed. */
   instagram_import: InstagramImport | null;
+  /**
+   * The venue's own site, built and hosted outside Site Manager (https only), which reads our public feed. null = the hosted
+   * /<slug> or a template deploy, as before. When set, no provider project is ever created and the dashboard links here.
+   * Not in the public feed.
+   */
+  site_url: string | null;
   created_at: string;
 }
 
@@ -196,6 +204,15 @@ export interface NewItemInput {
 }
 export type ItemPatch = Partial<Pick<Item, "category_id" | "name_bg" | "name_en" | "desc_bg" | "desc_en" | "price_eur" | "allergens" | "position">>;
 
+/**
+ * The venue's colours, as lower-case #rrggbb. `background` absent or null is the design's own page colour; when set, templates
+ * paint the page with it and pick light or dark text by its luminance (src/domain/color.ts inkFor).
+ */
+export interface Theme {
+  accent: string;
+  background?: string | null;
+}
+
 export type ChangeOp =
   | { op: "set_price"; item_id: string; price_eur: number }
   | { op: "set_sold_out"; item_id: string; until: string | null }
@@ -213,7 +230,7 @@ export type ChangeOp =
   | { op: "add_announcement"; text_bg: string; text_en: string; expires_at: string | null; id?: string }
   | { op: "remove_announcement"; announcement_id: string }
   | { op: "set_text"; key: TextKey; text_bg: string; text_en: string }
-  | { op: "set_theme"; accent: string };
+  | { op: "set_theme"; accent?: string; background?: string | null };
 export type OpName = ChangeOp["op"];
 export const OP_NAMES: readonly OpName[] = [
   "set_price", "set_sold_out", "add_item", "update_item", "remove_item", "set_item_image", "set_cover_image", "set_logo_image",

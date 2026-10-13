@@ -45,13 +45,14 @@ describe("social_post in the change engine", () => {
       const steps: string[] = [];
       const q: Record<string, unknown> = {};
       for (const m of ["select", "eq", "in", "update", "upsert", "delete", "maybeSingle", "single", "order"]) q[m] = () => (steps.push(m), q);
-      q.then = (ok: (r: unknown) => unknown) => Promise.resolve(table === "change_sets" && steps.includes("maybeSingle") ? { data: { status: "proposed" }, error: null } : table === "change_sets" && steps.includes("in") ? { data: [row], error: null } : { data: [{ id: "cs1" }], error: null }).then(ok);
+      q.then = (ok: (r: unknown) => unknown) => Promise.resolve(table === "change_sets" && steps.includes("maybeSingle") ? { data: { status: "proposed", source: "photo", venue_id: "v1" }, error: null } : table === "venues" ? { data: { id: "v1", slug: "s", name: "n", change_limit: null, created_at: "2026-10-11T09:00:00.000Z" }, error: null } : table === "change_sets" && steps.includes("in") ? { data: [row], error: null } : { data: [{ id: "cs1" }], error: null }).then(ok);
       return q;
     };
     const store = new SupabaseStore("http://localhost:54321", "test-key");
     (store as unknown as { db: unknown }).db = { from };
     expect(await store.applyChangeSet("cs1", "2026-10-11T10:00:00.000Z")).toBe("applied");
-    expect(tables.filter((t) => t !== "change_sets" && t !== "changes")).toEqual([]);
+    // venues is read (not written) once: the monthly change limit check before the apply.
+    expect(tables.filter((t) => t !== "change_sets" && t !== "changes" && t !== "venues")).toEqual([]);
   });
 });
 
@@ -68,10 +69,13 @@ describe("socialPreviewLines", () => {
       "  #кафе”",
     ]);
   });
-  it("shows a story-only post without a caption line", () => {
+  it("shows a story-only row as a story: no word \"post\", and no caption line even when one was written (stories show none)", () => {
     const story: Change = { ...post, after: { ...post.after!, caption: "", targets: ["instagram_story"] } };
-    expect(socialPreviewLines(story, "bg")).toEqual(["• Публикация: Instagram (история)"]);
-    expect(socialPreviewLines(story, "en")).toEqual(["• Post: Instagram (story)"]);
+    expect(socialPreviewLines(story, "bg")).toEqual(["• Публикуване: Instagram (история)"]);
+    expect(socialPreviewLines(story, "en")).toEqual(["• Publish: Instagram (story)"]);
+    const captioned: Change = { ...post, after: { ...post.after!, targets: ["instagram_story", "facebook_story"] } };
+    expect(socialPreviewLines(captioned, "bg")).toEqual(["• Публикуване: Facebook (история), Instagram (история)"]);
+    expect(socialPreviewLines(captioned, "en").join("\n")).not.toMatch(/post/i);
   });
   it("renders the inverted row as a removal", () => {
     const [inv] = invertChanges([post]);

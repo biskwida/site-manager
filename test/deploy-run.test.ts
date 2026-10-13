@@ -43,6 +43,17 @@ describe("startDeploy", () => {
     expect(logs.some((l) => l.includes("not found"))).toBe(true);
   });
 
+  it("skips a venue with its own site: no provider project, no deploy record", async () => {
+    const { store, venue } = await makeDemo();
+    await store.updateVenue(venue.id, { site_url: "https://coffique.vercel.app" });
+    const deployer = new FakeDeployer();
+    const logs: string[] = [];
+    await startDeploy({ store, deployer, feedUrlFor, now: () => T0, log: (s: string) => logs.push(s) }, venue.id);
+    expect(deployer.projects.size).toBe(0);
+    expect((await store.getVenue(venue.id)).deploy).toBeNull();
+    expect(logs).toEqual(["[deploy] agala: own site, skipped"]);
+  });
+
   it("stores a provider failure as a short, secret-free error and retries on the same project next time", async () => {
     const { store, venue } = await makeDemo();
     let fail = true;

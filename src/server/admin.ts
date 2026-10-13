@@ -1,4 +1,5 @@
 // src/server/admin.ts
+import { limitReachedLine, usageLine } from "../bot/limit";
 import type { Messenger } from "../bot/messenger";
 import { invertChanges } from "../domain/changes";
 import { isSoldOut } from "../domain/effective";
@@ -8,6 +9,7 @@ import type { Deployer, DeployInput, DomainInstructions } from "../deploy/types"
 import { normalizeDomain } from "../deploy/vercel-domains";
 import type { DestinationStatus, Store, SyncStatus } from "../store/types";
 import { formatDateTime } from "../time";
+import { changeUsage } from "../store/usage";
 import { accentAfterTemplateSwitch } from "../wizard/schema";
 import { connectedApps, type ConnectedApp } from "./connect-apps";
 import { publishedIn, safeLink } from "../destinations/social-common";
@@ -20,9 +22,11 @@ export interface AdminOverview {
   status: VenueStatus;
   /** True when this server has no deployer (no VERCEL_TOKEN): the hosted /<slug> is the site; no deploy record, no custom domain. */
   hosted: boolean;
-  /** Always null when `hosted`. */
+  /** True when the venue has its own site (Venue.site_url, built and hosted elsewhere): no deploy, template switch or custom domain. */
+  own_site?: boolean;
+  /** Always null when `hosted` or `own_site`. */
   deploy: DeployInfo | null;
-  /** The provider URL when the deploy is ready, otherwise our hosted copy. */
+  /** The venue's own site when `own_site`; else the provider URL when the deploy is ready, otherwise our hosted copy. */
   site_url: string;
   /** Custom domain attached to the deploy (Pro), and whether the provider confirmed its DNS at the last check. */
   custom_domain: string | null;
@@ -36,6 +40,8 @@ export interface AdminOverview {
   connected_apps: ConnectedApp[];
   /** "Facebook and Instagram" card. */
   social?: SocialOverview;
+  /** Monthly change limit (src/domain/limits.ts): changes applied this calendar month in the venue's zone; limit null = unlimited. */
+  changes_this_month?: { used: number; limit: number | null };
 }
 
 export async function adminOverview(store: Store, venue: Venue, now: Date, baseUrl = "", opts: { hosted?: boolean; social?: { facebook: boolean; instagram: boolean } } = {}): Promise<AdminOverview> {
@@ -48,8 +54,10 @@ export async function adminOverview(store: Store, venue: Venue, now: Date, baseU
   ]);
   const nowMs = now.getTime();
   const hosted = opts.hosted ?? false;
+  const ownSite = venue.site_url !== null && venue.site_url !== "";
   // In hosted mode a deploy record left from an earlier setup means nothing: no provider is reachable from this server.
-  const deploy = hosted ? null : venue.deploy;
+  // An own site is not ours to deploy either, whatever record an earlier template setup left behind.
+  const deploy = hosted || ownSite ? null : venue.deploy;
   return {
     venue: { id: venue.id, slug: venue.slug, name: venue.name, tz: venue.tz, default_lang: venue.default_lang },
     now: now.toISOString(),
@@ -57,8 +65,9 @@ export async function adminOverview(store: Store, venue: Venue, now: Date, baseU
     template: venue.template,
     status: venue.status,
     hosted,
+    own_site: ownSite,
     deploy,
-    site_url: deploy?.status === "ready" && deploy.url ? deploy.url : `${baseUrl}/${venue.slug}`,
+    site_url: ownSite ? (venue.site_url as string) : deploy?.status === "ready" && deploy.url ? deploy.url : `${baseUrl}/${venue.slug}`,
     custom_domain: deploy?.custom_domain ?? null,
     domain_verified: deploy?.custom_domain ? (deploy.domain_verified ?? false) : null,
     pending,
@@ -68,7 +77,13 @@ export async function adminOverview(store: Store, venue: Venue, now: Date, baseU
     wordpress: await wordPressOverview(store, venue.id),
     connected_apps: connectedApps(members),
     social: await socialOverview(store, venue.id, opts.social ?? { facebook: false, instagram: false }),
+    changes_this_month: await changesThisMonth(store, venue, now),
   };
+}
+
+async function changesThisMonth(store: Store, venue: Venue, now: Date): Promise<{ used: number; limit: number | null }> {
+  const u = await changeUsage(store, venue, now);
+  return { used: u.used, limit: u.limit };
 }
 
 export type AdminActionName = "apply" | "reject" | "cancel" | "undo";
@@ -130,8 +145,16 @@ export async function adminAction(d: AdminDeps, venue: Venue, action: AdminActio
     return { ok: true, status: "scheduled", change_set_id: cs.id };
   }
   const r = await d.store.applyChangeSet(cs.id, nowIso);
+  if (r === "limited") {
+    // The store refused it (monthly change limit) and cancelled the set; the chat message loses its buttons.
+    const line = { bg: await limitReachedLine(d.store, venue.id, now, "bg"), en: await limitReachedLine(d.store, venue.id, now, "en") };
+    await concludeOnChannel(d, cs, line);
+    return { ok: false, status: "cancelled", change_set_id: cs.id, error: line.en };
+  }
   if (r === "skipped") return { ok: false, error: `Change set is "${(await d.store.getChangeSet(cs.id)).status}".` };
-  await concludeOnChannel(d, cs, { bg: "✅ Приложено от таблото.", en: "✅ Applied from the dashboard." });
+  const usage = { bg: await usageLine(d.store, venue.id, now, "bg"), en: await usageLine(d.store, venue.id, now, "en") };
+  const withUsage = (mark: string, line: string | null) => (line ? `${mark}\n${line}` : mark);
+  await concludeOnChannel(d, cs, { bg: withUsage("✅ Приложено от таблото.", usage.bg), en: withUsage("✅ Applied from the dashboard.", usage.en) });
   return { ok: true, status: "applied", change_set_id: cs.id };
 }
 
@@ -173,18 +196,20 @@ export interface AdminSiteDeps {
 }
 export type SetTemplateResult =
   | { ok: true; template: TemplateId; deploy: DeployInfo | null }
-  | { ok: false; code: "unknown_template" | "busy" | "failed"; error: string; bg: string; en: string };
+  | { ok: false; code: "unknown_template" | "busy" | "failed" | "own_site"; error: string; bg: string; en: string };
 
 const UNKNOWN_TEMPLATE: SetTemplateResult = { ok: false, code: "unknown_template", error: "Unknown template.", bg: "Непознат шаблон.", en: "Unknown template." };
 const SAVE_FAILED: SetTemplateResult = { ok: false, code: "failed", error: "The template could not be saved.", bg: "Шаблонът не можа да бъде запазен. Опитайте отново.", en: "The template could not be saved. Try again." };
+const OWN_SITE: SetTemplateResult = { ok: false, code: "own_site", error: "This venue has its own site; templates do not apply.", bg: "Сайтът ви е изграден отделно и не използва шаблон.", en: "Your site is built separately and does not use a template." };
 const BUSY: SetTemplateResult = { ok: false, code: "busy", error: "The site is publishing right now.", bg: "Сайтът се публикува в момента. Опитайте след минута.", en: "The site is publishing right now. Try again in a minute." };
 
 /**
  * Dashboard "Change template": updates the venue (our /[slug] switches at once) and, when the site is deployed, redeploys it
  * with the new template. Refuses while a deploy is pending/building; the redeploy is claimed through the store so two
- * concurrent switches cannot both start one. Never calls startDeploy.
+ * concurrent switches cannot both start one. Never calls startDeploy. Refuses for a venue with its own site.
  */
 export async function setTemplate(d: AdminSiteDeps, venue: Venue, template: unknown): Promise<SetTemplateResult> {
+  if (venue.site_url) return OWN_SITE; // its own site never wears one of our templates
   if (typeof template !== "string" || !(TEMPLATE_IDS as readonly string[]).includes(template)) return UNKNOWN_TEMPLATE;
   const id = template as TemplateId;
   const deploy = venue.deploy;

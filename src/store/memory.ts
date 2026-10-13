@@ -1,7 +1,9 @@
 // src/store/memory.ts
 import { applyChanges } from "../domain/changes";
+import { countsTowardLimit } from "../domain/limits";
 import type { Category, ChangeSet, Conversation, DeployInfo, DeployStatus, Item, Lang, Media, Member, Role, SiteState, SiteTextKey, Venue, VenueStatus } from "../domain/types";
-import { DEFAULT_HOURS, extensionFor, newInviteCode, newToken, PUBLISH_CLAIM_TTL_MS, type ChangeSetPatch, type ExpiredTimer, type NewCategory, type NewChangeSet, type NewItem, type NewVenue, type Store, type VenuePatch, type Destination, type DestinationKind, type DestinationPatch, type DestinationSync, type DestinationWithSecrets, type NewDestination, type NewSync, type SyncPatch, type SyncStatus } from "./types";
+import { DEFAULT_HOURS, extensionFor, newInviteCode, newToken, PUBLISH_CLAIM_TTL_MS, type ChangeSetPatch, type ExpiredTimer, type NewCategory, type NewChangeSet, type NewItem, type NewVenue, type Store, type VenuePatch, type Destination, type DestinationKind, type DestinationPatch, type DestinationSync, type DestinationWithSecrets, type NewDestination, type NewSync, type SyncPatch, type SyncStatus, type ApplyResult, checkLimitValue } from "./types";
+import { limitBlocks } from "./usage";
 
 const clone = <T>(v: T): T => structuredClone(v);
 
@@ -54,6 +56,7 @@ export class InMemoryStore implements Store {
       cover_media_id: null,
       logo_media_id: null,
       hours: clone(v.hours ?? DEFAULT_HOURS),
+      change_limit: v.change_limit ?? null,
       tz: v.tz ?? "Europe/Sofia",
       default_lang: v.default_lang ?? "bg",
       theme: clone(v.theme ?? { accent: "#2f6b4f" }),
@@ -63,6 +66,7 @@ export class InMemoryStore implements Store {
       deploy: null,
       wizard_draft: v.wizard_draft ? clone(v.wizard_draft) : null,
       instagram_import: null,
+      site_url: v.site_url ?? null,
       created_at: this.clock(),
     };
     if ([...this.sites.values()].some((s) => s.venue.slug === venue.slug)) throw new Error(`slug ${venue.slug} already exists`);
@@ -242,6 +246,33 @@ export class InMemoryStore implements Store {
     for (const [venueId, t] of this.tokens) if (t === token) return this.getVenue(venueId);
     return null;
   }
+  async removeMember(venueId: string, chatRef: string) {
+    const m = this.members.get(chatRef);
+    if (!m || m.venue_id !== venueId) return false;
+    return this.members.delete(chatRef);
+  }
+  async listInvites(venueId: string, now: string) {
+    return [...this.invites.values()]
+      .filter((i) => i.venue_id === venueId && Date.parse(i.expires_at) > Date.parse(now))
+      .sort((a, b) => a.expires_at.localeCompare(b.expires_at))
+      .map((i) => ({ role: i.role, code_hint: i.code.slice(-4), expires_at: i.expires_at, used: i.used_at !== null }));
+  }
+  async cancelInvites(venueId: string, role?: Role) {
+    let n = 0;
+    for (const [code, i] of this.invites) {
+      if (i.venue_id === venueId && i.used_at === null && (role === undefined || i.role === role)) {
+        this.invites.delete(code);
+        n++;
+      }
+    }
+    return n;
+  }
+  async rotateAdminToken(venueId: string) {
+    this.site(venueId);
+    const t = newToken();
+    this.tokens.set(venueId, t);
+    return t;
+  }
 
   async createChangeSet(cs: NewChangeSet): Promise<ChangeSet> {
     this.site(cs.venue_id);
@@ -303,10 +334,16 @@ export class InMemoryStore implements Store {
     if (!cs) throw new Error(`change set ${id} not found`);
     for (const [k, v] of Object.entries(patch)) if (v !== undefined) (cs as unknown as Record<string, unknown>)[k] = v;
   }
-  async applyChangeSet(id: string, now: string) {
+  async applyChangeSet(id: string, now: string): Promise<ApplyResult> {
     const cs = this.sets.get(id);
     if (!cs) throw new Error(`change set ${id} not found`);
     if (cs.status !== "proposed" && cs.status !== "scheduled") return "skipped";
+    if (await limitBlocks(this, cs, now)) {
+      if (cs.status !== "proposed" && cs.status !== "scheduled") return "skipped"; // decided while the limit was read
+      cs.status = "cancelled";
+      cs.decided_at = now;
+      return "limited";
+    }
     const site = this.site(cs.venue_id);
     this.sites.set(cs.venue_id, applyChanges(site, cs.changes));
     cs.status = "applied";
@@ -449,5 +486,15 @@ export class InMemoryStore implements Store {
     if (!s) throw new Error(`sync ${id} not found`);
     for (const [k, v] of Object.entries(patch)) if (v !== undefined) (s as unknown as Record<string, unknown>)[k] = typeof v === "object" && v !== null ? clone(v) : v;
     if (patch.updated_at === undefined) s.updated_at = this.clock();
+  }
+
+  // --- Monthly change limit (appended 2026-10-13) ---
+  async countAppliedChangeSets(venueId: string, fromIso: string, toIso: string) {
+    return [...this.sets.values()].filter((x) => x.venue_id === venueId && x.applied_at !== null && x.applied_at >= fromIso && x.applied_at < toIso && countsTowardLimit(x.source)).length;
+  }
+  async setChangeLimit(venueId: string, limit: number | null) {
+    checkLimitValue(limit);
+    this.site(venueId).venue.change_limit = limit;
+    return this.getVenue(venueId);
   }
 }

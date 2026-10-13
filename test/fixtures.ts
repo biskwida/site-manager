@@ -29,6 +29,7 @@ export function venue(over: Partial<Venue> = {}): Venue {
     cover_media_id: null,
     logo_media_id: null,
     hours: HOURS,
+    change_limit: null,
     tz: TZ,
     default_lang: "bg",
     theme: { accent: "#2f6b4f" },
@@ -38,6 +39,7 @@ export function venue(over: Partial<Venue> = {}): Venue {
     deploy: null,
     wizard_draft: null,
     instagram_import: null,
+    site_url: null,
     created_at: NOW,
     ...over,
   };

@@ -33,6 +33,13 @@ alter table public.venues add column if not exists draft_token_hash text;
 alter table public.venues add column if not exists instagram_import jsonb;
 -- claimPublish: set while a publish of this draft runs (one conditional UPDATE), so two publishes cannot both run; stale after 5 minutes.
 alter table public.venues add column if not exists publishing_at timestamptz;
+-- Own site: the venue's site is built and hosted elsewhere and reads our public feed (https URL); null = hosted or template deploy.
+-- When set, the first owner join creates no provider project. Owner-only: not granted to anon (policies.sql).
+alter table public.venues add column if not exists site_url text;
+-- Monthly change limit (pricing plans; src/domain/limits.ts): applied change sets per calendar month in the venue's tz. null = unlimited.
+alter table public.venues add column if not exists change_limit integer;
+alter table public.venues drop constraint if exists venues_change_limit_check;
+alter table public.venues add constraint venues_change_limit_check check (change_limit is null or change_limit >= 0);
 alter table public.venues drop constraint if exists venues_template_check;
 alter table public.venues add constraint venues_template_check check (template in ('classic', 'nocturne', 'lumen', 'furna', 'mehana', 'kvartal'));
 alter table public.venues drop constraint if exists venues_business_type_check;
@@ -178,6 +185,8 @@ create table if not exists public.change_sets (
 create index if not exists change_sets_venue_idx on public.change_sets (venue_id, created_at desc);
 create index if not exists change_sets_status_idx on public.change_sets (status, apply_at);
 create index if not exists change_sets_chat_ref_idx on public.change_sets (venue_id, chat_ref) where status = 'proposed';
+-- countAppliedChangeSets: applied sets of one venue in a month.
+create index if not exists change_sets_applied_idx on public.change_sets (venue_id, applied_at) where applied_at is not null;
 
 create table if not exists public.changes (
   id uuid primary key default gen_random_uuid(),

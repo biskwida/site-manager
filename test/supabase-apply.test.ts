@@ -30,7 +30,8 @@ describe("SupabaseStore.applyChangeSet", () => {
     const row = { id: "cs1", venue_id: "v1", chat_ref: "tg:10", summary_bg: "", summary_en: "", preview_bg: "", preview_en: "", source: "text", status: "applied", apply_at: null, reminded_at: null, decided_at: null, applied_at: "2026-10-09T10:00:00.000Z", reverted_by: null, undoes_id: null, message_ref: null, created_at: "2026-10-09T09:00:00.000Z", changes };
     let itemWrites = 0;
     const { calls, client } = fakeClient((c) => {
-      if (c.table === "change_sets" && has(c, "maybeSingle")) return { data: { status: "proposed" }, error: null };
+      if (c.table === "change_sets" && has(c, "maybeSingle")) return { data: { status: "proposed", source: "text", venue_id: "v1" }, error: null };
+      if (c.table === "venues") return { data: { id: "v1", slug: "s", name: "n", change_limit: null, created_at: "2026-10-09T09:00:00.000Z" }, error: null };
       if (c.table === "change_sets" && has(c, "in")) return { data: [row], error: null };
       if (c.table === "items") return ++itemWrites === 2 ? { data: null, error: { message: "boom" } } : { data: [{ id: "i" }], error: null };
       return { data: [{ id: "cs1" }], error: null };

@@ -55,18 +55,23 @@ describe("publicSiteState", () => {
     const { store, venue } = await makeDemo();
     await store.setDeploy(venue.id, { provider: "vercel", project_id: "prj_secret", deployment_id: "dpl_1", url: "https://x.vercel.app", status: "error", error: "Build failed at /vercel/path0", template: "classic", updated_at: "2026-10-10T09:00:00.000Z" });
     await store.updateVenue(venue.id, { instagram_import: { fetched_at: "2026-10-10T09:00:00.000Z", username: "agala", items: [{ id: "1", url: "https://scontent.cdninstagram.com/secret.jpg", thumb: "https://scontent.cdninstagram.com/secret.jpg", caption: "", permalink: "", taken_at: "" }] } });
+    await store.updateVenue(venue.id, { site_url: "https://own.example" });
     const state = await store.getSite(venue.id);
     const pub = publicSiteState(state);
+    expect("site_url" in pub.venue).toBe(false); // the feed keeps its shape: the own-site URL is a dashboard/bot field
     expect("deploy" in pub.venue).toBe(false);
     expect("wizard_draft" in pub.venue).toBe(false);
     expect("instagram_import" in pub.venue).toBe(false);
+    expect("change_limit" in pub.venue).toBe(false);
     expect(JSON.stringify(pub)).not.toContain("prj_secret");
     expect(JSON.stringify(pub)).not.toContain("cdninstagram");
-    const { deploy: _d, wizard_draft: _w, instagram_import: _i, ...rest } = state.venue;
+    const { deploy: _d, wizard_draft: _w, instagram_import: _i, site_url: _s, change_limit: _l, ...rest } = state.venue;
     void _d;
     void _w;
     void _i;
-    expect(pub).toEqual({ ...state, venue: rest });
+    void _s;
+    void _l;
+    expect(pub).toEqual({ ...state, venue: { ...rest, theme: { ...rest.theme, background: null } } }); // background always present
     expect(state.venue.deploy).not.toBeNull(); // the input is not mutated
   });
 });

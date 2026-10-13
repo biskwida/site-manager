@@ -13,7 +13,7 @@ const isLocalized = (d: unknown): d is { bg: string; en: string } =>
   typeof d === "object" && d !== null && typeof (d as { bg?: unknown }).bg === "string" && typeof (d as { en?: unknown }).en === "string";
 
 /**
- * "Your site": where it lives, whether it is live, which template it wears, and the switch.
+ * "Your site": where it lives, whether it is live, which template it wears, and the switch (for an own site: only the link).
  * Changing the template redeploys a deployed site; while a deploy is in flight the switch waits (the 3 s poll re-enables it)
  * and the card nudges the tick every 30 s so the deploy is polled promptly.
  */
@@ -47,6 +47,19 @@ export function SiteCard({ overview: o, post, adminKey = "", refresh }: { overvi
   const msgText = msg ? ("key" in msg ? t(msg.key) : msg[lang]) : null;
 
   const statusTone = d?.status === "ready" ? "good" : d?.status === "error" ? "warn" : "plain";
+  // Own site (built and hosted elsewhere, reads our feed): just the link and who runs it; no deploy rows, no template switch.
+  if (o.own_site) {
+    return (
+      <Section id="your-site" title={t("admin.yourSite")}>
+        <div className="rounded-3xl bg-card p-4 ring-1 ring-ink/10 sm:p-5">
+          <a href={o.site_url} target="_blank" rel="noopener" className="inline-flex min-h-11 items-center font-semibold underline underline-offset-4 [overflow-wrap:anywhere] hover:text-accent">
+            {o.site_url}<span className="sr-only"> {t("admin.newTab")}</span>
+          </a>
+          <p className="mt-1 text-sm text-ink-soft">{t("admin.ownSiteLine")}</p>
+        </div>
+      </Section>
+    );
+  }
   return (
     <Section id="your-site" title={t("admin.yourSite")}>
       <div className="rounded-3xl bg-card p-4 ring-1 ring-ink/10 sm:p-5">

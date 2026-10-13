@@ -30,7 +30,7 @@ export const SocialPostSchema = z.object({
   summary_en: z.string().min(1).describe("The same line in English"),
   media_id: z.string().min(1).describe("The media_id of the photo the owner sent"),
   caption: z.string().describe("The post text, exactly as it will appear (hashtags included). In the venue's default language unless the owner gave the text. Stories show no caption."),
-  targets: z.array(z.enum(SOCIAL_TARGETS as [SocialTarget, ...SocialTarget[]])).min(1).max(4).describe("Where to publish: facebook_post, facebook_story, instagram_post, instagram_story. Default: the feed post on every connected network; stories only when the owner asks."),
+  targets: z.array(z.enum(SOCIAL_TARGETS as [SocialTarget, ...SocialTarget[]])).min(1).max(4).describe('Where to publish: facebook_post, facebook_story, instagram_post, instagram_story. "само стори", "като стори", "story only" or a story asked for without a post → only *_story; "само пост", "в профила", "във фийда", "post only" → only *_post; "и стори, и пост", "both" → both. A named network ("в инстаграм", "във фейсбук") → only that network. When the owner names neither story nor post: the feed post, on every connected network unless one is named. "прати стори само в инстаграм" → ["instagram_story"].'),
 });
 
 /** Which networks the venue has connected for posting (an errored connection still counts: its next push tells the owner). */
@@ -73,6 +73,7 @@ export function socialTools(d: AgentDeps, k: ToolKit) {
           if ((caption.match(/#[\p{L}\p{N}_]+/gu) ?? []).length > IG_HASHTAGS_MAX) throw new Error("Instagram allows at most 30 hashtags in a caption; remove some.");
           if ((caption.match(/(^|[^\w@])@[A-Za-z0-9._]{1,30}/g) ?? []).length > IG_MENTIONS_MAX) throw new Error("Instagram allows at most 20 @-mentions in a caption; remove some.");
         }
+        await k.ensureWithinLimit();
         await k.ensureNoPending();
         const row: SocialPostRow = { media_id: m.id, image_url: m.public_url, caption, targets };
         if (targets.includes("instagram_post")) {

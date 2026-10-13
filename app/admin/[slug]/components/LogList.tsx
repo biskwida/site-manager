@@ -8,11 +8,19 @@ import type { Decide } from "./useAdminOverview";
 
 const TONE: Partial<Record<ChangeSetStatus, "good" | "warn">> = { applied: "good", reverted: "warn" };
 
-/** Decided sets, newest first: before → after from the stored preview text; Undo only on applied sets. */
-export function LogList({ sets, tz, decide }: { sets: ChangeSet[]; tz: string; decide: Decide }) {
+/** Decided sets, newest first: before → after from the stored preview text; Undo only on applied sets. With a monthly change limit, the header shows this month's count. */
+export function LogList({ sets, tz, decide, usage }: { sets: ChangeSet[]; tz: string; decide: Decide; usage?: { used: number; limit: number | null } }) {
   const { lang, t } = useLang();
+  const limit = usage?.limit ?? null;
+  const reached = usage !== undefined && limit !== null && usage.used >= limit;
   return (
     <Section id="log" title={t("admin.log")}>
+      {usage && limit !== null && (
+        <p className="mb-4 flex flex-wrap items-center gap-2 text-sm text-ink-soft">
+          <Chip tone={reached ? "warn" : "plain"}>{t("admin.changesThisMonth", { used: String(usage.used), limit: String(limit) })}</Chip>
+          {reached && <span>{t("admin.limitReached")}</span>}
+        </p>
+      )}
       {sets.length === 0 ? <Empty /> : (
         <ul className="divide-y divide-ink/10 rounded-3xl bg-card ring-1 ring-ink/10">
           {sets.map((cs) => {

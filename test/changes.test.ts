@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { applyChanges, invertChanges, planChange, planChanges, validateChange, type PlanContext } from "@/src/domain/changes";
 import type { ChangeOp, Item, SiteState } from "@/src/domain/types";
-import { HOURS, NOW, state } from "./fixtures";
+import { HOURS, NOW, state, venue } from "./fixtures";
 
 const ctx = (): PlanContext => {
   let n = 0;
@@ -28,6 +28,8 @@ const OPS: { name: string; op: ChangeOp }[] = [
   { name: "set_text tagline", op: { op: "set_text", key: "tagline", text_bg: "Ново мото", text_en: "New tagline" } },
   { name: "set_text phone", op: { op: "set_text", key: "phone", text_bg: "+359 88 000", text_en: "+359 88 000" } },
   { name: "set_theme", op: { op: "set_theme", accent: "#aa3311" } },
+  { name: "set_theme background", op: { op: "set_theme", background: "#1f3d2b" } },
+  { name: "set_theme both", op: { op: "set_theme", accent: "#6e1f1b", background: "#f3eadb" } },
 ];
 
 describe("round trips", () => {
@@ -102,6 +104,36 @@ describe("planning details", () => {
   });
 });
 
+describe("set_theme", () => {
+  it("stores the whole theme before and after, merging the untouched key and lower-casing", () => {
+    const c = planChange(state(), { op: "set_theme", background: "#1F3D2B" }, ctx());
+    expect(c).toEqual({ position: 0, op: "set_theme", entity: "venue", entity_id: "v1", before: { theme: { accent: "#2f6b4f" } }, after: { theme: { accent: "#2f6b4f", background: "#1f3d2b" } } });
+    const a = planChange(state(), { op: "set_theme", accent: "#AA3311" }, ctx());
+    expect(a.after).toEqual({ theme: { accent: "#aa3311" } });
+  });
+  it("keeps an existing background when only the accent changes", () => {
+    const s0 = state({ venue: venue({ theme: { accent: "#2f6b4f", background: "#f3eadb" } }) });
+    const s1 = applyChanges(s0, [planChange(s0, { op: "set_theme", accent: "#6e1f1b" }, ctx())]);
+    expect(s1.venue.theme).toEqual({ accent: "#6e1f1b", background: "#f3eadb" });
+  });
+  it("background null goes back to the design's default, and undo restores the owner's colour", () => {
+    const s0 = state({ venue: venue({ theme: { accent: "#2f6b4f", background: "#1f3d2b" } }) });
+    const c = planChange(s0, { op: "set_theme", background: null }, ctx());
+    const s1 = applyChanges(s0, [c]);
+    expect(s1.venue.theme).toEqual({ accent: "#2f6b4f", background: null });
+    expect(applyChanges(s1, invertChanges([c])).venue.theme).toEqual({ accent: "#2f6b4f", background: "#1f3d2b" });
+  });
+  it("undoing the first background set leaves no background (the default)", () => {
+    const s0 = state();
+    const c = planChange(s0, { op: "set_theme", background: "#1f3d2b" }, ctx());
+    const s2 = applyChanges(applyChanges(s0, [c]), invertChanges([c]));
+    expect(s2.venue.theme.background ?? null).toBeNull();
+  });
+  it("accepts a clearly dark or clearly light background", () => {
+    for (const bg of ["#1f3d2b", "#f3eadb", "#ffffff", "#141414", "#b8432a"]) expect(validateChange(state(), { op: "set_theme", background: bg }, ctx())).toBeNull();
+  });
+});
+
 describe("validation", () => {
   const cases: [string, ChangeOp, RegExp][] = [
     ["unknown item", { op: "set_price", item_id: "nope", price_eur: 2 }, /item_id "nope" not found/],
@@ -118,6 +150,9 @@ describe("validation", () => {
     ["bad holiday date", { op: "add_holiday", date: "24.12.2026", note_bg: "x", note_en: "x" }, /YYYY-MM-DD/],
     ["bad text key", { op: "set_text", key: "menu" as never, text_bg: "x", text_en: "x" }, /key must be one of/],
     ["bad accent", { op: "set_theme", accent: "green" }, /#rrggbb/],
+    ["empty theme", { op: "set_theme" }, /accent, background or both/],
+    ["bad background", { op: "set_theme", background: "dark green" }, /background must be a hex colour/],
+    ["mid-tone background", { op: "set_theme", background: "#808080" }, /mid-tone/],
     ["empty patch", { op: "update_item", item_id: "i-cap", patch: {} }, /patch is empty/],
     ["add item id collides", { op: "add_item", item: (OPS[2].op as Extract<ChangeOp, { op: "add_item" }>).item, id: "i-cap" }, /id "i-cap" already exists/],
     ["add announcement bad id", { op: "add_announcement", text_bg: "Хей", text_en: "Hey", expires_at: null, id: "bad id!" }, /short identifier/],

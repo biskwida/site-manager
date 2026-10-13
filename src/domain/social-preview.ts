@@ -27,8 +27,11 @@ export function socialPreviewLines(c: Change, lang: Lang): string[] {
   if (c.after === null) {
     return [`• ${tr(lang, "Премахва публикацията", "Removes the post")}: ${socialTargetsText(targetsOf(c.before ?? {}), lang)}`];
   }
-  const lines = [`• ${tr(lang, "Публикация", "Post")}: ${socialTargetsText(targetsOf(c.after), lang)}`];
-  const caption = typeof c.after.caption === "string" ? c.after.caption.trim() : "";
+  // A story-only row must not read as a post: a neutral label, and no caption (stories show none).
+  const targets = targetsOf(c.after);
+  const storyOnly = targets.length > 0 && targets.every((t) => t.endsWith("_story"));
+  const lines = [`• ${storyOnly ? tr(lang, "Публикуване", "Publish") : tr(lang, "Публикация", "Post")}: ${socialTargetsText(targets, lang)}`];
+  const caption = typeof c.after.caption === "string" && !storyOnly ? c.after.caption.trim() : "";
   if (caption) lines.push(...quote(caption, lang).split("\n").map((l) => `  ${l}`));
   const ratio = c.after.ig_feed_ratio;
   if (ratio === "4:5" || ratio === "1.91:1") lines.push(`  (${tr(lang, `за Instagram снимката е допълнена до формат ${ratio}`, `for Instagram the photo is padded to ${ratio}`)})`);

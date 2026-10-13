@@ -31,7 +31,7 @@ export function SiteHeader({ state, slug, page, preview = false }: { state: Site
           <nav aria-label={t("site.nav")} className="flex gap-1">
             {links.map((l) => (
               <Link key={l.href} href={l.href} aria-current={l.current ? "page" : undefined}
-                className={`rounded-full px-3.5 py-1.5 text-sm font-semibold transition-colors ${l.current ? (cover ? "bg-white text-ink" : "bg-ink text-paper") : cover ? "text-white hover:bg-white/15" : "text-ink-soft hover:bg-ink/5 hover:text-ink"}`}>
+                className={`rounded-full px-3.5 py-1.5 text-sm font-semibold transition-colors ${l.current ? (cover ? "bg-card text-ink" : "bg-ink text-paper") : cover ? "text-white hover:bg-white/15" : "text-ink-soft hover:bg-ink/5 hover:text-ink"}`}>
                 {l.label}
               </Link>
             ))}

@@ -217,7 +217,7 @@ export function storeContract(name: string, make: () => Promise<Store>, storageH
       const v = await s.createVenue({ slug: "t10", name: "Test" });
       const d = await s.createVenue({ slug: "t10d", name: "Draft", template: "nocturne", business_type: "bar", status: "draft" });
       try {
-        expect(v).toMatchObject({ template: "classic", business_type: "cafe", status: "live", deploy: null, wizard_draft: null, instagram_import: null });
+        expect(v).toMatchObject({ template: "classic", business_type: "cafe", status: "live", deploy: null, wizard_draft: null, instagram_import: null, site_url: null });
         expect(d).toMatchObject({ template: "nocturne", business_type: "bar", status: "draft" });
         expect(only(await s.listVenues(), v.id, d.id)).toEqual([v.id, d.id]); // oldest first
         expect(only(await s.listVenues({ status: "draft" }), v.id, d.id)).toEqual([d.id]);
@@ -243,6 +243,24 @@ export function storeContract(name: string, make: () => Promise<Store>, storageH
         await expect(s.updateVenue(a.id, { slug: "t11b" })).rejects.toThrow(/t11b/);
         await expect(s.updateVenue("00000000-0000-0000-0000-000000000000", { name: "x" })).rejects.toThrow();
         await expect(s.updateVenue(a.id, { slug: "t11c" })).resolves.toMatchObject({ slug: "t11c" }); // own slug is fine
+      } finally {
+        await s.deleteVenue(a.id);
+        await s.deleteVenue(b.id);
+      }
+    });
+
+    it("stores the venue's own site URL on create and update, and clears it", async () => {
+      const s = await make();
+      const a = await s.createVenue({ slug: "t13a", name: "A" });
+      const b = await s.createVenue({ slug: "t13b", name: "B", site_url: "https://own.example" });
+      try {
+        expect(a.site_url).toBeNull();
+        expect(b.site_url).toBe("https://own.example");
+        expect((await s.getVenue(b.id)).site_url).toBe("https://own.example");
+        expect((await s.updateVenue(a.id, { site_url: "https://a.example" })).site_url).toBe("https://a.example");
+        expect((await s.getVenueBySlug("t13a"))?.site_url).toBe("https://a.example");
+        expect((await s.updateVenue(a.id, { name: "A2" })).site_url).toBe("https://a.example"); // untouched by other patches
+        expect((await s.updateVenue(a.id, { site_url: null })).site_url).toBeNull();
       } finally {
         await s.deleteVenue(a.id);
         await s.deleteVenue(b.id);
@@ -425,6 +443,86 @@ export function storeContract(name: string, make: () => Promise<Store>, storageH
       }
     });
 
+    it("removes a member of one venue only, and the chat is unknown afterwards", async () => {
+      const s = await make();
+      const v = await s.createVenue({ slug: "t16a", name: "A" });
+      const other = await s.createVenue({ slug: "t16b", name: "B" });
+      try {
+        await s.upsertMember({ venue_id: v.id, chat_ref: "tg:7161", role: "owner", lang: "bg" });
+        await s.upsertMember({ venue_id: v.id, chat_ref: "fb:7162", role: "staff", lang: "en" });
+        await s.upsertMember({ venue_id: other.id, chat_ref: "tg:7163", role: "owner", lang: "bg" });
+        expect(await s.removeMember(other.id, "tg:7161")).toBe(false); // not that venue's member
+        expect(await s.findMember("tg:7161")).not.toBeNull();
+        expect(await s.removeMember(v.id, "tg:7161")).toBe(true);
+        expect(await s.findMember("tg:7161")).toBeNull();
+        expect((await s.listMembers(v.id)).map((m) => m.chat_ref)).toEqual(["fb:7162"]);
+        expect(await s.removeMember(v.id, "tg:7161")).toBe(false); // already gone
+        expect(await s.removeMember("00000000-0000-0000-0000-000000000000", "fb:7162")).toBe(false);
+        expect(await s.findMember("tg:7163")).not.toBeNull();
+      } finally {
+        await s.deleteVenue(v.id);
+        await s.deleteVenue(other.id);
+      }
+    });
+
+    it("lists unexpired invites with a 4-character hint, and cancels unused ones by role", async () => {
+      const s = await make();
+      const v = await s.createVenue({ slug: "t17a", name: "A" });
+      const other = await s.createVenue({ slug: "t17b", name: "B" });
+      try {
+        expect(await s.listInvites(v.id, NOW)).toEqual([]);
+        await s.createInvite(v.id, "owner", "2026-10-09T08:00:00.000Z"); // expired at NOW
+        const owner = await s.createInvite(v.id, "owner", "2026-10-15T00:00:00.000Z");
+        const staff = await s.createInvite(v.id, "staff", "2026-10-12T00:00:00.000Z");
+        const used = await s.createInvite(v.id, "staff", "2026-10-14T00:00:00.000Z");
+        await s.redeemInvite(used, "tg:7171", "bg", NOW);
+        const foreign = await s.createInvite(other.id, "owner", "2026-10-15T00:00:00.000Z");
+        const list = await s.listInvites(v.id, NOW);
+        expect(list).toEqual([
+          { role: "staff", code_hint: staff.slice(-4), expires_at: "2026-10-12T00:00:00.000Z", used: false },
+          { role: "staff", code_hint: used.slice(-4), expires_at: "2026-10-14T00:00:00.000Z", used: true },
+          { role: "owner", code_hint: owner.slice(-4), expires_at: "2026-10-15T00:00:00.000Z", used: false },
+        ]);
+        expect(JSON.stringify(list)).not.toContain(owner); // never the whole code
+        expect(await s.listInvites("00000000-0000-0000-0000-000000000000", NOW)).toEqual([]);
+
+        expect(await s.cancelInvites(v.id, "staff")).toBe(1); // the used staff code stays (it is history, not access)
+        expect(await s.redeemInvite(staff, "tg:7172", "bg", NOW)).toBeNull();
+        expect(await s.findOpenInvite(v.id, "owner", NOW)).toBe(owner);
+        expect(await s.cancelInvites(v.id)).toBe(2); // the open owner code and the expired one
+        expect(await s.findOpenInvite(v.id, "owner", NOW)).toBeNull();
+        expect(await s.redeemInvite(owner, "tg:7173", "bg", NOW)).toBeNull();
+        expect(await s.cancelInvites(v.id)).toBe(0);
+        expect(await s.listInvites(v.id, NOW)).toEqual([{ role: "staff", code_hint: used.slice(-4), expires_at: "2026-10-14T00:00:00.000Z", used: true }]);
+        expect(await s.findOpenInvite(other.id, "owner", NOW)).toBe(foreign); // other venues untouched
+        expect(await s.findMember("tg:7171")).not.toBeNull(); // cancelling codes never unlinks members
+      } finally {
+        await s.deleteVenue(v.id);
+        await s.deleteVenue(other.id);
+      }
+    });
+
+    it("rotates the admin token: the old key stops working, the new one opens the venue", async () => {
+      const s = await make();
+      const v = await s.createVenue({ slug: "t18a", name: "A" });
+      const fresh = await s.createVenue({ slug: "t18b", name: "B" });
+      try {
+        const old = await s.getAdminToken(v.id);
+        const next = await s.rotateAdminToken(v.id);
+        expect(next).not.toBe(old);
+        expect(next.length).toBeGreaterThanOrEqual(32);
+        expect(await s.findVenueByAdminToken(old)).toBeNull();
+        expect((await s.findVenueByAdminToken(next))?.id).toBe(v.id);
+        expect(await s.getAdminToken(v.id)).toBe(next);
+        const first = await s.rotateAdminToken(fresh.id); // a venue that never had a token gets one
+        expect(await s.getAdminToken(fresh.id)).toBe(first);
+        await expect(s.rotateAdminToken("00000000-0000-0000-0000-000000000000")).rejects.toThrow();
+      } finally {
+        await s.deleteVenue(v.id);
+        await s.deleteVenue(fresh.id);
+      }
+    });
+
     it("deletes a venue with everything attached", async () => {
       const s = await make();
       const v = await s.createVenue({ slug: "t15", name: "Test" });
@@ -510,6 +608,86 @@ export function storeContract(name: string, make: () => Promise<Store>, storageH
       await s.updateSync(y.id, { leased_until: null, status: "done" });
       expect((await s.getSync(y.id)).leased_until).toBeNull();
       expect(await s.claimSync(y.id, LATER, "2026-10-09T11:00:00.000Z")).toBe(false); // only pending rows
+    });
+
+    // --- Monthly change limit (appended 2026-10-13) ---
+    it("stores a venue's monthly change limit (null = unlimited)", async () => {
+      const s = await make();
+      const v = await s.createVenue({ slug: "tl1", name: "Test" });
+      expect(v.change_limit).toBeNull();
+      const w = await s.createVenue({ slug: "tl2", name: "Test", change_limit: 60 });
+      expect(w.change_limit).toBe(60);
+      expect((await s.getVenue(w.id)).change_limit).toBe(60);
+      expect((await s.setChangeLimit(v.id, 40)).change_limit).toBe(40);
+      expect((await s.getVenueBySlug("tl1"))?.change_limit).toBe(40);
+      expect((await s.setChangeLimit(v.id, null)).change_limit).toBeNull();
+      expect((await s.getVenue(v.id)).change_limit).toBeNull();
+      await expect(s.setChangeLimit(crypto.randomUUID(), 5)).rejects.toThrow();
+    });
+
+    it("counts applied change sets in [from, to), including later reverted ones, without undo and automatic sets", async () => {
+      const s = await make();
+      const v = await s.createVenue({ slug: "tl3", name: "Test" });
+      const other = await s.createVenue({ slug: "tl4", name: "Test" });
+      const base = { chat_ref: null, summary_bg: "x", summary_en: "x", preview_bg: "x", preview_en: "x", status: "proposed" as const, changes: [] };
+      const applied = async (source: "text" | "voice" | "dashboard" | "auto" | "undo", at: string, extra: { venue_id?: string; undoes_id?: string } = {}) => {
+        const cs = await s.createChangeSet({ ...base, venue_id: v.id, source, ...extra });
+        expect(await s.applyChangeSet(cs.id, at)).toBe("applied");
+        return cs;
+      };
+      const FROM = "2026-09-30T21:00:00.000Z";
+      const TO = "2026-10-31T22:00:00.000Z";
+      await applied("text", FROM); // the first instant of the window counts
+      const voice = await applied("voice", "2026-10-20T10:00:00.000Z");
+      await applied("undo", "2026-10-21T10:00:00.000Z", { undoes_id: voice.id }); // voice is now reverted: it still counts, the undo does not
+      await applied("auto", "2026-10-06T10:00:00.000Z");
+      await applied("dashboard", "2026-10-07T10:00:00.000Z");
+      await applied("text", TO); // the window's end is exclusive
+      await applied("text", "2026-09-30T20:59:59.000Z"); // the month before
+      await applied("text", "2026-10-08T10:00:00.000Z", { venue_id: other.id });
+      await s.createChangeSet({ ...base, venue_id: v.id, source: "text" }); // proposed only
+      const rejected = await s.createChangeSet({ ...base, venue_id: v.id, source: "text" });
+      await s.updateChangeSet(rejected.id, { status: "rejected", decided_at: "2026-10-09T10:00:00.000Z" });
+      expect((await s.getChangeSet(voice.id)).status).toBe("reverted");
+      expect(await s.countAppliedChangeSets(v.id, FROM, TO)).toBe(3);
+      expect(await s.countAppliedChangeSets(other.id, FROM, TO)).toBe(1);
+      expect(await s.countAppliedChangeSets(v.id, TO, "2026-11-30T22:00:00.000Z")).toBe(1);
+    });
+
+    it("refuses to apply a counted set once the month's limit is reached: the set is cancelled, nothing is written", async () => {
+      const s = await make();
+      const v = await s.createVenue({ slug: "tl5", name: "Test", change_limit: 2 });
+      const c = await s.insertCategory({ venue_id: v.id, name_bg: "Кафе", name_en: "Coffee", position: 0 });
+      const i = await s.insertItem({ venue_id: v.id, category_id: c.id, name_bg: "Еспресо", name_en: "Espresso", desc_bg: "", desc_en: "", price_eur: 1.8, allergens: [], position: 0 });
+      const price = async (eur: number) => planChanges(await s.getSite(v.id), [{ op: "set_price", item_id: i.id, price_eur: eur }], ctx);
+      const base = { venue_id: v.id, chat_ref: "tg:10", summary_bg: "x", summary_en: "x", preview_bg: "x", preview_en: "x" };
+      const first = await s.createChangeSet({ ...base, source: "text", status: "proposed", changes: await price(2) });
+      expect(await s.applyChangeSet(first.id, NOW)).toBe("applied");
+      const second = await s.createChangeSet({ ...base, source: "voice", status: "proposed", changes: await price(2.1) });
+      expect(await s.applyChangeSet(second.id, NOW)).toBe("applied");
+      // 2/2: a scheduled set that comes due is refused and cancelled.
+      const due = await s.createChangeSet({ ...base, source: "text", status: "scheduled", apply_at: LATER, changes: await price(9) });
+      expect(await s.applyChangeSet(due.id, LATER)).toBe("limited");
+      expect(await s.getChangeSet(due.id)).toMatchObject({ status: "cancelled", applied_at: null, decided_at: LATER });
+      expect((await s.getSite(v.id)).items[0].price_eur).toBe(2.1);
+      expect(await s.applyChangeSet(due.id, LATER)).toBe("skipped"); // decided now
+      expect(await s.listDue(LATER, v.id)).toEqual([]);
+      // Undo is a safety feature and never limited; it does not use up a change either.
+      const undo = await s.createChangeSet({ ...base, source: "undo", status: "proposed", undoes_id: second.id, changes: [{ ...second.changes[0], before: second.changes[0].after, after: second.changes[0].before }] });
+      expect(await s.applyChangeSet(undo.id, LATER)).toBe("applied");
+      expect((await s.getSite(v.id)).items[0].price_eur).toBe(2);
+      const auto = await s.createChangeSet({ ...base, chat_ref: null, source: "auto", status: "proposed", changes: [] });
+      expect(await s.applyChangeSet(auto.id, LATER)).toBe("applied");
+      // The next calendar month in the venue's zone (1 Nov 2026 00:00 Sofia = 31 Oct 22:00 UTC) starts from zero.
+      const november = await s.createChangeSet({ ...base, source: "text", status: "proposed", changes: await price(3) });
+      expect(await s.applyChangeSet(november.id, "2026-10-31T22:00:00.000Z")).toBe("applied");
+      // No limit: never refused.
+      await s.setChangeLimit(v.id, null);
+      const free = await s.createChangeSet({ ...base, source: "text", status: "proposed", changes: [] });
+      expect(await s.applyChangeSet(free.id, "2026-10-31T22:00:01.000Z")).toBe("applied");
+      await s.setChangeLimit(v.id, 0);
+      const none = await s.createChangeSet({ ...base, source: "dashboard", status: "proposed", changes: [] });
+      expect(await s.applyChangeSet(none.id, "2026-10-31T22:00:02.000Z")).toBe("limited");
     });
   });
 }

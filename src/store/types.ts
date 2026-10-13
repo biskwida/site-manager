@@ -29,13 +29,17 @@ export interface NewVenue {
   maps_url?: string;
   instagram?: string;
   hours?: WeekHours;
+  /** Monthly change limit; default null (unlimited). */
+  change_limit?: number | null;
   tz?: string;
   default_lang?: Lang;
-  theme?: { accent: string };
+  theme?: Venue["theme"];
   template?: TemplateId;
   business_type?: BusinessType;
   status?: VenueStatus;
   wizard_draft?: WizardDraft | null;
+  /** The venue's own external site (https); see Venue.site_url. */
+  site_url?: string | null;
 }
 export interface NewCategory {
   venue_id: string;
@@ -74,7 +78,15 @@ export interface NewChangeSet {
 export type ChangeSetPatch = Partial<Pick<ChangeSet, "status" | "apply_at" | "reminded_at" | "decided_at" | "applied_at" | "reverted_by" | "message_ref" | "preview_bg" | "preview_en">>;
 export type VenuePatch = Partial<Pick<Venue,
   "slug" | "name" | "tagline_bg" | "tagline_en" | "about_bg" | "about_en" | "address" | "phone" | "maps_url" | "instagram" |
-  "hours" | "tz" | "default_lang" | "theme" | "template" | "business_type" | "status" | "wizard_draft" | "instagram_import">>;
+  "hours" | "tz" | "default_lang" | "theme" | "template" | "business_type" | "status" | "wizard_draft" | "instagram_import" | "site_url">>;
+
+export interface InviteSummary {
+  role: Role;
+  /** Last 4 characters of the code, enough to tell codes apart, not enough to redeem one. */
+  code_hint: string;
+  expires_at: string;
+  used: boolean;
+}
 
 export interface ExpiredTimer {
   item: Item;
@@ -140,6 +152,14 @@ export interface Store {
   /** Creates the token on first call. */
   getAdminToken(venueId: string): Promise<string>;
   findVenueByAdminToken(token: string): Promise<Venue | null>;
+  /** Unlinks the chat from this venue; true when a row was deleted (false when the chat is not this venue's member). The chat is then a stranger to the bot. */
+  removeMember(venueId: string, chatRef: string): Promise<boolean>;
+  /** Invites that have not expired at `now`, used ones included, soonest expiry first. Codes are stored in plain text; only the last 4 characters leave the store. */
+  listInvites(venueId: string, now: string): Promise<InviteSummary[]>;
+  /** Deletes the venue's unused invites (expired ones too) of `role`, or of every role when omitted; returns how many. Used ones stay as history. */
+  cancelInvites(venueId: string, role?: Role): Promise<number>;
+  /** Replaces the dashboard key with a fresh one (creating it if there was none) and returns it; the old key stops working at once. Throws on an unknown venue. */
+  rotateAdminToken(venueId: string): Promise<string>;
 
   // change sets
   createChangeSet(cs: NewChangeSet): Promise<ChangeSet>;
@@ -157,8 +177,10 @@ export interface Store {
   /**
    * Writes every change and marks the set applied, only if it is still proposed or scheduled.
    * For an undo set, also marks the target reverted. Returns "skipped" when already decided.
+   * Returns "limited" (and marks the set cancelled, decided_at = now, nothing written) when the venue's monthly change limit
+   * is already reached in the month of `now` (src/store/usage.ts limitBlocks): this is the one choke point every apply goes through.
    */
-  applyChangeSet(id: string, now: string): Promise<"applied" | "skipped">;
+  applyChangeSet(id: string, now: string): Promise<ApplyResult>;
   /** Marks the set expired (decided_at = now) only if it is still proposed; "skipped" when it was already decided. */
   expireChangeSet(id: string, now: string): Promise<"expired" | "skipped">;
   listExpiredTimers(now: string, venueId?: string): Promise<ExpiredTimer[]>;
@@ -263,4 +285,24 @@ export interface Store {
    * or before `now`). True when this caller got it; a concurrent run gets false and leaves the row alone.
    */
   claimSync(id: string, now: string, leaseUntil: string): Promise<boolean>;
+}
+
+// --- Monthly change limit (appended 2026-10-13; definition in src/domain/limits.ts) ---
+/** applyChangeSet's outcome; "limited" = refused by the monthly change limit (the set is now cancelled). */
+export type ApplyResult = "applied" | "skipped" | "limited";
+// Declaration merging: the Store interface above gains the limit methods.
+export interface Store {
+  /**
+   * Change sets of the venue with applied_at in [fromIso, toIso) whose source counts toward the monthly limit (not "undo",
+   * not "auto"). A set applied and later reverted still counts: it reached `applied`. Proposed, scheduled, rejected,
+   * expired and cancelled sets have no applied_at and never count.
+   */
+  countAppliedChangeSets(venueId: string, fromIso: string, toIso: string): Promise<number>;
+  /** Sets (a whole number >= 0) or clears (null = unlimited) the venue's monthly change limit; throws on an unknown venue. */
+  setChangeLimit(venueId: string, limit: number | null): Promise<Venue>;
+}
+
+/** Throws unless the limit is null or a whole number >= 0. */
+export function checkLimitValue(limit: number | null): void {
+  if (limit !== null && !(Number.isInteger(limit) && limit >= 0)) throw new Error(`change limit must be a whole number >= 0 or null, got ${limit}`);
 }

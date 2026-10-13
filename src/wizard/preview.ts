@@ -22,6 +22,7 @@ export function buildPreviewState(d: WizardDraft, media: Media[], now: Date): Si
     cover_media_id: d.cover_media_id,
     logo_media_id: d.logo_media_id,
     hours: d.hours,
+    change_limit: null,
     tz: "Europe/Sofia",
     default_lang: d.default_lang,
     theme: { accent: d.theme.accent },
@@ -32,6 +33,7 @@ export function buildPreviewState(d: WizardDraft, media: Media[], now: Date): Si
     deploy: null,
     wizard_draft: null,
     instagram_import: null,
+    site_url: null,
   };
   const categories: Category[] = d.categories.map((c, i) => {
     const n = bothLangs(c.name_bg, c.name_en);
