@@ -443,6 +443,86 @@ export function storeContract(name: string, make: () => Promise<Store>, storageH
       }
     });
 
+    it("removes a member of one venue only, and the chat is unknown afterwards", async () => {
+      const s = await make();
+      const v = await s.createVenue({ slug: "t16a", name: "A" });
+      const other = await s.createVenue({ slug: "t16b", name: "B" });
+      try {
+        await s.upsertMember({ venue_id: v.id, chat_ref: "tg:7161", role: "owner", lang: "bg" });
+        await s.upsertMember({ venue_id: v.id, chat_ref: "fb:7162", role: "staff", lang: "en" });
+        await s.upsertMember({ venue_id: other.id, chat_ref: "tg:7163", role: "owner", lang: "bg" });
+        expect(await s.removeMember(other.id, "tg:7161")).toBe(false); // not that venue's member
+        expect(await s.findMember("tg:7161")).not.toBeNull();
+        expect(await s.removeMember(v.id, "tg:7161")).toBe(true);
+        expect(await s.findMember("tg:7161")).toBeNull();
+        expect((await s.listMembers(v.id)).map((m) => m.chat_ref)).toEqual(["fb:7162"]);
+        expect(await s.removeMember(v.id, "tg:7161")).toBe(false); // already gone
+        expect(await s.removeMember("00000000-0000-0000-0000-000000000000", "fb:7162")).toBe(false);
+        expect(await s.findMember("tg:7163")).not.toBeNull();
+      } finally {
+        await s.deleteVenue(v.id);
+        await s.deleteVenue(other.id);
+      }
+    });
+
+    it("lists unexpired invites with a 4-character hint, and cancels unused ones by role", async () => {
+      const s = await make();
+      const v = await s.createVenue({ slug: "t17a", name: "A" });
+      const other = await s.createVenue({ slug: "t17b", name: "B" });
+      try {
+        expect(await s.listInvites(v.id, NOW)).toEqual([]);
+        await s.createInvite(v.id, "owner", "2026-10-09T08:00:00.000Z"); // expired at NOW
+        const owner = await s.createInvite(v.id, "owner", "2026-10-15T00:00:00.000Z");
+        const staff = await s.createInvite(v.id, "staff", "2026-10-12T00:00:00.000Z");
+        const used = await s.createInvite(v.id, "staff", "2026-10-14T00:00:00.000Z");
+        await s.redeemInvite(used, "tg:7171", "bg", NOW);
+        const foreign = await s.createInvite(other.id, "owner", "2026-10-15T00:00:00.000Z");
+        const list = await s.listInvites(v.id, NOW);
+        expect(list).toEqual([
+          { role: "staff", code_hint: staff.slice(-4), expires_at: "2026-10-12T00:00:00.000Z", used: false },
+          { role: "staff", code_hint: used.slice(-4), expires_at: "2026-10-14T00:00:00.000Z", used: true },
+          { role: "owner", code_hint: owner.slice(-4), expires_at: "2026-10-15T00:00:00.000Z", used: false },
+        ]);
+        expect(JSON.stringify(list)).not.toContain(owner); // never the whole code
+        expect(await s.listInvites("00000000-0000-0000-0000-000000000000", NOW)).toEqual([]);
+
+        expect(await s.cancelInvites(v.id, "staff")).toBe(1); // the used staff code stays (it is history, not access)
+        expect(await s.redeemInvite(staff, "tg:7172", "bg", NOW)).toBeNull();
+        expect(await s.findOpenInvite(v.id, "owner", NOW)).toBe(owner);
+        expect(await s.cancelInvites(v.id)).toBe(2); // the open owner code and the expired one
+        expect(await s.findOpenInvite(v.id, "owner", NOW)).toBeNull();
+        expect(await s.redeemInvite(owner, "tg:7173", "bg", NOW)).toBeNull();
+        expect(await s.cancelInvites(v.id)).toBe(0);
+        expect(await s.listInvites(v.id, NOW)).toEqual([{ role: "staff", code_hint: used.slice(-4), expires_at: "2026-10-14T00:00:00.000Z", used: true }]);
+        expect(await s.findOpenInvite(other.id, "owner", NOW)).toBe(foreign); // other venues untouched
+        expect(await s.findMember("tg:7171")).not.toBeNull(); // cancelling codes never unlinks members
+      } finally {
+        await s.deleteVenue(v.id);
+        await s.deleteVenue(other.id);
+      }
+    });
+
+    it("rotates the admin token: the old key stops working, the new one opens the venue", async () => {
+      const s = await make();
+      const v = await s.createVenue({ slug: "t18a", name: "A" });
+      const fresh = await s.createVenue({ slug: "t18b", name: "B" });
+      try {
+        const old = await s.getAdminToken(v.id);
+        const next = await s.rotateAdminToken(v.id);
+        expect(next).not.toBe(old);
+        expect(next.length).toBeGreaterThanOrEqual(32);
+        expect(await s.findVenueByAdminToken(old)).toBeNull();
+        expect((await s.findVenueByAdminToken(next))?.id).toBe(v.id);
+        expect(await s.getAdminToken(v.id)).toBe(next);
+        const first = await s.rotateAdminToken(fresh.id); // a venue that never had a token gets one
+        expect(await s.getAdminToken(fresh.id)).toBe(first);
+        await expect(s.rotateAdminToken("00000000-0000-0000-0000-000000000000")).rejects.toThrow();
+      } finally {
+        await s.deleteVenue(v.id);
+        await s.deleteVenue(fresh.id);
+      }
+    });
+
     it("deletes a venue with everything attached", async () => {
       const s = await make();
       const v = await s.createVenue({ slug: "t15", name: "Test" });

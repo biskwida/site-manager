@@ -251,6 +251,25 @@ The owner can use Facebook Messenger, Instagram Direct or WhatsApp instead of Te
 
 Setup, step by step (Meta app, tokens, Testers, webhooks, App Review, WhatsApp test number, Vercel preview, database migration): **[docs/CHANNELS.md](docs/CHANNELS.md)**.
 
+## Access
+
+Who can manage a venue:
+
+- **Owner.** Proposes and approves changes from the chat, gets the dashboard link (`/menu`, the welcome message), connects WordPress and social accounts, and can see who has access with `/members`.
+- **Staff.** Marks items sold out and adds today's specials; no dashboard link, no `/members`.
+- **The dashboard key.** `/admin/<slug>?key=…` works without any chat: whoever holds it can approve, cancel and undo changes.
+
+**One code per person.** An invite code links one chat and is then used up; codes expire after 7 days. Give each person (and each extra phone or app) their own code, so you can later remove exactly that chat. A chat belongs to one venue at a time.
+
+| To… | Run |
+| --- | --- |
+| See who has access and which codes are still open | `npm run member:list -- --slug coffique` (WhatsApp numbers show their last four digits; codes only their last four characters) |
+| Remove one chat | `npm run member:remove -- --slug coffique --ref tg:123456` (WhatsApp: the full `wa:<digits>`, or `wa:…3456` as the list shows it). Refuses a chat that is not that venue's member. The bot then treats the chat as a stranger, and its pending proposals can no longer be applied. |
+| Cancel codes that were not used yet | `npm run invite:cancel -- --slug coffique [--role owner\|staff]` (members already linked stay) |
+| Replace the dashboard key | `npm run admin:rotate-key -- --slug coffique`. The old link stops working at once; the new one is printed once (keep it out of git and chat logs). The owner also gets it from the bot with `/menu`. |
+
+Owners see the same list in the chat with `/members`; removing access is deliberately left to these scripts for now.
+
 ## Landing page (Lovable)
 
 The public marketing landing is built in [Lovable](https://lovable.dev) from the prompt pack in [docs/lovable/LANDING-PROMPT.md](docs/lovable/LANDING-PROMPT.md) (bilingual copy, the pitch facts, design tokens, the "Create your site" button to `/new` and the demo link). After publishing it in Lovable, set `NEXT_PUBLIC_LANDING_URL` to its address and redeploy: `/` then redirects there. The variable is baked in at build time, so setting it without a redeploy changes nothing. Without it, the app's own `/` renders a short fallback landing.
@@ -285,7 +304,7 @@ Cron: `vercel.json` runs `/api/tick` every 5 minutes (`*/5 * * * *`; the team is
 
 - **Anon key.** The browser no longer uses it: public pages, the dashboard and the wizard read through the app's own server routes. Its grants stay locked down anyway: it can read only live venues (and of `venues` only the public feed's columns, granted column by column; `deploy`, `wizard_draft`, `draft_token_hash`, `publishing_at` and `instagram_import` answer `42501`) and their public site tables (`venues`, `site_texts`, `categories`, `items`, `holidays`, `announcements`, `media`), never drafts, members, invites, admin tokens, change sets, changes, conversations or `rate_limits`; it cannot call `bump_rate_limit`; every write is refused (`42501`). `npm run check:rls` proves this against the live project.
 - **Service-role key.** Only in server code (`src/server/deps.ts`, the route handlers) and the scripts. The build is checked for it: `grep -rl "SUPABASE_SERVICE_ROLE\|service_role" .next/static` finds nothing.
-- **The admin link is the key.** Whoever has `/admin/<slug>?key=…` can approve, cancel and undo changes for that venue. Share it only with the owner. The dev server's request log skips admin URLs, the admin API, the tick and any URL with `?key=`.
+- **The admin link is the key.** Whoever has `/admin/<slug>?key=…` can approve, cancel and undo changes for that venue. Share it only with the owner; if it leaks, `npm run admin:rotate-key` replaces it (see [Access](#access)). The dev server's request log skips admin URLs, the admin API, the tick and any URL with `?key=`.
 - **Webhook secret.** `/api/telegram` rejects any request without Telegram's `X-Telegram-Bot-Api-Secret-Token` header matching `TELEGRAM_WEBHOOK_SECRET`. `/api/tick` needs `TICK_SECRET` (header or Bearer) or a venue's admin key (that venue only).
 - **Telegram file URLs** contain the bot token, so they are never logged. Photos are downloaded server-side and stored in Supabase Storage (the site uses the Storage public URL); voice notes are downloaded, transcribed and not stored.
 - **Invite codes** are one-use and expire after 7 days. Reloading the done page shows the same open code instead of issuing a new one.
