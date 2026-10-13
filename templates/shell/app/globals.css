@@ -27,7 +27,7 @@
    `reference`: no :root copy of these tokens, so nothing can resolve --accent at the root by mistake; in custom CSS use var(--accent, #2f6b4f). */
 @theme inline reference {
   --color-accent: var(--accent, #2f6b4f);
-  --color-accent-soft: color-mix(in oklab, var(--accent, #2f6b4f) 14%, white);
+  --color-accent-soft: color-mix(in oklab, var(--accent, #2f6b4f) 14%, var(--accent-ground, white));
 }
 
 /* The template's fontVars class (on <html>) defines --font-display and --font-body. */
