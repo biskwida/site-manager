@@ -46,7 +46,8 @@ export async function runTurn(deps: AgentDeps, input: TurnInput, cfg: AgentConfi
     ...(input.image ? [{ type: "image" as const, source: { type: "base64" as const, media_type: input.image.media_type, data: input.image.data } }] : []),
     { type: "text" as const, text },
   ];
-  const tools = makeTools({ ...deps, correctionFor: memory.correctionFor, source: input.source });
+  const turnSets = new Set<string>();
+  const tools = makeTools({ ...deps, correctionFor: memory.correctionFor, source: input.source, turnSets });
   const ownerLine = `${input.source === "voice" ? "[voice] " : input.source === "photo" ? "[photo] " : ""}${input.text}`.trim();
 
   const closeOut = async (reply: string, outcome?: string) => {
@@ -81,8 +82,18 @@ export async function runTurn(deps: AgentDeps, input: TurnInput, cfg: AgentConfi
     return "refused";
   }
   const reply = final.content.flatMap((b) => (b.type === "text" && b.text ? [b.text] : [])).join("\n").trim();
-  const pending = await deps.store.findProposed(deps.venueId, deps.chatRef);
-  const outcome = pending ? `proposed: ${lang === "bg" ? pending.summary_bg : pending.summary_en} (waiting for the owner's decision)` : undefined;
+  const outcome = await pendingOutcome(deps, turnSets);
   await closeOut(reply, outcome);
   return reply;
+}
+
+/** Every proposal still waiting in this chat (earlier ones first, then this turn's in the order they were made), for the memory line. */
+async function pendingOutcome(deps: AgentDeps, turnSets: Set<string>): Promise<string | undefined> {
+  const proposed = (await deps.store.listChangeSets(deps.venueId, { status: ["proposed"], limit: 50 })).filter((cs) => cs.chat_ref === deps.chatRef);
+  if (proposed.length === 0) return undefined;
+  const order = [...turnSets];
+  const rank = (id: string) => (turnSets.has(id) ? order.indexOf(id) : -1);
+  proposed.sort((a, b) => rank(a.id) - rank(b.id) || a.created_at.localeCompare(b.created_at));
+  const names = proposed.map((cs) => (deps.member.lang === "bg" ? cs.summary_bg : cs.summary_en)).join(" | ");
+  return `proposed: ${names} (waiting for the owner's ${proposed.length === 1 ? "decision" : "decisions"})`;
 }

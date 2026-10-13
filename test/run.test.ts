@@ -78,6 +78,16 @@ describe("runTurn", () => {
     const conv = await store.getConversation(venue.id, "tg:1001");
     expect(conv?.turns[0].outcome).toBe("proposed: Капучино 3,20 € (waiting for the owner's decision)");
   });
+  it("records every proposal one message created in the memory outcome", async () => {
+    const { deps, store, venue, items } = await setup();
+    const { client } = fakeClient([
+      { tool: "propose_changes", input: { summary_bg: "Капучино 3,20 €", summary_en: "Cappuccino €3.20", changes: [{ op: "set_price", item_id: items.Cappuccino.id, price_eur: 3.2 }] } },
+      { tool: "schedule_changes", input: { summary_bg: "Коледа", summary_en: "Christmas", apply_at: "2026-12-20T08:00:00+02:00", changes: [{ op: "add_holiday", date: "2026-12-25", note_bg: "Коледа", note_en: "Christmas" }] } },
+    ], { stop_reason: "end_turn", text: "" });
+    await runTurn(deps, { text: "капучиното е 3,20 и сме затворени на Коледа", source: "text" }, { model: "m", effort: "medium" }, client);
+    const conv = await store.getConversation(venue.id, "tg:1001");
+    expect(conv?.turns[0].outcome).toBe("proposed: Капучино 3,20 € | Коледа (waiting for the owner's decisions)");
+  });
   it("tells the owner when the model refuses or errors", async () => {
     const { deps, messenger } = await setup();
     const { client } = fakeClient([], { stop_reason: "refusal", text: "" });
@@ -98,5 +108,14 @@ describe("runTurn", () => {
     await runTurn(deps, { text: "не, 3,40", source: "text" }, { model: "m", effort: "medium" }, client);
     expect((await store.getChangeSet(old.id)).status).toBe("cancelled");
     expect(await store.findProposed(venue.id, "tg:1001")).not.toBeNull();
+  });
+});
+
+describe("SYSTEM_PROMPT", () => {
+  it("tells the agent to split a message into tasks and do every one", async () => {
+    const { SYSTEM_PROMPT } = await import("@/src/agent/prompt");
+    expect(SYSTEM_PROMPT).toMatch(/Split the owner's message into tasks/);
+    expect(SYSTEM_PROMPT).toMatch(/never stop after the first/i);
+    expect(SYSTEM_PROMPT).not.toMatch(/One proposal per message/);
   });
 });

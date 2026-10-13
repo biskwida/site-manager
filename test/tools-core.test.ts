@@ -57,17 +57,37 @@ describe("propose_changes", () => {
     expect(r).toMatchObject({ status: "applied", sold_out_until: "2026-10-11T05:00:00.000Z" });
     expect((await store.getSite(venue.id)).items.find((i) => i.id === items["Cheese banitsa"].id)?.sold_out_until).toBe("2026-10-11T05:00:00.000Z");
   });
-  it("returns an error for a stale id, a pending proposal, or a closed venue with next_opening unavailable", async () => {
-    const { tools, items, store, venue } = await setup();
+  it("returns an error for a stale id, a pending proposal from an earlier message, or a closed venue with next_opening unavailable", async () => {
+    const { tools, items, store, venue, deps } = await setup();
     expect(await call(tools, "propose_changes", { summary_bg: "x", summary_en: "x", changes: [{ op: "set_price", item_id: "nope", price_eur: 2 }] })).toEqual({ error: 'item_id "nope" not found; use an id from get_menu.' });
     await call(tools, "propose_changes", { summary_bg: "x", summary_en: "x", changes: [{ op: "set_price", item_id: items.Latte.id, price_eur: 3.5 }] });
-    const second = await call(tools, "propose_changes", { summary_bg: "y", summary_en: "y", changes: [{ op: "set_price", item_id: items.Latte.id, price_eur: 3.6 }] });
+    const nextMessage = makeTools(deps); // a new owner message = a new turn = new tools
+    const second = await call(nextMessage, "propose_changes", { summary_bg: "y", summary_en: "y", changes: [{ op: "set_price", item_id: items.Latte.id, price_eur: 3.6 }] });
     expect(second.error).toMatch(/already waiting for a decision/);
     const closed = { mon: null, tue: null, wed: null, thu: null, fri: null, sat: null, sun: null };
     const site = await store.getSite(venue.id);
     store.sites.get(venue.id)!.venue.hours = closed;
     const r = await call(tools, "propose_changes", { summary_bg: "x", summary_en: "x", changes: [{ op: "set_sold_out", item_id: site.items[0].id, until: "next_opening" }] });
     expect(r.error).toMatch(/no opening in the next 14 days/);
+  });
+  it("lets one message create several proposals (one per kind of task)", async () => {
+    const { tools, items, store, venue, messenger } = await setup();
+    const a = await call(tools, "propose_changes", { summary_bg: "Капучино 3,20 €", summary_en: "Cappuccino €3.20", changes: [{ op: "set_price", item_id: items.Cappuccino.id, price_eur: 3.2 }] });
+    const b = await call(tools, "schedule_changes", { summary_bg: "Коледа", summary_en: "Christmas", apply_at: "2026-12-20T08:00:00+02:00", changes: [{ op: "add_holiday", date: "2026-12-25", note_bg: "Коледа", note_en: "Christmas" }] });
+    expect(a.status).toBe("proposed");
+    expect(b.status).toBe("proposed");
+    expect(messenger.sent.filter((m) => m.setId)).toHaveLength(2);
+    const pending = (await store.listChangeSets(venue.id, { status: ["proposed"] })).map((cs) => cs.id).sort();
+    expect(pending).toEqual([a.change_set_id, b.change_set_id].sort());
+  });
+  it("replaces only the proposal the owner tapped ✏️ on, even when the earlier message left two", async () => {
+    const base = await setup();
+    const first = await call(base.tools, "propose_changes", { summary_bg: "x", summary_en: "x", changes: [{ op: "set_price", item_id: base.items.Latte.id, price_eur: 3.5 }] });
+    const other = await call(base.tools, "propose_changes", { summary_bg: "z", summary_en: "z", changes: [{ op: "set_price", item_id: base.items.Cappuccino.id, price_eur: 3.2 }] });
+    const tools = makeTools({ ...base.deps, correctionFor: first.change_set_id as string });
+    const second = await call(tools, "propose_changes", { summary_bg: "y", summary_en: "y", changes: [{ op: "set_price", item_id: base.items.Latte.id, price_eur: 3.4 }] });
+    expect(second.error).toMatch(/already waiting for a decision/); // the other pending one still needs a decision first
+    expect(second.error).toContain(other.change_set_id as string);
   });
   it("replaces the proposal the owner asked to change", async () => {
     const base = await setup();

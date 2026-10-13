@@ -98,7 +98,7 @@ describe("wp_edit_page", () => {
     expect(unknown.error).toMatch(/nope/);
   });
   it("keeps placeholders in the stored row on every path, proposes photos alone when the page is unchanged, and refuses before previewing when a proposal is pending", async () => {
-    const { tools, store, photo, wp } = await setup();
+    const { tools, store, photo, wp, deps } = await setup();
     const photos = [{ media_id: photo.id, alt_bg: "Витрина", alt_en: "Window" }];
     // A replacement whose replace text carries a placeholder: the plugin's preview resolves it to our URL for display only.
     const r = await call(tools, "wp_edit_page", { summary_bg: "Снимка в „За нас“", summary_en: "Photo on About", page_id: 2, replacements: [{ find: "every morning.", replace: `every morning.<img src="{{sm_media_url:${photo.id}}}">` }], photos });
@@ -108,9 +108,9 @@ describe("wp_edit_page", () => {
     expect(String(cs.changes[1].after?.content)).toContain(`{{sm_media_url:${photo.id}}}`);
     expect(String(cs.changes[1].after?.content)).not.toContain(photo.public_url);
     expect(wp.pending.get(2)?.after.content).toContain(photo.public_url);
-    // Another proposal pending: refused before the plugin stores a preview for the page.
+    // A proposal from an earlier message pending: the next message is refused before the plugin stores a preview for the page.
     wp.pending.delete(2);
-    const refused = await call(tools, "wp_edit_page", { summary_bg: "x", summary_en: "x", page_id: 2, title: "Y" });
+    const refused = await call(makeTools(deps), "wp_edit_page", { summary_bg: "x", summary_en: "x", page_id: 2, title: "Y" });
     expect(refused.error).toMatch(/already waiting for a decision/);
     expect(wp.pending.has(2)).toBe(false);
     await store.updateChangeSet(cs.id, { status: "cancelled" });
