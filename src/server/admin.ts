@@ -9,6 +9,7 @@ import type { Deployer, DeployInput, DomainInstructions } from "../deploy/types"
 import { normalizeDomain } from "../deploy/vercel-domains";
 import type { DestinationStatus, Store, SyncStatus } from "../store/types";
 import { formatDateTime } from "../time";
+import { changeUsage } from "../store/usage";
 import { accentAfterTemplateSwitch } from "../wizard/schema";
 import { connectedApps, type ConnectedApp } from "./connect-apps";
 import { publishedIn, safeLink } from "../destinations/social-common";
@@ -37,6 +38,8 @@ export interface AdminOverview {
   connected_apps: ConnectedApp[];
   /** "Facebook and Instagram" card. */
   social?: SocialOverview;
+  /** Monthly change limit (src/domain/limits.ts): changes applied this calendar month in the venue's zone; limit null = unlimited. */
+  changes_this_month?: { used: number; limit: number | null };
 }
 
 export async function adminOverview(store: Store, venue: Venue, now: Date, baseUrl = "", opts: { hosted?: boolean; social?: { facebook: boolean; instagram: boolean } } = {}): Promise<AdminOverview> {
@@ -69,7 +72,13 @@ export async function adminOverview(store: Store, venue: Venue, now: Date, baseU
     wordpress: await wordPressOverview(store, venue.id),
     connected_apps: connectedApps(members),
     social: await socialOverview(store, venue.id, opts.social ?? { facebook: false, instagram: false }),
+    changes_this_month: await changesThisMonth(store, venue, now),
   };
+}
+
+async function changesThisMonth(store: Store, venue: Venue, now: Date): Promise<{ used: number; limit: number | null }> {
+  const u = await changeUsage(store, venue, now);
+  return { used: u.used, limit: u.limit };
 }
 
 export type AdminActionName = "apply" | "reject" | "cancel" | "undo";

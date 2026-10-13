@@ -47,7 +47,7 @@ export function AdminPanel({ slug, adminKey, initial }: { slug: string; adminKey
             </ul>
           )}
         </Section>
-        <LogList sets={o.log} tz={tz} decide={decide} />
+        <LogList sets={o.log} tz={tz} decide={decide} usage={o.changes_this_month} />
         <AppsCard apps={o.connected_apps ?? []} post={post} />
         <WordPressCard overview={o.wordpress ?? null} slug={slug} adminKey={adminKey} baseUrl={o.public_url.replace(new RegExp(`/${slug}$`), "")} tz={tz} />
         <SocialCard overview={o.social ?? null} slug={slug} adminKey={adminKey} tz={tz} />
