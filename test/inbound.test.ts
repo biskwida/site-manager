@@ -181,6 +181,40 @@ describe("handleInbound", () => {
   });
 });
 
+describe("handleInbound: own-site venues", () => {
+  it("welcomes the owner with the venue's own site, says it is connected and managed, and never announces publishing", async () => {
+    const joined: string[] = [];
+    const { d, messenger, store, venue } = await setup({ onOwnerJoined: (id) => joined.push(id) });
+    await store.updateVenue(venue.id, { site_url: "https://coffique.vercel.app" });
+    const bg = await store.createInvite(venue.id, "owner", "2026-10-10T00:00:00.000Z");
+    await handleInbound(d, { chatRef: "fb:950", kind: "text", text: bg });
+    const [welcomeBg, ownBg, ...restBg] = texts(messenger);
+    expect(welcomeBg).toMatch(/^Свързахте се като собственик/);
+    expect(welcomeBg).toContain("Сайт: https://coffique.vercel.app\n");
+    expect(welcomeBg).not.toContain("https://site.example/agala\n");
+    expect(ownBg).toBe("Сайтът ви https://coffique.vercel.app е свързан и аз го поддържам: промените, които одобрите тук, се появяват на него.");
+    expect(restBg).toEqual([]); // no "your site is being published"
+    expect(joined).toEqual([venue.id]); // startDeploy is still called and skips the own site itself
+
+    messenger.sent.length = 0;
+    const en = await store.createInvite(venue.id, "owner", "2026-10-10T00:00:00.000Z");
+    await handleInbound(d, { chatRef: "tg:951", kind: "text", text: `/start ${en}`, langHint: "en" });
+    const [welcomeEn, ownEn, ...restEn] = texts(messenger);
+    expect(welcomeEn).toMatch(/^You are linked as the owner/);
+    expect(welcomeEn).toContain("Site: https://coffique.vercel.app\n");
+    expect(ownEn).toBe("Your site https://coffique.vercel.app is connected and I manage it: the changes you approve here appear on it.");
+    expect(restEn).toEqual([]);
+  });
+
+  it("gives staff the venue's own site too", async () => {
+    const { d, messenger, store, venue } = await setup();
+    await store.updateVenue(venue.id, { site_url: "https://coffique.vercel.app" });
+    const code = await store.createInvite(venue.id, "staff", "2026-10-10T00:00:00.000Z");
+    await handleInbound(d, { chatRef: "fb:952", kind: "text", text: code });
+    expect(texts(messenger).at(-1)).toMatch(/Сайт: https:\/\/coffique\.vercel\.app$/);
+  });
+});
+
 describe("handleInbound: WordPress /connect and venue switching on Meta channels", () => {
   it("runs /connect from WhatsApp and Messenger with the whole argument (url and code)", async () => {
     const calls: unknown[] = [];

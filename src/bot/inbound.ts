@@ -153,18 +153,22 @@ async function welcome(d: BotDeps, member: Member, previous: Member | null) {
   const venue = await d.store.getVenue(member.venue_id);
   const c = copy(member.lang);
   if (previous && previous.venue_id !== member.venue_id) await d.messenger.send(member.chat_ref, c.switched(venue.name));
+  // An own site (built and hosted elsewhere, reads our feed) is the site the owner and staff know.
+  const site = venue.site_url || publicUrl(d.baseUrl, venue.slug);
   if (member.role === "owner") {
-    await d.messenger.send(member.chat_ref, c.welcome(venue.name, adminUrl(d.baseUrl, venue.slug, await d.store.getAdminToken(venue.id)), publicUrl(d.baseUrl, venue.slug), channelOf(member.chat_ref)));
+    await d.messenger.send(member.chat_ref, c.welcome(venue.name, adminUrl(d.baseUrl, venue.slug, await d.store.getAdminToken(venue.id)), site, channelOf(member.chat_ref)));
+    if (venue.site_url) await d.messenger.send(member.chat_ref, c.ownSite(venue.site_url));
     if (d.onOwnerJoined) {
-      // The first owner join is the human check that publishes the site; startDeploy ignores venues that already have one.
-      if (venue.status === "live" && venue.deploy === null) await d.messenger.send(member.chat_ref, c.publishing);
+      // The first owner join is the human check that publishes the site; startDeploy ignores venues that already have one
+      // and venues with their own site (nothing to publish, so no "being published" line either).
+      if (!venue.site_url && venue.status === "live" && venue.deploy === null) await d.messenger.send(member.chat_ref, c.publishing);
       try {
         d.onOwnerJoined(venue.id);
       } catch (e) {
         console.error("[bot] onOwnerJoined failed:", e instanceof Error ? e.message : e);
       }
     }
-  } else await d.messenger.send(member.chat_ref, c.welcomeStaff(venue.name, publicUrl(d.baseUrl, venue.slug)));
+  } else await d.messenger.send(member.chat_ref, c.welcomeStaff(venue.name, site));
 }
 
 async function welcomeBack(d: BotDeps, member: Member) {
