@@ -38,3 +38,11 @@ export function limitState(used: number, limit: number | null): LimitState {
 export function countsTowardLimit(source: ChangeSource): boolean {
   return source !== "undo" && source !== "auto";
 }
+
+/** Parses a --change-limit argument: "none" (or "null", "unlimited") clears the limit, a whole number >= 0 sets it; anything else is an Error. */
+export function parseChangeLimit(raw: string): number | null | Error {
+  const v = raw.trim().toLowerCase();
+  if (v === "none" || v === "null" || v === "unlimited") return null;
+  if (!/^\d{1,6}$/.test(v)) return new Error(`--change-limit must be a whole number >= 0 or "none", got "${raw}"`);
+  return Number(v);
+}

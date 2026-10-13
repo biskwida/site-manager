@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { countsTowardLimit, limitState, monthWindow } from "@/src/domain/limits";
+import { countsTowardLimit, limitState, monthWindow, parseChangeLimit } from "@/src/domain/limits";
 
 const TZ = "Europe/Sofia";
 
@@ -47,5 +47,15 @@ describe("countsTowardLimit", () => {
     for (const s of ["text", "voice", "photo", "dashboard"] as const) expect(countsTowardLimit(s)).toBe(true);
     expect(countsTowardLimit("undo")).toBe(false);
     expect(countsTowardLimit("auto")).toBe(false);
+  });
+});
+
+describe("parseChangeLimit", () => {
+  it("reads a whole number or none", () => {
+    expect(parseChangeLimit("60")).toBe(60);
+    expect(parseChangeLimit(" 0 ")).toBe(0);
+    expect(parseChangeLimit("none")).toBeNull();
+    expect(parseChangeLimit("NONE")).toBeNull();
+    for (const bad of ["", "-1", "2.5", "sixty", "1e3"]) expect(parseChangeLimit(bad)).toBeInstanceOf(Error);
   });
 });

@@ -1,13 +1,15 @@
 // scripts/venue-create.mts
-// npm run venue:create -- --name "Кафене „Ъгъла“" --slug agala --lang bg [--seed demo|coffique] [--tz Europe/Sofia]
+// npm run venue:create -- --name "Кафене „Ъгъла“" --slug agala --lang bg [--seed demo|coffique] [--tz Europe/Sofia] [--change-limit 60]
 // Prints the owner invite code, a staff invite code and the admin link ONCE. Keep them.
 import { INVITE_TTL_MS } from "../src/bot/links";
+import { parseChangeLimit } from "../src/domain/limits";
 import { startLinks } from "../src/channels/links";
 import { seedCoffique } from "../src/seed/coffique";
 import { seedDemo } from "../src/seed/demo";
 import { makeServerDeps } from "../src/server/deps";
 
-const USAGE = `Usage: npm run venue:create -- --name "Name" --slug my-cafe [--lang bg|en] [--tz Europe/Sofia] [--seed demo|coffique]
+const USAGE = `Usage: npm run venue:create -- --name "Name" --slug my-cafe [--lang bg|en] [--tz Europe/Sofia] [--seed demo|coffique] [--change-limit 60|none]
+  --change-limit   applied changes per calendar month (Menu plan 40, Everywhere plan 150); default none = unlimited
   --seed demo      creates the demo café (menu, texts, hours); the demo's own name and language are used, --name/--lang are ignored (and optional)
   --seed coffique  creates Coffique (real menu, texts, hours); its own name and language are used, --name/--lang are ignored (and optional)`;
 
@@ -33,6 +35,11 @@ if (args.has("seed") && !seed) {
   process.exit(1);
 }
 const lang = args.get("lang") === "en" ? "en" : "bg";
+const changeLimit = args.has("change-limit") ? parseChangeLimit(args.get("change-limit") ?? "") : null;
+if (changeLimit instanceof Error) {
+  console.error(`${changeLimit.message}\n${USAGE}`);
+  process.exit(1);
+}
 
 const deps = await makeServerDeps({ defer: (fn) => void fn() });
 if (await deps.store.getVenueBySlug(slug)) {
@@ -43,6 +50,7 @@ if (seed) console.log(`--seed ${seed}: using the seed venue's name and language 
 const venue = seed
   ? (await SEEDS[seed](deps.store, slug)).venue
   : await deps.store.createVenue({ slug, name: name as string, default_lang: lang, tz: args.get("tz") || "Europe/Sofia" });
+if (changeLimit !== null) await deps.store.setChangeLimit(venue.id, changeLimit);
 
 const expires = new Date(Date.now() + INVITE_TTL_MS).toISOString();
 const owner = await deps.store.createInvite(venue.id, "owner", expires);
@@ -50,6 +58,7 @@ const staff = await deps.store.createInvite(venue.id, "staff", expires);
 const token = await deps.store.getAdminToken(venue.id);
 console.log(`venue ${venue.slug} created (${venue.id})${deps.isMemory ? " in the MEMORY store (lost on exit)" : ""}`);
 console.log(`site:        ${deps.config.publicBaseUrl}/${venue.slug}`);
+console.log(`change limit: ${changeLimit === null ? "unlimited" : `${changeLimit} per month`} (change it with npm run venue:set)`);
 console.log(`admin link:  ${deps.config.publicBaseUrl}/admin/${venue.slug}?key=${token}`);
 console.log(`owner code:  /start ${owner}   (valid 7 days, one use)`);
 console.log(`staff code:  /start ${staff}   (valid 7 days, one use)`);
