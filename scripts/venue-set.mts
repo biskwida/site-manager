@@ -5,12 +5,12 @@
 import { parseChangeLimit } from "../src/domain/limits";
 import { makeServerDeps } from "../src/server/deps";
 import { changeUsage } from "../src/store/usage";
+import { parseArgs } from "./invite-lines.mts";
 
 const USAGE = `Usage: npm run venue:set -- --slug my-cafe --change-limit 60|none
   --change-limit  applied change sets per calendar month in the venue's time zone (undo and automatic sets do not count); none = unlimited`;
 
-const args = new Map<string, string>();
-for (let i = 2; i < process.argv.length; i += 2) args.set(process.argv[i].replace(/^--/, ""), process.argv[i + 1] ?? "");
+const args = parseArgs(process.argv);
 const slug = args.get("slug")?.trim();
 if (!slug || !args.has("change-limit")) {
   console.error(USAGE);
