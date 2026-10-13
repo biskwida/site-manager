@@ -2,7 +2,7 @@
 import { describe, expect, it } from "vitest";
 import { planChanges } from "@/src/domain/changes";
 import { newDraftToken, sha256Hex } from "@/src/server/hash";
-import { loadSite, publicSiteState } from "@/src/server/site";
+import { loadSite, ownSiteRedirect, publicSiteState } from "@/src/server/site";
 import { templatePageProps } from "@/app/[slug]/props";
 import { makeDemo } from "./helpers";
 
@@ -96,3 +96,15 @@ describe("hosted page props", () => {
   });
 });
 
+
+describe("ownSiteRedirect", () => {
+  it("sends visitors of an own-site venue to its site, but keeps draft previews on the hosted page", async () => {
+    const { store, venue } = await makeDemo();
+    const hosted = await loadSite(store, venue.slug);
+    expect(ownSiteRedirect(hosted!)).toBeNull();
+    await store.updateVenue(venue.id, { site_url: "https://coffique.example" });
+    const own = await loadSite(store, venue.slug);
+    expect(ownSiteRedirect(own!)).toBe("https://coffique.example");
+    expect(ownSiteRedirect({ ...own!, draft: { id: "d1", summary_bg: "", summary_en: "", apply_at: null } as never })).toBeNull();
+  });
+});
