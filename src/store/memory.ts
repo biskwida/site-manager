@@ -242,6 +242,33 @@ export class InMemoryStore implements Store {
     for (const [venueId, t] of this.tokens) if (t === token) return this.getVenue(venueId);
     return null;
   }
+  async removeMember(venueId: string, chatRef: string) {
+    const m = this.members.get(chatRef);
+    if (!m || m.venue_id !== venueId) return false;
+    return this.members.delete(chatRef);
+  }
+  async listInvites(venueId: string, now: string) {
+    return [...this.invites.values()]
+      .filter((i) => i.venue_id === venueId && Date.parse(i.expires_at) > Date.parse(now))
+      .sort((a, b) => a.expires_at.localeCompare(b.expires_at))
+      .map((i) => ({ role: i.role, code_hint: i.code.slice(-4), expires_at: i.expires_at, used: i.used_at !== null }));
+  }
+  async cancelInvites(venueId: string, role?: Role) {
+    let n = 0;
+    for (const [code, i] of this.invites) {
+      if (i.venue_id === venueId && i.used_at === null && (role === undefined || i.role === role)) {
+        this.invites.delete(code);
+        n++;
+      }
+    }
+    return n;
+  }
+  async rotateAdminToken(venueId: string) {
+    this.site(venueId);
+    const t = newToken();
+    this.tokens.set(venueId, t);
+    return t;
+  }
 
   async createChangeSet(cs: NewChangeSet): Promise<ChangeSet> {
     this.site(cs.venue_id);

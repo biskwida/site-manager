@@ -337,6 +337,27 @@ export class SupabaseStore implements Store {
     if (error) throw new Error(`findVenueByAdminToken: ${error.message}`);
     return data ? this.getVenue(data.venue_id as string) : null;
   }
+  async removeMember(venueId: string, chatRef: string) {
+    if (badVenue(venueId)) return false;
+    const rows = await must(this.db.from("venue_members").delete().eq("venue_id", venueId).eq("chat_ref", chatRef).select("chat_ref"), "removeMember");
+    return rows.length > 0;
+  }
+  async listInvites(venueId: string, now: string) {
+    if (badVenue(venueId)) return [];
+    const rows = await must(this.db.from("venue_invites").select("code, role, expires_at, used_at").eq("venue_id", venueId).gt("expires_at", now).order("expires_at"), "listInvites");
+    return rows.map((r) => ({ role: r.role as Role, code_hint: str(r.code).slice(-4), expires_at: iso(r.expires_at), used: r.used_at !== null }));
+  }
+  async cancelInvites(venueId: string, role?: Role) {
+    if (badVenue(venueId)) return 0;
+    let q = this.db.from("venue_invites").delete().eq("venue_id", venueId).is("used_at", null);
+    if (role) q = q.eq("role", role);
+    return (await must(q.select("code"), "cancelInvites")).length;
+  }
+  async rotateAdminToken(venueId: string) {
+    const token = newToken();
+    await mustRows(this.db.from("venue_admin_tokens").upsert({ venue_id: venueId, token }, { onConflict: "venue_id" }).select("venue_id"), "rotateAdminToken");
+    return token;
+  }
 
   async createChangeSet(cs: NewChangeSet) {
     const { changes, message_ref, ...head } = cs;

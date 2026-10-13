@@ -76,6 +76,14 @@ export type VenuePatch = Partial<Pick<Venue,
   "slug" | "name" | "tagline_bg" | "tagline_en" | "about_bg" | "about_en" | "address" | "phone" | "maps_url" | "instagram" |
   "hours" | "tz" | "default_lang" | "theme" | "template" | "business_type" | "status" | "wizard_draft" | "instagram_import">>;
 
+export interface InviteSummary {
+  role: Role;
+  /** Last 4 characters of the code, enough to tell codes apart, not enough to redeem one. */
+  code_hint: string;
+  expires_at: string;
+  used: boolean;
+}
+
 export interface ExpiredTimer {
   item: Item;
   kind: "sold_out" | "special";
@@ -140,6 +148,14 @@ export interface Store {
   /** Creates the token on first call. */
   getAdminToken(venueId: string): Promise<string>;
   findVenueByAdminToken(token: string): Promise<Venue | null>;
+  /** Unlinks the chat from this venue; true when a row was deleted (false when the chat is not this venue's member). The chat is then a stranger to the bot. */
+  removeMember(venueId: string, chatRef: string): Promise<boolean>;
+  /** Invites that have not expired at `now`, used ones included, soonest expiry first. Codes are stored in plain text; only the last 4 characters leave the store. */
+  listInvites(venueId: string, now: string): Promise<InviteSummary[]>;
+  /** Deletes the venue's unused invites (expired ones too) of `role`, or of every role when omitted; returns how many. Used ones stay as history. */
+  cancelInvites(venueId: string, role?: Role): Promise<number>;
+  /** Replaces the dashboard key with a fresh one (creating it if there was none) and returns it; the old key stops working at once. Throws on an unknown venue. */
+  rotateAdminToken(venueId: string): Promise<string>;
 
   // change sets
   createChangeSet(cs: NewChangeSet): Promise<ChangeSet>;
