@@ -7,7 +7,7 @@ import { describe, expect, it } from "vitest";
 
 const ROOT = fileURLToPath(new URL("..", import.meta.url));
 const TEMPLATES = join(ROOT, "src", "templates");
-const DOMAIN_ALLOWED = new Set(["types", "format", "effective", "hours", "allergens"]);
+const DOMAIN_ALLOWED = new Set(["types", "format", "effective", "hours", "allergens", "color"]);
 
 function walk(dir: string, out: string[] = []): string[] {
   for (const name of readdirSync(dir)) {

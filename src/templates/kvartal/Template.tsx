@@ -3,6 +3,7 @@ import type { CSSProperties } from "react";
 import { useLang } from "@/src/i18n";
 import type { TemplateProps } from "../index";
 import { capAccent, ensureContrast, mixHex } from "../shared/color";
+import { groundFor, onGround, readableOn, type Ground } from "../shared/ground";
 import { mediaUrl } from "../shared/media";
 import { useLiveSite, useNow } from "../shared/useLiveSite";
 import { menuSections, type MediaLookup } from "./bits";
@@ -45,6 +46,29 @@ export function accentVars(accent: string) {
   };
 }
 
+/**
+ * The owner's background (shared/ground.ts): paper, the pressed tint, ink, soft and muted text, hairlines from the ground.
+ * The ink blocks ("Today", the current tab) keep their inversion: their text is the ground colour. The accent as text reads
+ * >= 4.5:1 on both papers and as the "Now" fill under that text. Nothing without a background.
+ */
+export function groundVars(g: Ground | null, accent: string): Record<string, string> {
+  if (!g) return {};
+  return {
+    "--kv-bg": g.bg,
+    "--kv-bg-2": g.bg2,
+    "--kv-ink": g.ink,
+    "--kv-soft": g.inkSoft,
+    "--kv-mute": onGround(mixHex(g.inkSoft, g.bg, 0.85), g, [g.bg]),
+    "--kv-line": g.line,
+    "--kv-on": g.bg,
+    "--kv-on-soft": readableOn(mixHex(g.bg, g.ink, 0.7), [g.ink], !g.dark),
+    "--kv-accent-text": onGround(accent, g, [g.bg, g.bg2]),
+    "--kv-accent-fill": onGround(accent, g, [g.bg]),
+    "--kv-accent-soft": mixHex(accent, g.bg, 0.14),
+    colorScheme: g.dark ? "dark" : "light",
+  };
+}
+
 /** Kvartal: Swiss 12-column grid, poster-sized headline, numbered menu tables; brunch by day, cocktails by night (Geologica + Fira Sans). */
 export function Template({ state: initial, now: initialNow, slug, page, draft, live, feedUrl, preview = false }: TemplateProps) {
   const { state, changed } = useLiveSite(initial, feedUrl, live);
@@ -54,7 +78,7 @@ export function Template({ state: initial, now: initialNow, slug, page, draft, l
   const { sections, numbers } = menuSections(state, now);
   const menuProps = { state, now, changed, media, slug, sections, numbers };
   return (
-    <div className={`tpl-kvartal ${fontVars}`} style={{ "--accent": accent, ...accentVars(accent) } as CSSProperties} data-page={page}>
+    <div className={`tpl-kvartal ${fontVars}`} style={{ "--accent": accent, ...accentVars(accent), ...groundVars(groundFor(state.venue.theme.background), accent) } as CSSProperties} data-page={page}>
       {draft && <DraftNote summary_bg={draft.summary_bg} summary_en={draft.summary_en} />}
       <Header state={state} slug={slug} page={page} media={media} />
       <main id="main" className="kv-main">

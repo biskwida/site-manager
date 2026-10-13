@@ -223,7 +223,7 @@ export function makeTools(deps: AgentDeps) {
             name: s.venue.name, slug: s.venue.slug, tz: s.venue.tz, default_lang: s.venue.default_lang,
             tagline_bg: s.venue.tagline_bg, tagline_en: s.venue.tagline_en, about_bg: s.venue.about_bg, about_en: s.venue.about_en,
             address: s.venue.address, phone: s.venue.phone, maps_url: s.venue.maps_url, instagram: s.venue.instagram,
-            theme: s.venue.theme, has_cover: s.venue.cover_media_id !== null, has_logo: s.venue.logo_media_id !== null,
+            theme: { ...s.venue.theme, background: s.venue.theme.background ?? null }, has_cover: s.venue.cover_media_id !== null, has_logo: s.venue.logo_media_id !== null,
           },
           texts: Object.fromEntries(s.texts.map((t) => [t.key, { bg: t.text_bg, en: t.text_en }])),
           hours: s.venue.hours,

@@ -1,9 +1,10 @@
 import { formatDate, formatDateTime, hhmm, localTime } from "../time";
 import { allergenName } from "./allergens";
+import { colorName, inkFor, INK_LIGHT } from "./color";
 import { categoryName, formatPrice, itemName, quote, tr, weekdayLabel } from "./format";
 import { socialPreviewLines } from "./social-preview";
 import { wpPreviewLines } from "./wp-preview";
-import { MONO_TEXT_KEYS, WEEKDAYS, type Change, type Item, type Lang, type Row, type SiteState, type TextKey, type WeekHours } from "./types";
+import { MONO_TEXT_KEYS, WEEKDAYS, type Change, type Item, type Lang, type Row, type SiteState, type TextKey, type Theme, type WeekHours } from "./types";
 
 const FIELD: Record<string, { bg: string; en: string }> = {
   name_bg: { bg: "име (BG)", en: "name (BG)" },
@@ -25,6 +26,30 @@ const TEXT_LABEL: Record<string, { bg: string; en: string }> = {
   maps_url: { bg: "Линк към картата", en: "Map link" },
   instagram: { bg: "Instagram", en: "Instagram" },
 };
+
+/** "#1f3d2b (тъмнозелено)"; with `ink`, also which text the site puts on it: "#1f3d2b (dark green, light text)". */
+function colourLabel(hex: string, lang: Lang, ink = false): string {
+  const name = colorName(hex, lang);
+  const text = ink ? (inkFor(hex) === INK_LIGHT ? tr(lang, "светъл текст", "light text") : tr(lang, "тъмен текст", "dark text")) : "";
+  const parts = [name, text].filter(Boolean);
+  return parts.length ? `${hex} (${parts.join(", ")})` : hex;
+}
+
+/** Lines for a set_theme change: one per colour that differs (the accent line alone when nothing does). */
+function themeLines(b: Row, a: Row, lang: Lang): string[] {
+  const before = (b.theme ?? {}) as Theme;
+  const after = (a.theme ?? {}) as Theme;
+  const bgBefore = before.background ?? null;
+  const bgAfter = after.background ?? null;
+  const lines: string[] = [];
+  const accentLine = () => `• ${tr(lang, "Акцентен цвят", "Accent colour")}: ${before.accent ?? "—"} → ${colourLabel(after.accent, lang)}`;
+  if (after.accent !== before.accent) lines.push(accentLine());
+  if (bgAfter !== bgBefore) {
+    const byDefault = tr(lang, "по подразбиране", "design default");
+    lines.push(`• ${tr(lang, "Фон", "Background")}: ${bgBefore ?? byDefault} → ${bgAfter === null ? byDefault : colourLabel(bgAfter, lang, true)}`);
+  }
+  return lines.length ? lines : [accentLine()];
+}
 
 function allergenLine(codes: number[], lang: Lang): string {
   if (codes.length === 0) return tr(lang, "  Алергени: няма", "  Allergens: none");
@@ -168,7 +193,7 @@ export function renderPreview(s: SiteState, changes: Change[], lang: Lang, tz: s
         break;
       }
       case "set_theme":
-        lines.push(`• ${tr(lang, "Цвят на темата", "Accent colour")}: ${(b.theme as { accent: string } | undefined)?.accent ?? "—"} → ${(a.theme as { accent: string }).accent}`);
+        lines.push(...themeLines(b, a, lang));
         break;
       case "wp_edit_page":
       case "wp_upload_photo":
