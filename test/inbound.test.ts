@@ -143,6 +143,18 @@ describe("handleInbound", () => {
     expect(texts(bad.messenger)[0]).toBe("Не успях да изтегля снимката. Опитайте отново.");
     expect(bad.runs).toHaveLength(0);
   });
+  it("holds a photo sent without a caption: no agent run, one question, and an album asks only once", async () => {
+    const { d, runs, messenger, store, venue } = await setup();
+    const photo = { download: async () => ({ bytes: new Uint8Array([9, 9]), contentType: "image/jpeg", name: "a.jpg" }) };
+    await handleInbound(d, { chatRef: "tg:1001", kind: "photo", media: photo });
+    await handleInbound(d, { chatRef: "tg:1001", kind: "photo", text: "  ", media: photo });
+    expect(runs).toHaveLength(0);
+    expect(texts(messenger)).toEqual(["📷 Получих снимката. Какво да направя с нея? Напишете или изпратете гласово съобщение."]);
+    expect((await store.getSite(venue.id)).media).toHaveLength(2);
+    const conv = await store.getConversation(venue.id, "tg:1001");
+    expect(conv?.turns[0].media_ids).toHaveLength(2);
+    expect(conv?.turns[0].waiting).toBe(true);
+  });
   it("transcribes voice with the media's content type", async () => {
     const seen: string[] = [];
     const { d, runs, messenger } = await setup({ transcribe: async (_b, _l, ct) => { seen.push(ct ?? ""); return "Капучиното става три и двайсет"; } });

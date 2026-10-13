@@ -38,21 +38,25 @@ export async function runTurn(deps: AgentDeps, input: TurnInput, cfg: AgentConfi
   const venue = await deps.store.getVenue(deps.venueId);
   const memory = await loadMemory(deps.store, deps.venueId, deps.chatRef, now);
   const lang = deps.member.lang;
+  const held = memory.waiting;
   const text = userMessage({
     venueName: venue.name, slug: venue.slug, nowText: nowText(now, venue.tz), lang, role: deps.member.role,
-    memory: memory.text, correctionFor: memory.correctionFor, mediaId: input.mediaId, text: input.text, source: input.source,
+    memory: memory.text, correctionFor: memory.correctionFor, mediaId: input.mediaId, heldMediaIds: held, text: input.text, source: input.source,
   });
   const content = [
+    ...(await heldPhotoUrls(deps, held)).map((url) => ({ type: "image" as const, source: { type: "url" as const, url } })),
     ...(input.image ? [{ type: "image" as const, source: { type: "base64" as const, media_type: input.image.media_type, data: input.image.data } }] : []),
     { type: "text" as const, text },
   ];
   const turnSets = new Set<string>();
   const tools = makeTools({ ...deps, correctionFor: memory.correctionFor, source: input.source, turnSets });
-  const ownerLine = `${input.source === "voice" ? "[voice] " : input.source === "photo" ? "[photo] " : ""}${input.text}`.trim();
+  const tag = input.source === "voice" ? "[voice] " : input.source === "photo" ? `[photo media_id: ${input.mediaId ?? "?"}] ` : "";
+  const about = held.length ? `[about the photos above: media_id ${held.join(", ")}] ` : "";
+  const ownerLine = `${tag}${about}${input.text}`.trim();
 
   const closeOut = async (reply: string, outcome?: string) => {
     if (reply) await deps.messenger.send(deps.chatRef, reply);
-    await appendMemory(deps.store, deps.venueId, deps.chatRef, { at: now.toISOString(), owner: ownerLine, agent: reply || "(no reply)", outcome }, now);
+    await appendMemory(deps.store, deps.venueId, deps.chatRef, { at: now.toISOString(), owner: ownerLine, agent: reply || "(no reply)", outcome }, now, held);
   };
 
   let final: { stop_reason: string | null; content: { type: string; text?: string }[] };
@@ -62,7 +66,7 @@ export async function runTurn(deps: AgentDeps, input: TurnInput, cfg: AgentConfi
       model: cfg.model,
       max_tokens: 16000,
       max_iterations: 30,
-      output_config: { effort: pickEffort(cfg.effort, { hasImage: !!input.image, text: input.text }) },
+      output_config: { effort: pickEffort(cfg.effort, { hasImage: !!input.image || held.length > 0, text: input.text }) },
       // One tool call at a time: proposals must be sequential and the queue in makeTools expects it.
       tool_choice: { type: "auto", disable_parallel_tool_use: true },
       betas: ["server-side-fallback-2026-07-01"],
@@ -96,4 +100,14 @@ async function pendingOutcome(deps: AgentDeps, turnSets: Set<string>): Promise<s
   proposed.sort((a, b) => rank(a.id) - rank(b.id) || a.created_at.localeCompare(b.created_at));
   const names = proposed.map((cs) => (deps.member.lang === "bg" ? cs.summary_bg : cs.summary_en)).join(" | ");
   return `proposed: ${names} (waiting for the owner's ${proposed.length === 1 ? "decision" : "decisions"})`;
+}
+
+/** Public https addresses of the held photos, for Claude to fetch. Photos without one (offline storage) are only named by id in the text. */
+async function heldPhotoUrls(deps: AgentDeps, ids: string[]): Promise<string[]> {
+  const urls: string[] = [];
+  for (const id of ids) {
+    const m = await deps.store.getMedia(id).catch(() => null);
+    if (m && m.venue_id === deps.venueId && /^https:\/\//.test(m.public_url)) urls.push(m.public_url);
+  }
+  return urls;
 }

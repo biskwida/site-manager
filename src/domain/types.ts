@@ -281,6 +281,10 @@ export interface ConversationTurn {
   owner: string;
   agent: string;
   outcome?: string;
+  /** Photos this turn is about (stored media ids). */
+  media_ids?: string[];
+  /** Photos sent without instructions, held for the owner's next message. */
+  waiting?: boolean;
 }
 export interface Conversation {
   turns: ConversationTurn[];

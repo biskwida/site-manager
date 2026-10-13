@@ -3,7 +3,7 @@ import type Anthropic from "@anthropic-ai/sdk";
 import { describe, expect, it } from "vitest";
 import type { AgentDeps } from "@/src/agent/tools";
 import { pickEffort, runTurn } from "@/src/agent/run";
-import { appendMemory } from "@/src/agent/memory";
+import { appendMemory, holdPhoto, loadMemory } from "@/src/agent/memory";
 import { FakeMessenger, makeDemo } from "./helpers";
 
 const T0 = new Date("2026-10-09T09:00:00.000Z");
@@ -67,7 +67,7 @@ describe("runTurn", () => {
     expect(messenger.sent[0]).toMatchObject({ chatRef: "tg:1001", text: "Готово, върнах я." });
     const conv = await store.getConversation(venue.id, "tg:1001");
     expect(conv?.turns).toHaveLength(2);
-    expect(conv?.turns[1]).toMatchObject({ owner: "[photo] това е новата корица", agent: "Готово, върнах я." });
+    expect(conv?.turns[1]).toMatchObject({ owner: "[photo media_id: m-1] това е новата корица", agent: "Готово, върнах я." });
   });
   it("records the proposal outcome and does not relay an empty final text", async () => {
     const { deps, messenger, store, venue, items } = await setup();
@@ -87,6 +87,37 @@ describe("runTurn", () => {
     await runTurn(deps, { text: "капучиното е 3,20 и сме затворени на Коледа", source: "text" }, { model: "m", effort: "medium" }, client);
     const conv = await store.getConversation(venue.id, "tg:1001");
     expect(conv?.turns[0].outcome).toBe("proposed: Капучино 3,20 € | Коледа (waiting for the owner's decisions)");
+  });
+  it("attaches photos held without instructions to the next message and claims them", async () => {
+    const { deps, store, venue } = await setup();
+    const a = await store.saveMedia(venue.id, new Uint8Array([1]), "image/jpeg");
+    const b = await store.saveMedia(venue.id, new Uint8Array([2]), "image/jpeg");
+    const getMedia = store.getMedia.bind(store);
+    store.getMedia = async (id: string) => {
+      const m = await getMedia(id);
+      return m && { ...m, public_url: m.public_url.replace("memory://media/", "https://media.example/") };
+    };
+    await holdPhoto(store, venue.id, "tg:1001", a.id, "ack", T0);
+    await holdPhoto(store, venue.id, "tg:1001", b.id, "ack", T0);
+    const { client, calls } = fakeClient([], { stop_reason: "end_turn", text: "Готово." });
+    await runTurn(deps, { text: "сложи първата за корица, а втората в Instagram", source: "voice" }, { model: "m", effort: "medium" }, client);
+    const p = calls[0];
+    expect(p.output_config).toEqual({ effort: "high" });
+    const content = (p.messages as { content: { type: string; text?: string; source?: { type: string; url?: string } }[] }[])[0].content;
+    expect(content.slice(0, 2).map((c) => c.source)).toEqual([{ type: "url", url: `https://media.example/${a.storage_path}` }, { type: "url", url: `https://media.example/${b.storage_path}` }]);
+    expect(content[2].text).toContain(`media_id: ${a.id}, media_id: ${b.id}`);
+    expect(content[2].text).toContain("waiting for instructions");
+    expect((await loadMemory(store, venue.id, "tg:1001", T0)).waiting).toEqual([]);
+  });
+  it("still names held photos it cannot attach (offline storage) so their ids can be used", async () => {
+    const { deps, store, venue } = await setup();
+    const a = await store.saveMedia(venue.id, new Uint8Array([1]), "image/jpeg");
+    await holdPhoto(store, venue.id, "tg:1001", a.id, "ack", T0);
+    const { client, calls } = fakeClient([], { stop_reason: "end_turn", text: "Готово." });
+    await runTurn(deps, { text: "това е новата корица", source: "text" }, { model: "m", effort: "medium" }, client);
+    const content = (calls[0].messages as { content: { type: string; text?: string }[] }[])[0].content;
+    expect(content.map((c) => c.type)).toEqual(["text"]);
+    expect(content[0].text).toContain(`media_id: ${a.id}`);
   });
   it("tells the owner when the model refuses or errors", async () => {
     const { deps, messenger } = await setup();
