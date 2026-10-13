@@ -39,7 +39,8 @@ const BG = {
     `${HELP_BG_BODY}\n\n${ch === "tg" ? "Команди: /menu – линкове към сайта, /lang bg|en – език, /undo – връща последната промяна, /members – кой има достъп (за собственика)." : "Думи-команди: „меню“ – линкове към сайта, „език bg“ / „език en“ – език. За да отмените последната промяна, напишете /undo или „върни последната промяна“. Кой има достъп: /members (за собственика)."}`,
   langSet: "Езикът е български.",
   langUsage: (ch: Channel): string => (ch === "tg" ? "Използвайте /lang bg или /lang en." : "Напишете „език bg“ или „език en“."),
-  menu: (publicUrl: string, adminUrl: string | null) => `Сайтът: ${publicUrl}\nМеню: ${publicUrl}/menu${adminUrl ? `\nQR код и табло: ${adminUrl}` : ""}`,
+  /** menuUrl null = no separate menu line (an own site may have no /menu path). */
+  menu: (siteUrl: string, menuUrl: string | null, adminUrl: string | null) => `Сайтът: ${siteUrl}${menuUrl ? `\nМеню: ${menuUrl}` : ""}${adminUrl ? `\nQR код и табло: ${adminUrl}` : ""}`,
   changePrompt: "Напишете какво да променя в предложението.",
   notYours: "Това предложение не е от този чат.",
   applied: "✅ Приложено",
@@ -92,7 +93,7 @@ const EN: typeof BG = {
     `${HELP_EN_BODY}\n\n${ch === "tg" ? "Commands: /menu – site links, /lang bg|en – language, /undo – reverts the last change, /members – who has access (owner only)." : "Command words: “menu” – site links, “language bg” / “language en” – language. To revert the last change, type /undo or write “undo the last change”. Who has access: /members (owner only)."}`,
   langSet: "Language set to English.",
   langUsage: (ch) => (ch === "tg" ? "Use /lang bg or /lang en." : "Write “language bg” or “language en”."),
-  menu: (publicUrl, adminUrl) => `Site: ${publicUrl}\nMenu: ${publicUrl}/menu${adminUrl ? `\nQR code and dashboard: ${adminUrl}` : ""}`,
+  menu: (siteUrl, menuUrl, adminUrl) => `Site: ${siteUrl}${menuUrl ? `\nMenu: ${menuUrl}` : ""}${adminUrl ? `\nQR code and dashboard: ${adminUrl}` : ""}`,
   changePrompt: "Tell me what to change in the proposal.",
   notYours: "That proposal is not from this chat.",
   applied: "✅ Applied",

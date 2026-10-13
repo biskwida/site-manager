@@ -1,6 +1,7 @@
 // test/wizard-server.test.ts
 import { describe, expect, it } from "vitest";
 import { INVITE_TTL_MS } from "@/src/bot/bot";
+import { monthWindow } from "@/src/domain/limits";
 import { sha256Hex } from "@/src/server/hash";
 import { createDraft, doneInviteCode, publishDraft, rateLimitKeys, updateDraft, WizardError } from "@/src/server/wizard";
 import { COOKIE_NAME, cookieFromHeader, DRAFT_COOKIE, draftCookieValue, parseDraftCookie, readDraftFromCookies, readDraftFromRequest, serializeDraftCookie, venueFromDraftCookie } from "@/src/server/draft-cookie";
@@ -150,7 +151,7 @@ describe("createDraft → updateDraft → publishDraft", () => {
     expect(site.media.filter((m) => m.is_gallery).sort((a, b) => a.position - b.position).map((m) => m.id)).toEqual([g2.id, g1.id]);
     const sets = await store.listChangeSets(venue.id);
     expect(sets).toHaveLength(1);
-    expect(sets[0]).toMatchObject({ status: "applied", source: "dashboard", summary_bg: "Първоначални снимки", summary_en: "Initial photos", chat_ref: null });
+    expect(sets[0]).toMatchObject({ status: "applied", source: "auto", summary_bg: "Първоначални снимки", summary_en: "Initial photos", chat_ref: null });
     expect(sets[0].changes.map((c) => c.op)).toEqual(["set_logo_image", "set_cover_image", "add_gallery_image", "add_gallery_image"]);
     expect(sets[0].preview_bg.length).toBeGreaterThan(0);
     // owner invite, 7 days
@@ -204,6 +205,20 @@ describe("createDraft → updateDraft → publishDraft", () => {
     await expect(publishDraft(store, await store.getVenue(venue.id), T0)).rejects.toMatchObject({ code: "already_published", status: 409, slug: "dva" });
     expect({ invites: invites(), sets: (await store.listChangeSets(venue.id)).length, items: (await store.getSite(venue.id)).items.length }).toEqual(before);
     expect((await store.getVenue(venue.id)).deploy).toBeNull();
+  });
+
+  it("applies the initial photos on a venue whose monthly limit is already reached, without counting them", async () => {
+    const { store } = await makeDemo();
+    const { venue } = await createDraft(store, "classic", T0);
+    await store.setChangeLimit(venue.id, 0); // 0/0: reached before the first change
+    const logo = await store.saveMedia(venue.id, new Uint8Array([1]), "image/png");
+    await updateDraft(store, await store.getVenue(venue.id), { name: "Лимит", slug: "limit-cafe", logo_media_id: logo.id, categories: [{ key: "c", name_bg: "Кафе", name_en: "", items: [{ key: "i", name_bg: "Чай", name_en: "", desc_bg: "", desc_en: "", price_eur: 2, allergens: [], image_media_id: null }] }] });
+    const month = monthWindow(T0, venue.tz);
+    const usedBefore = await store.countAppliedChangeSets(venue.id, month.from, month.to);
+    const r = await publishDraft(store, await store.getVenue(venue.id), T0);
+    expect(r.venue.logo_media_id).toBe(logo.id);
+    expect((await store.listChangeSets(venue.id)).map((cs) => cs.status)).toEqual(["applied"]);
+    expect(await store.countAppliedChangeSets(venue.id, month.from, month.to)).toBe(usedBefore);
   });
 
   it("a failure while writing the menu leaves the draft intact, and a retry publishes exactly once", async () => {

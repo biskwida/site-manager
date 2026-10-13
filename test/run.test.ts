@@ -168,4 +168,10 @@ describe("SYSTEM_PROMPT", () => {
     expect(SYSTEM_PROMPT).toMatch(/never stop after the first/i);
     expect(SYSTEM_PROMPT).not.toMatch(/One proposal per message/);
   });
+  it("numbers its rules 1, 2, 3, … without gaps or repeats (rules refer to each other by number)", async () => {
+    const { SYSTEM_PROMPT } = await import("@/src/agent/prompt");
+    const numbers = [...SYSTEM_PROMPT.matchAll(/^(\d+)\. /gm)].map((m) => Number(m[1]));
+    expect(numbers).toEqual(numbers.map((_, i) => i + 1));
+    expect(SYSTEM_PROMPT).toMatch(/^12\. Monthly change limit:/m);
+  });
 });

@@ -5,7 +5,8 @@
 // - One "change" is one change set that reaches status `applied`, whatever the number of rows inside it. A set that was
 //   applied and later undone still counts (it reached `applied`); scheduled sets count when they are applied.
 // - Sets with source "undo" never count: undo is a safety feature. Sets with source "auto" never count either: the tick
-//   writes them when a sold-out mark or a special runs out, so they only record what the owner already decided.
+//   writes them when a sold-out mark or a special runs out, and the wizard publish writes the venue's initial photos as one,
+//   so they only record what the owner already decided.
 // - Rejected, expired and cancelled sets never reached `applied`, so they do not count.
 // - The month is the calendar month in the venue's time zone (venue.tz, e.g. Europe/Sofia).
 // - Venue.change_limit null = unlimited (the default).

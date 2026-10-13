@@ -199,7 +199,9 @@ async function runCommand(d: BotDeps, member: Member, channel: Channel, cmd: str
     case "menu": {
       const venue = await d.store.getVenue(member.venue_id);
       const admin = member.role === "owner" ? adminUrl(d.baseUrl, venue.slug, await d.store.getAdminToken(venue.id)) : null;
-      await d.messenger.send(member.chat_ref, c.menu(publicUrl(d.baseUrl, venue.slug), admin));
+      // An own-site venue (site_url) is linked as is: its site may not have a /menu path. Hosted venues get site and menu.
+      const hosted = publicUrl(d.baseUrl, venue.slug);
+      await d.messenger.send(member.chat_ref, venue.site_url ? c.menu(venue.site_url, null, admin) : c.menu(hosted, `${hosted}/menu`, admin));
       return;
     }
     case "connect": {

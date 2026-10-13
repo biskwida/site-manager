@@ -123,6 +123,18 @@ describe("handleInbound", () => {
     expect(runs).toHaveLength(1);
     expect(texts(messenger).at(-1)).toMatch(/https:\/\/site.example\/agala\/menu/);
   });
+  it("links an own-site venue's own site without a /menu path, plus the dashboard for the owner", async () => {
+    const { d, messenger, store, venue } = await setup();
+    await store.updateVenue(venue.id, { site_url: "https://coffique.vercel.app" });
+    const key = await store.getAdminToken(venue.id);
+    await handleInbound(d, { chatRef: "tg:1001", kind: "text", text: "/menu" });
+    expect(texts(messenger).at(-1)).toBe(`Сайтът: https://coffique.vercel.app\nQR код и табло: https://site.example/admin/agala?key=${key}`);
+    await handleInbound(d, { chatRef: "tg:1002", kind: "text", text: "/menu" });
+    expect(texts(messenger).at(-1)).toBe("Site: https://coffique.vercel.app");
+    await store.upsertMember({ venue_id: venue.id, chat_ref: "fb:901", role: "staff", lang: "bg" });
+    await handleInbound(d, { chatRef: "fb:901", kind: "text", text: "меню" });
+    expect(texts(messenger).at(-1)).toBe("Сайтът: https://coffique.vercel.app");
+  });
   it("still starts the run when touchMember fails", async () => {
     const { d, runs } = await setup();
     const errs: string[] = []; const orig = console.error; console.error = (...a: unknown[]) => { errs.push(a.join(" ")); };

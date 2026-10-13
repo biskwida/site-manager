@@ -9,6 +9,7 @@ import { itemName, tr } from "./domain/format";
 import type { Lang } from "./domain/types";
 import type { ApplyResult, ExpiredTimer, Store } from "./store/types";
 import { limitReachedLine, usageLine } from "./bot/limit";
+import { channelOf, isMetaChannel } from "./channels/ref";
 import { formatDateTime } from "./time";
 
 export interface TickDeps {
@@ -80,12 +81,17 @@ export async function runTick(d: TickDeps): Promise<TickReport> {
     }
     if (result === "limited") {
       // The store cancelled it (monthly change limit), so later ticks leave it alone; the owner hears why once.
+      // Its "⏰ Scheduled for …" message is concluded with the limit line, like an expired proposal. Telegram edits that message
+      // in place without a notification, so the owner also gets a new message; elsewhere conclude already sends `text` as one.
       report.limited?.push(cs.id);
       if (d.messenger && cs.chat_ref !== null) {
         const { lang } = await langFor(d.store, cs.venue_id, cs.chat_ref);
         const summary = lang === "bg" ? cs.summary_bg : cs.summary_en;
+        const preview = lang === "bg" ? cs.preview_bg : cs.preview_en;
         const line = await limitReachedLine(d.store, cs.venue_id, d.now, lang);
-        await d.messenger.send(cs.chat_ref, `${tr(lang, "⛔ Не е приложено по график", "⛔ Not applied as scheduled")}: ${summary}\n${line}`, { proactive: true });
+        const text = `${tr(lang, "⛔ Не е приложено по график", "⛔ Not applied as scheduled")}: ${summary}\n${line}`;
+        if (cs.message_ref !== null) await d.messenger.conclude(cs.chat_ref, cs.message_ref, `${preview}\n\n${line}`, text, { proactive: true });
+        if (cs.message_ref === null || !isMetaChannel(channelOf(cs.chat_ref))) await d.messenger.send(cs.chat_ref, text, { proactive: true });
       }
       continue;
     }

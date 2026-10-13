@@ -22,8 +22,8 @@ async function setup(limit: number | null, used = 0) {
   }
   if (limit !== null) await store.setChangeLimit(venue.id, limit);
   const site = await store.getSite(venue.id);
-  const cappuccino = (status: "proposed" | "scheduled", applyAt: string | null = null) =>
-    store.createChangeSet({ venue_id: venue.id, chat_ref: "tg:1001", summary_bg: "Капучино 3,20 €", summary_en: "Cappuccino €3.20", preview_bg: "• Капучино: 2,90 € → 3,20 €", preview_en: "• Cappuccino: €2.90 → €3.20", source: "text", status, apply_at: applyAt, message_ref: "42", changes: planChanges(site, [{ op: "set_price", item_id: items.Cappuccino.id, price_eur: 3.2 }], { newId: () => "n", now: T0.toISOString() }) });
+  const cappuccino = (status: "proposed" | "scheduled", applyAt: string | null = null, chatRef = "tg:1001") =>
+    store.createChangeSet({ venue_id: venue.id, chat_ref: chatRef, summary_bg: "Капучино 3,20 €", summary_en: "Cappuccino €3.20", preview_bg: "• Капучино: 2,90 € → 3,20 €", preview_en: "• Cappuccino: €2.90 → €3.20", source: "text", status, apply_at: applyAt, message_ref: "42", changes: planChanges(site, [{ op: "set_price", item_id: items.Cappuccino.id, price_eur: 3.2 }], { newId: () => "n", now: T0.toISOString() }) });
   const messenger = new FakeMessenger();
   const price = async () => (await store.getSite(venue.id)).items.find((i) => i.id === items.Cappuccino.id)?.price_eur;
   return { ...demo, messenger, cappuccino, price };
@@ -75,9 +75,29 @@ describe("tick", () => {
     expect((await store.getChangeSet(due.id)).status).toBe("cancelled");
     expect(await price()).toBe(2.9);
     expect(messenger.sent).toEqual([expect.objectContaining({ chatRef: "tg:1001", proactive: true, text: "⛔ Не е приложено по график: Капучино 3,20 €\nЛимитът от 2 промени за този месец е достигнат (2/2). Нови промени от 1 ноември." })]);
+    // The "⏰ Scheduled for …" message is concluded with the limit line (Telegram edits it in place, silently, hence the message above).
+    expect(messenger.concluded).toEqual([{ chatRef: "tg:1001", messageRef: "42", full: "• Капучино: 2,90 € → 3,20 €\n\nЛимитът от 2 промени за този месец е достигнат (2/2). Нови промени от 1 ноември.", short: "⛔ Не е приложено по график: Капучино 3,20 €\nЛимитът от 2 промени за този месец е достигнат (2/2). Нови промени от 1 ноември.", proactive: true }]);
     // The next tick does not try again.
     expect((await runTick({ store, messenger, now: new Date("2026-10-09T09:01:00.000Z") })).limited).toEqual([]);
     expect(await store.listDue(T0.toISOString(), venue.id)).toEqual([]);
+  });
+
+  it("on a Meta channel, tells the owner once: conclude sends the line as a new message, no second message", async () => {
+    const { store, venue, messenger, cappuccino } = await setup(2, 2);
+    await store.upsertMember({ venue_id: venue.id, chat_ref: "fb:900", role: "owner", lang: "en" });
+    const due = await cappuccino("scheduled", "2026-10-09T08:00:00.000Z", "fb:900");
+    expect((await runTick({ store, messenger, now: T0 })).limited).toEqual([due.id]);
+    expect(messenger.sent).toEqual([]);
+    expect(messenger.concluded).toEqual([expect.objectContaining({ chatRef: "fb:900", messageRef: "42", short: expect.stringMatching(/^⛔ Not applied as scheduled: Cappuccino €3\.20\n/), proactive: true })]);
+  });
+
+  it("without a message ref, sends the line once and concludes nothing", async () => {
+    const { store, messenger, cappuccino } = await setup(2, 2);
+    const due = await cappuccino("scheduled", "2026-10-09T08:00:00.000Z");
+    await store.updateChangeSet(due.id, { message_ref: null });
+    await runTick({ store, messenger, now: T0 });
+    expect(messenger.concluded).toEqual([]);
+    expect(messenger.sent).toHaveLength(1);
   });
 
   it("applies it in the next month, with the usage line", async () => {
