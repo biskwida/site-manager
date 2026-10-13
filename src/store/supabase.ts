@@ -4,7 +4,7 @@ import { isExternalEntity, type SocialEntity, type WpEntity } from "../domain/ty
 import type { Announcement, BusinessType, Category, Change, ChangeSet, Conversation, DeployInfo, DeployStatus, Holiday, InstagramImport, Item, Lang, Media, Member, Role, SiteState, SiteText, SiteTextKey, TemplateId, Venue, VenueStatus } from "../domain/types";
 import type { WizardDraft } from "../wizard/schema";
 import { legacyTelegramId } from "../channels/ref";
-import { DEFAULT_HOURS, extensionFor, newInviteCode, newToken, PUBLISH_CLAIM_TTL_MS, type ChangeSetPatch, type ExpiredTimer, type NewCategory, type NewChangeSet, type NewItem, type NewVenue, type Store, type VenuePatch, type Destination, type DestinationKind, type DestinationPatch, type DestinationSync, type DestinationWithSecrets, type NewDestination, type NewSync, type SyncPatch, type SyncStatus } from "./types";
+import { DEFAULT_HOURS, extensionFor, newInviteCode, newToken, PUBLISH_CLAIM_TTL_MS, type ChangeSetPatch, type ExpiredTimer, type NewCategory, type NewChangeSet, type NewItem, type NewVenue, type Store, type VenuePatch, type Destination, type DestinationKind, type DestinationPatch, type DestinationSync, type DestinationWithSecrets, type NewDestination, type NewSync, type SyncPatch, type SyncStatus, checkLimitValue } from "./types";
 
 type Row = Record<string, unknown>;
 type DbError = { message: string; code?: string } | null;
@@ -31,6 +31,8 @@ export function toVenue(r: Row): Venue {
     cover_media_id: strOrNull(r.cover_media_id),
     logo_media_id: strOrNull(r.logo_media_id),
     hours: (r.hours as Venue["hours"]) ?? DEFAULT_HOURS,
+    // Missing before the column is added (schema.sql): unlimited.
+    change_limit: r.change_limit === null || r.change_limit === undefined ? null : num(r.change_limit),
     tz: str(r.tz) || "Europe/Sofia",
     default_lang: (r.default_lang as Lang) ?? "bg",
     theme: (r.theme as Venue["theme"]) ?? { accent: "#2f6b4f" },
@@ -569,6 +571,28 @@ export class SupabaseStore implements Store {
       throw new Error(`claimSync ${id}: ${error.message}`);
     }
     return (data ?? []).length > 0;
+  }
+
+  // --- Monthly change limit (appended 2026-10-13) ---
+  async countAppliedChangeSets(venueId: string, fromIso: string, toIso: string) {
+    if (badVenue(venueId)) return 0;
+    const { count, error } = await this.db
+      .from("change_sets")
+      .select("id", { count: "exact", head: true })
+      .eq("venue_id", venueId)
+      .gte("applied_at", fromIso)
+      .lt("applied_at", toIso)
+      .not("source", "in", "(undo,auto)"); // countsTowardLimit (src/domain/limits.ts)
+    if (error) throw new Error(`countAppliedChangeSets: ${error.message}`);
+    return count ?? 0;
+  }
+  async setChangeLimit(venueId: string, limit: number | null) {
+    checkLimitValue(limit);
+    if (badVenue(venueId)) throw new Error(`setChangeLimit ${venueId}: not found`);
+    const { data, error } = await this.db.from("venues").update({ change_limit: limit }).eq("id", venueId).select("*").maybeSingle();
+    if (error) throw new Error(`setChangeLimit ${venueId}: ${error.message}`);
+    if (!data) throw new Error(`setChangeLimit ${venueId}: not found`);
+    return this.venue(data);
   }
 }
 

@@ -29,6 +29,8 @@ export interface NewVenue {
   maps_url?: string;
   instagram?: string;
   hours?: WeekHours;
+  /** Monthly change limit; default null (unlimited). */
+  change_limit?: number | null;
   tz?: string;
   default_lang?: Lang;
   theme?: { accent: string };
@@ -263,4 +265,22 @@ export interface Store {
    * or before `now`). True when this caller got it; a concurrent run gets false and leaves the row alone.
    */
   claimSync(id: string, now: string, leaseUntil: string): Promise<boolean>;
+}
+
+// --- Monthly change limit (appended 2026-10-13; definition in src/domain/limits.ts) ---
+// Declaration merging: the Store interface above gains the limit methods.
+export interface Store {
+  /**
+   * Change sets of the venue with applied_at in [fromIso, toIso) whose source counts toward the monthly limit (not "undo",
+   * not "auto"). A set applied and later reverted still counts: it reached `applied`. Proposed, scheduled, rejected,
+   * expired and cancelled sets have no applied_at and never count.
+   */
+  countAppliedChangeSets(venueId: string, fromIso: string, toIso: string): Promise<number>;
+  /** Sets (a whole number >= 0) or clears (null = unlimited) the venue's monthly change limit; throws on an unknown venue. */
+  setChangeLimit(venueId: string, limit: number | null): Promise<Venue>;
+}
+
+/** Throws unless the limit is null or a whole number >= 0. */
+export function checkLimitValue(limit: number | null): void {
+  if (limit !== null && !(Number.isInteger(limit) && limit >= 0)) throw new Error(`change limit must be a whole number >= 0 or null, got ${limit}`);
 }

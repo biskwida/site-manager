@@ -22,6 +22,7 @@ export function buildPreviewState(d: WizardDraft, media: Media[], now: Date): Si
     cover_media_id: d.cover_media_id,
     logo_media_id: d.logo_media_id,
     hours: d.hours,
+    change_limit: null,
     tz: "Europe/Sofia",
     default_lang: d.default_lang,
     theme: { accent: d.theme.accent },

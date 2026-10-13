@@ -511,5 +511,49 @@ export function storeContract(name: string, make: () => Promise<Store>, storageH
       expect((await s.getSync(y.id)).leased_until).toBeNull();
       expect(await s.claimSync(y.id, LATER, "2026-10-09T11:00:00.000Z")).toBe(false); // only pending rows
     });
+
+    // --- Monthly change limit (appended 2026-10-13) ---
+    it("stores a venue's monthly change limit (null = unlimited)", async () => {
+      const s = await make();
+      const v = await s.createVenue({ slug: "tl1", name: "Test" });
+      expect(v.change_limit).toBeNull();
+      const w = await s.createVenue({ slug: "tl2", name: "Test", change_limit: 60 });
+      expect(w.change_limit).toBe(60);
+      expect((await s.getVenue(w.id)).change_limit).toBe(60);
+      expect((await s.setChangeLimit(v.id, 40)).change_limit).toBe(40);
+      expect((await s.getVenueBySlug("tl1"))?.change_limit).toBe(40);
+      expect((await s.setChangeLimit(v.id, null)).change_limit).toBeNull();
+      expect((await s.getVenue(v.id)).change_limit).toBeNull();
+      await expect(s.setChangeLimit(crypto.randomUUID(), 5)).rejects.toThrow();
+    });
+
+    it("counts applied change sets in [from, to), including later reverted ones, without undo and automatic sets", async () => {
+      const s = await make();
+      const v = await s.createVenue({ slug: "tl3", name: "Test" });
+      const other = await s.createVenue({ slug: "tl4", name: "Test" });
+      const base = { chat_ref: null, summary_bg: "x", summary_en: "x", preview_bg: "x", preview_en: "x", status: "proposed" as const, changes: [] };
+      const applied = async (source: "text" | "voice" | "dashboard" | "auto" | "undo", at: string, extra: { venue_id?: string; undoes_id?: string } = {}) => {
+        const cs = await s.createChangeSet({ ...base, venue_id: v.id, source, ...extra });
+        expect(await s.applyChangeSet(cs.id, at)).toBe("applied");
+        return cs;
+      };
+      const FROM = "2026-09-30T21:00:00.000Z";
+      const TO = "2026-10-31T22:00:00.000Z";
+      await applied("text", FROM); // the first instant of the window counts
+      const voice = await applied("voice", "2026-10-20T10:00:00.000Z");
+      await applied("undo", "2026-10-21T10:00:00.000Z", { undoes_id: voice.id }); // voice is now reverted: it still counts, the undo does not
+      await applied("auto", "2026-10-06T10:00:00.000Z");
+      await applied("dashboard", "2026-10-07T10:00:00.000Z");
+      await applied("text", TO); // the window's end is exclusive
+      await applied("text", "2026-09-30T20:59:59.000Z"); // the month before
+      await applied("text", "2026-10-08T10:00:00.000Z", { venue_id: other.id });
+      await s.createChangeSet({ ...base, venue_id: v.id, source: "text" }); // proposed only
+      const rejected = await s.createChangeSet({ ...base, venue_id: v.id, source: "text" });
+      await s.updateChangeSet(rejected.id, { status: "rejected", decided_at: "2026-10-09T10:00:00.000Z" });
+      expect((await s.getChangeSet(voice.id)).status).toBe("reverted");
+      expect(await s.countAppliedChangeSets(v.id, FROM, TO)).toBe(3);
+      expect(await s.countAppliedChangeSets(other.id, FROM, TO)).toBe(1);
+      expect(await s.countAppliedChangeSets(v.id, TO, "2026-11-30T22:00:00.000Z")).toBe(1);
+    });
   });
 }
