@@ -13,6 +13,9 @@ import { bulkPrices } from "../domain/pricing";
 import type { ChangeOp, ChangeSet, ChangeSource, Lang, Member, SiteState } from "../domain/types";
 import type { Store } from "../store/types";
 import { formatDateTime, nowText } from "../time";
+import { copy } from "../bot/copy";
+import { usageLine } from "../bot/limit";
+import { changeUsage } from "../store/usage";
 import { BulkSchema, CancelSchema, CheckAllergensSchema, ListSchema, ProposeSchema, ScheduleSchema, UndoSchema, type ChangeInput } from "./tool-schemas";
 import { socialTools } from "./social-tools";
 import { wpTools } from "./wp-tools";
@@ -163,8 +166,22 @@ export function makeTools(deps: AgentDeps) {
     throw new Error(`A proposal from an earlier message (${pending.id}: ${lang === "bg" ? pending.summary_bg : pending.summary_en}) is already waiting for a decision. Ask the owner to tap ✅/❌ on it, or call cancel_change_set("${pending.id}") if this message clearly supersedes it.`);
   };
 
+  /**
+   * Monthly change limit (src/domain/limits.ts): every proposal that would use up a change refuses here once the month's
+   * limit is reached, before anything is created. Undo never calls it. The apply-time stop in the store covers the rest.
+   */
+  const ensureWithinLimit = async () => {
+    const venue = await d.store.getVenue(d.venueId);
+    if (venue.change_limit === null) return;
+    const u = await changeUsage(d.store, venue, d.now());
+    if (!u.reached) return;
+    const line = copy(lang).limitReached(venue.change_limit, u.used, u.resets_on);
+    throw new Error(`Monthly change limit reached (${u.used}/${venue.change_limit} this month): nothing was proposed. Do not retry, split or rephrase this request; reply to the owner with exactly this line: "${line}" Undo still works.`);
+  };
+
   /** Shared by propose_changes and schedule_changes. */
   const propose = async (input: z.infer<typeof ProposeSchema>, applyAt: string | null) => {
+    await ensureWithinLimit();
     const s = await site();
     const ops = resolveTokens(input.changes, s, d.now());
     requireRole(d.member, ops);
@@ -177,8 +194,13 @@ export function makeTools(deps: AgentDeps) {
       source: d.source ?? "text", status: "proposed", apply_at: applyAt, changes,
     });
     if (instant) {
-      await d.store.applyChangeSet(cs.id, d.now().toISOString());
-      await d.messenger.send(d.chatRef, `✅ ${mine(p).replace(/^• /gm, "")}`);
+      if ((await d.store.applyChangeSet(cs.id, d.now().toISOString())) === "limited") {
+        // Another apply used up the last change since the check above; the store cancelled this set.
+        await ensureWithinLimit(); // throws with the owner's line
+        throw new Error("Monthly change limit reached: nothing was applied. Do not retry.");
+      }
+      const usage = await usageLine(d.store, d.venueId, d.now(), lang);
+      await d.messenger.send(d.chatRef, `✅ ${mine(p).replace(/^• /gm, "")}${usage ? `\n${usage}` : ""}`);
       const first = ops[0] as Extract<ChangeOp, { op: "set_sold_out" }>;
       return { change_set_id: cs.id, status: "applied", preview: mine(p), sold_out_until: first.until };
     }
@@ -281,7 +303,7 @@ export function makeTools(deps: AgentDeps) {
   });
 
   // Task 11 appends schedule_changes, propose_bulk_price_change, check_allergens, undo here.
-  const kit: ToolKit = { attempt, site, ctx, previews, mine, propose, getSet, ensureNoPending, lang };
+  const kit: ToolKit = { attempt, site, ctx, previews, mine, propose, getSet, ensureNoPending, ensureWithinLimit, lang };
   return [getSite, getMenu, proposeChanges, cancelChangeSet, listChanges, ...extraTools(d, kit), ...wpTools(d, kit), ...socialTools(d, kit)];
 }
 
@@ -295,6 +317,8 @@ export interface ToolKit {
   propose: (input: z.infer<typeof ProposeSchema>, applyAt: string | null) => Promise<unknown>;
   getSet: (id: string) => Promise<ChangeSet>;
   ensureNoPending: () => Promise<void>;
+  /** Throws the owner's limit line when the venue's monthly change limit is reached; call before creating any non-undo set. */
+  ensureWithinLimit: () => Promise<void>;
   lang: Lang;
 }
 const ISO_WITH_OFFSET = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(:\d{2}(\.\d+)?)?(Z|[+-]\d{2}:?\d{2})$/i;

@@ -200,3 +200,12 @@ describe("Instagram feed aspect ratio", () => {
     expect((await tallFb.store.getChangeSet(r2.change_set_id as string)).changes[0].after).not.toHaveProperty("ig_feed_image_url");
   });
 });
+
+describe("social_post and the monthly change limit", () => {
+  it("refuses at the limit without creating a set", async () => {
+    const { tools, store, venue, photo } = await setup();
+    await store.setChangeLimit(venue.id, 0);
+    expect((await call(tools, "social_post", input(photo.id))).error).toMatch(/Monthly change limit reached.*Лимитът от 0 промени/);
+    expect(await store.listChangeSets(venue.id)).toEqual([]);
+  });
+});

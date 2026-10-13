@@ -49,16 +49,29 @@ export async function loadSite(store: Store, slug: string, opts: LoadSiteOptions
   return { state, draft };
 }
 
+<<<<<<< HEAD
 /** The venue as the public feed sends it: no deploy record (provider ids, build errors), no wizard draft, no Instagram import list, no own-site URL. */
 export type PublicVenue = Omit<Venue, "deploy" | "wizard_draft" | "instagram_import" | "site_url">;
+=======
+/** The venue as the public feed sends it: no deploy record (provider ids, build errors), no wizard draft, no Instagram import list. */
+export type PublicVenue = Omit<Venue, "deploy" | "wizard_draft" | "instagram_import" | "change_limit">;
+>>>>>>> build/change-limit
 export type PublicSiteState = Omit<SiteState, "venue"> & { venue: PublicVenue };
 
 /** For GET /api/site/[slug]: everything templates and outside readers (Coffique) use, minus the owner-only venue fields. */
 export function publicSiteState(state: SiteState): PublicSiteState {
+<<<<<<< HEAD
   const { deploy, wizard_draft, instagram_import, site_url, ...venue } = state.venue;
   void deploy;
   void wizard_draft;
   void instagram_import;
   void site_url;
+=======
+  const { deploy, wizard_draft, instagram_import, change_limit, ...venue } = state.venue;
+  void deploy;
+  void wizard_draft;
+  void instagram_import;
+  void change_limit; // the plan's limit is the owner's business, not the public's
+>>>>>>> build/change-limit
   return { ...state, venue };
 }

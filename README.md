@@ -199,6 +199,24 @@ Other scripts:
 | `npm run wp:smoke` | Throwaway WordPress + MySQL in Docker: installs WP, renders the plugin's blocks from the production feed, then connect → preview → apply → undo → options → menus → rate limit → log through our code; `-- --keep` leaves it at http://localhost:8088, `-- --feed <url>` picks another feed. |
 | `npm run test:templates` | Writes each template's thin shell to a temp dir, runs `npm install` (needs network) and `next build` there: the offline proof that a deployed site builds. Slow; not part of `npm test`. Run before a release. |
 | `npm run site:delete -- --slug my-cafe` | Deletes a venue (typically one created by the wizard) and its Vercel project. Prints the venue and the project id and asks you to type the slug again before deleting. Storage objects are not removed. |
+| `npm run venue:set -- --slug coffique --change-limit 60` | Sets a venue's monthly change limit (`--change-limit none` clears it) and prints the limit and this month's count. See "Monthly change limit". |
+
+## Monthly change limit
+
+Pricing plans include a number of changes per month: Menu plan 40, Everywhere plan 150 (Coffique, the first customer: 60). `venues.change_limit` holds it; `null`, the default, means unlimited.
+
+- **One change** is one change set that reaches status `applied`, however many rows it has. Scheduled sets count when they are applied. A set that is applied and later undone still counts.
+- **Never counted:** undo sets (undo is a safety feature and is never limited) and the automatic sets the tick writes when a sold-out mark or a special runs out. Rejected, expired and cancelled sets never reached `applied`.
+- **The month** is the calendar month in the venue's time zone (`venue.tz`, e.g. Europe/Sofia), so it starts at local midnight on the 1st.
+- **At the limit** the agent proposes nothing new (it relays "This month's limit of 60 changes is reached (60/60). New changes from 1 November."), and `applyChangeSet` refuses any counted set, including a scheduled one that comes due: the set becomes `cancelled` and the owner gets the same line. Every applied confirmation ends with "Changes this month: 12/60", and the dashboard's change log shows the count.
+
+```bash
+npm run venue:create -- --seed coffique --slug coffique --change-limit 60   # a new venue with its limit
+npm run venue:set -- --slug coffique --change-limit 60                    # an existing venue
+npm run venue:set -- --slug coffique --change-limit none                  # back to unlimited
+```
+
+The column comes from `supabase/schema.sql` (`npm run db:apply`); until it is applied every venue reads as unlimited.
 
 ## Instagram import
 

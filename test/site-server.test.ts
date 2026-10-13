@@ -62,13 +62,15 @@ describe("publicSiteState", () => {
     expect("deploy" in pub.venue).toBe(false);
     expect("wizard_draft" in pub.venue).toBe(false);
     expect("instagram_import" in pub.venue).toBe(false);
+    expect("change_limit" in pub.venue).toBe(false);
     expect(JSON.stringify(pub)).not.toContain("prj_secret");
     expect(JSON.stringify(pub)).not.toContain("cdninstagram");
-    const { deploy: _d, wizard_draft: _w, instagram_import: _i, site_url: _s, ...rest } = state.venue;
+    const { deploy: _d, wizard_draft: _w, instagram_import: _i, site_url: _s, change_limit: _l, ...rest } = state.venue;
     void _d;
     void _w;
     void _i;
     void _s;
+    void _l;
     expect(pub).toEqual({ ...state, venue: rest });
     expect(state.venue.deploy).not.toBeNull(); // the input is not mutated
   });

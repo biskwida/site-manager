@@ -1,13 +1,15 @@
 // scripts/venue-create.mts
-// npm run venue:create -- --name "Кафене „Ъгъла“" --slug agala --lang bg [--seed demo|coffique] [--tz Europe/Sofia] [--site-url https://…]
+// npm run venue:create -- --name "Кафене „Ъгъла“" --slug agala --lang bg [--seed demo|coffique] [--tz Europe/Sofia] [--site-url https://…] [--change-limit 60]
 // Prints the owner invite code, a staff invite code and the admin link ONCE. Keep them.
 import { INVITE_TTL_MS } from "../src/bot/links";
+import { parseChangeLimit } from "../src/domain/limits";
 import { seedCoffique } from "../src/seed/coffique";
 import { seedDemo } from "../src/seed/demo";
 import { makeServerDeps } from "../src/server/deps";
 import { inviteLines, parseArgs, parseSiteUrl } from "./invite-lines.mts";
 
-const USAGE = `Usage: npm run venue:create -- --name "Name" --slug my-cafe [--lang bg|en] [--tz Europe/Sofia] [--seed demo|coffique] [--site-url https://…]
+const USAGE = `Usage: npm run venue:create -- --name "Name" --slug my-cafe [--lang bg|en] [--tz Europe/Sofia] [--seed demo|coffique] [--site-url https://…] [--change-limit 60|none]
+  --change-limit   applied changes per calendar month (Menu plan 40, Everywhere plan 150); default none = unlimited
   --seed demo      creates the demo café (menu, texts, hours); the demo's own name and language are used, --name/--lang are ignored (and optional)
   --seed coffique  creates Coffique (real menu, texts, hours); its own name and language are used, --name/--lang are ignored (and optional)
   --site-url       the venue's own site, built and hosted elsewhere, that reads /api/site/<slug> (https only): no Vercel project is ever created for it`;
@@ -38,6 +40,11 @@ if (args.has("site-url") && !siteUrl) {
   process.exit(1);
 }
 const lang = args.get("lang") === "en" ? "en" : "bg";
+const changeLimit = args.has("change-limit") ? parseChangeLimit(args.get("change-limit") ?? "") : null;
+if (changeLimit instanceof Error) {
+  console.error(`${changeLimit.message}\n${USAGE}`);
+  process.exit(1);
+}
 
 const deps = await makeServerDeps({ defer: (fn) => void fn() });
 if (await deps.store.getVenueBySlug(slug)) {
@@ -50,6 +57,7 @@ const created = seed
   : await deps.store.createVenue({ slug, name: name as string, default_lang: lang, tz: args.get("tz") || "Europe/Sofia", ...(siteUrl ? { site_url: siteUrl } : {}) });
 // Set before any invite exists, so the first owner join already skips the deploy.
 const venue = seed && siteUrl ? await deps.store.updateVenue(created.id, { site_url: siteUrl }) : created;
+if (changeLimit !== null) await deps.store.setChangeLimit(venue.id, changeLimit);
 
 const expires = new Date(Date.now() + INVITE_TTL_MS).toISOString();
 const owner = await deps.store.createInvite(venue.id, "owner", expires);
@@ -58,6 +66,7 @@ const token = await deps.store.getAdminToken(venue.id);
 console.log(`venue ${venue.slug} created (${venue.id})${deps.isMemory ? " in the MEMORY store (lost on exit)" : ""}`);
 console.log(`site:        ${deps.config.publicBaseUrl}/${venue.slug}`);
 if (venue.site_url) console.log(`own site:    ${venue.site_url}   (reads ${deps.config.publicBaseUrl}/api/site/${venue.slug}; no Vercel project is created)`);
+console.log(`change limit: ${changeLimit === null ? "unlimited" : `${changeLimit} per month`} (change it with npm run venue:set)`);
 console.log(`admin link:  ${deps.config.publicBaseUrl}/admin/${venue.slug}?key=${token}`);
 const note = "valid 7 days, one use";
 for (const line of inviteLines(deps.config, [{ role: "owner", code: owner, note }, { role: "staff", code: staff, note }])) console.log(line);

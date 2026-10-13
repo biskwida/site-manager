@@ -11,8 +11,9 @@ describe("supabase row mappers", () => {
   });
   it("maps a venue with jsonb hours and theme", () => {
     const v = toVenue({ id: "v", slug: "s", name: "n", hours: { mon: null, tue: null, wed: null, thu: null, fri: null, sat: null, sun: null }, theme: { accent: "#000000" }, tz: "Europe/Sofia", default_lang: "en", created_at: "2026-10-09T09:00:00Z" });
-    expect(v).toMatchObject({ tagline_bg: "", cover_media_id: null, default_lang: "en", theme: { accent: "#000000" }, instagram_import: null, site_url: null });
+    expect(v).toMatchObject({ tagline_bg: "", cover_media_id: null, default_lang: "en", theme: { accent: "#000000" }, instagram_import: null, site_url: null, change_limit: null });
     expect(toVenue({ id: "v", slug: "s", name: "n", site_url: "https://own.example", created_at: "2026-10-09T09:00:00Z" }).site_url).toBe("https://own.example");
+    expect(toVenue({ id: "v", slug: "s", name: "n", change_limit: "60", created_at: "2026-10-09T09:00:00Z" }).change_limit).toBe(60);
   });
   it("maps a change set with nested changes", () => {
     const cs = toChangeSet({ id: "c", venue_id: "v", chat_ref: "tg:1001", chat_id: "1001", summary_bg: "", summary_en: "", preview_bg: "", preview_en: "", source: "text", status: "proposed", apply_at: null, reminded_at: null, decided_at: null, applied_at: null, reverted_by: null, undoes_id: null, message_ref: "55", tg_message_id: "55", created_at: "2026-10-09T09:00:00Z", changes: [{ id: "x", position: 0, op: "set_price", entity: "item", entity_id: "i", before: { price_eur: 1 }, after: { price_eur: 2 } }] });

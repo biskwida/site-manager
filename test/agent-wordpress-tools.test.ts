@@ -159,3 +159,15 @@ describe("wp_upload_photo / wp_set_option / wp_edit_menu / wp_edit_product", () 
     expect(p.preview).toBe("• WordPress: продукт „Espresso beans 250 g“\n  цена: „12“ → „13.50“");
   });
 });
+
+describe("monthly change limit", () => {
+  it("refuses WordPress proposals at the limit before the plugin stores a preview", async () => {
+    const { tools, store, venue, wp } = await setup();
+    await store.setChangeLimit(venue.id, 0);
+    const page = await call(tools, "wp_edit_page", { summary_bg: "x", summary_en: "x", page_id: 2, title: "Y" });
+    expect(page.error).toMatch(/Monthly change limit reached.*Лимитът от 0 промени за този месец е достигнат \(0\/0\)\. Нови промени от 1 ноември\./);
+    expect(wp.pending.has(2)).toBe(false);
+    expect((await call(tools, "wp_set_option", { summary_bg: "Име", summary_en: "Name", key: "blogname", value: "Ново" })).error).toMatch(/Monthly change limit reached/);
+    expect(await store.listChangeSets(venue.id)).toEqual([]);
+  });
+});

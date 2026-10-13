@@ -5,6 +5,7 @@ import type { Lang } from "../domain/types";
 import type { Store } from "../store/types";
 import { formatDateTime } from "../time";
 import { copy } from "./copy";
+import { limitReachedLine, usageLine } from "./limit";
 import type { Messenger } from "./messenger";
 
 export type Decision = "apply" | "change" | "cancel";
@@ -60,11 +61,18 @@ export async function handleDecision(d: DecisionDeps, chatRef: string, decision:
     return { edit: { full: `${preview}\n\n${line}`, short: line }, toast: line };
   }
   const result = await d.store.applyChangeSet(cs.id, now.toISOString());
+  if (result === "limited") {
+    // The store refused it (monthly change limit) and cancelled the set.
+    const line = await limitReachedLine(d.store, cs.venue_id, now, lang);
+    return { edit: { full: `${preview}\n\n${line}`, short: line }, toast: line };
+  }
   if (result === "skipped") {
     const fresh = await d.store.getChangeSet(cs.id);
     return { edit: { full: `${preview}\n\n${c.status[fresh.status]}`, short: c.status[fresh.status] }, toast: c.status[fresh.status] };
   }
   const lines = await syncLines(d.store, cs.id, lang);
+  const usage = await usageLine(d.store, cs.venue_id, now, lang);
+  if (usage) lines.push(usage);
   const tail = lines.length ? `\n${lines.join("\n")}` : "";
   return { edit: { full: `${preview}\n\n${c.applied}${tail}`, short: `${c.applied}${tail}` }, toast: c.applied };
 }

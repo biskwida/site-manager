@@ -75,6 +75,8 @@ export interface Venue {
   cover_media_id: string | null;
   logo_media_id: string | null;
   hours: WeekHours;
+  /** Change sets the owner may apply per calendar month in `tz` (src/domain/limits.ts); null = unlimited. Server-only. */
+  change_limit: number | null;
   tz: string;
   default_lang: Lang;
   theme: { accent: string };

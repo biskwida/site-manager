@@ -1,4 +1,5 @@
 // src/server/admin.ts
+import { limitReachedLine, usageLine } from "../bot/limit";
 import type { Messenger } from "../bot/messenger";
 import { invertChanges } from "../domain/changes";
 import { isSoldOut } from "../domain/effective";
@@ -8,6 +9,7 @@ import type { Deployer, DeployInput, DomainInstructions } from "../deploy/types"
 import { normalizeDomain } from "../deploy/vercel-domains";
 import type { DestinationStatus, Store, SyncStatus } from "../store/types";
 import { formatDateTime } from "../time";
+import { changeUsage } from "../store/usage";
 import { accentAfterTemplateSwitch } from "../wizard/schema";
 import { connectedApps, type ConnectedApp } from "./connect-apps";
 import { publishedIn, safeLink } from "../destinations/social-common";
@@ -38,6 +40,8 @@ export interface AdminOverview {
   connected_apps: ConnectedApp[];
   /** "Facebook and Instagram" card. */
   social?: SocialOverview;
+  /** Monthly change limit (src/domain/limits.ts): changes applied this calendar month in the venue's zone; limit null = unlimited. */
+  changes_this_month?: { used: number; limit: number | null };
 }
 
 export async function adminOverview(store: Store, venue: Venue, now: Date, baseUrl = "", opts: { hosted?: boolean; social?: { facebook: boolean; instagram: boolean } } = {}): Promise<AdminOverview> {
@@ -73,7 +77,13 @@ export async function adminOverview(store: Store, venue: Venue, now: Date, baseU
     wordpress: await wordPressOverview(store, venue.id),
     connected_apps: connectedApps(members),
     social: await socialOverview(store, venue.id, opts.social ?? { facebook: false, instagram: false }),
+    changes_this_month: await changesThisMonth(store, venue, now),
   };
+}
+
+async function changesThisMonth(store: Store, venue: Venue, now: Date): Promise<{ used: number; limit: number | null }> {
+  const u = await changeUsage(store, venue, now);
+  return { used: u.used, limit: u.limit };
 }
 
 export type AdminActionName = "apply" | "reject" | "cancel" | "undo";
@@ -135,8 +145,16 @@ export async function adminAction(d: AdminDeps, venue: Venue, action: AdminActio
     return { ok: true, status: "scheduled", change_set_id: cs.id };
   }
   const r = await d.store.applyChangeSet(cs.id, nowIso);
+  if (r === "limited") {
+    // The store refused it (monthly change limit) and cancelled the set; the chat message loses its buttons.
+    const line = { bg: await limitReachedLine(d.store, venue.id, now, "bg"), en: await limitReachedLine(d.store, venue.id, now, "en") };
+    await concludeOnChannel(d, cs, line);
+    return { ok: false, status: "cancelled", change_set_id: cs.id, error: line.en };
+  }
   if (r === "skipped") return { ok: false, error: `Change set is "${(await d.store.getChangeSet(cs.id)).status}".` };
-  await concludeOnChannel(d, cs, { bg: "✅ Приложено от таблото.", en: "✅ Applied from the dashboard." });
+  const usage = { bg: await usageLine(d.store, venue.id, now, "bg"), en: await usageLine(d.store, venue.id, now, "en") };
+  const withUsage = (mark: string, line: string | null) => (line ? `${mark}\n${line}` : mark);
+  await concludeOnChannel(d, cs, { bg: withUsage("✅ Приложено от таблото.", usage.bg), en: withUsage("✅ Applied from the dashboard.", usage.en) });
   return { ok: true, status: "applied", change_set_id: cs.id };
 }
 
