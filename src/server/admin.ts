@@ -1,4 +1,5 @@
 // src/server/admin.ts
+import { limitReachedLine, usageLine } from "../bot/limit";
 import type { Messenger } from "../bot/messenger";
 import { invertChanges } from "../domain/changes";
 import { isSoldOut } from "../domain/effective";
@@ -130,8 +131,16 @@ export async function adminAction(d: AdminDeps, venue: Venue, action: AdminActio
     return { ok: true, status: "scheduled", change_set_id: cs.id };
   }
   const r = await d.store.applyChangeSet(cs.id, nowIso);
+  if (r === "limited") {
+    // The store refused it (monthly change limit) and cancelled the set; the chat message loses its buttons.
+    const line = { bg: await limitReachedLine(d.store, venue.id, now, "bg"), en: await limitReachedLine(d.store, venue.id, now, "en") };
+    await concludeOnChannel(d, cs, line);
+    return { ok: false, status: "cancelled", change_set_id: cs.id, error: line.en };
+  }
   if (r === "skipped") return { ok: false, error: `Change set is "${(await d.store.getChangeSet(cs.id)).status}".` };
-  await concludeOnChannel(d, cs, { bg: "✅ Приложено от таблото.", en: "✅ Applied from the dashboard." });
+  const usage = { bg: await usageLine(d.store, venue.id, now, "bg"), en: await usageLine(d.store, venue.id, now, "en") };
+  const withUsage = (mark: string, line: string | null) => (line ? `${mark}\n${line}` : mark);
+  await concludeOnChannel(d, cs, { bg: withUsage("✅ Приложено от таблото.", usage.bg), en: withUsage("✅ Applied from the dashboard.", usage.en) });
   return { ok: true, status: "applied", change_set_id: cs.id };
 }
 

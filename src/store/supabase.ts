@@ -4,7 +4,8 @@ import { isExternalEntity, type SocialEntity, type WpEntity } from "../domain/ty
 import type { Announcement, BusinessType, Category, Change, ChangeSet, Conversation, DeployInfo, DeployStatus, Holiday, InstagramImport, Item, Lang, Media, Member, Role, SiteState, SiteText, SiteTextKey, TemplateId, Venue, VenueStatus } from "../domain/types";
 import type { WizardDraft } from "../wizard/schema";
 import { legacyTelegramId } from "../channels/ref";
-import { DEFAULT_HOURS, extensionFor, newInviteCode, newToken, PUBLISH_CLAIM_TTL_MS, type ChangeSetPatch, type ExpiredTimer, type NewCategory, type NewChangeSet, type NewItem, type NewVenue, type Store, type VenuePatch, type Destination, type DestinationKind, type DestinationPatch, type DestinationSync, type DestinationWithSecrets, type NewDestination, type NewSync, type SyncPatch, type SyncStatus, checkLimitValue } from "./types";
+import { DEFAULT_HOURS, extensionFor, newInviteCode, newToken, PUBLISH_CLAIM_TTL_MS, type ChangeSetPatch, type ExpiredTimer, type NewCategory, type NewChangeSet, type NewItem, type NewVenue, type Store, type VenuePatch, type Destination, type DestinationKind, type DestinationPatch, type DestinationSync, type DestinationWithSecrets, type NewDestination, type NewSync, type SyncPatch, type SyncStatus, type ApplyResult, checkLimitValue } from "./types";
+import { limitBlocks } from "./usage";
 
 type Row = Record<string, unknown>;
 type DbError = { message: string; code?: string } | null;
@@ -389,8 +390,17 @@ export class SupabaseStore implements Store {
    * Conditional status flip first (so two appliers cannot both write), then the entity writes.
    * If any write fails, the set is reset to its prior status so it can be retried (every write is idempotent).
    */
-  async applyChangeSet(id: string, now: string) {
-    const prior = await must<{ status: ChangeSet["status"] }>(this.db.from("change_sets").select("status").eq("id", id).maybeSingle(), `applyChangeSet ${id}`);
+  async applyChangeSet(id: string, now: string): Promise<ApplyResult> {
+    const prior = await must<{ status: ChangeSet["status"]; source: ChangeSet["source"]; venue_id: string }>(this.db.from("change_sets").select("status, source, venue_id").eq("id", id).maybeSingle(), `applyChangeSet ${id}`);
+    if ((prior.status === "proposed" || prior.status === "scheduled") && (await limitBlocks(this, prior, now))) {
+      // Conditional like the apply flip: a set decided meanwhile stays as it is. Two applies racing past the count can
+      // overshoot the limit by one; the count is not a lock.
+      const cancelled = await must(
+        this.db.from("change_sets").update({ status: "cancelled", decided_at: now }).eq("id", id).in("status", ["proposed", "scheduled"]).select("id"),
+        `applyChangeSet ${id} (limit)`,
+      );
+      return cancelled.length === 0 ? "skipped" : "limited";
+    }
     const flipped = await must(
       this.db.from("change_sets").update({ status: "applied", applied_at: now }).eq("id", id).in("status", ["proposed", "scheduled"]).select(SET_SELECT),
       `applyChangeSet ${id}`,

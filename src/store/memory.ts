@@ -2,7 +2,8 @@
 import { applyChanges } from "../domain/changes";
 import { countsTowardLimit } from "../domain/limits";
 import type { Category, ChangeSet, Conversation, DeployInfo, DeployStatus, Item, Lang, Media, Member, Role, SiteState, SiteTextKey, Venue, VenueStatus } from "../domain/types";
-import { DEFAULT_HOURS, extensionFor, newInviteCode, newToken, PUBLISH_CLAIM_TTL_MS, type ChangeSetPatch, type ExpiredTimer, type NewCategory, type NewChangeSet, type NewItem, type NewVenue, type Store, type VenuePatch, type Destination, type DestinationKind, type DestinationPatch, type DestinationSync, type DestinationWithSecrets, type NewDestination, type NewSync, type SyncPatch, type SyncStatus, checkLimitValue } from "./types";
+import { DEFAULT_HOURS, extensionFor, newInviteCode, newToken, PUBLISH_CLAIM_TTL_MS, type ChangeSetPatch, type ExpiredTimer, type NewCategory, type NewChangeSet, type NewItem, type NewVenue, type Store, type VenuePatch, type Destination, type DestinationKind, type DestinationPatch, type DestinationSync, type DestinationWithSecrets, type NewDestination, type NewSync, type SyncPatch, type SyncStatus, type ApplyResult, checkLimitValue } from "./types";
+import { limitBlocks } from "./usage";
 
 const clone = <T>(v: T): T => structuredClone(v);
 
@@ -305,10 +306,16 @@ export class InMemoryStore implements Store {
     if (!cs) throw new Error(`change set ${id} not found`);
     for (const [k, v] of Object.entries(patch)) if (v !== undefined) (cs as unknown as Record<string, unknown>)[k] = v;
   }
-  async applyChangeSet(id: string, now: string) {
+  async applyChangeSet(id: string, now: string): Promise<ApplyResult> {
     const cs = this.sets.get(id);
     if (!cs) throw new Error(`change set ${id} not found`);
     if (cs.status !== "proposed" && cs.status !== "scheduled") return "skipped";
+    if (await limitBlocks(this, cs, now)) {
+      if (cs.status !== "proposed" && cs.status !== "scheduled") return "skipped"; // decided while the limit was read
+      cs.status = "cancelled";
+      cs.decided_at = now;
+      return "limited";
+    }
     const site = this.site(cs.venue_id);
     this.sites.set(cs.venue_id, applyChanges(site, cs.changes));
     cs.status = "applied";

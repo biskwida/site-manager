@@ -52,4 +52,27 @@ describe("SupabaseStore change limit", () => {
     await expect(store(client).setChangeLimit(VENUE, -1)).rejects.toThrow(/whole number/);
     await expect(store(client).setChangeLimit(VENUE, 2.5)).rejects.toThrow(/whole number/);
   });
+
+  it("applyChangeSet refuses a counted set at the limit: a conditional cancel, no apply flip, no entity writes", async () => {
+    const { calls, client } = fakeClient((c) => {
+      if (c.table === "change_sets" && c.steps.some(([m]) => m === "maybeSingle")) return { data: { status: "scheduled", source: "text", venue_id: VENUE }, error: null };
+      if (c.table === "venues") return { data: { id: VENUE, slug: "coffique", name: "Coffique", tz: "Europe/Sofia", change_limit: 2, created_at: "2026-10-09T09:00:00Z" }, error: null };
+      if (c.steps.some(([m, a]) => m === "select" && a[0] === "id" && (a[1] as { head?: boolean } | undefined)?.head)) return { data: null, error: null, count: 2 };
+      return { data: [{ id: "cs1" }], error: null };
+    });
+    expect(await store(client).applyChangeSet("cs1", "2026-10-09T10:00:00.000Z")).toBe("limited");
+    const cancel = calls.at(-1)!;
+    expect(cancel.table).toBe("change_sets");
+    expect(cancel.steps).toEqual([["update", [{ status: "cancelled", decided_at: "2026-10-09T10:00:00.000Z" }]], ["eq", ["id", "cs1"]], ["in", ["status", ["proposed", "scheduled"]]], ["select", ["id"]]]);
+    expect(calls.some((c) => c.steps.some(([m, a]) => m === "update" && (a[0] as { status?: string }).status === "applied"))).toBe(false);
+  });
+
+  it("applyChangeSet never reads the limit for an undo set", async () => {
+    const { calls, client } = fakeClient((c) => {
+      if (c.table === "change_sets" && c.steps.some(([m]) => m === "maybeSingle")) return { data: { status: "proposed", source: "undo", venue_id: VENUE }, error: null };
+      return { data: [], error: null }; // the apply flip finds nothing: "skipped" is enough here
+    });
+    expect(await store(client).applyChangeSet("cs1", "2026-10-09T10:00:00.000Z")).toBe("skipped");
+    expect(calls.some((c) => c.table === "venues")).toBe(false);
+  });
 });

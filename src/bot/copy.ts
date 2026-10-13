@@ -11,6 +11,11 @@ const HELP_BG_BODY =
 const HELP_EN_BODY =
   "Tell me what to change, in English or Bulgarian. Examples:\n• “Cappuccino is 3.20 now”\n• “Banitsa is sold out”\n• “Add shopska salad 7.50”\n• “We're closed on 24 and 25 December”\n• a photo of the specials board\n• a photo captioned “this is the new cover”";
 
+const MONTHS_BG = ["януари", "февруари", "март", "април", "май", "юни", "юли", "август", "септември", "октомври", "ноември", "декември"];
+const MONTHS_EN = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
+/** YYYY-MM-DD → "1 ноември" / "1 November". */
+const dayMonth = (date: string, months: string[]) => `${Number(date.slice(8, 10))} ${months[Number(date.slice(5, 7)) - 1]}`;
+
 const BG = {
   noAccess: (ch: Channel): string =>
     ch === "tg"
@@ -33,6 +38,9 @@ const BG = {
   applied: "✅ Приложено",
   scheduled: (when: string) => `⏰ Насрочено за ${when}`,
   cancelled: "❌ Отказано",
+  /** Monthly change limit (src/domain/limits.ts); `resetsOn` is YYYY-MM-DD, the 1st of next month. */
+  limitReached: (limit: number, used: number, resetsOn: string) => `Лимитът от ${limit} промени за този месец е достигнат (${used}/${limit}). Нови промени от ${dayMonth(resetsOn, MONTHS_BG)}.`,
+  changesThisMonth: (used: number, limit: number) => `Промени този месец: ${used}/${limit}`,
   status: {
     proposed: "Чака решение.",
     scheduled: "Насрочено.",
@@ -79,6 +87,8 @@ const EN: typeof BG = {
   applied: "✅ Applied",
   scheduled: (when) => `⏰ Scheduled for ${when}`,
   cancelled: "❌ Cancelled",
+  limitReached: (limit, used, resetsOn) => `This month's limit of ${limit} changes is reached (${used}/${limit}). New changes from ${dayMonth(resetsOn, MONTHS_EN)}.`,
+  changesThisMonth: (used, limit) => `Changes this month: ${used}/${limit}`,
   status: {
     proposed: "Waiting for a decision.",
     scheduled: "Scheduled.",

@@ -159,8 +159,10 @@ export interface Store {
   /**
    * Writes every change and marks the set applied, only if it is still proposed or scheduled.
    * For an undo set, also marks the target reverted. Returns "skipped" when already decided.
+   * Returns "limited" (and marks the set cancelled, decided_at = now, nothing written) when the venue's monthly change limit
+   * is already reached in the month of `now` (src/store/usage.ts limitBlocks): this is the one choke point every apply goes through.
    */
-  applyChangeSet(id: string, now: string): Promise<"applied" | "skipped">;
+  applyChangeSet(id: string, now: string): Promise<ApplyResult>;
   /** Marks the set expired (decided_at = now) only if it is still proposed; "skipped" when it was already decided. */
   expireChangeSet(id: string, now: string): Promise<"expired" | "skipped">;
   listExpiredTimers(now: string, venueId?: string): Promise<ExpiredTimer[]>;
@@ -268,6 +270,8 @@ export interface Store {
 }
 
 // --- Monthly change limit (appended 2026-10-13; definition in src/domain/limits.ts) ---
+/** applyChangeSet's outcome; "limited" = refused by the monthly change limit (the set is now cancelled). */
+export type ApplyResult = "applied" | "skipped" | "limited";
 // Declaration merging: the Store interface above gains the limit methods.
 export interface Store {
   /**

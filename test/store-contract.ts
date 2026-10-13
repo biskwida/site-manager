@@ -555,5 +555,41 @@ export function storeContract(name: string, make: () => Promise<Store>, storageH
       expect(await s.countAppliedChangeSets(other.id, FROM, TO)).toBe(1);
       expect(await s.countAppliedChangeSets(v.id, TO, "2026-11-30T22:00:00.000Z")).toBe(1);
     });
+
+    it("refuses to apply a counted set once the month's limit is reached: the set is cancelled, nothing is written", async () => {
+      const s = await make();
+      const v = await s.createVenue({ slug: "tl5", name: "Test", change_limit: 2 });
+      const c = await s.insertCategory({ venue_id: v.id, name_bg: "Кафе", name_en: "Coffee", position: 0 });
+      const i = await s.insertItem({ venue_id: v.id, category_id: c.id, name_bg: "Еспресо", name_en: "Espresso", desc_bg: "", desc_en: "", price_eur: 1.8, allergens: [], position: 0 });
+      const price = async (eur: number) => planChanges(await s.getSite(v.id), [{ op: "set_price", item_id: i.id, price_eur: eur }], ctx);
+      const base = { venue_id: v.id, chat_ref: "tg:10", summary_bg: "x", summary_en: "x", preview_bg: "x", preview_en: "x" };
+      const first = await s.createChangeSet({ ...base, source: "text", status: "proposed", changes: await price(2) });
+      expect(await s.applyChangeSet(first.id, NOW)).toBe("applied");
+      const second = await s.createChangeSet({ ...base, source: "voice", status: "proposed", changes: await price(2.1) });
+      expect(await s.applyChangeSet(second.id, NOW)).toBe("applied");
+      // 2/2: a scheduled set that comes due is refused and cancelled.
+      const due = await s.createChangeSet({ ...base, source: "text", status: "scheduled", apply_at: LATER, changes: await price(9) });
+      expect(await s.applyChangeSet(due.id, LATER)).toBe("limited");
+      expect(await s.getChangeSet(due.id)).toMatchObject({ status: "cancelled", applied_at: null, decided_at: LATER });
+      expect((await s.getSite(v.id)).items[0].price_eur).toBe(2.1);
+      expect(await s.applyChangeSet(due.id, LATER)).toBe("skipped"); // decided now
+      expect(await s.listDue(LATER, v.id)).toEqual([]);
+      // Undo is a safety feature and never limited; it does not use up a change either.
+      const undo = await s.createChangeSet({ ...base, source: "undo", status: "proposed", undoes_id: second.id, changes: [{ ...second.changes[0], before: second.changes[0].after, after: second.changes[0].before }] });
+      expect(await s.applyChangeSet(undo.id, LATER)).toBe("applied");
+      expect((await s.getSite(v.id)).items[0].price_eur).toBe(2);
+      const auto = await s.createChangeSet({ ...base, chat_ref: null, source: "auto", status: "proposed", changes: [] });
+      expect(await s.applyChangeSet(auto.id, LATER)).toBe("applied");
+      // The next calendar month in the venue's zone (1 Nov 2026 00:00 Sofia = 31 Oct 22:00 UTC) starts from zero.
+      const november = await s.createChangeSet({ ...base, source: "text", status: "proposed", changes: await price(3) });
+      expect(await s.applyChangeSet(november.id, "2026-10-31T22:00:00.000Z")).toBe("applied");
+      // No limit: never refused.
+      await s.setChangeLimit(v.id, null);
+      const free = await s.createChangeSet({ ...base, source: "text", status: "proposed", changes: [] });
+      expect(await s.applyChangeSet(free.id, "2026-10-31T22:00:01.000Z")).toBe("applied");
+      await s.setChangeLimit(v.id, 0);
+      const none = await s.createChangeSet({ ...base, source: "dashboard", status: "proposed", changes: [] });
+      expect(await s.applyChangeSet(none.id, "2026-10-31T22:00:02.000Z")).toBe("limited");
+    });
   });
 }
