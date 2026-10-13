@@ -18,6 +18,10 @@ export interface Messenger {
   conclude(chatRef: string, messageRef: string | null, full: string, short: string, opts?: SendOpts): Promise<void>;
   /** "typing…" indicator; `inReplyTo` is the inbound message ref (WhatsApp needs it). Best-effort. */
   typing(chatRef: string, inReplyTo?: string): Promise<void>;
+  /** Replaces the text of a plain message (the "working on it" status). Telegram only; absent elsewhere. Best-effort. */
+  edit?(chatRef: string, messageRef: string, text: string): Promise<void>;
+  /** Deletes a plain message (the status, once the answer is ready). Telegram only; absent elsewhere. Best-effort. */
+  remove?(chatRef: string, messageRef: string): Promise<void>;
 }
 
 /** The three proposal buttons, shared by every channel (labels ≤ 20 characters for Meta). */
@@ -79,6 +83,20 @@ export class TelegramMessenger implements Messenger {
       await this.api.sendChatAction(telegramChat(chatRef), "typing");
     } catch (e) {
       console.error("[messenger] typing failed:", e instanceof Error ? e.message : e);
+    }
+  }
+  async edit(chatRef: string, messageRef: string, text: string) {
+    try {
+      await this.api.editMessageText(telegramChat(chatRef), Number(messageRef), text);
+    } catch (e) {
+      console.error("[messenger] edit failed:", e instanceof Error ? e.message : e);
+    }
+  }
+  async remove(chatRef: string, messageRef: string) {
+    try {
+      await this.api.deleteMessage(telegramChat(chatRef), Number(messageRef));
+    } catch (e) {
+      console.error("[messenger] remove failed:", e instanceof Error ? e.message : e);
     }
   }
 }

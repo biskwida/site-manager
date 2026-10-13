@@ -36,6 +36,25 @@ export interface AgentDeps {
   social?: { facebook: boolean; instagram: boolean } | null;
   /** Outbound HTTP for reading the owner's photo (social_post checks its shape for Instagram); default the global fetch. */
   fetch?: typeof fetch;
+  /** Ids of the change sets this turn created (filled by the tools). One owner message may hold several tasks, so its own proposals never block each other. */
+  turnSets?: Set<string>;
+}
+
+/** The store as the tools see it: every change set they create is recorded in `created`. Other methods pass through, bound to the real store. */
+function recordingStore(store: Store, created: Set<string>): Store {
+  return new Proxy(store, {
+    get(target, prop) {
+      if (prop === "createChangeSet") {
+        return async (...args: Parameters<Store["createChangeSet"]>) => {
+          const cs = await target.createChangeSet(...args);
+          created.add(cs.id);
+          return cs;
+        };
+      }
+      const v = Reflect.get(target, prop, target);
+      return typeof v === "function" ? v.bind(target) : v;
+    },
+  });
 }
 
 const STAFF_OPS = new Set<ChangeOp["op"]>(["set_sold_out", "add_item"]);
@@ -90,7 +109,9 @@ const NEXT_STEP: Record<ChangeSet["status"], string> = {
   reverted: "it was undone already.",
 };
 
-export function makeTools(d: AgentDeps) {
+export function makeTools(deps: AgentDeps) {
+  const turnSets = deps.turnSets ?? new Set<string>();
+  const d: AgentDeps = { ...deps, turnSets, store: recordingStore(deps.store, turnSets) };
   // Tools run one at a time per turn, even if the runner calls several at once.
   let queue: Promise<unknown> = Promise.resolve();
   const attempt = (fn: () => Promise<unknown>): Promise<string> => {
@@ -130,15 +151,16 @@ export function makeTools(d: AgentDeps) {
     if (cs.chat_ref !== null) await d.messenger.conclude(cs.chat_ref, cs.message_ref, `${mine(cs)}\n\n${mark}`, mark);
   };
 
-  /** One proposal per chat: replace it when the owner pressed ✏️, otherwise refuse. */
+  /** Proposals from earlier messages block new ones: the one the owner pressed ✏️ on is replaced, any other refuses. This message's own proposals never block. */
   const ensureNoPending = async () => {
-    const pending = await d.store.findProposed(d.venueId, d.chatRef);
-    if (!pending) return;
-    if (d.correctionFor && pending.id === d.correctionFor) {
-      await cancelPending(pending, tr(lang, "✏️ Заменено с ново предложение.", "✏️ Replaced by a new proposal."));
+    const earlier = (await d.store.listChangeSets(d.venueId, { status: ["proposed"], limit: 50 })).filter((cs) => cs.chat_ref === d.chatRef && !turnSets.has(cs.id));
+    const corrected = d.correctionFor ? earlier.find((cs) => cs.id === d.correctionFor) : undefined;
+    const pending = earlier.find((cs) => cs !== corrected);
+    if (!pending) {
+      if (corrected) await cancelPending(corrected, tr(lang, "✏️ Заменено с ново предложение.", "✏️ Replaced by a new proposal."));
       return;
     }
-    throw new Error(`A proposal (${pending.id}: ${lang === "bg" ? pending.summary_bg : pending.summary_en}) is already waiting for a decision. Ask the owner to tap ✅/❌ on it, or call cancel_change_set("${pending.id}") if this message clearly supersedes it.`);
+    throw new Error(`A proposal from an earlier message (${pending.id}: ${lang === "bg" ? pending.summary_bg : pending.summary_en}) is already waiting for a decision. Ask the owner to tap ✅/❌ on it, or call cancel_change_set("${pending.id}") if this message clearly supersedes it.`);
   };
 
   /** Shared by propose_changes and schedule_changes. */

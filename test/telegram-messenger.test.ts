@@ -30,6 +30,16 @@ describe("TelegramMessenger", () => {
     expect(api.calls).toEqual([{ method: "sendMessage", payload: expect.objectContaining({ chat_id: 1001, text: "✅ Applied" }) }]);
   });
 
+  it("edits and removes a plain status message", async () => {
+    const { api, messenger } = setup();
+    await messenger.edit("tg:1001", "42", "📖 Чета менюто…");
+    await messenger.remove("tg:1001", "42");
+    expect(api.calls).toEqual([
+      { method: "editMessageText", payload: expect.objectContaining({ chat_id: 1001, message_id: 42, text: "📖 Чета менюто…" }) },
+      { method: "deleteMessage", payload: expect.objectContaining({ chat_id: 1001, message_id: 42 }) },
+    ]);
+  });
+
   it("shows typing with a chat action", async () => {
     const { api, messenger } = setup();
     await messenger.typing("tg:1001");

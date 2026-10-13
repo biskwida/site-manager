@@ -131,10 +131,11 @@ describe("social_post", () => {
     await store.updateChangeSet(r.change_set_id as string, { status: "cancelled" });
   });
 
-  it("refuses while another proposal is pending", async () => {
-    const { tools, photo } = await setup();
+  it("refuses while a proposal from an earlier message is pending, but allows several from the same message", async () => {
+    const { tools, photo, deps } = await setup();
     expect((await call(tools, "social_post", input(photo.id))).status).toBe("proposed");
-    expect((await call(tools, "social_post", input(photo.id))).error).toMatch(/already waiting for a decision/);
+    expect((await call(tools, "social_post", input(photo.id, { targets: ["facebook_post"] }))).status).toBe("proposed");
+    expect((await call(makeTools(deps), "social_post", input(photo.id))).error).toMatch(/already waiting for a decision/);
   });
 
   it("refuses a photo without a public https address, and drops duplicate targets", async () => {

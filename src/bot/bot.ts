@@ -19,6 +19,8 @@ export interface RunRequest {
   source: "text" | "voice" | "photo";
   image?: ImageInput;
   mediaId?: string;
+  /** The owner's inbound message id, for channels whose typing indicator needs it (WhatsApp). */
+  replyTo?: string;
 }
 
 export interface BotDeps {

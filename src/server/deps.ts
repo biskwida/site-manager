@@ -161,7 +161,7 @@ export async function makeServerDeps(o: DepsOptions): Promise<ServerDeps> {
     try {
       await runTurn(
         { store: store2, venueId: r.venueId, chatRef: r.chatRef, member: r.member, messenger, now: () => new Date(), baseUrl: config.publicBaseUrl, wordpress: wp?.client ?? null, social },
-        { text: r.text, source: r.source, image: r.image, mediaId: r.mediaId },
+        { text: r.text, source: r.source, image: r.image, mediaId: r.mediaId, replyTo: r.replyTo },
         { model: config.agentModel, effort: config.agentEffort, apiKey: config.anthropicApiKey || undefined },
         o.client,
       );
