@@ -66,7 +66,7 @@ describe("publicSiteState", () => {
     void _d;
     void _w;
     void _i;
-    expect(pub).toEqual({ ...state, venue: rest });
+    expect(pub).toEqual({ ...state, venue: { ...rest, theme: { ...rest.theme, background: null } } }); // background always present
     expect(state.venue.deploy).not.toBeNull(); // the input is not mutated
   });
 });

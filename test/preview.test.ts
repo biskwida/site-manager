@@ -107,6 +107,24 @@ describe("renderPreview", () => {
       "• Removes the holiday on 24 Dec 2026",
     ].join("\n"));
   });
+  it("renders background and accent lines with the colour's name, and the undo back to the default", () => {
+    const s = state();
+    const changes = planChanges(s, [{ op: "set_theme", background: "#1f3d2b" }], ctx());
+    expect(renderPreview(s, changes, "bg", TZ)).toBe("• Фон: по подразбиране → #1f3d2b (тъмнозелено, светъл текст)");
+    expect(renderPreview(s, changes, "en", TZ)).toBe("• Background: design default → #1f3d2b (dark green, light text)");
+    const applied = applyChanges(s, changes);
+    expect(renderPreview(applied, invertChanges(changes), "bg", TZ)).toBe("• Фон: #1f3d2b → по подразбиране");
+    expect(renderPreview(applied, invertChanges(changes), "en", TZ)).toBe("• Background: #1f3d2b → design default");
+    const both = planChanges(s, [{ op: "set_theme", accent: "#6e1f1b", background: "#f3eadb" }], ctx());
+    expect(renderPreview(s, both, "bg", TZ)).toBe([
+      "• Акцентен цвят: #2f6b4f → #6e1f1b (бордо)",
+      "• Фон: по подразбиране → #f3eadb (кремаво, тъмен текст)",
+    ].join("\n"));
+  });
+  it("shows the accent line when a theme change changes nothing", () => {
+    const s = state();
+    expect(renderPreview(s, planChanges(s, [{ op: "set_theme", accent: "#2f6b4f" }], ctx()), "en", TZ)).toBe("• Accent colour: #2f6b4f → #2f6b4f (green)");
+  });
   it("names the missing item instead of printing undefined", () => {
     const s = state();
     const changes = planChanges(s, [{ op: "set_price", item_id: "i-cap", price_eur: 3.2 }], ctx());
@@ -138,7 +156,7 @@ describe("renderPreview", () => {
       "• Tagline: “Coffee on the corner” → “New tagline”",
       "  BG: „Кафе на ъгъла“ → „Ново мото“",
       "• New cover photo",
-      "• Accent colour: #2f6b4f → #aa3311",
+      "• Accent colour: #2f6b4f → #aa3311 (red)",
       "• Removes Espresso",
       "• Cappuccino: name (EN): “Cappuccino” → “Cappuccino XL”",
     ].join("\n"));

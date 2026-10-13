@@ -59,5 +59,6 @@ export function publicSiteState(state: SiteState): PublicSiteState {
   void deploy;
   void wizard_draft;
   void instagram_import;
-  return { ...state, venue };
+  // background is always present for outside readers: null = the design's own page colour.
+  return { ...state, venue: { ...venue, theme: { ...venue.theme, background: venue.theme.background ?? null } } };
 }

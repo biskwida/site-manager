@@ -31,7 +31,7 @@ export interface NewVenue {
   hours?: WeekHours;
   tz?: string;
   default_lang?: Lang;
-  theme?: { accent: string };
+  theme?: Venue["theme"];
   template?: TemplateId;
   business_type?: BusinessType;
   status?: VenueStatus;

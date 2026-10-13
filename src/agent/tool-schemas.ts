@@ -9,6 +9,8 @@ const Allergens = z.array(z.number().int().min(1).max(14)).describe("EU allergen
 const Until = z.string().nullable().describe('"next_opening" (the tool resolves it from the opening hours), an ISO 8601 datetime with offset, or null = back on sale');
 const Expiry = z.string().nullable().describe('"closing_today" (resolved by the tool), an ISO 8601 datetime with offset, or null = no expiry');
 
+const Hex = z.string().regex(/^#[0-9a-fA-F]{6}$/, "a hex colour like #1f3d2b");
+
 const DayHours = z.object({ open: z.string().regex(/^\d{2}:\d{2}$/), close: z.string().regex(/^\d{2}:\d{2}$/) }).nullable();
 export const HoursSchema = z.object(Object.fromEntries(WEEKDAYS.map((d) => [d, DayHours])) as Record<(typeof WEEKDAYS)[number], typeof DayHours>);
 
@@ -46,7 +48,11 @@ export const ChangeInputSchema = z.discriminatedUnion("op", [
   z.object({ op: z.literal("add_announcement"), text_bg: z.string().min(1), text_en: z.string().min(1), expires_at: Expiry }),
   z.object({ op: z.literal("remove_announcement"), announcement_id: Id }),
   z.object({ op: z.literal("set_text"), key: z.enum([...SITE_TEXT_KEYS, ...VENUE_TEXT_KEYS]), text_bg: z.string(), text_en: z.string() }),
-  z.object({ op: z.literal("set_theme"), accent: z.string().regex(/^#[0-9a-fA-F]{6}$/) }),
+  z.object({
+    op: z.literal("set_theme"),
+    accent: Hex.optional().describe("Buttons, links and highlights, #rrggbb"),
+    background: Hex.nullable().optional().describe("The page background, #rrggbb, clearly dark or clearly light; null = back to the design's own"),
+  }).refine((o) => o.accent !== undefined || o.background !== undefined, { message: "set_theme needs accent, background or both." }),
 ]);
 export type ChangeInput = z.infer<typeof ChangeInputSchema>;
 

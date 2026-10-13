@@ -1,4 +1,5 @@
 import { isAllergenCode } from "./allergens";
+import { bestInkContrast, isReadableBackground, READABLE_BACKGROUND_MIN } from "./color";
 import { isValidHours } from "./hours";
 import { PRICE_MAX, PRICE_MIN, round2 } from "./pricing";
 import {
@@ -139,8 +140,16 @@ export function validateChange(s: SiteState, op: ChangeOp, ctx: PlanContext): st
       if (typeof op.text_bg !== "string" || typeof op.text_en !== "string") return "text_bg and text_en must be strings.";
       return null;
     }
-    case "set_theme":
-      return HEX.test(op.accent) ? null : "accent must be a hex colour like #rrggbb.";
+    case "set_theme": {
+      if (op.accent === undefined && op.background === undefined) return "set_theme needs accent, background or both.";
+      if (op.accent !== undefined && !(typeof op.accent === "string" && HEX.test(op.accent))) return "accent must be a hex colour like #rrggbb.";
+      if (op.background === undefined || op.background === null) return null;
+      if (!(typeof op.background === "string" && HEX.test(op.background))) return "background must be a hex colour like #rrggbb, or null for the design's default.";
+      if (!isReadableBackground(op.background)) {
+        return `background ${op.background} is a mid-tone: neither dark nor light text reads well on it (best ${bestInkContrast(op.background).toFixed(1)}:1, needs ${READABLE_BACKGROUND_MIN}:1). Propose a clearly darker or lighter shade and tell the owner why.`;
+      }
+      return null;
+    }
     default:
       return `unknown op "${(op as { op: string }).op}".`;
   }
@@ -246,8 +255,13 @@ export function planChange(s: SiteState, op: ChangeOp, ctx: PlanContext, positio
       const p = patchOf(v as unknown as Row, after);
       return change(position, op, "venue", v.id, p.before, p.after);
     }
-    case "set_theme":
-      return change(position, op, "venue", v.id, { theme: v.theme }, { theme: { accent: op.accent.toLowerCase() } });
+    case "set_theme": {
+      // The theme is one venue column, so the change stores the whole object: undo puts back exactly what was there.
+      const theme = { ...v.theme };
+      if (op.accent !== undefined) theme.accent = op.accent.toLowerCase();
+      if (op.background !== undefined) theme.background = op.background === null ? null : op.background.toLowerCase();
+      return change(position, op, "venue", v.id, { theme: clone(v.theme) }, { theme });
+    }
   }
 }
 
