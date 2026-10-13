@@ -25,8 +25,15 @@
   --me-wine: #6e1f1b;
   --me-on-band-soft: color-mix(in oklab, var(--me-on-band) 90%, var(--me-wine));
   --me-band-line: color-mix(in oklab, var(--me-on-band) 50%, var(--me-wine));
-  --me-on-dark-soft: color-mix(in oklab, var(--me-paper) 80%, var(--me-ink)); /* 9.2:1 on ink */
-  --me-dark-line: color-mix(in oklab, var(--me-line) 22%, var(--me-ink));
+  /* The dark foot (visit, footer, phone action bar) and the text on it and on ochre. They follow ink and paper by default; with
+     an owner-picked background (Template.tsx groundVars) ink and paper follow the ground, and these keep the tavern's own
+     dark brown and parchment, so the foot, the gold links on it and the ochre buttons read the same on any ground. */
+  --me-dark: var(--me-ink);
+  --me-on-dark: var(--me-paper);
+  --me-dark-muted: var(--me-line);
+  --me-on-ochre: var(--me-ink);
+  --me-on-dark-soft: color-mix(in oklab, var(--me-on-dark) 80%, var(--me-dark)); /* 9.2:1 on ink */
+  --me-dark-line: color-mix(in oklab, var(--me-dark-muted) 22%, var(--me-dark));
   --me-ease: cubic-bezier(0.23, 1, 0.32, 1);
   --me-radius: 4px;          /* boxes and photos */
   --me-radius-btn: 8px;      /* buttons and the language toggle */
@@ -72,10 +79,10 @@
 /* Buttons: 44 px minimum, 8 px corners (boxes and photos are 4 px), press feedback on transform only. */
 .me-btn { min-height: 44px; display: inline-flex; align-items: center; justify-content: center; padding-inline: 1.125rem; border-radius: var(--me-radius-btn); font-weight: 700; line-height: 1.2; text-align: center; text-decoration: none; white-space: nowrap; transition: transform 160ms var(--me-ease); }
 .me-btn:active { transform: scale(0.97); }
-.tpl-mehana .me-btn-ochre { background: var(--me-ochre); color: var(--me-ink); }
+.tpl-mehana .me-btn-ochre { background: var(--me-ochre); color: var(--me-on-ochre); }
 .tpl-mehana .me-btn-ink { background: var(--me-ink); color: var(--me-paper); }
 .tpl-mehana .me-btn-ghost { box-shadow: inset 0 0 0 1px var(--me-ink-soft); color: var(--me-ink); }
-.tpl-mehana .me-btn-outline { box-shadow: inset 0 0 0 1px var(--me-line); color: var(--me-paper); }
+.tpl-mehana .me-btn-outline { box-shadow: inset 0 0 0 1px var(--me-dark-muted); color: var(--me-on-dark); }
 
 /* Skip link: lands on the open/closed answer in the band. */
 .tpl-mehana .me-skip { position: absolute; left: var(--me-gutter); top: -100%; z-index: 20; padding: 0.75rem 1rem; border-radius: var(--me-radius-btn); background: var(--me-paper); color: var(--me-ink); font-weight: 700; }
@@ -231,18 +238,18 @@
 .me-gallery-photo { position: relative; aspect-ratio: 4 / 3; overflow: hidden; border-radius: var(--me-radius); background: var(--me-paper-2); }
 
 /* ── Заповядайте: the dark foot of the page ── */
-.me-visit { background: var(--me-ink); color: var(--me-paper); }
+.me-visit { background: var(--me-dark); color: var(--me-on-dark); }
 .me-visit-inner { display: grid; gap: 2rem 2.5rem; padding-block: 3.5rem 2.5rem; }
 @media (min-width: 768px) { .me-visit-inner { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); } }
 .me-visit-contact { display: flex; flex-direction: column; align-items: flex-start; gap: 0.5rem; }
 .tpl-mehana .me-h-visit { margin-bottom: 0.5rem; font-weight: 500; font-size: clamp(2.25rem, 5vw, 2.75rem); line-height: 1; }
 .me-about { max-width: 52ch; color: var(--me-on-dark-soft); text-wrap: pretty; }
 .me-address { display: inline-flex; align-items: center; min-height: 44px; }
-.me-dark-link { display: inline-flex; align-items: center; min-height: 44px; text-decoration: underline; text-underline-offset: 4px; text-decoration-color: color-mix(in oklab, var(--me-paper) 45%, var(--me-ink)); }
+.me-dark-link { display: inline-flex; align-items: center; min-height: 44px; text-decoration: underline; text-underline-offset: 4px; text-decoration-color: color-mix(in oklab, var(--me-on-dark) 45%, var(--me-dark)); }
 .tpl-mehana .me-phone { display: inline-flex; align-items: center; min-height: 44px; font-size: 1.375rem; font-weight: 700; color: var(--me-gold); font-variant-numeric: tabular-nums; }
 .me-hours { display: grid; gap: 0.625rem; }
 .me-hours > div { display: grid; grid-template-columns: minmax(6.5rem, max-content) 1fr; gap: 1.5rem; color: var(--me-on-dark-soft); }
-.me-hours > div[aria-current="date"] { color: var(--me-paper); }
+.me-hours > div[aria-current="date"] { color: var(--me-on-dark); }
 .me-hours > div[aria-current="date"] dd { font-weight: 700; }
 .me-hours dt { font-weight: 700; }
 .me-hours dd { font-variant-numeric: tabular-nums; }
@@ -251,15 +258,15 @@
 
 /* Footer: the last dark line, on every page. On the home page it follows the visit section on the same ink, under a hairline that
    spans the text column only (the rule sits on the inner box, inside the wrap's gutters). */
-.me-footer { background: var(--me-ink); color: var(--me-line); font-size: 0.9375rem; }
+.me-footer { background: var(--me-dark); color: var(--me-dark-muted); font-size: 0.9375rem; }
 .me-footer-inner { display: flex; flex-wrap: wrap; align-items: center; gap: 0.25rem 1.5rem; padding-block: 1rem 1.5rem; border-top: 1px solid var(--me-dark-line); }
 .tpl-mehana .me-footer-text { display: flex; flex-wrap: wrap; gap: 0.25rem 0.75rem; margin-right: auto; }
-.tpl-mehana .me-footer-phone { display: inline-flex; align-items: center; min-height: 44px; font-weight: 700; color: var(--me-paper); font-variant-numeric: tabular-nums; text-decoration: underline; text-underline-offset: 4px; text-decoration-color: color-mix(in oklab, var(--me-paper) 45%, var(--me-ink)); }
-.me-footer-name { font-weight: 700; color: var(--me-paper); }
-.me-powered { display: inline-flex; min-height: 44px; align-items: center; text-decoration: underline; text-underline-offset: 4px; text-decoration-color: color-mix(in oklab, var(--me-line) 50%, var(--me-ink)); }
+.tpl-mehana .me-footer-phone { display: inline-flex; align-items: center; min-height: 44px; font-weight: 700; color: var(--me-on-dark); font-variant-numeric: tabular-nums; text-decoration: underline; text-underline-offset: 4px; text-decoration-color: color-mix(in oklab, var(--me-on-dark) 45%, var(--me-dark)); }
+.me-footer-name { font-weight: 700; color: var(--me-on-dark); }
+.me-powered { display: inline-flex; min-height: 44px; align-items: center; text-decoration: underline; text-underline-offset: 4px; text-decoration-color: color-mix(in oklab, var(--me-dark-muted) 50%, var(--me-dark)); }
 
 /* Phones: the bottom action bar (menu + call). Last in the flow and sticky, so it never covers the footer at the end. */
-.me-actionbar { position: sticky; bottom: 0; z-index: 3; display: grid; grid-template-columns: 1fr 1fr; gap: 0.5rem; padding: 0.75rem var(--me-gutter) calc(0.75rem + env(safe-area-inset-bottom)); background: var(--me-ink); box-shadow: 0 -1px 0 var(--me-dark-line); }
+.me-actionbar { position: sticky; bottom: 0; z-index: 3; display: grid; grid-template-columns: 1fr 1fr; gap: 0.5rem; padding: 0.75rem var(--me-gutter) calc(0.75rem + env(safe-area-inset-bottom)); background: var(--me-dark); box-shadow: 0 -1px 0 var(--me-dark-line); }
 .me-actionbar .me-btn { min-height: 52px; }
 @media (min-width: 768px) { .me-actionbar { display: none; } }
 
@@ -276,7 +283,7 @@
   .tpl-mehana .me-btn-ink:hover { background: color-mix(in oklab, var(--me-ink) 85%, var(--me-wine)); }
   .tpl-mehana .me-btn-ghost:hover { box-shadow: inset 0 0 0 2px var(--me-ink); }
   .tpl-mehana .me-jumplink:hover { color: var(--me-ink); text-decoration-color: var(--me-wine); }
-  .me-dark-link:hover, .me-powered:hover { color: var(--me-paper); }
+  .me-dark-link:hover, .me-powered:hover { color: var(--me-on-dark); }
 }
 
 /* Motion: one hero entrance, the change flash, press feedback. */

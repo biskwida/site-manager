@@ -3,6 +3,7 @@ import type { CSSProperties } from "react";
 import { useLang } from "@/src/i18n";
 import type { TemplateProps } from "../index";
 import { capAccent, ensureContrast } from "../shared/color";
+import { groundFor, onGround, type Ground } from "../shared/ground";
 import { mediaUrl } from "../shared/media";
 import { useLiveSite, useNow } from "../shared/useLiveSite";
 import { Band } from "./Band";
@@ -40,6 +41,28 @@ export function accentVars(accent: string) {
   return { "--me-wine": ensureContrast(ensureContrast(capped, "#9bd39b", 4.6, "darken"), "#e8c98b", 4.9, "darken") };
 }
 
+/**
+ * The owner's background (shared/ground.ts): parchment, the second parchment, rules, ink, soft ink and the "sold out" red from
+ * the ground. The dark foot, its text and the ochre buttons' text keep the tavern's own colours (styles.css --me-dark and
+ * friends), and the band keeps the accent, so both read the same on any ground. Nothing without a background.
+ */
+export function groundVars(g: Ground | null): Record<string, string> {
+  if (!g) return {};
+  return {
+    "--me-paper": g.bg,
+    "--me-paper-2": g.bg2,
+    "--me-line": g.line,
+    "--me-ink": g.ink,
+    "--me-ink-soft": g.inkSoft,
+    "--me-red": onGround("#8e2a22", g, [g.bg, g.bg2]),
+    "--me-dark": "#2b1b14",
+    "--me-on-dark": "#f3eadb",
+    "--me-dark-muted": "#cdb894",
+    "--me-on-ochre": "#2b1b14",
+    colorScheme: g.dark ? "dark" : "light",
+  };
+}
+
 /** Mehana: a traditional Bulgarian tavern. Wine band, embroidery border, the menu course by course (Brygada 1918 + Wix Madefor Text). */
 export function Template({ state: initial, now: initialNow, slug, page, draft, live, feedUrl, preview = false }: TemplateProps) {
   const { state, changed } = useLiveSite(initial, feedUrl, live);
@@ -47,7 +70,7 @@ export function Template({ state: initial, now: initialNow, slug, page, draft, l
   const accent = ACCENT_RE.test(state.venue.theme.accent) ? state.venue.theme.accent : "#6e1f1b";
   const media: MediaLookup = (id) => mediaUrl(id ? state.media.find((m) => m.id === id) : null, { preview });
   return (
-    <div className={`tpl-mehana ${fontVars}`} style={{ "--accent": accent, ...accentVars(accent) } as CSSProperties} data-page={page}>
+    <div className={`tpl-mehana ${fontVars}`} style={{ "--accent": accent, ...accentVars(accent), ...groundVars(groundFor(state.venue.theme.background)) } as CSSProperties} data-page={page}>
       {draft && <DraftNote summary_bg={draft.summary_bg} summary_en={draft.summary_en} />}
       <Band state={state} slug={slug} page={page} now={now} media={media} />
       <Shevitsa />

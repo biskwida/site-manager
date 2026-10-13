@@ -4,8 +4,9 @@ import { createElement, type ReactNode } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 import { INK_DARK, INK_LIGHT } from "@/src/domain/color";
-import type { Lang, SiteState } from "@/src/domain/types";
+import type { Lang, SiteState, TemplateId } from "@/src/domain/types";
 import { LangProvider } from "@/src/i18n";
+import { getTemplate } from "@/src/templates";
 import { contrastRatio } from "@/src/templates/shared/color";
 import { groundFor, onGround } from "@/src/templates/shared/ground";
 import { Template as Classic } from "@/src/templates/classic/Template";
@@ -62,7 +63,7 @@ async function renderClassic(background: string | null | undefined, page: "home"
 }
 
 const rootStyle = (html: string) => /^<div style="([^"]*)"/.exec(html)?.[1] ?? "";
-const cssVar = (style: string, name: string) => new RegExp(`${name}:(#[0-9a-f]{6})`).exec(style)?.[1];
+const cssVar = (style: string, name: string) => new RegExp(`(?:^|;)${name}:(#[0-9a-f]{6})`).exec(style)?.[1];
 
 describe("classic: the owner's background", () => {
   it("adds nothing to the root without a background", async () => {
@@ -98,4 +99,59 @@ describe("classic: the owner's background", () => {
     expect(html).toContain("bg-card text-ink");
     expect(html).not.toContain("bg-white text-ink");
   });
+});
+
+async function renderTemplate(id: TemplateId, background: string | null | undefined, accent?: string) {
+  const { store, venue } = await makeDemo();
+  const state: SiteState = await store.getSite(venue.id);
+  state.venue.theme = { accent: accent ?? state.venue.theme.accent, background };
+  const { Component } = getTemplate(id);
+  return renderToStaticMarkup(createElement(Provider, { defaultLang: "bg" },
+    createElement(Component, { state, now: NOW, slug: "agala", page: "home", draft: null, live: false, feedUrl: "/api/site/agala" })));
+}
+
+/** The root element's inline style of a template (the first element carrying the template class). */
+const templateStyle = (html: string, id: TemplateId) => new RegExp(`class="tpl-${id}[^"]*" style="([^"]*)"`).exec(html)?.[1] ?? "";
+
+/** Per template: the token that is the page colour, and the text/ground pairs that must read >= 4.5:1. */
+const SPECS: { id: TemplateId; page: string; pairs: [string, string][] }[] = [
+  { id: "lumen", page: "--l-bg", pairs: [["--l-ink", "--l-bg"], ["--l-ink", "--l-surface"], ["--l-ink-soft", "--l-bg"], ["--l-ink-soft", "--l-bg-2"], ["--l-accent-text", "--l-bg"], ["--l-accent-text", "--l-bg-2"]] },
+  { id: "nocturne", page: "--n-bg", pairs: [["--n-ink", "--n-bg"], ["--n-ink", "--n-bg-2"], ["--n-ink-soft", "--n-bg"], ["--n-ink-soft", "--n-bg-2"], ["--n-accent-text", "--n-bg"], ["--n-accent-text", "--n-bg-2"]] },
+  {
+    id: "kvartal", page: "--kv-bg",
+    pairs: [["--kv-ink", "--kv-bg"], ["--kv-soft", "--kv-bg"], ["--kv-soft", "--kv-bg-2"], ["--kv-mute", "--kv-bg"], ["--kv-accent-text", "--kv-bg"], ["--kv-accent-text", "--kv-bg-2"], ["--kv-on", "--kv-ink"], ["--kv-on-soft", "--kv-ink"], ["--kv-on", "--kv-accent-fill"]],
+  },
+  {
+    id: "furna", page: "--fu-bg",
+    pairs: [["--fu-ink", "--fu-bg"], ["--fu-ink-2", "--fu-bg"], ["--fu-soft", "--fu-bg"], ["--fu-soft", "--fu-tile"], ["--fu-soft", "--fu-butter"], ["--fu-fine", "--fu-bg"], ["--fu-open", "--fu-bg"], ["--fu-later", "--fu-bg"], ["--fu-closed", "--fu-bg"], ["--fu-accent-text", "--fu-bg"], ["--fu-on-accent", "--fu-accent-text"], ["--fu-bg", "--fu-ink"]],
+  },
+  {
+    id: "mehana", page: "--me-paper",
+    pairs: [["--me-ink", "--me-paper"], ["--me-ink", "--me-paper-2"], ["--me-ink-soft", "--me-paper"], ["--me-ink-soft", "--me-paper-2"], ["--me-red", "--me-paper"], ["--me-on-dark", "--me-dark"], ["--me-on-ochre", "#c9902f"]],
+  },
+];
+
+describe("designs: the owner's background", () => {
+  for (const spec of SPECS) {
+    describe(spec.id, () => {
+      it("adds no ground tokens without a background", async () => {
+        for (const bg of [undefined, null]) expect(templateStyle(await renderTemplate(spec.id, bg), spec.id)).not.toContain(`${spec.page}:`);
+      });
+      it("paints the page with the owner's colour and keeps every text pair readable, dark or light", async () => {
+        for (const ground of ["#1f3d2b", "#6e1f1b", "#161616", "#f3eadb", "#ffffff", "#909090", "#b8432a"]) {
+          for (const accent of ["#2f6b4f", "#d9a05b", "#1b2a4a", "#e8b4b8"]) {
+            const style = templateStyle(await renderTemplate(spec.id, ground, accent), spec.id);
+            expect(cssVar(style, spec.page), `${spec.id} ${ground}`).toBe(ground);
+            expect(style).toContain(`color-scheme:${groundFor(ground)!.dark ? "dark" : "light"}`);
+            for (const [fg, bg] of spec.pairs) {
+              const a = fg.startsWith("#") ? fg : cssVar(style, fg);
+              const b = bg.startsWith("#") ? bg : cssVar(style, bg);
+              expect(a && b, `${spec.id} ${ground} ${fg} / ${bg} present`).toBeTruthy();
+              expect(contrastRatio(a!, b!), `${spec.id} ground ${ground} accent ${accent}: ${fg} ${a} on ${bg} ${b}`).toBeGreaterThanOrEqual(4.5);
+            }
+          }
+        }
+      });
+    });
+  }
 });

@@ -25,8 +25,11 @@ export interface Ground {
   line: string;
 }
 
-/** Moves `color` until it reads >= `min` on every colour in `under` (away from the ground: lighter on dark, darker on light). */
-function readableOn(color: string, under: string[], dark: boolean, min = 4.5): string {
+/**
+ * Moves `color` in lightness (hue kept) until it reads >= `min` on every colour in `under`: lighter when `under` is dark,
+ * darker when it is light. A colour that already reads comes back unchanged.
+ */
+export function readableOn(color: string, under: string[], dark: boolean, min = 4.5): string {
   let out = color;
   for (let pass = 0; pass < 3; pass++) {
     for (const u of under) out = ensureContrast(out, u, min, dark ? "lighten" : "darken");
@@ -52,6 +55,6 @@ export function groundFor(background: string | null | undefined): Ground | null 
  * A fixed design colour used as text (a status, a sold-out mark) moved just far enough to read >= 4.5:1 on each of `under`,
  * hue kept; a colour that already reads comes back unchanged. `onGround("#a4442c", groundFor("#1f3d2b")!, [bg])` → a lighter clay.
  */
-export function onGround(color: string, g: Ground, under: string[]): string {
-  return readableOn(color, under, g.dark);
+export function onGround(color: string, g: Ground, under: string[], min = 4.5): string {
+  return readableOn(color, under, g.dark, min);
 }

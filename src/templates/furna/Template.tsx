@@ -2,7 +2,8 @@
 import type { CSSProperties } from "react";
 import { useLang } from "@/src/i18n";
 import type { TemplateProps } from "../index";
-import { capAccent, ensureContrast } from "../shared/color";
+import { capAccent, ensureContrast, mixHex } from "../shared/color";
+import { groundFor, onGround, type Ground } from "../shared/ground";
 import { mediaUrl } from "../shared/media";
 import { useLiveSite, useNow } from "../shared/useLiveSite";
 import type { MediaLookup } from "./bits";
@@ -41,6 +42,35 @@ export function accentVars(accent: string) {
   return { "--fu-accent-text": ensureContrast(capAccent(accent, { maxL: 0.542, maxC: 0.17 }), "#f6eedb", 4.5, "darken") };
 }
 
+/**
+ * The owner's background (shared/ground.ts): paper, day tiles, the notice strip (a hint of butter in the ground), ink and the
+ * softer text tones, rules and the open/later/closed words from the ground. Dark buttons keep their inversion (ground-coloured
+ * text on ink), the accent button's text is the ground colour, and the accent as text reads >= 4.5:1 on the paper and the
+ * strip. The oven panel keeps its own colours. Nothing without a background.
+ */
+export function groundVars(g: Ground | null, accent: string): Record<string, string> {
+  if (!g) return {};
+  const butter = mixHex("#ebd9a8", g.bg, g.dark ? 0.12 : 0.5);
+  const soft = onGround(g.inkSoft, g, [g.bg, g.bg2, butter]);
+  return {
+    "--fu-bg": g.bg,
+    "--fu-tile": g.bg2,
+    "--fu-butter": butter,
+    "--fu-ink": g.ink,
+    "--fu-ink-2": onGround(mixHex(g.ink, soft, 0.5), g, [g.bg]),
+    "--fu-soft": soft,
+    "--fu-fine": soft,
+    "--fu-line": g.line,
+    "--fu-line-strong": mixHex(g.ink, g.bg, 0.3),
+    "--fu-open": onGround("#2f6b3f", g, [g.bg, g.bg2]),
+    "--fu-later": onGround("#8a5a2b", g, [g.bg, g.bg2]),
+    "--fu-closed": onGround("#9e3a24", g, [g.bg, g.bg2]),
+    "--fu-on-accent": g.bg,
+    "--fu-accent-text": onGround(accent, g, [g.bg, butter]),
+    colorScheme: g.dark ? "dark" : "light",
+  };
+}
+
 /** Furna: a neighbourhood bakery and breakfast place; cream paper, shop-sign type, the dark oven panel (Yeseva One + Arsenal). */
 export function Template({ state: initial, now: initialNow, slug, page, draft, live, feedUrl, preview = false }: TemplateProps) {
   const { state, changed } = useLiveSite(initial, feedUrl, live);
@@ -52,7 +82,7 @@ export function Template({ state: initial, now: initialNow, slug, page, draft, l
   const picks = specials.length === 0 && page === "home" ? ovenPicks(state, now, media) : [];
   const inOven = new Set(picks.map((i) => i.id));
   return (
-    <div className={`tpl-furna ${fontVars}`} style={{ "--accent": accent, ...accentVars(accent) } as CSSProperties} data-page={page}>
+    <div className={`tpl-furna ${fontVars}`} style={{ "--accent": accent, ...accentVars(accent), ...groundVars(groundFor(state.venue.theme.background), accent) } as CSSProperties} data-page={page}>
       {draft && <DraftNote summary_bg={draft.summary_bg} summary_en={draft.summary_en} />}
       <Hero state={state} now={now} slug={slug} page={page} media={media} oven={<Oven state={state} now={now} changed={changed} specials={specials} picks={picks} />} />
       <main id="main" className="fu-main">
