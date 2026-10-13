@@ -174,7 +174,7 @@ npm run venue:create -- --name "Кафене „Ъгъла“" --slug agala --la
 
 On a database created before the channels change, run the `chat_ref` migration before `db:apply` (see [docs/CHANNELS.md → Database migration](docs/CHANNELS.md#database-migration)).
 
-`venue:create` prints the site URL, the admin link and two one-use invite codes (owner and staff, valid 7 days) once. Keep them; they are not shown again. With `--seed demo` the demo café's own name and menu are used. Without it you get an empty venue with default hours and `--name` is required. `--site-url https://…` marks the venue as having its own site, built and hosted elsewhere: no Vercel project is created for it.
+`venue:create` prints the site URL, the admin link and two one-use invite codes (owner and staff, valid 7 days) once. Keep them; they are not shown again. With `--seed demo` the demo café's own name and menu are used. Without it you get an empty venue with default hours and `--name` is required. `--site-url https://…` marks the venue as having its own site (see [Venues with their own site](#venues-with-their-own-site)).
 
 Then, in two terminals:
 
@@ -329,6 +329,19 @@ Checked on 2026-10-11 on `build/templates`:
 A café that already has a WordPress site keeps it: the **Site Manager plugin** (`public/wp/site-manager.zip`, source in `integrations/wordpress/site-manager`) shows the live menu, specials, hours, announcements and photos as blocks and shortcodes, and, after the owner sends one `/connect` line to the bot, lets the agent edit the site's pages, photos, title, logo, menus and WooCommerce products through the same preview → ✅ → undo flow. Set `DESTINATION_SECRET_KEY` (32 bytes, `openssl rand -hex 32`) in production to enable connecting. Full guide: [docs/INTEGRATION.md](docs/INTEGRATION.md). Checks: `npm run wp:lint`, `npm run wp:test`, `npm run wp:smoke` (Docker).
 
 A WordPress push that fails (the site is down) is retried with backoff, but only when the tick runs: on the owner's next message to the bot and at the daily cron (03:00 UTC), or every 5 minutes with `supabase/cron.sql` or a Pro cron. So "will retry" can mean a few hours on the Hobby plan.
+
+## Venues with their own site
+
+Use this when the venue's site was built by hand outside Site Manager and reads our public feed (`/api/site/<slug>`), as https://coffique.vercel.app does for `coffique`. The venue gets `site_url`; when the owner redeems the invite **no Vercel project is created** (`startDeploy` logs `own site, skipped`). The bot's welcome names that site and says it is connected and managed by the agent; the dashboard links it with a short note, without deploy status, template switch or custom-domain card. Changes still go through the bot and the dashboard as usual and reach the site through the feed.
+
+```bash
+# a new venue
+npm run venue:create -- --name "Coffique" --slug coffique --site-url https://coffique.vercel.app
+# an existing venue: sets site_url first, then prints an owner invite (reuses an open one)
+npm run invite:create -- --slug coffique --site-url https://coffique.vercel.app
+```
+
+Run `npm run db:apply` once first so the `venues.site_url` column exists. `--site-url` takes an https URL only.
 
 ## Posting to Facebook and Instagram
 
