@@ -69,10 +69,13 @@ describe("socialPreviewLines", () => {
       "  #кафе”",
     ]);
   });
-  it("shows a story-only post without a caption line", () => {
+  it("shows a story-only row as a story: no word \"post\", and no caption line even when one was written (stories show none)", () => {
     const story: Change = { ...post, after: { ...post.after!, caption: "", targets: ["instagram_story"] } };
-    expect(socialPreviewLines(story, "bg")).toEqual(["• Публикация: Instagram (история)"]);
-    expect(socialPreviewLines(story, "en")).toEqual(["• Post: Instagram (story)"]);
+    expect(socialPreviewLines(story, "bg")).toEqual(["• Публикуване: Instagram (история)"]);
+    expect(socialPreviewLines(story, "en")).toEqual(["• Publish: Instagram (story)"]);
+    const captioned: Change = { ...post, after: { ...post.after!, targets: ["instagram_story", "facebook_story"] } };
+    expect(socialPreviewLines(captioned, "bg")).toEqual(["• Публикуване: Facebook (история), Instagram (история)"]);
+    expect(socialPreviewLines(captioned, "en").join("\n")).not.toMatch(/post/i);
   });
   it("renders the inverted row as a removal", () => {
     const [inv] = invertChanges([post]);
