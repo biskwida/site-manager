@@ -296,3 +296,25 @@ describe("without a deployer (production without VERCEL_TOKEN)", () => {
     expect((await adminOverview(store, await store.getVenue(venue.id), T0, "https://site.example")).hosted).toBe(false);
   });
 });
+
+describe("own site (built and hosted elsewhere, reads our feed)", () => {
+  it("the overview links the venue's own site and drops any deploy record and custom domain", async () => {
+    const { store, venue } = await makeDemo();
+    await store.setDeploy(venue.id, { ...ready, custom_domain: "agala.bg", domain_verified: true });
+    const v = await store.updateVenue(venue.id, { site_url: "https://coffique.vercel.app" });
+    const o = await adminOverview(store, v, T0, "https://site.example");
+    expect(o).toMatchObject({ own_site: true, site_url: "https://coffique.vercel.app", deploy: null, custom_domain: null, domain_verified: null, public_url: "https://site.example/agala" });
+    const hosted = await adminOverview(store, await store.updateVenue(venue.id, { site_url: null }), T0, "https://site.example");
+    expect(hosted.own_site).toBe(false);
+  });
+
+  it("set_template refuses with a clear message and touches neither the venue nor the provider", async () => {
+    const { store, venue } = await makeDemo();
+    const v = await store.updateVenue(venue.id, { site_url: "https://coffique.vercel.app" });
+    const deployer = new FakeDeployer();
+    const r = await setTemplate(deps(store, deployer), v, "nocturne");
+    expect(r).toEqual({ ok: false, code: "own_site", error: "This venue has its own site; templates do not apply.", bg: "Сайтът ви е изграден отделно и не използва шаблон.", en: "Your site is built separately and does not use a template." });
+    expect((await store.getVenue(venue.id)).template).toBe("classic");
+    expect(deployer.projects.size).toBe(0);
+  });
+});
