@@ -64,3 +64,14 @@ export function publicSiteState(state: SiteState): PublicSiteState {
   // background is always present for outside readers: null = the design's own page colour.
   return { ...state, venue: { ...venue, theme: { ...venue.theme, background: venue.theme.background ?? null } } };
 }
+
+/**
+ * Where the hosted /<slug> page sends visitors of an own-site venue: the venue's own site, so one address serves the café.
+ * A draft preview (the dashboard's "Preview on the site" link, or a wizard draft) stays on the hosted page, which is the only place a draft can render.
+ * null = render the hosted page as usual.
+ */
+export function ownSiteRedirect(site: { state: SiteState; draft: DraftInfo | null }): string | null {
+  const url = site.state.venue.site_url;
+  if (!url || site.draft) return null;
+  return url;
+}

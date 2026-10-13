@@ -1,10 +1,11 @@
 import type { Metadata } from "next";
-import { notFound } from "next/navigation";
+import { notFound, redirect } from "next/navigation";
 import { LangProvider } from "@/src/i18n";
 import { getTemplate } from "@/src/templates";
 import { templatePageProps } from "./props";
 import { DraftBanner } from "./components/DraftBanner";
 import { loadPage, pageMetadata } from "./load";
+import { ownSiteRedirect } from "@/src/server/site";
 
 export const dynamic = "force-dynamic";
 
@@ -16,6 +17,9 @@ export default async function Page(props: PageProps<"/[slug]">) {
   const { slug } = await props.params;
   const site = await loadPage(slug, await props.searchParams);
   if (!site) notFound();
+  // An own-site venue (site_url) lives elsewhere: send visitors there, so the hosted template is not a second public site.
+  const own = ownSiteRedirect(site);
+  if (own) redirect(own);
   const { Component } = getTemplate(site.state.venue.template);
   // eslint-disable-next-line react-hooks/purity -- a server component renders once per request; this is the request time templates tick from
   const now = Date.now();
