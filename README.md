@@ -174,7 +174,7 @@ npm run venue:create -- --name "Кафене „Ъгъла“" --slug agala --la
 
 On a database created before the channels change, run the `chat_ref` migration before `db:apply` (see [docs/CHANNELS.md → Database migration](docs/CHANNELS.md#database-migration)).
 
-`venue:create` prints the site URL, the admin link and two one-use invite codes (owner and staff, valid 7 days) once. Keep them; they are not shown again. With `--seed demo` the demo café's own name and menu are used. Without it you get an empty venue with default hours and `--name` is required.
+`venue:create` prints the site URL, the admin link and two one-use invite codes (owner and staff, valid 7 days) once. Keep them; they are not shown again. With `--seed demo` the demo café's own name and menu are used. Without it you get an empty venue with default hours and `--name` is required. `--site-url https://…` marks the venue as having its own site, built and hosted elsewhere: no Vercel project is created for it.
 
 Then, in two terminals:
 
@@ -189,6 +189,7 @@ Other scripts:
 
 | Command | What it does |
 |---|---|
+| `npm run invite:create -- --slug my-cafe [--role owner\|staff] [--site-url https://…]` | A one-use invite for an existing venue: reuses the open invite for that role or creates one (valid 7 days), and prints the code and links once. `--site-url` sets the venue's own site first. |
 | `npm run demo:reset` | Wipes the demo venue's content and change log, re-seeds the menu, texts, hours and theme. Linked phones, invite codes and the admin link stay. |
 | `npm run smoke -- --dry` | One real agent turn ("Капучиното става 3,20" by default, `--text "…"` to change it) against an in-memory demo venue; prints the model, effort, reply and resulting proposal. |
 | `npm run smoke -- --chat <chat id>` | The same against Supabase, with the preview really sent to that linked Telegram chat. |

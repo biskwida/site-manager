@@ -15,6 +15,7 @@
     "db:dry-run": "tsx --env-file-if-exists=.env.local scripts/db-dry-run.mts",
     "check:rls": "tsx --env-file-if-exists=.env.local scripts/check-rls.mts",
     "venue:create": "tsx --env-file-if-exists=.env.local scripts/venue-create.mts",
+    "invite:create": "tsx --env-file-if-exists=.env.local scripts/invite-create.mts",
     "bot:dev": "tsx --env-file-if-exists=.env.local scripts/dev-bot.mts",
     "telegram:set-webhook": "tsx --env-file-if-exists=.env.local scripts/set-webhook.mts",
     "meta:setup": "tsx --env-file-if-exists=.env.local scripts/meta-setup.mts",
