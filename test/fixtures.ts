@@ -38,6 +38,7 @@ export function venue(over: Partial<Venue> = {}): Venue {
     deploy: null,
     wizard_draft: null,
     instagram_import: null,
+    site_url: null,
     created_at: NOW,
     ...over,
   };

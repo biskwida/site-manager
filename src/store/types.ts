@@ -36,6 +36,8 @@ export interface NewVenue {
   business_type?: BusinessType;
   status?: VenueStatus;
   wizard_draft?: WizardDraft | null;
+  /** The venue's own external site (https); see Venue.site_url. */
+  site_url?: string | null;
 }
 export interface NewCategory {
   venue_id: string;
@@ -74,7 +76,7 @@ export interface NewChangeSet {
 export type ChangeSetPatch = Partial<Pick<ChangeSet, "status" | "apply_at" | "reminded_at" | "decided_at" | "applied_at" | "reverted_by" | "message_ref" | "preview_bg" | "preview_en">>;
 export type VenuePatch = Partial<Pick<Venue,
   "slug" | "name" | "tagline_bg" | "tagline_en" | "about_bg" | "about_en" | "address" | "phone" | "maps_url" | "instagram" |
-  "hours" | "tz" | "default_lang" | "theme" | "template" | "business_type" | "status" | "wizard_draft" | "instagram_import">>;
+  "hours" | "tz" | "default_lang" | "theme" | "template" | "business_type" | "status" | "wizard_draft" | "instagram_import" | "site_url">>;
 
 export interface ExpiredTimer {
   item: Item;

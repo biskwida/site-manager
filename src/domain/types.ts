@@ -86,6 +86,12 @@ export interface Venue {
   wizard_draft: WizardDraft | null;
   /** Server-only: photos the owner may import from their Instagram (wizard drafts; cleared on publish). Never in the public feed. */
   instagram_import: InstagramImport | null;
+  /**
+   * The venue's own site, built and hosted outside Site Manager (https only), which reads our public feed. null = the hosted
+   * /<slug> or a template deploy, as before. When set, no provider project is ever created and the dashboard links here.
+   * Not in the public feed.
+   */
+  site_url: string | null;
   created_at: string;
 }
 

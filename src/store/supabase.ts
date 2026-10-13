@@ -41,6 +41,8 @@ export function toVenue(r: Row): Venue {
     wizard_draft: (r.wizard_draft as WizardDraft | null) ?? null,
     // Missing before the column is added (schema.sql): read as null, so nothing breaks until it is applied.
     instagram_import: (r.instagram_import as InstagramImport | null) ?? null,
+    // Missing before the column is added: read as null (a hosted or template site).
+    site_url: strOrNull(r.site_url),
     created_at: iso(r.created_at),
   };
 }

@@ -25,7 +25,7 @@ describe("supabase/policies.sql venue grants", () => {
     const grant = statements.find((s) => /^grant select \(.+\) on public\.venues/i.test(s))!;
     const granted = grant.slice(grant.indexOf("(") + 1, grant.indexOf(")")).split(",").map((c) => c.trim()).sort();
     expect(granted).toEqual(publicColumns);
-    for (const secret of ["deploy", "wizard_draft", "draft_token_hash", "instagram_import", "publishing_at"]) expect(granted).not.toContain(secret);
+    for (const secret of ["deploy", "wizard_draft", "draft_token_hash", "instagram_import", "publishing_at", "site_url"]) expect(granted).not.toContain(secret);
     expect(granted).toEqual(expect.arrayContaining(["id", "slug", "status"])); // check:rls reads id, slug; the RLS policies test status
   });
 });

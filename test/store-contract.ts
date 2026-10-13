@@ -217,7 +217,7 @@ export function storeContract(name: string, make: () => Promise<Store>, storageH
       const v = await s.createVenue({ slug: "t10", name: "Test" });
       const d = await s.createVenue({ slug: "t10d", name: "Draft", template: "nocturne", business_type: "bar", status: "draft" });
       try {
-        expect(v).toMatchObject({ template: "classic", business_type: "cafe", status: "live", deploy: null, wizard_draft: null, instagram_import: null });
+        expect(v).toMatchObject({ template: "classic", business_type: "cafe", status: "live", deploy: null, wizard_draft: null, instagram_import: null, site_url: null });
         expect(d).toMatchObject({ template: "nocturne", business_type: "bar", status: "draft" });
         expect(only(await s.listVenues(), v.id, d.id)).toEqual([v.id, d.id]); // oldest first
         expect(only(await s.listVenues({ status: "draft" }), v.id, d.id)).toEqual([d.id]);
@@ -243,6 +243,24 @@ export function storeContract(name: string, make: () => Promise<Store>, storageH
         await expect(s.updateVenue(a.id, { slug: "t11b" })).rejects.toThrow(/t11b/);
         await expect(s.updateVenue("00000000-0000-0000-0000-000000000000", { name: "x" })).rejects.toThrow();
         await expect(s.updateVenue(a.id, { slug: "t11c" })).resolves.toMatchObject({ slug: "t11c" }); // own slug is fine
+      } finally {
+        await s.deleteVenue(a.id);
+        await s.deleteVenue(b.id);
+      }
+    });
+
+    it("stores the venue's own site URL on create and update, and clears it", async () => {
+      const s = await make();
+      const a = await s.createVenue({ slug: "t13a", name: "A" });
+      const b = await s.createVenue({ slug: "t13b", name: "B", site_url: "https://own.example" });
+      try {
+        expect(a.site_url).toBeNull();
+        expect(b.site_url).toBe("https://own.example");
+        expect((await s.getVenue(b.id)).site_url).toBe("https://own.example");
+        expect((await s.updateVenue(a.id, { site_url: "https://a.example" })).site_url).toBe("https://a.example");
+        expect((await s.getVenueBySlug("t13a"))?.site_url).toBe("https://a.example");
+        expect((await s.updateVenue(a.id, { name: "A2" })).site_url).toBe("https://a.example"); // untouched by other patches
+        expect((await s.updateVenue(a.id, { site_url: null })).site_url).toBeNull();
       } finally {
         await s.deleteVenue(a.id);
         await s.deleteVenue(b.id);
