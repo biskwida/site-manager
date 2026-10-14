@@ -21,7 +21,7 @@ import { exchangeCode, IG_AUTHORIZE_URL, instagramConfigured } from "./instagram
 export type SocialKind = "facebook" | "instagram";
 export const SOCIAL_KINDS: readonly SocialKind[] = ["facebook", "instagram"];
 export const FB_SCOPES = "pages_manage_posts,pages_read_engagement,pages_show_list";
-export const IG_PUBLISH_SCOPES = "instagram_business_basic,instagram_business_content_publish";
+export const IG_PUBLISH_SCOPES = "instagram_business_basic,instagram_business_content_publish,instagram_business_manage_insights";
 export const FB_DIALOG_URL = "https://www.facebook.com/v25.0/dialog/oauth";
 export const FB_CALLBACK_PATH = "/api/social/facebook/callback";
 export const FB_SELECT_PATH = "/api/social/facebook/select";

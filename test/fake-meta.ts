@@ -281,6 +281,6 @@ export class FakeMeta {
     this.igCodes.delete(String(body.code));
     const short = tok("IGAAShort");
     this.igShortTokens.set(short, userId);
-    return Response.json({ data: [{ access_token: short, user_id: Number(userId), permissions: "instagram_business_basic,instagram_business_content_publish" }] });
+    return Response.json({ data: [{ access_token: short, user_id: Number(userId), permissions: "instagram_business_basic,instagram_business_content_publish,instagram_business_manage_insights" }] });
   }
 }

@@ -86,7 +86,7 @@ describe("start", () => {
     const { loc } = await start("instagram");
     expect(`${loc.origin}${loc.pathname}`).toBe(IG_AUTHORIZE_URL);
     expect(loc.searchParams.get("scope")).toBe(IG_PUBLISH_SCOPES);
-    expect(IG_PUBLISH_SCOPES).toBe("instagram_business_basic,instagram_business_content_publish");
+    expect(IG_PUBLISH_SCOPES).toBe("instagram_business_basic,instagram_business_content_publish,instagram_business_manage_insights");
     expect(loc.searchParams.get("redirect_uri")).toBe(`${BASE}/api/social/instagram/callback`);
     expect(loc.searchParams.get("response_type")).toBe("code");
     expect(IG_SCOPE).toBe("instagram_business_basic"); // the wizard import keeps its read-only scope
