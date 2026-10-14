@@ -186,8 +186,10 @@ export interface Store {
   listExpiredTimers(now: string, venueId?: string): Promise<ExpiredTimer[]>;
 
   // media
-  saveMedia(venueId: string, bytes: Uint8Array, contentType: string): Promise<Media>;
+  /** `opts.name` stores the file at `<venue>/<name>` instead of a random name (used for cached cut-outs). */
+  saveMedia(venueId: string, bytes: Uint8Array, contentType: string, opts?: { name?: string }): Promise<Media>;
   getMedia(id: string): Promise<Media | null>;
+  findMediaByPath(storagePath: string): Promise<Media | null>;
 
   // conversations
   getConversation(venueId: string, chatRef: string): Promise<Conversation | null>;
