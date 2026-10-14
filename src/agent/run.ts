@@ -53,9 +53,10 @@ export async function runTurn(deps: AgentDeps, input: TurnInput, cfg: AgentConfi
     { type: "text" as const, text },
   ];
   const turnSets = new Set<string>();
+  const notes: string[] = [];
   const progress = startProgress({ messenger: deps.messenger, chatRef: deps.chatRef, lang, hasImage: !!input.image || held.length > 0, inReplyTo: input.replyTo });
   // Each tool call updates the status line ("Reading the menu…").
-  const tools = makeTools({ ...deps, correctionFor: memory.correctionFor, source: input.source, turnSets }).map((t) => {
+  const tools = makeTools({ ...deps, correctionFor: memory.correctionFor, source: input.source, turnSets, notes }).map((t) => {
     const run = t.run as (...args: unknown[]) => ReturnType<typeof t.run>;
     return { ...t, run: ((...args: unknown[]) => { progress.step(t.name); return run(...args); }) as typeof t.run };
   });
@@ -74,7 +75,8 @@ export async function runTurn(deps: AgentDeps, input: TurnInput, cfg: AgentConfi
     if (keep && !reply) reply = copy(lang).photoWaiting; // the model said nothing: ask the usual question rather than stay silent
     if (reply) await deps.messenger.send(deps.chatRef, reply);
     const photos = keep ? { media_ids: [input.mediaId!, ...held], waiting: true } : {};
-    await appendMemory(deps.store, deps.venueId, deps.chatRef, { at: now.toISOString(), owner: ownerLine, agent: reply || NO_REPLY, outcome, ...photos }, now, claimed);
+    const fullOutcome = [outcome, ...notes].filter(Boolean).join("; ") || undefined;
+    await appendMemory(deps.store, deps.venueId, deps.chatRef, { at: now.toISOString(), owner: ownerLine, agent: reply || NO_REPLY, outcome: fullOutcome, ...photos }, now, claimed);
   };
 
   try {

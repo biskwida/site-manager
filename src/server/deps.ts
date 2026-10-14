@@ -29,6 +29,7 @@ import { withDestinationSync } from "../destinations/store-hook";
 import type { SyncDeps } from "../destinations/sync";
 import { connectWordPress, wordPressClientFor } from "../destinations/connect";
 import { socialConnections } from "../agent/social-tools";
+import { httpVisualClient } from "../visual/client";
 
 export interface ServerDeps {
   config: Config;
@@ -150,6 +151,9 @@ export async function makeServerDeps(o: DepsOptions): Promise<ServerDeps> {
   const waDownload: MediaFetch = (mediaId) => downloadWhatsAppMedia(config.whatsappToken ?? "", mediaId);
   const fetchUrl: MediaFetch = (url) => downloadUrl(url);
 
+  // The picture service runs as its own function (/api/visual) on this same deployment, reached with the tick secret.
+  const visual = config.tickSecret ? httpVisualClient({ baseUrl: config.publicBaseUrl, secret: config.tickSecret, fetch: o.fetch }) : null;
+
   async function handleRun(r: RunRequest): Promise<void> {
     try {
       await runTick({ store: store2, messenger, now: new Date(), venueId: r.venueId, deployer, sync });
@@ -160,7 +164,7 @@ export async function makeServerDeps(o: DepsOptions): Promise<ServerDeps> {
     const social = sync ? await socialConnections(s, r.venueId).catch(() => null) : null;
     try {
       await runTurn(
-        { store: store2, venueId: r.venueId, chatRef: r.chatRef, member: r.member, messenger, now: () => new Date(), baseUrl: config.publicBaseUrl, wordpress: wp?.client ?? null, social },
+        { store: store2, venueId: r.venueId, chatRef: r.chatRef, member: r.member, messenger, now: () => new Date(), baseUrl: config.publicBaseUrl, wordpress: wp?.client ?? null, social, visual },
         { text: r.text, source: r.source, image: r.image, mediaId: r.mediaId, replyTo: r.replyTo },
         { model: config.agentModel, effort: config.agentEffort, apiKey: config.anthropicApiKey || undefined },
         o.client,
