@@ -689,5 +689,37 @@ export function storeContract(name: string, make: () => Promise<Store>, storageH
       const none = await s.createChangeSet({ ...base, source: "dashboard", status: "proposed", changes: [] });
       expect(await s.applyChangeSet(none.id, "2026-10-31T22:00:02.000Z")).toBe("limited");
     });
+
+    it("finds social destinations by a config value across venues, of one kind only", async () => {
+      const s = await make();
+      const a = await s.createVenue({ slug: "fd-a", name: "A" });
+      const b = await s.createVenue({ slug: "fd-b", name: "B" });
+      const subject = `asid-${crypto.randomUUID()}`; // unique: a live store holds other venues' rows too
+      const fa = await s.upsertDestination({ venue_id: a.id, kind: "facebook", config: { page_id: "1", app_user_id: subject }, secrets: "x" });
+      await s.upsertDestination({ venue_id: b.id, kind: "facebook", config: { page_id: "2", app_user_id: `${subject}-other` }, secrets: "y" });
+      const ib = await s.upsertDestination({ venue_id: b.id, kind: "instagram", config: { ig_user_id: subject }, secrets: "z" });
+      const fb = await s.findDestinationsByConfig("facebook", "app_user_id", subject);
+      expect(fb.map((d) => d.id)).toEqual([fa.id]);
+      expect(fb[0]).not.toHaveProperty("secrets");
+      expect((await s.findDestinationsByConfig("instagram", "ig_user_id", subject)).map((d) => d.id)).toEqual([ib.id]);
+      expect(await s.findDestinationsByConfig("instagram", "app_user_id", subject)).toEqual([]);
+      await expect(s.findDestinationsByConfig("facebook", "bad key;", subject)).rejects.toThrow();
+    });
+
+    it("records data deletion requests with a confirmation code and completes them", async () => {
+      const s = await make();
+      const r = await s.createDeletionRequest({ provider: "facebook", subject_id: "asid-1", now: NOW });
+      expect(r).toMatchObject({ provider: "facebook", subject_id: "asid-1", status: "pending", completed_at: null });
+      expect(r.confirmation_code).toMatch(/^[A-Z2-9]{12}$/);
+      expect(new Date(r.created_at).toISOString()).toBe(NOW);
+      const other = await s.createDeletionRequest({ provider: "instagram", subject_id: "asid-1", now: NOW });
+      expect(other.confirmation_code).not.toBe(r.confirmation_code);
+      await s.completeDeletionRequest(r.confirmation_code, LATER);
+      const done = (await s.getDeletionRequest(r.confirmation_code))!;
+      expect(done).toMatchObject({ id: r.id, status: "completed", confirmation_code: r.confirmation_code });
+      expect(new Date(done.completed_at!).toISOString()).toBe(LATER);
+      expect((await s.getDeletionRequest(other.confirmation_code))!.status).toBe("pending");
+      expect(await s.getDeletionRequest("NOPENOPENOPE")).toBeNull();
+    });
   });
 }

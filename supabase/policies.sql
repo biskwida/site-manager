@@ -38,6 +38,10 @@ begin
 end $$;
 -- venue_members, venue_invites, venue_admin_tokens, change_sets, changes, conversations, rate_limits: RLS on, no policies => invisible to anon.
 
+-- Meta data deletion requests (2026-10-14): server-only, like the tables above (RLS on, no policies, no grants).
+alter table public.data_deletion_requests enable row level security;
+revoke all on public.data_deletion_requests from anon, authenticated;
+
 -- 2. No RPCs: the owner dashboard and the public site read through the app's server (service-role key, never in the browser).
 
 -- 3. Realtime for the public site and the dashboard.

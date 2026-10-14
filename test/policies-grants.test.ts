@@ -28,4 +28,10 @@ describe("supabase/policies.sql venue grants", () => {
     for (const secret of ["deploy", "wizard_draft", "draft_token_hash", "instagram_import", "publishing_at", "site_url"]) expect(granted).not.toContain(secret);
     expect(granted).toEqual(expect.arrayContaining(["id", "slug", "status"])); // check:rls reads id, slug; the RLS policies test status
   });
+
+  it("data_deletion_requests is server-only: RLS on, everything revoked from anon/authenticated, never granted", () => {
+    expect(statements).toContain("alter table public.data_deletion_requests enable row level security");
+    expect(statements).toContain("revoke all on public.data_deletion_requests from anon, authenticated");
+    expect(statements.filter((s) => /^grant /i.test(s)).join(" ")).not.toMatch(/data_deletion_requests/);
+  });
 });

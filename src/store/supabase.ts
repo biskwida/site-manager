@@ -4,7 +4,7 @@ import { isExternalEntity, type SocialEntity, type WpEntity } from "../domain/ty
 import type { Announcement, BusinessType, Category, Change, ChangeSet, Conversation, DeployInfo, DeployStatus, Holiday, InstagramImport, Item, Lang, Media, Member, Role, SiteState, SiteText, SiteTextKey, TemplateId, Venue, VenueStatus } from "../domain/types";
 import type { WizardDraft } from "../wizard/schema";
 import { legacyTelegramId } from "../channels/ref";
-import { DEFAULT_HOURS, extensionFor, newInviteCode, newToken, PUBLISH_CLAIM_TTL_MS, type ChangeSetPatch, type ExpiredTimer, type NewCategory, type NewChangeSet, type NewItem, type NewVenue, type Store, type VenuePatch, type Destination, type DestinationKind, type DestinationPatch, type DestinationSync, type DestinationWithSecrets, type NewDestination, type NewSync, type SyncPatch, type SyncStatus, type ApplyResult, checkLimitValue } from "./types";
+import { DEFAULT_HOURS, extensionFor, newInviteCode, newToken, PUBLISH_CLAIM_TTL_MS, type ChangeSetPatch, type ExpiredTimer, type NewCategory, type NewChangeSet, type NewItem, type NewVenue, type Store, type VenuePatch, type Destination, type DestinationKind, type DestinationPatch, type DestinationSync, type DestinationWithSecrets, type NewDestination, type NewSync, type SyncPatch, type SyncStatus, type ApplyResult, checkLimitValue, CONFIG_KEY_RE, newConfirmationCode, type DataDeletionRequest, type DeletionProvider, type DeletionStatus } from "./types";
 import { limitBlocks } from "./usage";
 
 type Row = Record<string, unknown>;
@@ -627,6 +627,41 @@ export class SupabaseStore implements Store {
     if (!data) throw new Error(`setChangeLimit ${venueId}: not found`);
     return this.venue(data);
   }
+
+  // --- Meta data deletion (appended 2026-10-14) ---
+  async findDestinationsByConfig(kind: DestinationKind, key: string, value: string) {
+    if (!CONFIG_KEY_RE.test(key)) throw new Error(`findDestinationsByConfig: bad key ${key}`);
+    const rows = await must(this.db.from("venue_destinations").select("*").eq("kind", kind).eq(`config->>${key}`, value).order("created_at"), "findDestinationsByConfig");
+    return rows.map((r) => this.withoutSecrets(toDestination(r)));
+  }
+  async createDeletionRequest(r: { provider: DeletionProvider; subject_id: string; now: string }) {
+    const row = await must<Row>(
+      this.db.from("data_deletion_requests").insert({ provider: r.provider, subject_id: r.subject_id, confirmation_code: newConfirmationCode(), status: "pending", created_at: r.now }).select("*").single(),
+      "createDeletionRequest",
+    );
+    return toDeletionRequest(row);
+  }
+  async completeDeletionRequest(code: string, now: string) {
+    const { error } = await this.db.from("data_deletion_requests").update({ status: "completed", completed_at: now }).eq("confirmation_code", code);
+    if (error) throw new Error(`completeDeletionRequest: ${error.message}`);
+  }
+  async getDeletionRequest(code: string) {
+    const { data, error } = await this.db.from("data_deletion_requests").select("*").eq("confirmation_code", code).maybeSingle();
+    if (error) throw new Error(`getDeletionRequest: ${error.message}`);
+    return data ? toDeletionRequest(data) : null;
+  }
+}
+
+export function toDeletionRequest(r: Row): DataDeletionRequest {
+  return {
+    id: r.id as string,
+    provider: r.provider as DeletionProvider,
+    subject_id: str(r.subject_id),
+    confirmation_code: str(r.confirmation_code),
+    status: r.status as DeletionStatus,
+    created_at: iso(r.created_at),
+    completed_at: r.completed_at ? iso(r.completed_at) : null,
+  };
 }
 
 // --- Destinations (integrations track, appended 2026-10-10) ---
