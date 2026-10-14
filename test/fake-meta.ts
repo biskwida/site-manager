@@ -1,6 +1,6 @@
 // test/fake-meta.ts
 // In-memory stand-in for the Meta endpoints social posting uses, served through `fetch`:
-// - graph.facebook.com/v25.0: OAuth code/long-lived exchange, /me/accounts, /{page}/photos, /{page}/photo_stories,
+// - graph.facebook.com/v25.0: OAuth code/long-lived exchange, /me (app-scoped id), /me/accounts, /{page}/photos, /{page}/photo_stories,
 //   GET /{post}?fields=permalink_url, DELETE /{post} (feed posts only: a story DELETE fails with 100/33 like Meta),
 //   GET /{page}/published_posts, GET /{page}/stories (what a retry checks before posting again)
 // - graph.instagram.com/v25.0: /me, /{ig}/media (containers with status polling), /{ig}/media_publish, GET /{media}?fields=permalink,
@@ -55,6 +55,10 @@ export class FakeMeta {
   wrapMe = false;
   /** /me leaves out user_id. */
   meWithoutUserId = false;
+  /** The Facebook user's app-scoped id (GET /me with a user token). */
+  fbAppUserId = num();
+  /** GET /me with a Facebook user token fails. */
+  fbMeFails = false;
   /** Clock for created_time / creation_time. */
   now: () => Date = () => new Date();
   private fbCodes = new Map<string, string[]>();
@@ -146,6 +150,11 @@ export class FakeMeta {
       const short = tok("EAAUser");
       this.fbUserTokens.set(short, { long: false, pages });
       return Response.json({ access_token: short, token_type: "bearer", expires_in: 3600 });
+    }
+    if (method === "GET" && path === "/me") {
+      const u = token ? this.fbUserTokens.get(token) : undefined;
+      if (!u || this.fbMeFails) return graphError(400, 190, "Invalid OAuth access token.");
+      return Response.json({ id: this.fbAppUserId });
     }
     if (method === "GET" && path === "/me/accounts") {
       const u = token ? this.fbUserTokens.get(token) : undefined;
