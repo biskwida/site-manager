@@ -40,6 +40,11 @@ export class WhatsAppMessenger implements Messenger {
     const to = this.to(chatRef, "send");
     return to ? this.sendText(to, text) : null;
   }
+  async sendPhoto(chatRef: string, url: string, caption?: string): Promise<string | null> {
+    const to = this.to(chatRef, "sendPhoto");
+    if (!to) return null;
+    return WhatsAppMessenger.id(await this.post({ recipient_type: "individual", to, type: "image", image: { link: url, ...(caption ? { caption } : {}) } }, "sendPhoto"));
+  }
   async sendProposal(chatRef: string, text: string, setId: string, lang: Lang): Promise<string | null> {
     const to = this.to(chatRef, "sendProposal");
     if (!to) return null;

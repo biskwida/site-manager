@@ -29,7 +29,7 @@ export function captureApi(bot: Bot) {
   bot.api.config.use(async (_prev, method, payload) => {
     calls.push({ method, payload: payload as Record<string, unknown> });
     const result: unknown =
-      method === "sendMessage" ? { message_id: msgId++, date: 0, chat: { id: (payload as { chat_id: number }).chat_id, type: "private" }, text: (payload as { text: string }).text }
+      method === "sendMessage" || method === "sendPhoto" ? { message_id: msgId++, date: 0, chat: { id: (payload as { chat_id: number }).chat_id, type: "private" }, text: (payload as { text: string }).text }
       : method === "getFile" ? { file_id: (payload as { file_id: string }).file_id, file_unique_id: "u", file_path: `files/${(payload as { file_id: string }).file_id}.bin` }
       : true;
     return { ok: true, result } as never;

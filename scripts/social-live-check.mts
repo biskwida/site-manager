@@ -32,6 +32,10 @@ const token = process.env.IG_TEST_TOKEN ?? "";
 if (!token) throw new Error("IG_TEST_TOKEN is missing");
 
 class PrintMessenger implements Messenger {
+  async sendPhoto(_chatRef: string, url: string, caption?: string) {
+    console.log(`🖼 ${url}${caption ? ` ${caption}` : ""}`);
+    return "photo";
+  }
   private n = 1;
   async send(_r: string, text: string) {
     console.log(`  [bot] ${text.replace(/\n/g, " | ")}`);

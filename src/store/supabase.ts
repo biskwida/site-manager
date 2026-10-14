@@ -492,13 +492,18 @@ export class SupabaseStore implements Store {
     return out;
   }
 
-  async saveMedia(venueId: string, bytes: Uint8Array, contentType: string) {
+  async saveMedia(venueId: string, bytes: Uint8Array, contentType: string, opts?: { name?: string }) {
     const id = crypto.randomUUID();
-    const path = `${venueId}/${id}.${extensionFor(contentType)}`;
+    const path = opts?.name ? `${venueId}/${opts.name}` : `${venueId}/${id}.${extensionFor(contentType)}`;
     const { error } = await this.db.storage.from("media").upload(path, bytes, { contentType, upsert: false });
     if (error) throw new Error(`saveMedia upload: ${error.message}`);
     const public_url = this.db.storage.from("media").getPublicUrl(path).data.publicUrl;
     return toMedia(await must(this.db.from("media").insert({ id, venue_id: venueId, storage_path: path, public_url }).select("*").single(), "saveMedia row"));
+  }
+  async findMediaByPath(storagePath: string) {
+    const { data, error } = await this.db.from("media").select("*").eq("storage_path", storagePath).maybeSingle();
+    if (error) throw new Error(`findMediaByPath: ${error.message}`);
+    return data ? toMedia(data) : null;
   }
   async getMedia(id: string) {
     const { data, error } = await this.db.from("media").select("*").eq("id", id).maybeSingle();

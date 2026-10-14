@@ -166,6 +166,15 @@ export function storeContract(name: string, make: () => Promise<Store>, storageH
       expect(await s.listExpiredTimers(LATER, v.id)).toEqual([]);
     });
 
+    it("saves media under a chosen name and finds it again by path", async () => {
+      const s = await make();
+      const v = await s.createVenue({ slug: "t8n", name: "Test" });
+      expect(await s.findMediaByPath(`${v.id}/cutouts/p1.png`)).toBeNull();
+      const m = await s.saveMedia(v.id, new Uint8Array([1, 2]), "image/png", { name: "cutouts/p1.png" });
+      expect(m.storage_path).toBe(`${v.id}/cutouts/p1.png`);
+      expect(await s.findMediaByPath(`${v.id}/cutouts/p1.png`)).toEqual(m);
+    });
+
     it("stores media and conversations", async () => {
       const s = await make();
       const v = await s.createVenue({ slug: "t8", name: "Test" });

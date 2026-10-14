@@ -14,6 +14,8 @@ export interface Messenger {
   send(chatRef: string, text: string, opts?: SendOpts): Promise<string | null>;
   /** Preview with ✅ / ✏️ / ❌ buttons. */
   sendProposal(chatRef: string, text: string, setId: string, lang: Lang): Promise<string | null>;
+  /** A picture by public https URL, with an optional caption. Returns the message ref or null if sending failed (never throws). */
+  sendPhoto(chatRef: string, url: string, caption?: string): Promise<string | null>;
   /** Telegram: edits the proposal message to `full` and removes the buttons. Meta channels: send `short` as a new message. Best-effort. */
   conclude(chatRef: string, messageRef: string | null, full: string, short: string, opts?: SendOpts): Promise<void>;
   /** "typing…" indicator; `inReplyTo` is the inbound message ref (WhatsApp needs it). Best-effort. */
@@ -55,6 +57,15 @@ export class TelegramMessenger implements Messenger {
       return String(m.message_id);
     } catch (e) {
       console.error("[messenger] send failed:", e instanceof Error ? e.message : e);
+      return null;
+    }
+  }
+  async sendPhoto(chatRef: string, url: string, caption?: string) {
+    try {
+      const m = await this.api.sendPhoto(telegramChat(chatRef), url, caption ? { caption } : undefined);
+      return String(m.message_id);
+    } catch (e) {
+      console.error("[messenger] sendPhoto failed:", e instanceof Error ? e.message : e);
       return null;
     }
   }

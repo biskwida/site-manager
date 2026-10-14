@@ -378,14 +378,21 @@ export class InMemoryStore implements Store {
     return out;
   }
 
-  async saveMedia(venueId: string, bytes: Uint8Array, contentType: string): Promise<Media> {
+  async saveMedia(venueId: string, bytes: Uint8Array, contentType: string, opts?: { name?: string }): Promise<Media> {
     const s = this.site(venueId);
     const id = crypto.randomUUID();
-    const path = `${venueId}/${id}.${extensionFor(contentType)}`;
+    const path = opts?.name ? `${venueId}/${opts.name}` : `${venueId}/${id}.${extensionFor(contentType)}`;
     this.files.set(path, bytes);
     const row: Media = { id, venue_id: venueId, storage_path: path, public_url: `memory://media/${path}`, is_gallery: false, position: 0, created_at: this.clock() };
     s.media.push(row);
     return clone(row);
+  }
+  async findMediaByPath(storagePath: string) {
+    for (const s of this.sites.values()) {
+      const m = s.media.find((x) => x.storage_path === storagePath);
+      if (m) return clone(m);
+    }
+    return null;
   }
   async getMedia(id: string) {
     for (const s of this.sites.values()) {

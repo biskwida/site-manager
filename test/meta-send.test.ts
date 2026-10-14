@@ -75,4 +75,11 @@ describe("MetaMessenger", () => {
     expect(calls).toHaveLength(0);
     expect(logs.join("\n")).toMatch(/\[meta\] send failed: malformed chat_ref/);
   });
+  it("sends a photo by URL as an image attachment, with the caption as a following text", async () => {
+    const { f, calls } = fakeFetch();
+    const m = new MetaMessenger({ pageToken: "PT", fetch: f });
+    expect(await m.sendPhoto("ig:178414", "https://cdn.example/p.jpg", "Флат уайт")).toBe("m_1");
+    expect(calls[0].json).toEqual({ recipient: { id: "178414" }, messaging_type: "RESPONSE", message: { attachment: { type: "image", payload: { url: "https://cdn.example/p.jpg", is_reusable: false } } } });
+    expect(calls[1].json.message).toEqual({ text: "Флат уайт" });
+  });
 });

@@ -18,6 +18,8 @@ import { usageLine } from "../bot/limit";
 import { changeUsage } from "../store/usage";
 import { BulkSchema, CancelSchema, CheckAllergensSchema, ListSchema, ProposeSchema, ScheduleSchema, UndoSchema, type ChangeInput } from "./tool-schemas";
 import { socialTools } from "./social-tools";
+import { visualTools } from "./visual-tools";
+import type { VisualClient } from "../visual/client";
 import { wpTools } from "./wp-tools";
 
 export interface AgentDeps {
@@ -39,6 +41,10 @@ export interface AgentDeps {
   social?: { facebook: boolean; instagram: boolean } | null;
   /** Outbound HTTP for reading the owner's photo (social_post checks its shape for Instagram); default the global fetch. */
   fetch?: typeof fetch;
+  /** The picture service (photo → Instagram picture); registers make_visual when present. */
+  visual?: VisualClient | null;
+  /** Extra lines for this turn's memory (e.g. the media ids of pictures made), so later messages can refer to them. */
+  notes?: string[];
   /** Ids of the change sets this turn created (filled by the tools). One owner message may hold several tasks, so its own proposals never block each other. */
   turnSets?: Set<string>;
 }
@@ -304,7 +310,7 @@ export function makeTools(deps: AgentDeps) {
 
   // Task 11 appends schedule_changes, propose_bulk_price_change, check_allergens, undo here.
   const kit: ToolKit = { attempt, site, ctx, previews, mine, propose, getSet, ensureNoPending, ensureWithinLimit, lang };
-  return [getSite, getMenu, proposeChanges, cancelChangeSet, listChanges, ...extraTools(d, kit), ...wpTools(d, kit), ...socialTools(d, kit)];
+  return [getSite, getMenu, proposeChanges, cancelChangeSet, listChanges, ...extraTools(d, kit), ...wpTools(d, kit), ...socialTools(d, kit), ...visualTools(d, kit)];
 }
 
 /** What the shared helpers of makeTools expose to the second group of tools. */

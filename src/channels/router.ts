@@ -44,6 +44,9 @@ export class ChannelRouter implements Messenger {
     if (!p || !(await this.allowed(chatRef, p.ch, opts))) return null;
     return p.a.send(chatRef, text, opts);
   }
+  async sendPhoto(chatRef: string, url: string, caption?: string) {
+    return (await this.pick(chatRef)?.a.sendPhoto(chatRef, url, caption)) ?? null;
+  }
   async sendProposal(chatRef: string, text: string, setId: string, lang: Lang) {
     return (await this.pick(chatRef)?.a.sendProposal(chatRef, text, setId, lang)) ?? null;
   }

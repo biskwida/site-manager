@@ -50,4 +50,10 @@ describe("WhatsAppMessenger", () => {
     expect(calls).toHaveLength(0);
     expect(logs.join("\n")).toMatch(/\[meta\] send failed: malformed chat_ref/);
   });
+  it("sends a photo by link with its caption", async () => {
+    const { f, calls } = fakeFetch();
+    const m = new WhatsAppMessenger({ token: "WT", phoneNumberId: "PNID", fetch: f });
+    expect(await m.sendPhoto("wa:359888123456", "https://cdn.example/p.jpg", "Флат уайт")).toBe("wamid.out1");
+    expect(calls[0].json).toEqual({ messaging_product: "whatsapp", recipient_type: "individual", to: "359888123456", type: "image", image: { link: "https://cdn.example/p.jpg", caption: "Флат уайт" } });
+  });
 });
