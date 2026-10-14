@@ -14,6 +14,10 @@ export class ConsoleMessenger implements Messenger {
     this.log(`→ [${maskRef(chatRef)}] ${text}\n   ${proposalButtons(lang).map((b) => `[${b.label}]`).join(" ")}`);
     return `c${++this.n}`;
   }
+  async sendPhoto(chatRef: string, url: string, caption?: string) {
+    this.log(`→ [${maskRef(chatRef)}] 🖼 ${url}${caption ? `\n   ${caption}` : ""}`);
+    return `c${++this.n}`;
+  }
   async conclude(chatRef: string, messageRef: string | null, _full: string, short: string) {
     this.log(`✎ [${maskRef(chatRef)}#${messageRef ?? "-"}] ${short}`);
   }

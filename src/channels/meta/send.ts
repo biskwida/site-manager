@@ -37,6 +37,15 @@ export class MetaMessenger implements Messenger {
     const r = this.ref(chatRef, "send");
     return r ? this.sendText(r, text) : null;
   }
+  /** Messenger and Instagram show an image attachment without a caption, so the caption follows as text. */
+  async sendPhoto(chatRef: string, url: string, caption?: string): Promise<string | null> {
+    const r = this.ref(chatRef, "sendPhoto");
+    if (!r) return null;
+    const res = await this.post({ recipient: { id: r.id }, messaging_type: "RESPONSE", message: { attachment: { type: "image", payload: { url, is_reusable: false } } } }, "sendPhoto");
+    if (!res) return null;
+    if (caption) await this.sendText(r, caption);
+    return typeof res.message_id === "string" ? res.message_id : null;
+  }
   async sendProposal(chatRef: string, text: string, setId: string, lang: Lang): Promise<string | null> {
     const r = this.ref(chatRef, "sendProposal");
     if (!r) return null;

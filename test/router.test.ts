@@ -62,4 +62,12 @@ describe("ChannelRouter", () => {
     } finally { console.log = orig; }
     expect(logs).toContain("[router] skipped proactive wa:…3456: outside 24h window");
   });
+  it("routes a photo to the chat's channel", async () => {
+    const { store } = await makeDemo();
+    const tg = new FakeMessenger();
+    const r = new ChannelRouter({ store, now: () => new Date(), adapters: { tg } });
+    expect(await r.sendPhoto("tg:1001", "https://cdn.example/p.jpg", "x")).toBe("100");
+    expect(tg.photos).toEqual([{ chatRef: "tg:1001", url: "https://cdn.example/p.jpg", caption: "x", messageRef: "100" }]);
+    expect(await r.sendPhoto("wa:1", "https://cdn.example/p.jpg")).toBeNull();
+  });
 });

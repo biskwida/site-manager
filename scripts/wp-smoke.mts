@@ -66,6 +66,10 @@ function printDebugLogTail() {
 }
 
 class PrintMessenger implements Messenger {
+  async sendPhoto(_chatRef: string, url: string, caption?: string) {
+    console.log(`🖼 ${url}${caption ? ` ${caption}` : ""}`);
+    return "photo";
+  }
   private n = 1;
   async send(_c: string, text: string) {
     console.log(`  [bot] ${text.split("\n")[0]}`);

@@ -58,4 +58,9 @@ describe("TelegramMessenger", () => {
     expect(err).toHaveBeenCalledTimes(5);
     expect(String(err.mock.calls[0][1])).toBe("not a Telegram ref: fb");
   });
+  it("sends a photo by URL with a caption", async () => {
+    const { api, messenger } = setup();
+    expect(await messenger.sendPhoto("tg:1001", "https://cdn.example/p.jpg", "Флат уайт")).toBe("500");
+    expect(api.calls).toEqual([{ method: "sendPhoto", payload: expect.objectContaining({ chat_id: 1001, photo: "https://cdn.example/p.jpg", caption: "Флат уайт" }) }]);
+  });
 });
