@@ -10,7 +10,7 @@ import { DEFAULT_HOURS } from "../store/types";
 
 /** 2–39 chars: lowercase letters and digits, single dashes only between them (no leading, trailing or doubled dash). */
 export const SLUG_RE = /^[a-z0-9](?:[a-z0-9]|-(?=[a-z0-9])){1,38}$/;
-export const RESERVED_SLUGS = ["new", "admin", "api", "embed", "draft", "demo", "www", "static", "_next"];
+export const RESERVED_SLUGS = ["new", "admin", "api", "embed", "draft", "demo", "www", "static", "_next", "privacy", "data-deletion"];
 /** Placeholder slug of an unpublished draft: `draft-<8 hex>`. Never accepted as the final address. */
 export const DRAFT_SLUG_PREFIX = "draft-";
 const HEX = /^#[0-9a-fA-F]{6}$/;
