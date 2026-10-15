@@ -15,7 +15,10 @@ const full = {
 describe("loadConfig", () => {
   it("reads every key with defaults", () => {
     const c = loadConfig(full);
-    expect(c).toMatchObject({ agentModel: "claude-opus-5-5", agentEffort: "medium", sttApiKey: null, sttBaseUrl: "https://api.groq.com/openai/v1", sttModel: "whisper-large-v3", demoVenueSlug: "agala", publicBaseUrl: "https://site.example" });
+    expect(c).toMatchObject({ agentModel: "claude-opus-5-5", agentEffort: "medium", sttApiKey: null, sttBaseUrl: "https://api.groq.com/openai/v1", sttModel: "whisper-large-v3", demoVenueSlug: "agala", publicBaseUrl: "https://site.example", commentDraftModel: "claude-haiku-5-5" });
+  });
+  it("reads COMMENT_DRAFT_MODEL", () => {
+    expect(loadConfig({ ...full, COMMENT_DRAFT_MODEL: "claude-sonnet-5-5" }).commentDraftModel).toBe("claude-sonnet-5-5");
   });
   it("names the missing key", () => {
     expect(() => loadConfig({ ...full, TELEGRAM_BOT_TOKEN: "" })).toThrow(/Missing TELEGRAM_BOT_TOKEN/);

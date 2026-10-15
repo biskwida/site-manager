@@ -6,6 +6,8 @@ export interface Config {
   anthropicApiKey: string;
   agentModel: string;
   agentEffort: Effort;
+  /** Small model for comment reply drafts (COMMENT_DRAFT_MODEL); one short call per comment. */
+  commentDraftModel: string;
   telegramToken: string;
   telegramWebhookSecret: string;
   /** Any OpenAI-compatible transcription endpoint; Groq free tier by default. */
@@ -112,6 +114,7 @@ export function loadConfig(env: Env = process.env, opts: { lenient?: boolean } =
     anthropicApiKey: need("ANTHROPIC_API_KEY"),
     agentModel: optional("AGENT_MODEL") ?? "claude-opus-5-5",
     agentEffort: effort,
+    commentDraftModel: optional("COMMENT_DRAFT_MODEL") ?? "claude-haiku-5-5",
     telegramToken: need("TELEGRAM_BOT_TOKEN"),
     telegramWebhookSecret: need("TELEGRAM_WEBHOOK_SECRET"),
     sttApiKey: optional("STT_API_KEY"),
