@@ -72,7 +72,7 @@ Tick step 9 (`if (d.sync)`): for each live venue with a facebook or instagram de
 
 ### Notification
 
-Proposal text: "💬 Нов коментар под поста „{caption excerpt}“ ({network}) от {author}: „{text}“\n\nПредложен отговор:\n„{reply}“" with the existing ✅ Приложи / ✏️ Промени / ❌ Откажи buttons. Sent to the primary owner (the owner member with the earliest `created_at`); other owners get a plain line with "отговорено от …" after the fact. If the primary owner's channel is a Meta channel and outside the 23-hour window, the proposal is held (status stays `new`, flagged `deferred`) and re-sent when that owner next writes or from the dashboard. Telegram owners are never deferred.
+Proposal text: "💬 Нов коментар под поста „{caption excerpt}“ ({network}) от {author}: „{text}“\n\nПредложен отговор:\n„{reply}“" with the existing ✅ Приложи / ✏️ Промени / ❌ Откажи buttons. **Sent to every owner of the venue; the first tap wins** (decided 2026-10-15). Mechanics: a comment set stores one message ref per owner chat (`change_sets.proposal_refs jsonb`, `{chat_ref: message_ref}`; `chat_ref`/`message_ref` keep the first owner for compatibility); `handleDecision` accepts a tap on a `comment` set from any owner member of the venue, not only `cs.chat_ref`; after the first decision every other owner's message is concluded with "✅ Отговорено от {name}" / "❌ Отказано от {name}", and a later tap answers "вече решено". ✏️ from either owner sets `correction_for` for that owner's chat only. If the primary owner's channel is a Meta channel and outside the 23-hour window, the proposal is held (status stays `new`, flagged `deferred`) and re-sent when that owner next writes or from the dashboard. Telegram owners are never deferred.
 
 ### Reply publishing
 
@@ -106,7 +106,7 @@ Unit: comment parsing for both networks (fixtures), own-account and nested skipp
 
 0. Default mode for new venues: `each` (my proposal) or `digest`?
 1. Do replies count toward the monthly change limit (60 for Coffique)? Proposal: no, with a separate cap of 300 replies a month to bound cost.
-2. Two owners: proposal with buttons to the first owner only, plain copy to the second? Or to both, first tap wins?
+2. ~~Two owners~~: decided, both get the buttons, first tap wins.
 3. Draft tone source: until the brand/tone field exists, use the venue's tagline and about text. OK?
 4. Spam or abuse: propose "не отговаряме" (owner still decides) or skip silently? Proposal: propose, so the owner sees it.
 5. Conference demo: Instagram only (sitemanager.bg test account) or both networks? Facebook needs the Page connect and the two new scopes on the test Page.
