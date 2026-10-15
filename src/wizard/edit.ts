@@ -51,7 +51,12 @@ const norm = (s: string) => s.trim().toLowerCase();
 export function mergeExtracted(categories: readonly WizardCategory[], r: ExtractResult): WizardCategory[] {
   const out = categories.map((c) => ({ ...c, items: [...c.items] }));
   for (const ec of r.categories) {
-    const items: WizardItem[] = ec.items.map((it) => ({ key: newKey(), name_bg: it.name_bg, name_en: it.name_en, desc_bg: it.desc_bg, desc_en: it.desc_en, price_eur: it.price_eur, allergens: [...it.allergens], image_media_id: null }));
+    const items: WizardItem[] = ec.items.map((it) => ({
+      key: newKey(), name_bg: it.name_bg, name_en: it.name_en, desc_bg: it.desc_bg, desc_en: it.desc_en, price_eur: it.price_eur, allergens: [...it.allergens], image_media_id: null,
+      // Randevue import only: the photo to copy and the sold-out date travel with the item; `hidden` is a review-time default and stays behind.
+      ...(it.image_url ? { image_url: it.image_url } : {}),
+      ...(it.sold_out_until ? { sold_out_until: it.sold_out_until } : {}),
+    }));
     const bg = norm(ec.name_bg);
     const en = norm(ec.name_en);
     const existing = out.find((c) => (bg && norm(c.name_bg) === bg) || (en && norm(c.name_en) === en) || (bg && norm(c.name_en) === bg) || (en && norm(c.name_bg) === en));

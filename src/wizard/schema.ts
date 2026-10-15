@@ -63,6 +63,10 @@ export interface WizardItem {
   price_eur: number;
   allergens: number[];
   image_media_id: string | null;
+  /** From the Randevue import: a product photo publish copies into the venue's media (src/server/item-images.ts), when there is no uploaded one. */
+  image_url?: string;
+  /** From the Randevue import: the item starts sold out until this ISO datetime, when it is still in the future at publish. */
+  sold_out_until?: string;
 }
 export interface WizardCategory {
   key: string;
@@ -102,6 +106,8 @@ export const WeekHoursSchema = z
   .refine((h) => isValidHours(h), { message: "open must be before close" });
 
 const Key = z.string().min(1).max(64).regex(/^[A-Za-z0-9_-]+$/);
+/** Randevue's image urls are ~200 chars; anything longer is not one of them. */
+const IMAGE_URL_MAX = 500;
 const Price = z
   .number()
   .finite()
@@ -125,6 +131,8 @@ export const WizardItemSchema = z.object({
   price_eur: Price,
   allergens: Allergens,
   image_media_id: z.string().max(64).nullable(),
+  image_url: z.url({ protocol: /^https$/ }).max(IMAGE_URL_MAX).optional(),
+  sold_out_until: z.iso.datetime({ offset: true }).optional(),
 });
 export const WizardCategorySchema = z.object({ key: Key, name_bg: Short(80), name_en: Short(80), items: z.array(WizardItemSchema).max(200) });
 
