@@ -1,6 +1,7 @@
 // src/destinations/sync.ts
 // Server-only. Queues one sync row per (change set, destination) and pushes it; failures retry with backoff from the tick.
 import { isWpEntity, type ChangeSet, type Lang } from "../domain/types";
+import { afterSocialPush } from "../social/comments-status";
 import type { DestinationSync, Store } from "../store/types";
 import { adapterFor } from "./registry";
 import { decryptSecrets, encryptSecrets } from "./secrets";
@@ -97,9 +98,14 @@ export async function runSync(d: SyncDeps, listed: DestinationSync, now: Date): 
       return connectionError(e, true);
     }
   })();
+  const social = dest.kind === "facebook" || dest.kind === "instagram";
+  // Comment sets: the social_comments rows follow what went out (never fails the push; no comment text in the log).
+  const commentStatus = (r: Record<string, unknown> | null | undefined) =>
+    social && r ? afterSocialPush(d.store, sync, r, now.toISOString()).catch((e) => log(`[comments] status update after push ${sync.id} failed: ${e instanceof Error ? e.message : String(e)}`)) : undefined;
   if (result.ok) {
     await d.store.updateSync(sync.id, { status: "done", attempts, last_error: null, result: result.result, updated_at: now.toISOString(), leased_until: null });
     if (dest.status === "error") await d.store.updateDestination(dest.id, { status: "connected", last_error: null });
+    await commentStatus(result.result);
     return result;
   }
   const stored = formatSyncError(result.code, result.error);
@@ -107,9 +113,9 @@ export async function runSync(d: SyncDeps, listed: DestinationSync, now: Date): 
   // Attempt n waits BACKOFF_MS[n-1]; attempts past the table reuse its last entry.
   const nextAt = new Date(now.getTime() + (BACKOFF_MS[Math.min(attempts, BACKOFF_MS.length) - 1] ?? BACKOFF_MS[BACKOFF_MS.length - 1])).toISOString();
   await d.store.updateSync(sync.id, { status: giveUp ? "failed" : "pending", attempts, next_at: nextAt, last_error: stored, updated_at: now.toISOString(), leased_until: null, ...(result.partial ? { result: result.partial } : {}) });
+  await commentStatus(result.partial);
   // WordPress: any final failure marks the connection. Facebook/Instagram: only a broken token or a missing permission does;
   // a refused photo or a Meta outage says nothing about the connection.
-  const social = dest.kind === "facebook" || dest.kind === "instagram";
   if (giveUp && (!social || CONNECTION_CODES.has(result.code ?? ""))) await d.store.updateDestination(dest.id, { status: "error", last_error: stored });
   log(`[destinations] ${dest.kind} push for set ${sync.change_set_id} failed (attempt ${attempts}${giveUp ? ", giving up" : `, next at ${nextAt}`}): ${result.error}`);
   return result;

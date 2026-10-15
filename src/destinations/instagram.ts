@@ -6,10 +6,11 @@
 // deleted through the API: an undo publishes nothing and returns the links so the owner deletes them by hand. Tokens older than
 // 30 days are refreshed (here before publishing, and by the tick); a refresh failure never stops a publish.
 import type { SocialPostRow } from "../domain/types";
+import { pushCommentChanges } from "./comment-push";
 import { socialFailure } from "./facebook";
 import { GraphClient, IG_GRAPH, MetaApiError, metaFetch } from "./meta-graph";
 import { decryptSecrets, encryptSecrets } from "./secrets";
-import { entriesIn, networkTargets, publishedIn, relevantFor, safeLink, type SocialPublished } from "./social-common";
+import { commentNetworkOf, commentResultIn, entriesIn, networkTargets, publishedIn, relevantFor, safeLink, type SocialPublished } from "./social-common";
 import type { SyncDeps } from "./sync";
 import type { DestinationAdapter, PushContext, PushResult } from "./types";
 
@@ -97,22 +98,26 @@ export const instagramAdapter: DestinationAdapter = {
   async push(ctx: PushContext): Promise<PushResult> {
     const igId = String(ctx.destination.config.ig_user_id ?? "");
     if (!/^\d{1,32}$/.test(igId) || !ctx.secrets.token) return { ok: false, retry: false, error: "Instagram is not connected.", code: "sm_social_not_connected", line: LINES.error("not connected") };
+    // A set holds post rows or comment rows (replies / moderation, 2026-10-15); each kind keeps its own part of the result.
+    const posts = ctx.changes.filter((c) => c.entity === "social_post");
+    const comments = ctx.changes.filter((c) => commentNetworkOf(c) === "instagram");
+    const acc = commentResultIn(ctx.prior ?? []);
     const entries = new Map<string, SocialPublished>(entriesIn(ctx.prior ?? []).map((e) => [`${e.target}|${e.media_id}`, e]));
-    const current = () => ({ published: [...entries.values()] });
+    const current = () => ({ ...(posts.length ? { published: [...entries.values()] } : {}), ...(comments.length ? acc : {}) });
     const sleep = ctx.sleep ?? realSleep;
     try {
       // An undo needs no API call (and no token): Instagram media cannot be deleted through the API.
-      if (ctx.changes.every((c) => c.after === null)) {
+      if (comments.length === 0 && posts.every((c) => c.after === null)) {
         const manual: { target: string; id: string | null; permalink: string | null }[] = [];
         const original = ctx.changeSet.undoes_id && ctx.resultsOf ? publishedIn(await ctx.resultsOf(ctx.changeSet.undoes_id)) : [];
-        for (const c of ctx.changes) {
+        for (const c of posts) {
           const targets = networkTargets(c, "instagram");
           for (const p of original.filter((x) => x.media_id === c.entity_id && targets.includes(x.target))) manual.push({ target: p.target, id: p.id, permalink: p.permalink });
         }
         return { ok: true, result: { undo: true, manual_delete: manual }, line: LINES.ok };
       }
       const ig = new GraphClient(IG_GRAPH, await freshToken(ctx, ctx.secrets.token), ctx.fetch ?? fetch);
-      for (const c of ctx.changes) {
+      for (const c of posts) {
         if (!c.after) continue;
         const row = c.after as unknown as SocialPostRow;
         for (const target of networkTargets(c, "instagram")) {
@@ -152,6 +157,7 @@ export const instagramAdapter: DestinationAdapter = {
           entries.set(key, { ...entries.get(key)!, state: "published", id, permalink: await permalink(ig, id) });
         }
       }
+      if (comments.length) await pushCommentChanges(ctx, "instagram", ig, acc, async () => ctx.checkpoint?.(current()));
       return { ok: true, result: current(), line: LINES.ok };
     } catch (e) {
       return socialFailure(e, LINES, current());

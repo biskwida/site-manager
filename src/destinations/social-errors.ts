@@ -10,6 +10,7 @@ const KNOWN: Record<string, { bg: string; en: string }> = {
   sm_ig_processing: { bg: "Instagram още обработва снимката", en: "Instagram is still processing the photo" },
   sm_fb_check: { bg: "не е ясно дали публикацията излезе; проверете страницата и, ако я няма, поискайте я отново", en: "it is unclear whether the post went out; check the Page and, if it is not there, ask again" },
   sm_fb_unknown: { bg: "Facebook не потвърди публикацията", en: "Facebook did not confirm the post" },
+  sm_reply_unknown: { bg: "Meta не потвърди отговора", en: "Meta did not confirm the reply" },
   sm_ig_publish_unknown: { bg: "Instagram не потвърди публикацията", en: "Instagram did not confirm the post" },
   sm_social_not_connected: { bg: "не е свързан; свържете от таблото", en: "not connected; connect it from the dashboard" },
 };

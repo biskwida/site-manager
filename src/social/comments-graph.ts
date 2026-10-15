@@ -90,6 +90,28 @@ export async function replyFacebook(client: GraphClient, commentId: string, mess
   return idOf(await client.post<{ id?: unknown }>(`/${enc(commentId)}/comments`, { message }), "Facebook");
 }
 
+const OWN_REPLY_FIELDS = { instagram: encodeURIComponent("id,text,from,username"), facebook: encodeURIComponent("id,message,from") };
+
+/**
+ * After a reply call whose answer was lost or came without an id: the id of a reply under `commentId` by the venue's own
+ * account (`ownId` = the Instagram user id / Page id) with the same text, or null when there is none. Instagram reads
+ * GET /{comment-id}/replies, Facebook GET /{comment-id}/comments (newest first). Errors propagate (a gone comment is notFound).
+ */
+export async function findOwnReply(client: GraphClient, network: CommentNetwork, commentId: string, ownId: string, message: string): Promise<string | null> {
+  const path = network === "instagram"
+    ? `/${enc(commentId)}/replies?fields=${OWN_REPLY_FIELDS.instagram}&limit=${COMMENTS_PER_CALL}`
+    : `/${enc(commentId)}/comments?fields=${OWN_REPLY_FIELDS.facebook}&order=reverse_chronological&limit=${COMMENTS_PER_CALL}`;
+  const r = await client.get<{ data?: unknown }>(path);
+  const want = message.trim();
+  for (const raw of rows(r.data)) {
+    const id = str(raw.id);
+    const from = (raw.from ?? {}) as Raw;
+    const text = str(network === "instagram" ? raw.text : raw.message);
+    if (id && str(from.id) === ownId && text.trim() === want) return id;
+  }
+  return null;
+}
+
 /** hide/unhide: POST /{ig-comment-id} { hide }; delete: DELETE /{ig-comment-id}. */
 export async function moderateInstagram(client: GraphClient, commentId: string, action: ModerateAction): Promise<void> {
   if (action === "delete") await client.delete(`/${enc(commentId)}`);

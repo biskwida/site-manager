@@ -6,8 +6,9 @@
 // - graph.instagram.com/v25.0: /me, /{ig}/media (containers with status polling), /{ig}/media_publish, GET /{media}?fields=permalink,
 //   /access_token (ig_exchange_token), /refresh_access_token (ig_refresh_token)
 // - comments (comment replies): Facebook GET /{post}/comments (filter=toplevel, since, limit), POST /{comment}/comments,
-//   POST /{comment} {is_hidden}, DELETE /{comment}; Instagram GET /{media}/comments (top-level with a replies edge),
-//   POST /{comment}/replies (top-level only), POST /{comment} {hide}, DELETE /{comment}. Seed with addFacebookComment/addInstagramComment.
+//   GET /{comment}/comments (its replies), POST /{comment} {is_hidden}, DELETE /{comment}; Instagram GET /{media}/comments
+//   (top-level with a replies edge), GET /{comment}/replies, POST /{comment}/replies (top-level only), POST /{comment} {hide},
+//   DELETE /{comment}. Seed with addFacebookComment/addInstagramComment.
 // - api.instagram.com/oauth/access_token (form POST): the short-lived Instagram token
 // Tokens are read from the bearer header or an access_token query parameter, exactly like Graph.
 import { randomBytes } from "node:crypto";
@@ -71,6 +72,8 @@ export class FakeMeta {
   dropResponse: ((c: FakeCall) => boolean) | null = null;
   /** media_publish answers without an id. */
   publishWithoutId = false;
+  /** A reply to a comment (FB POST /{comment}/comments, IG POST /{comment}/replies) is created but answered without an id. */
+  replyWithoutId = false;
   /** /me answers in Meta's `data: [...]` wrapper. */
   wrapMe = false;
   /** /me leaves out user_id. */
@@ -167,6 +170,13 @@ export class FakeMeta {
     return { data: rows.map((c) => this.commentJson(c, true)) };
   }
 
+  /** The replies under one comment (Facebook: newest first with order=reverse_chronological; Instagram: oldest first). */
+  private listReplies(parent: FakeComment, q: URLSearchParams): Json {
+    const rows = [...this.comments.values()].filter((c) => c.parent_id === parent.id && !c.deleted).sort((a, b) => a.created_time.localeCompare(b.created_time));
+    if (q.get("order") === "reverse_chronological") rows.reverse();
+    return { data: rows.slice(0, Number(q.get("limit") ?? 25)).map((c) => this.commentJson(c, false)) };
+  }
+
   private pageForToken(token: string | null): FakePage | null {
     return [...this.pages.values()].find((p) => p.access_token === token) ?? null;
   }
@@ -208,11 +218,12 @@ export class FakeMeta {
       if ((!post || post.deleted) && (!parent || parent.deleted || parent.network !== "facebook")) return graphError(400, 100, "Unsupported request. Object does not exist.", { error_subcode: 33 });
       const page = this.pageForToken(token);
       if (!page || page.id !== ownerId) return graphError(400, 190, "Invalid OAuth access token.");
-      if (method === "GET") return Response.json(this.listComments("facebook", post ? post.post_id : (parent as FakeComment).id, q));
+      if (method === "GET" && post) return Response.json(this.listComments("facebook", post.post_id, q));
+      if (method === "GET" && parent) return Response.json(this.listReplies(parent, q));
       if (method === "POST" && parent) {
         const c: FakeComment = { id: `${parent.post_ref}_${num()}`, network: "facebook", post_ref: parent.post_ref, owner_id: page.id, parent_id: parent.id, from_id: page.id, from_name: page.name, text: String(body?.message ?? ""), created_time: this.stamp(), hidden: false, deleted: false };
         this.comments.set(c.id, c);
-        return Response.json({ id: c.id });
+        return Response.json(this.replyWithoutId ? { success: true } : { id: c.id });
       }
       return graphError(400, 100, "Unsupported request");
     }
@@ -333,8 +344,9 @@ export class FakeMeta {
         if (ic.parent_id !== null) return graphError(400, 100, "Instagram cannot reply to a reply.");
         const c: FakeComment = { id: `178${num()}`, network: "instagram", post_ref: ic.post_ref, owner_id: user.user_id, parent_id: ic.id, from_id: user.user_id, from_name: user.username, text: String(body?.message ?? ""), created_time: this.stamp(), hidden: false, deleted: false };
         this.comments.set(c.id, c);
-        return Response.json({ id: c.id });
+        return Response.json(this.replyWithoutId ? { success: true } : { id: c.id });
       }
+      if (parts.length === 2 && parts[1] === "replies" && method === "GET") return Response.json(this.listReplies(ic, q));
       if (parts.length === 1 && method === "GET") return Response.json({ id: ic.id, text: ic.text, hidden: ic.hidden });
       if (parts.length === 1 && method === "POST" && typeof body?.hide === "boolean") {
         ic.hidden = body.hide;
