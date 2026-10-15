@@ -414,8 +414,13 @@ export interface Store {
   findComment(venueId: string, commentId: string): Promise<SocialComment | null>;
   /** Throws on an unknown id. Keys set to undefined are ignored. */
   updateComment(id: string, patch: SocialCommentPatch): Promise<void>;
-  /** Deletes every venue's rows with created_at < before; returns how many. */
+  /** Deletes every venue's rows with created_at < before (60 days: COMMENT_ROW_RETENTION_MS); returns how many. */
   purgeComments(before: string): Promise<number>;
+  /**
+   * The 30-day rule for the rows themselves: blanks text and author_name of every venue's rows with created_at < before that
+   * still hold any (the row, its status and replied_at stay for the monthly comment count). Returns how many it blanked.
+   */
+  redactComments(before: string): Promise<number>;
   /**
    * The 30-day rule for the customer text kept on change sets: every set with source "comment" created before `before` (and not
    * redacted yet) gets comment_text and author_name blanked in its rows' before/after and COMMENT_REDACTED as its summaries and

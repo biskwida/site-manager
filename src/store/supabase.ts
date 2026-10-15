@@ -724,6 +724,16 @@ export class SupabaseStore implements Store {
     if (error) throw new Error(`purgeComments: ${error.message}`);
     return (data ?? []).length;
   }
+  async redactComments(before: string) {
+    // Two plain filters instead of an or(): rows with text left, then rows with only the author left (none after the first).
+    let n = 0;
+    for (const column of ["text", "author_name"] as const) {
+      const { data, error } = await this.db.from("social_comments").update({ text: "", author_name: "" }).lt("created_at", before).neq(column, "").select("id");
+      if (error) throw new Error(`redactComments: ${error.message}`);
+      n += (data ?? []).length;
+    }
+    return n;
+  }
   async redactCommentSets(before: string, venueId?: string) {
     if (badVenue(venueId)) return 0;
     // At most 200 sets per call (the next tick takes the rest); a redacted set no longer matches (its summary_en is the fixed line).

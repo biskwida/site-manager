@@ -11,6 +11,7 @@ import { maskRef } from "../channels/ref";
 import { COMMENT_MODES, type ChangeSet, type CommentMode, type CommentNetwork, type Lang, type ModerateAction, type Venue } from "../domain/types";
 import { cancelCommentSet, commentLimitState, commentsOfSet, createCommentSet, previewLength, reachableOwners, splitCommentItems, type CommentSetDeps, type CommentSetItem } from "../social/comments-propose";
 import type { DraftKind } from "../social/comments-draft";
+import { COMMENT_RETENTION_MS } from "../social/comments-poll";
 import type { CommentStatus, SocialComment, Store } from "../store/types";
 import type { AdminDeps } from "./admin";
 
@@ -57,9 +58,11 @@ function view(c: SocialComment, posting = false): CommentView {
 
 /** Never includes secrets: comment rows and the destinations' `comments` flag only. */
 export async function commentsOverview(store: Store, venue: Venue, now: Date): Promise<CommentsOverview> {
+  // Older rows keep no customer text (purgeOldComments blanks it after 30 days; the row stays for the monthly count).
+  const since = new Date(now.getTime() - COMMENT_RETENTION_MS).toISOString();
   const [pending, answered, limit, fb, ig] = await Promise.all([
-    store.listComments(venue.id, { status: PENDING, limit: 100 }),
-    store.listComments(venue.id, { status: ANSWERED, limit: ANSWERED_MAX }),
+    store.listComments(venue.id, { status: PENDING, limit: 100, since }),
+    store.listComments(venue.id, { status: ANSWERED, limit: ANSWERED_MAX, since }),
     commentLimitState(store, venue, now),
     store.getDestination(venue.id, "facebook"),
     store.getDestination(venue.id, "instagram"),

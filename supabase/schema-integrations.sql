@@ -49,8 +49,8 @@ alter table public.venue_destinations add constraint venue_destinations_kind_che
 -- ended (a crashed run) can be taken again. Social track, 2026-10-11.
 alter table public.destination_syncs add column if not exists leased_until timestamptz;
 
--- Comment replies (2026-10-15): customer comments under posts Site Manager published. Customer content: the tick purges rows
--- older than 30 days. RLS on, no anon access (policies-integrations.sql). Apply only this file live: npm run db:apply -- schema-integrations.sql
+-- Comment replies (2026-10-15): customer comments under posts Site Manager published. Customer content: the tick blanks text and author after 30 days and deletes rows
+-- older than 60 days. RLS on, no anon access (policies-integrations.sql). Apply only this file live: npm run db:apply -- schema-integrations.sql
 create table if not exists public.social_comments (
   id uuid primary key default gen_random_uuid(),
   venue_id uuid not null references public.venues(id) on delete cascade,

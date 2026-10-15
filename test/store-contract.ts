@@ -850,6 +850,14 @@ export function storeContract(name: string, make: () => Promise<Store>, storageH
       await expect(s.updateComment(crypto.randomUUID(), { status: "ignored" })).rejects.toThrow();
       expect(await s.countCommentActions(v.id, "2026-09-30T21:00:00.000Z", "2026-10-31T22:00:00.000Z")).toBe(2);
       expect(await s.countCommentActions(v.id, "2026-10-31T22:00:00.000Z", "2026-11-30T22:00:00.000Z")).toBe(1);
+      // 30 days: the customer text and author are blanked, the row (status, replied_at) stays for the monthly count.
+      await s.updateComment(old.id, { status: "replied", reply_id: "r0", replied_at: "2026-10-01T09:00:00.000Z" });
+      expect(await s.redactComments("2026-09-15T00:00:00.000Z")).toBe(1);
+      expect(await s.getComment(old.id)).toMatchObject({ text: "", author_name: "", status: "replied", replied_at: "2026-10-01T09:00:00.000Z", comment_id: `${t}-fold` });
+      expect(await s.getComment(a.id)).toMatchObject({ text: "t", author_name: "A" });
+      expect(await s.redactComments("2026-09-15T00:00:00.000Z")).toBe(0); // already blank
+      expect(await s.countCommentActions(v.id, "2026-09-30T21:00:00.000Z", "2026-10-31T22:00:00.000Z")).toBe(3);
+      // 60 days: the row itself goes.
       expect(await s.purgeComments("2026-09-15T00:00:00.000Z")).toBe(1);
       expect((await s.listComments(v.id)).map((x) => x.comment_id)).toEqual([`${t}-fc`, `${t}-fb`, `${t}-fa`]);
       expect(await s.purgeComments("2026-09-15T00:00:00.000Z")).toBe(0);

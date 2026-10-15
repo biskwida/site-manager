@@ -16,6 +16,8 @@ import { fetchFacebookComments, fetchInstagramComments, type IncomingComment } f
 export const COMMENT_POLL_EVERY_MS = 15 * 60_000;
 export const COMMENT_POST_WINDOW_MS = 14 * 24 * 3_600_000;
 export const COMMENT_RETENTION_MS = 30 * 24 * 3_600_000;
+/** The blanked rows stay this long (the monthly comment count reads replied_at), then they are deleted. */
+export const COMMENT_ROW_RETENTION_MS = 60 * 24 * 3_600_000;
 /** Facebook `since` on a repeat poll: the last poll minus this margin (the unique comment_id makes the overlap harmless). */
 const SINCE_MARGIN_MS = 3_600_000;
 const NETWORKS: readonly CommentNetwork[] = ["instagram", "facebook"];
@@ -114,12 +116,14 @@ export async function pollVenueComments(d: SyncDeps, venue: Venue, now: Date): P
 }
 
 /**
- * Customer content is kept for 30 days at most (Meta policy): deletes every venue's older comments and redacts the comment text
- * and author kept on comment change sets older than that. Returns how many comments were deleted. Logs nothing of the text.
+ * Customer content is kept for 30 days at most (Meta policy): blanks the text and author of every venue's older comments and
+ * of the comment change sets older than that. The blanked rows stay until 60 days so a reply made early in the month still
+ * counts toward comment_limit (countCommentActions reads replied_at), then they are deleted. Returns how many rows were
+ * deleted. Logs nothing of the text.
  */
-export async function purgeOldComments(store: Pick<Store, "purgeComments" | "redactCommentSets">, now: Date): Promise<number> {
+export async function purgeOldComments(store: Pick<Store, "purgeComments" | "redactComments" | "redactCommentSets">, now: Date): Promise<number> {
   const before = new Date(now.getTime() - COMMENT_RETENTION_MS).toISOString();
-  const purged = await store.purgeComments(before);
+  await store.redactComments(before);
   await store.redactCommentSets(before);
-  return purged;
+  return store.purgeComments(new Date(now.getTime() - COMMENT_ROW_RETENTION_MS).toISOString());
 }

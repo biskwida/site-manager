@@ -69,6 +69,12 @@ describe("adminCommentAction", () => {
     expect(await adminCommentAction(t.d, t.venue, { action: "reply_comment", comment_id: t.maria.id, reply_text: "again" })).toMatchObject({ ok: false, error: expect.stringMatching(/already answered/) });
     expect(await adminCommentAction(t.d, t.venue, { action: "reply_comment", comment_id: "nope", reply_text: "x" })).toMatchObject({ ok: false, error: "Comment not found." });
   });
+  it("leaves out comments older than 30 days (their text is blanked by the purge; the rows stay for the monthly count)", async () => {
+    const t = await setup();
+    await t.store.upsertComments(t.venue.id, [{ network: "instagram", post_ref: t.maria.post_ref, comment_id: "k-31", parent_id: null, author_id: "", author_name: "", text: "", created_at: at(-31 * 24 * 60 * MIN).toISOString(), seen_at: T0.toISOString(), status: "replied", post_caption: "" }]);
+    const o = await commentsOverview(t.store, await t.store.getVenue(t.venue.id), T0);
+    expect(o.answered.map((c) => c.author_name)).toEqual(["ivan"]);
+  });
   it("refuses a second reply (and an ignore) while the approved reply is still being posted; one reply once Meta recovers", async () => {
     const t = await setup();
     const { set } = await createCommentSet(t.pd, t.venue, [{ comment: t.maria, reply_text: "Да, имаме.", moderate: null }]);

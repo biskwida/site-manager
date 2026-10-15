@@ -2,7 +2,8 @@
 import { describe, expect, it } from "vitest";
 import type { Change } from "@/src/domain/types";
 import { publishedTargets } from "@/src/destinations/social-common";
-import { COMMENT_POLL_EVERY_MS, COMMENT_POST_WINDOW_MS, COMMENT_RETENTION_MS, pollVenueComments, purgeOldComments } from "@/src/social/comments-poll";
+import { COMMENT_POLL_EVERY_MS, COMMENT_POST_WINDOW_MS, COMMENT_RETENTION_MS, COMMENT_ROW_RETENTION_MS, pollVenueComments, purgeOldComments } from "@/src/social/comments-poll";
+import { commentLimitState } from "@/src/social/comments-propose";
 import { runTick } from "@/src/tick";
 import { at, connectedVenue, DAY, HOUR, MIN, T0 } from "./comments-helpers";
 
@@ -148,14 +149,20 @@ describe("pollVenueComments", () => {
     expect((await v.store.getDestination(v.venue.id, "instagram"))?.config).toMatchObject({ token_refreshed_at: T0.toISOString(), last_comment_poll_at: T0.toISOString() });
   });
 
-  it("purges comments older than 30 days", async () => {
+  it("blanks the customer text of comments older than 30 days (the reply still counts this month) and deletes rows after 60", async () => {
     const v = await connectedVenue();
-    await v.store.upsertComments(v.venue.id, [
-      { network: "facebook", post_ref: "p", comment_id: "k1", parent_id: null, author_id: "", author_name: "", text: "old", created_at: at(-COMMENT_RETENTION_MS - MIN).toISOString(), seen_at: T0.toISOString(), status: "replied", post_caption: "" },
-      { network: "facebook", post_ref: "p", comment_id: "k2", parent_id: null, author_id: "", author_name: "", text: "fresh", created_at: at(-COMMENT_RETENTION_MS + MIN).toISOString(), seen_at: T0.toISOString(), status: "new", post_caption: "" },
+    const [old, , ancient] = await v.store.upsertComments(v.venue.id, [
+      { network: "facebook", post_ref: "p", comment_id: "k1", parent_id: null, author_id: "77", author_name: "Ivan Petrov", text: "old", created_at: at(-COMMENT_RETENTION_MS - MIN).toISOString(), seen_at: T0.toISOString(), status: "replied", post_caption: "" },
+      { network: "facebook", post_ref: "p", comment_id: "k2", parent_id: null, author_id: "", author_name: "Мария", text: "fresh", created_at: at(-COMMENT_RETENTION_MS + MIN).toISOString(), seen_at: T0.toISOString(), status: "new", post_caption: "" },
+      { network: "facebook", post_ref: "p", comment_id: "k3", parent_id: null, author_id: "", author_name: "Петя", text: "ancient", created_at: at(-COMMENT_ROW_RETENTION_MS - MIN).toISOString(), seen_at: T0.toISOString(), status: "replied", post_caption: "" },
     ]);
-    expect(await purgeOldComments(v.store, T0)).toBe(1);
-    expect((await v.store.listComments(v.venue.id)).map((c) => c.text)).toEqual(["fresh"]);
+    await v.store.updateComment(old.id, { reply_id: "r1", replied_at: at(-14 * DAY).toISOString() }); // 1 Oct: this month
+    await v.store.updateComment(ancient.id, { reply_id: "r0", replied_at: at(-40 * DAY).toISOString() });
+    const venue = await v.store.getVenue(v.venue.id);
+    expect((await commentLimitState(v.store, venue, T0)).used).toBe(1);
+    expect(await purgeOldComments(v.store, T0)).toBe(1); // the 60-day row
+    expect((await v.store.listComments(v.venue.id)).map((c) => [c.comment_id, c.text, c.author_name])).toEqual([["k2", "fresh", "Мария"], ["k1", "", ""]]);
+    expect((await commentLimitState(v.store, venue, T0)).used).toBe(1); // the early-month reply is still counted
   });
 
   it("the purge also redacts the customer text kept on comment sets older than 30 days", async () => {
@@ -192,7 +199,7 @@ describe("pollVenueComments", () => {
     await v.store.upsertComments(v.venue.id, [{ network: "instagram", post_ref: "p", comment_id: "k-old", parent_id: null, author_id: "", author_name: "", text: "old", created_at: at(-COMMENT_RETENTION_MS - DAY).toISOString(), seen_at: T0.toISOString(), status: "replied", post_caption: "" }]);
     const none = await runTick({ store: v.store, messenger: v.messenger, now: at(MIN), sync: v.d });
     expect(none.comments_found).toBe(0);
-    expect((await v.store.listComments(v.venue.id)).map((c) => c.comment_id)).not.toContain("k-old"); // the global tick purges
+    expect((await v.store.listComments(v.venue.id)).find((c) => c.comment_id === "k-old")).toMatchObject({ text: "" }); // the global tick purges
     const off = await runTick({ store: v.store, messenger: v.messenger, now: at(2 * MIN) });
     expect(off.comments_found).toBeUndefined(); // no sync deps: no polling
   });

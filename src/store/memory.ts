@@ -598,6 +598,16 @@ export class InMemoryStore implements Store {
     }
     return n;
   }
+  async redactComments(before: string) {
+    let n = 0;
+    for (const c of this.comments.values()) {
+      if (c.created_at >= before || (c.text === "" && c.author_name === "")) continue;
+      c.text = "";
+      c.author_name = "";
+      n++;
+    }
+    return n;
+  }
   async redactCommentSets(before: string, venueId?: string) {
     let n = 0;
     for (const cs of this.sets.values()) {
