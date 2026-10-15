@@ -24,8 +24,8 @@ export const MAX_ATTEMPTS = 5;
 export const HOOK_LEASE_MS = 5 * 60_000;
 /** How long one run holds a row while pushing it (claimSync); a run that crashed frees it after this. */
 export const PUSH_LEASE_MS = 5 * 60_000;
-/** Error codes after which a social destination is marked "error" (the connection itself is broken). */
-const CONNECTION_CODES = new Set(["sm_meta_token", "sm_meta_permission"]);
+/** Error codes after which a social destination is marked "error" (the connection itself is broken); the comment poller uses the same set. */
+export const CONNECTION_CODES: ReadonlySet<string> = new Set(["sm_meta_token", "sm_meta_permission"]);
 
 /**
  * One pending row per destination that has something to push for this set. `leaseMs` moves the row's first

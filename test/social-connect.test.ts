@@ -75,7 +75,7 @@ describe("start", () => {
     expect(loc.searchParams.get("client_id")).toBe("fb-app-1");
     expect(loc.searchParams.get("redirect_uri")).toBe(`${BASE}/api/social/facebook/callback`);
     expect(loc.searchParams.get("scope")).toBe(FB_SCOPES);
-    expect(FB_SCOPES).toBe("pages_manage_posts,pages_read_engagement,pages_show_list");
+    expect(FB_SCOPES).toBe("pages_manage_posts,pages_read_engagement,pages_show_list,pages_read_user_content,pages_manage_engagement");
     expect(state).toMatch(/^[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$/);
     const cookie = res.headers.get("set-cookie") ?? "";
     expect(cookie).toMatch(new RegExp(`^${SOCIAL_NONCE_COOKIE}=[0-9a-f]{32}; Path=/api/social; HttpOnly; SameSite=Lax; Max-Age=600; Secure$`));
@@ -86,7 +86,7 @@ describe("start", () => {
     const { loc } = await start("instagram");
     expect(`${loc.origin}${loc.pathname}`).toBe(IG_AUTHORIZE_URL);
     expect(loc.searchParams.get("scope")).toBe(IG_PUBLISH_SCOPES);
-    expect(IG_PUBLISH_SCOPES).toBe("instagram_business_basic,instagram_business_content_publish,instagram_business_manage_insights");
+    expect(IG_PUBLISH_SCOPES).toBe("instagram_business_basic,instagram_business_content_publish,instagram_business_manage_insights,instagram_business_manage_comments");
     expect(loc.searchParams.get("redirect_uri")).toBe(`${BASE}/api/social/instagram/callback`);
     expect(loc.searchParams.get("response_type")).toBe("code");
     expect(IG_SCOPE).toBe("instagram_business_basic"); // the wizard import keeps its read-only scope
@@ -118,7 +118,7 @@ describe("Facebook callback", () => {
     expect(resultOf(res)).toEqual({ path: `/admin/${venue.slug}`, key: adminKey, result: "facebook_connected", hash: "#social" });
     expect(res.headers.get("set-cookie")).toMatch(new RegExp(`^${SOCIAL_NONCE_COOKIE}=; .*Max-Age=0`));
     const dest = (await store.getDestination(venue.id, "facebook"))!;
-    expect(dest).toMatchObject({ status: "connected", config: { page_id: page.id, page_name: "Кафе Агала", app_user_id: meta.fbAppUserId, connected_at: T0.toISOString() } });
+    expect(dest).toMatchObject({ status: "connected", config: { page_id: page.id, page_name: "Кафе Агала", app_user_id: meta.fbAppUserId, connected_at: T0.toISOString(), comments: true } });
     expect(decryptSecrets(dest.secrets, KEY)).toEqual({ page_token: page.access_token });
     expect(JSON.stringify(dest.config)).not.toContain(page.access_token);
     expect(res.headers.get("location")).not.toContain(page.access_token);
@@ -146,7 +146,7 @@ describe("Facebook callback", () => {
     expect(sel.status).toBe(303);
     expect(resultOf(sel).result).toBe("facebook_connected");
     const dest = (await store.getDestination(venue.id, "facebook"))!;
-    expect(dest.config).toMatchObject({ page_id: second.id, page_name: "Агала Бар", app_user_id: meta.fbAppUserId });
+    expect(dest.config).toMatchObject({ page_id: second.id, page_name: "Агала Бар", app_user_id: meta.fbAppUserId, comments: true });
     expect(decryptSecrets(dest.secrets, KEY)).toEqual({ page_token: second.access_token });
   });
 
@@ -221,7 +221,7 @@ describe("Instagram callback", () => {
     const res = await callback("instagram", `code=${meta.issueInstagramCode(ig.user_id)}%23_&state=${state}`, cookie);
     expect(resultOf(res).result).toBe("instagram_connected");
     const dest = (await store.getDestination(venue.id, "instagram"))!;
-    expect(dest).toMatchObject({ status: "connected", config: { ig_user_id: ig.user_id, app_user_id: `app-scoped-${ig.user_id}`, username: "agala.cafe", connected_at: T0.toISOString(), token_refreshed_at: T0.toISOString() } });
+    expect(dest).toMatchObject({ status: "connected", config: { ig_user_id: ig.user_id, app_user_id: `app-scoped-${ig.user_id}`, username: "agala.cafe", connected_at: T0.toISOString(), token_refreshed_at: T0.toISOString(), comments: true } });
     const { token } = decryptSecrets(dest.secrets, KEY);
     expect(token).toMatch(/^IGAALong/); // the long-lived token, not the one-hour one
     expect(meta.calls.some((c) => c.host === "api.instagram.com" && c.body?.redirect_uri === `${BASE}/api/social/instagram/callback`)).toBe(true);

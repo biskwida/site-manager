@@ -4,6 +4,8 @@
 // - Facebook Login → user token → long-lived user token → /me/accounts → one Page is stored (with the user's app-scoped id); several → a BG/EN chooser whose
 //   forms carry a signed, short-lived state with the encrypted long-lived user token; choosing re-reads /me/accounts.
 // - Instagram API with Instagram Login (publishing scopes) → short-lived token → long-lived token → /me; personal accounts refused.
+// Scopes now include reading and replying to comments; existing connections reconnect once (the dashboard says so): a stored
+// connection carries `comments: true` (COMMENTS_CAPABILITY) only when it was made with the comment scopes.
 // Separate from the wizard's photo import (src/server/instagram.ts): own authorize request, own state key and cookie, own callback;
 // only the constants and the code exchange are shared. State = base64url(JSON) "." base64url(HMAC) under a key derived from the
 // app secret; a nonce cookie set by the start ties the callback to the browser that started it; the admin key rides in the state
@@ -20,8 +22,10 @@ import { exchangeCode, IG_AUTHORIZE_URL, instagramConfigured } from "./instagram
 
 export type SocialKind = "facebook" | "instagram";
 export const SOCIAL_KINDS: readonly SocialKind[] = ["facebook", "instagram"];
-export const FB_SCOPES = "pages_manage_posts,pages_read_engagement,pages_show_list";
-export const IG_PUBLISH_SCOPES = "instagram_business_basic,instagram_business_content_publish,instagram_business_manage_insights";
+export const FB_SCOPES = "pages_manage_posts,pages_read_engagement,pages_show_list,pages_read_user_content,pages_manage_engagement";
+export const IG_PUBLISH_SCOPES = "instagram_business_basic,instagram_business_content_publish,instagram_business_manage_insights,instagram_business_manage_comments";
+/** Destination config flag set at connect time (comment replies, 2026-10-15): the token carries the comment scopes. */
+export const COMMENTS_CAPABILITY = "comments";
 export const FB_DIALOG_URL = "https://www.facebook.com/v25.0/dialog/oauth";
 export const FB_CALLBACK_PATH = "/api/social/facebook/callback";
 export const FB_SELECT_PATH = "/api/social/facebook/select";
@@ -232,7 +236,7 @@ async function storeFacebook(d: SocialConnectDeps, venueId: string, page: FbPage
   await d.store.upsertDestination({
     venue_id: venueId,
     kind: "facebook",
-    config: { page_id: page.id, page_name: page.name, ...(appUserId ? { app_user_id: appUserId } : {}), connected_at: d.now().toISOString() },
+    config: { page_id: page.id, page_name: page.name, ...(appUserId ? { app_user_id: appUserId } : {}), connected_at: d.now().toISOString(), [COMMENTS_CAPABILITY]: true },
     secrets: encryptSecrets({ page_token: page.access_token }, d.secretKey!),
     status: "connected",
   });
@@ -330,7 +334,7 @@ export async function handleInstagramPublishCallback(req: Request, d: SocialConn
     await d.store.upsertDestination({
       venue_id: venue.id,
       kind: "instagram",
-      config: { ig_user_id: igId, ...(appUserId ? { app_user_id: appUserId } : {}), username: typeof me.username === "string" && /^[A-Za-z0-9._]{1,30}$/.test(me.username) ? me.username : "", account_type: type || null, connected_at: now, token_refreshed_at: now },
+      config: { ig_user_id: igId, ...(appUserId ? { app_user_id: appUserId } : {}), username: typeof me.username === "string" && /^[A-Za-z0-9._]{1,30}$/.test(me.username) ? me.username : "", account_type: type || null, connected_at: now, token_refreshed_at: now, [COMMENTS_CAPABILITY]: true },
       secrets: encryptSecrets({ token }, d.secretKey!),
       status: "connected",
     });

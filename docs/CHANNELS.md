@@ -159,6 +159,15 @@ Code cleanup list (step 3; do not do it before production is on the new code, an
 - `test/supabase-mappers.test.ts` and `test/ref.test.ts`: delete the tests that cover the legacy columns and `legacyTelegramId`.
 - `supabase/schema.sql`: delete the legacy columns, the two legacy unique indexes (`venue_members_tg_chat_id_key`, `conversations_chat_id_key`) and the `fill_chat_ref` function with its triggers.
 
+## Comment webhooks (phase 2, not built)
+
+Comment replies (docs/superpowers/specs/2026-10-15-comment-replies-design.md) poll Meta every 15 minutes per venue, because the `instagram` object's `comments` field and the `page` object's `feed` field are delivered only to a Live app with Advanced Access and Business Verification, and the Pages/accounts venues connect by OAuth are not subscribed to this app's webhooks. Once App Review grants `instagram_business_manage_comments`, `pages_read_user_content` and `pages_manage_engagement` with Advanced Access:
+
+1. At connect time subscribe the venue: Instagram `POST /me/subscribed_apps?subscribed_fields=comments` with the user token (`src/server/social-connect.ts`, after the `/me` check); Facebook `POST /{page-id}/subscribed_apps?subscribed_fields=feed` with the Page token (needs `pages_manage_metadata` in `FB_SCOPES`).
+2. `npm run meta:setup` registers the `instagram` → `comments` and `page` → `feed` webhook fields next to the messaging ones.
+3. Extend `parseMetaWebhook` (`src/channels/meta/parse.ts`): `entry[].changes[]` with `field: "comments"` (Instagram: `value.id`, `value.text`, `value.from`, `value.media.id`, `value.parent_id`) or `field: "feed"` with `value.item === "comment"` and `value.verb === "add"` (Facebook: `value.comment_id`, `value.post_id`, `value.from`, `value.message`, `value.created_time`) become `IncomingComment`s (`src/social/comments-graph.ts`) routed to the same upsert + propose path (`src/social/comments-poll.ts` `pollVenueComments` → `src/social/comments-propose.ts` `proposeForComments`).
+4. Polling stays as the fallback at a lower cadence: raise `COMMENT_POLL_EVERY_MS` to one hour for venues whose destinations carry a `webhook: true` flag.
+
 ## Offline: no Meta account needed
 
 - `DEMO_OWNER_CHAT_REF` (memory mode only, not in `.env.example`): links that chat as the demo owner when `npm run dev:offline` seeds the café, for example `fb:4242`, `ig:4242`, `wa:4242` or `tg:<chat id>`. The older `DEMO_OWNER_CHAT_ID` (a Telegram chat id) still works.
@@ -186,3 +195,4 @@ Webhook-ът живее на preview в Vercel (https://site-manager-channels-bi
 Preview-то е зад Vercel Authentication: изберете „Only Production Deployments“ или bypass секрет, иначе Meta не стига до webhook-а; сменете и META_APP_SECRET с истинския.
 Базата: първо `npm run db:dry-run`, после миграцията, после `npm run db:apply` и `npm run check:rls`; миграцията е приложена на 2026-10-10.
 Офлайн: `DEMO_OWNER_CHAT_REF=fb:4242`, `npm run dev:offline` и `npm run meta:sim` пускат целия път без акаунт в Meta.
+Коментари: засега ботът проверява коментарите на всеки 15 минути; webhook-ите на Meta за коментари (Instagram `comments`, страница `feed`) идват след App Review: абонамент на заведението при свързване, `parseMetaWebhook` праща `changes[]` по същия път, а проверката остава резервна на всеки час.

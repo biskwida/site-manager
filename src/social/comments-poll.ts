@@ -7,7 +7,7 @@
 import { FB_GRAPH, GraphClient, IG_GRAPH, MetaApiError } from "../destinations/meta-graph";
 import { decryptSecrets } from "../destinations/secrets";
 import { publishedTargets, type PublishedTarget } from "../destinations/social-common";
-import type { SyncDeps } from "../destinations/sync";
+import { CONNECTION_CODES, type SyncDeps } from "../destinations/sync";
 import { formatSyncError } from "../destinations/wp-errors";
 import type { CommentNetwork, Venue } from "../domain/types";
 import type { DestinationPatch, DestinationWithSecrets, NewSocialComment, SocialComment, Store } from "../store/types";
@@ -19,8 +19,6 @@ export const COMMENT_RETENTION_MS = 30 * 24 * 3_600_000;
 /** Facebook `since` on a repeat poll: the last poll minus this margin (the unique comment_id makes the overlap harmless). */
 const SINCE_MARGIN_MS = 3_600_000;
 const NETWORKS: readonly CommentNetwork[] = ["instagram", "facebook"];
-/** Errors that need the owner to reconnect: the destination is marked `error` (the same classification as a push). */
-const CONNECTION_CODES = new Set(["sm_meta_token", "sm_meta_permission"]);
 
 export interface PollReport {
   polled: CommentNetwork[];
