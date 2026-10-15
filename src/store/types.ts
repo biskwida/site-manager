@@ -308,3 +308,35 @@ export interface Store {
 export function checkLimitValue(limit: number | null): void {
   if (limit !== null && !(Number.isInteger(limit) && limit >= 0)) throw new Error(`change limit must be a whole number >= 0 or null, got ${limit}`);
 }
+
+// --- Meta data deletion (appended 2026-10-14; src/server/meta-deletion.ts) ---
+export type DeletionProvider = "facebook" | "instagram";
+export type DeletionStatus = "pending" | "completed";
+/** One data deletion request Meta sent us (the user removed the app); the confirmation code is what the status page looks up. */
+export interface DataDeletionRequest {
+  id: string;
+  provider: DeletionProvider;
+  /** The app-scoped user id from Meta's signed_request. */
+  subject_id: string;
+  confirmation_code: string;
+  status: DeletionStatus;
+  created_at: string;
+  completed_at: string | null;
+}
+/** Config keys findDestinationsByConfig may look up (letters and underscores only: the Supabase store builds a JSON path from it). */
+export const CONFIG_KEY_RE = /^[a-z_]{1,40}$/;
+// Declaration merging: the Store interface above gains the deletion methods.
+export interface Store {
+  /** Destinations of `kind` (any venue) whose config[key] equals `value` as a string; oldest first, without secrets. Throws on a key outside CONFIG_KEY_RE. */
+  findDestinationsByConfig(kind: DestinationKind, key: string, value: string): Promise<Destination[]>;
+  /** Creates a pending request with a fresh 12-character confirmation code (CODE_ALPHABET). */
+  createDeletionRequest(r: { provider: DeletionProvider; subject_id: string; now: string }): Promise<DataDeletionRequest>;
+  /** Marks the request completed at `now`; no-op for an unknown code. */
+  completeDeletionRequest(code: string, now: string): Promise<void>;
+  getDeletionRequest(code: string): Promise<DataDeletionRequest | null>;
+}
+
+export function newConfirmationCode(): string {
+  const bytes = crypto.getRandomValues(new Uint8Array(12));
+  return [...bytes].map((b) => CODE_ALPHABET[b % CODE_ALPHABET.length]).join("");
+}

@@ -2,7 +2,7 @@
 import { applyChanges } from "../domain/changes";
 import { countsTowardLimit } from "../domain/limits";
 import type { Category, ChangeSet, Conversation, DeployInfo, DeployStatus, Item, Lang, Media, Member, Role, SiteState, SiteTextKey, Venue, VenueStatus } from "../domain/types";
-import { DEFAULT_HOURS, extensionFor, newInviteCode, newToken, PUBLISH_CLAIM_TTL_MS, type ChangeSetPatch, type ExpiredTimer, type NewCategory, type NewChangeSet, type NewItem, type NewVenue, type Store, type VenuePatch, type Destination, type DestinationKind, type DestinationPatch, type DestinationSync, type DestinationWithSecrets, type NewDestination, type NewSync, type SyncPatch, type SyncStatus, type ApplyResult, checkLimitValue } from "./types";
+import { DEFAULT_HOURS, extensionFor, newInviteCode, newToken, PUBLISH_CLAIM_TTL_MS, type ChangeSetPatch, type ExpiredTimer, type NewCategory, type NewChangeSet, type NewItem, type NewVenue, type Store, type VenuePatch, type Destination, type DestinationKind, type DestinationPatch, type DestinationSync, type DestinationWithSecrets, type NewDestination, type NewSync, type SyncPatch, type SyncStatus, type ApplyResult, checkLimitValue, CONFIG_KEY_RE, newConfirmationCode, type DataDeletionRequest, type DeletionProvider } from "./types";
 import { limitBlocks } from "./usage";
 
 const clone = <T>(v: T): T => structuredClone(v);
@@ -503,5 +503,28 @@ export class InMemoryStore implements Store {
     checkLimitValue(limit);
     this.site(venueId).venue.change_limit = limit;
     return this.getVenue(venueId);
+  }
+
+  // --- Meta data deletion (appended 2026-10-14) ---
+  deletionRequests = new Map<string, DataDeletionRequest>();
+  async findDestinationsByConfig(kind: DestinationKind, key: string, value: string) {
+    if (!CONFIG_KEY_RE.test(key)) throw new Error(`findDestinationsByConfig: bad key ${key}`);
+    return [...this.destinations.values()]
+      .filter((d) => d.kind === kind && d.config[key] !== undefined && d.config[key] !== null && String(d.config[key]) === value)
+      .sort((a, b) => a.created_at.localeCompare(b.created_at))
+      .map((d) => this.publicDestination(d));
+  }
+  async createDeletionRequest(r: { provider: DeletionProvider; subject_id: string; now: string }) {
+    const row: DataDeletionRequest = { id: crypto.randomUUID(), provider: r.provider, subject_id: r.subject_id, confirmation_code: newConfirmationCode(), status: "pending", created_at: r.now, completed_at: null };
+    this.deletionRequests.set(row.confirmation_code, row);
+    return clone(row);
+  }
+  async completeDeletionRequest(code: string, now: string) {
+    const row = this.deletionRequests.get(code);
+    if (row) Object.assign(row, { status: "completed", completed_at: now });
+  }
+  async getDeletionRequest(code: string) {
+    const row = this.deletionRequests.get(code);
+    return row ? clone(row) : null;
   }
 }

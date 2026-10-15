@@ -238,3 +238,15 @@ begin
 end $$;
 drop trigger if exists items_touch on public.items;
 create trigger items_touch before update on public.items for each row execute function public.touch_updated_at();
+
+-- Meta data deletion requests (2026-10-14): one row per "Data Deletion Request" callback (src/server/meta-deletion.ts); the
+-- confirmation code is what /data-deletion?code= looks up. Server-only (policies.sql). Apply only this: npm run db:apply -- schema.sql policies.sql
+create table if not exists public.data_deletion_requests (
+  id uuid primary key default gen_random_uuid(),
+  provider text not null check (provider in ('facebook', 'instagram')),
+  subject_id text not null,               -- app-scoped user id from Meta's signed_request
+  confirmation_code text not null unique,
+  status text not null default 'pending' check (status in ('pending', 'completed')),
+  created_at timestamptz not null default now(),
+  completed_at timestamptz
+);

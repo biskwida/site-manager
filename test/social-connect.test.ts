@@ -86,7 +86,7 @@ describe("start", () => {
     const { loc } = await start("instagram");
     expect(`${loc.origin}${loc.pathname}`).toBe(IG_AUTHORIZE_URL);
     expect(loc.searchParams.get("scope")).toBe(IG_PUBLISH_SCOPES);
-    expect(IG_PUBLISH_SCOPES).toBe("instagram_business_basic,instagram_business_content_publish");
+    expect(IG_PUBLISH_SCOPES).toBe("instagram_business_basic,instagram_business_content_publish,instagram_business_manage_insights");
     expect(loc.searchParams.get("redirect_uri")).toBe(`${BASE}/api/social/instagram/callback`);
     expect(loc.searchParams.get("response_type")).toBe("code");
     expect(IG_SCOPE).toBe("instagram_business_basic"); // the wizard import keeps its read-only scope
@@ -118,7 +118,7 @@ describe("Facebook callback", () => {
     expect(resultOf(res)).toEqual({ path: `/admin/${venue.slug}`, key: adminKey, result: "facebook_connected", hash: "#social" });
     expect(res.headers.get("set-cookie")).toMatch(new RegExp(`^${SOCIAL_NONCE_COOKIE}=; .*Max-Age=0`));
     const dest = (await store.getDestination(venue.id, "facebook"))!;
-    expect(dest).toMatchObject({ status: "connected", config: { page_id: page.id, page_name: "Кафе Агала", connected_at: T0.toISOString() } });
+    expect(dest).toMatchObject({ status: "connected", config: { page_id: page.id, page_name: "Кафе Агала", app_user_id: meta.fbAppUserId, connected_at: T0.toISOString() } });
     expect(decryptSecrets(dest.secrets, KEY)).toEqual({ page_token: page.access_token });
     expect(JSON.stringify(dest.config)).not.toContain(page.access_token);
     expect(res.headers.get("location")).not.toContain(page.access_token);
@@ -146,7 +146,7 @@ describe("Facebook callback", () => {
     expect(sel.status).toBe(303);
     expect(resultOf(sel).result).toBe("facebook_connected");
     const dest = (await store.getDestination(venue.id, "facebook"))!;
-    expect(dest.config).toMatchObject({ page_id: second.id, page_name: "Агала Бар" });
+    expect(dest.config).toMatchObject({ page_id: second.id, page_name: "Агала Бар", app_user_id: meta.fbAppUserId });
     expect(decryptSecrets(dest.secrets, KEY)).toEqual({ page_token: second.access_token });
   });
 
@@ -197,6 +197,15 @@ describe("Facebook callback", () => {
     expect((await callback("facebook", `code=${meta.issueFacebookCode()}&state=${state}`, cookie)).status).toBe(400);
   });
 
+  it("still connects when /me fails (no app-scoped id stored then)", async () => {
+    const { start, callback, meta, store, venue } = await setup();
+    meta.addPage("Кафе Агала");
+    meta.fbMeFails = true;
+    const { state, cookie } = await start("facebook");
+    expect(resultOf(await callback("facebook", `code=${meta.issueFacebookCode()}&state=${state}`, cookie)).result).toBe("facebook_connected");
+    expect((await store.getDestination(venue.id, "facebook"))!.config).not.toHaveProperty("app_user_id");
+  });
+
   it("a failed code exchange returns to the dashboard with an error", async () => {
     const { start, callback } = await setup();
     const { state, cookie } = await start("facebook");
@@ -212,7 +221,7 @@ describe("Instagram callback", () => {
     const res = await callback("instagram", `code=${meta.issueInstagramCode(ig.user_id)}%23_&state=${state}`, cookie);
     expect(resultOf(res).result).toBe("instagram_connected");
     const dest = (await store.getDestination(venue.id, "instagram"))!;
-    expect(dest).toMatchObject({ status: "connected", config: { ig_user_id: ig.user_id, username: "agala.cafe", connected_at: T0.toISOString(), token_refreshed_at: T0.toISOString() } });
+    expect(dest).toMatchObject({ status: "connected", config: { ig_user_id: ig.user_id, app_user_id: `app-scoped-${ig.user_id}`, username: "agala.cafe", connected_at: T0.toISOString(), token_refreshed_at: T0.toISOString() } });
     const { token } = decryptSecrets(dest.secrets, KEY);
     expect(token).toMatch(/^IGAALong/); // the long-lived token, not the one-hour one
     expect(meta.calls.some((c) => c.host === "api.instagram.com" && c.body?.redirect_uri === `${BASE}/api/social/instagram/callback`)).toBe(true);
