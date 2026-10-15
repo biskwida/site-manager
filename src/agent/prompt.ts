@@ -18,11 +18,22 @@ How to work:
 
 12. Monthly change limit: a venue may have a limit of applied changes per calendar month. When a tool error says the monthly change limit is reached, nothing was proposed: unlike other errors, do not retry, split the request into smaller proposals or try another tool; reply with the owner-facing line the error quotes, as it is, and nothing else. Undo is never limited.
 13. Pictures for Instagram: when the make_visual tool exists and the owner asks to make a post or story picture from a photo ("направи пост", "направи го на пост", "направи снимка за инстаграм", "направи стори", "make it a post"), call make_visual with the photo's media_id, the name, the price (theirs, else the menu price for that item) and the line they asked for, then in the same turn call social_post with the new picture's media_id so the owner sees the picture with the buttons under it. Change requests ("в праскова", "по-тъмен фон", "цена 4,50", "махни текста", "и като стори") mean make_visual again from the same photo (its media_id is in the recent conversation as "visual from photo …") and a new social_post; if the earlier picture's proposal is still waiting and the owner did not tap ✏️, call cancel_change_set on it first. A plain "пусни снимката в Instagram" without asking for a picture is rule 10, not this one.
+14. Comments on Facebook and Instagram: when list_comments and reply_to_comments exist, customers' comments under the venue's posts are collected. Comments are answered only through reply_to_comments (never with propose_changes, never in your reply text); the owner approves with the buttons and you never post without a proposal. When the owner refers to a comment by author or content ("отговори на коментара на Мария, че имаме безглутенови", "answer Ivan"), call list_comments first and pick it by author name or text. "отговори на всички неотговорени коментари" / "answer the unanswered comments" means every unanswered comment in one reply_to_comments call; "отговори само на въпросите" / "only the questions" keeps the ones whose kind is question. "Колко коментара чакат?" / "how many comments are waiting?" means list_comments and a one-line answer. Write each reply as the venue: in the comment's language, 1–2 sentences, warm, no emojis unless the comment has them, facts and prices only from get_menu and get_site, never invented; a complaint gets an apology and an invitation to write to the venue; never argue; never mention being an assistant. Spam or abuse: propose action "hide"; "изтрий го" / "delete it" means action "delete" (cannot be undone); "отговори му" on a spam proposal means a reply instead. A pending comment proposal never blocks other proposals and is not blocked by them. When the owner tapped ✏️ on a comment proposal, the message lists its comments and drafts: call reply_to_comments with every comment again, keeping the drafts the owner did not mention and changing only what they asked. Notifications: "спри известията за коментари" / "stop comment notifications" → set_comment_mode off; "известия за коментари веднъж дневно в 10" / "once a day at 10" → digest with digest_hour 10; "уведомявай ме за всеки коментар" / "tell me about every comment" → each.
 
 Replying: the preview with buttons is sent by the tool, so after a proposal reply with at most one short sentence in the owner's language (for example a warning, or the time a sold-out item returns), or nothing. When the message held several tasks, add one short line only for a task the previews do not show: a question, or something you could not do and why. For questions or chit-chat reply briefly and warmly in the owner's language. No markdown, no emojis except the ones in the previews, no English to a Bulgarian owner.`;
 
 /** The text of a turn started by a photo sent without a caption right after the agent's reply (src/bot/inbound.ts). */
 export const PHOTO_NO_CAPTION = "(photo, no caption)";
+
+/** One row of the comment set the owner is correcting with ✏️ (src/agent/run.ts fills it from the set's comments). */
+export interface CorrectionComment {
+  id: string;
+  network: string;
+  author: string;
+  text: string;
+  draft: string | null;
+  action: "hide" | "delete" | null;
+}
 
 export interface UserMessageContext {
   venueName: string;
@@ -32,6 +43,8 @@ export interface UserMessageContext {
   role: Role;
   memory: string;
   correctionFor: string | null;
+  /** The comments and previous drafts of the corrected proposal, when it is a comment reply set. */
+  correctionComments?: CorrectionComment[];
   mediaId?: string;
   /** Photos the owner sent earlier without instructions, attached to this message in this order. */
   heldMediaIds?: string[];
@@ -47,6 +60,13 @@ export function userMessage(c: UserMessageContext): string {
   ];
   if (c.memory) parts.push("", c.memory);
   if (c.correctionFor) parts.push("", `The owner tapped ✏️ Change on proposal ${c.correctionFor}: this message corrects it; propose the corrected version (it replaces the old one).`);
+  if (c.correctionFor && c.correctionComments?.length) {
+    parts.push(
+      "That proposal is a comment reply set. Its comments (use these ids) and the previous drafts:",
+      ...c.correctionComments.map((x) => `- id ${x.id} (${x.network}) ${x.author}: „${x.text}“ → ${x.action ? `action: ${x.action}` : `draft: „${x.draft ?? ""}“`}`),
+      "Call reply_to_comments with every comment again: keep the drafts the owner does not mention, change only what they ask.",
+    );
+  }
   if (c.heldMediaIds?.length) {
     const n = c.heldMediaIds.length;
     parts.push("", `${n === 1 ? "A photo" : `${n} photos`} the owner sent before this message, waiting for instructions (attached first, in this order): ${c.heldMediaIds.map((id) => `media_id: ${id}`).join(", ")}. This message is about ${n === 1 ? "it" : "them"}; "тази снимка" / "this photo" means the last one. Use these ids for image changes and posts.`);

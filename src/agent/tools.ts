@@ -18,7 +18,7 @@ import { usageLine } from "../bot/limit";
 import { changeUsage } from "../store/usage";
 import { countsTowardLimit } from "../domain/limits";
 import { BulkSchema, CancelSchema, CheckAllergensSchema, ListSchema, ProposeSchema, ScheduleSchema, UndoSchema, type ChangeInput } from "./tool-schemas";
-import { commentTools } from "./comment-tools";
+import { commentTools, isCommentReplySet } from "./comment-tools";
 import { socialTools } from "./social-tools";
 import { visualTools } from "./visual-tools";
 import type { VisualClient } from "../visual/client";
@@ -295,6 +295,8 @@ export function makeTools(deps: AgentDeps) {
     run: (input) =>
       attempt(async () => {
         const cs = await getSet(input.change_set_id);
+        // A comment proposal went to every owner and holds comment rows: only ❌ on it (or ignoring the comment) concludes all of them.
+        if (isCommentReplySet(cs)) throw new Error(`Change set ${cs.id} is a comment reply proposal; cancel_change_set does not cancel those. Tell the owner in one short sentence: ❌ on that proposal ignores the comment ("игнорирай коментара"); the dashboard's comments card can ignore it too.`);
         if (cs.status !== "proposed" && cs.status !== "scheduled") throw new Error(`Change set is "${cs.status}"; only proposed or scheduled sets can be cancelled.`);
         await cancelPending(cs, tr(lang, "❌ Отказано.", "❌ Cancelled."));
         return { change_set_id: cs.id, status: "cancelled" };
