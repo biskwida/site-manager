@@ -13,6 +13,7 @@ import { changeUsage } from "../store/usage";
 import { accentAfterTemplateSwitch } from "../wizard/schema";
 import { connectedApps, type ConnectedApp } from "./connect-apps";
 import { publishedIn, safeLink } from "../destinations/social-common";
+import { commentsOverview, type CommentsOverview } from "./admin-comments";
 
 export interface AdminOverview {
   venue: Pick<Venue, "id" | "slug" | "name" | "tz" | "default_lang">;
@@ -42,11 +43,17 @@ export interface AdminOverview {
   social?: SocialOverview;
   /** Monthly change limit (src/domain/limits.ts): changes applied this calendar month in the venue's zone; limit null = unlimited. */
   changes_this_month?: { used: number; limit: number | null };
+  /** "Comments" card (comment replies, 2026-10-15). */
+  comments?: CommentsOverview;
 }
+
+/** How many proposed sets the generic pending list shows. */
+const PENDING_MAX = 20;
 
 export async function adminOverview(store: Store, venue: Venue, now: Date, baseUrl = "", opts: { hosted?: boolean; social?: { facebook: boolean; instagram: boolean } } = {}): Promise<AdminOverview> {
   const [pending, scheduled, log, site, members] = await Promise.all([
-    store.listChangeSets(venue.id, { status: ["proposed"], limit: 20 }),
+    // Comment sets are decided in the Comments card or the chat only: fetched wider, then left out of the generic list.
+    store.listChangeSets(venue.id, { status: ["proposed"], limit: 200 }),
     store.listChangeSets(venue.id, { status: ["scheduled"], limit: 50 }),
     store.listChangeSets(venue.id, { status: ["applied", "reverted", "rejected", "expired", "cancelled"], limit: 50 }),
     store.getSite(venue.id),
@@ -70,7 +77,7 @@ export async function adminOverview(store: Store, venue: Venue, now: Date, baseU
     site_url: ownSite ? (venue.site_url as string) : deploy?.status === "ready" && deploy.url ? deploy.url : `${baseUrl}/${venue.slug}`,
     custom_domain: deploy?.custom_domain ?? null,
     domain_verified: deploy?.custom_domain ? (deploy.domain_verified ?? false) : null,
-    pending,
+    pending: pending.filter((cs) => cs.source !== "comment").slice(0, PENDING_MAX),
     scheduled: [...scheduled].sort((a, b) => (a.apply_at ?? "").localeCompare(b.apply_at ?? "")),
     log,
     sold_out: site.items.filter((i) => i.active && isSoldOut(i, nowMs)).map((i) => ({ id: i.id, name_bg: i.name_bg, name_en: i.name_en, sold_out_until: i.sold_out_until as string })),
@@ -78,6 +85,7 @@ export async function adminOverview(store: Store, venue: Venue, now: Date, baseU
     connected_apps: connectedApps(members),
     social: await socialOverview(store, venue.id, opts.social ?? { facebook: false, instagram: false }),
     changes_this_month: await changesThisMonth(store, venue, now),
+    comments: await commentsOverview(store, venue, now),
   };
 }
 
@@ -112,6 +120,9 @@ export async function adminAction(d: AdminDeps, venue: Venue, action: AdminActio
     return { ok: false, error: "Change set not found." };
   }
   if (cs.venue_id !== venue.id) return { ok: false, error: "Change set not found." };
+  // A comment set is decided in the Comments card (src/server/admin-comments.ts) or with the chat's buttons, never here:
+  // that flow concludes every owner's message and puts the comments in the right state. Undo of an applied one stays here.
+  if (cs.source === "comment" && action !== "undo") return { ok: false, error: "Comment replies are decided in the Comments card." };
   const now = d.now();
   const nowIso = now.toISOString();
   if (action === "undo") {
