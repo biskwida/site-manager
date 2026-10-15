@@ -1,6 +1,7 @@
 import { formatDate, formatDateTime, hhmm, localTime } from "../time";
 import { allergenName } from "./allergens";
 import { colorName, inkFor, INK_LIGHT } from "./color";
+import { commentModeLabel, commentPreviewLines } from "./comment-preview";
 import { categoryName, formatPrice, itemName, quote, tr, weekdayLabel } from "./format";
 import { socialPreviewLines } from "./social-preview";
 import { wpPreviewLines } from "./wp-preview";
@@ -205,6 +206,15 @@ export function renderPreview(s: SiteState, changes: Change[], lang: Lang, tz: s
       case "social_post":
         lines.push(...socialPreviewLines(c, lang));
         break;
+      case "social_reply":
+      case "social_moderate":
+        lines.push(...commentPreviewLines(c, lang));
+        break;
+      case "set_comment_mode": {
+        const label = (row: Row) => commentModeLabel(row.comment_mode, row.comment_digest_hour, lang);
+        lines.push(`• ${tr(lang, "Известия за коментари", "Comment notifications")}: ${label(b)} → ${label(a)}`);
+        break;
+      }
     }
   }
   return lines.join("\n");

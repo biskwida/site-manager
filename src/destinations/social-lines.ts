@@ -1,11 +1,10 @@
 // src/destinations/social-lines.ts
 // Pure: the owner's confirmation line per social network from its sync row ("Facebook: публикувано ✅ <links>").
-import type { Change, Lang, SocialTarget } from "../domain/types";
+import { NETWORK_NAMES, type Change, type Lang, type SocialTarget } from "../domain/types";
 import type { DestinationKind, SyncStatus } from "../store/types";
 import { networkTargets, publishedIn, safeLink, type SocialNetwork } from "./social-common";
 import { socialErrorText } from "./social-errors";
 
-const NAME: Record<SocialNetwork, string> = { facebook: "Facebook", instagram: "Instagram" };
 const FORMAT: Record<SocialTarget, { bg: string; en: string }> = {
   facebook_post: { bg: "пост", en: "post" },
   facebook_story: { bg: "история", en: "story" },
@@ -14,7 +13,7 @@ const FORMAT: Record<SocialTarget, { bg: string; en: string }> = {
 };
 
 export function socialSyncLine(kind: SocialNetwork, status: SyncStatus, result: Record<string, unknown> | null, lastError: string | null, lang: Lang): string {
-  const name = NAME[kind];
+  const name = NETWORK_NAMES[kind];
   const bg = lang === "bg";
   const r = result ?? {};
   if (status !== "done") {
@@ -52,8 +51,8 @@ export function socialMissingLines(changes: Change[], active: Set<DestinationKin
     const rows = changes.filter((c) => networkTargets(c, network).length > 0);
     if (active.has(network) || rows.length === 0) continue;
     const undo = rows.every((c) => c.after === null);
-    if (undo) out.push(lang === "bg" ? `${NAME[network]}: не е свързан, публикацията не е изтрита` : `${NAME[network]}: not connected, the post was not deleted`);
-    else out.push(lang === "bg" ? `${NAME[network]}: не е свързан, публикацията не е изпратена` : `${NAME[network]}: not connected, the post was not sent`);
+    if (undo) out.push(lang === "bg" ? `${NETWORK_NAMES[network]}: не е свързан, публикацията не е изтрита` : `${NETWORK_NAMES[network]}: not connected, the post was not deleted`);
+    else out.push(lang === "bg" ? `${NETWORK_NAMES[network]}: не е свързан, публикацията не е изпратена` : `${NETWORK_NAMES[network]}: not connected, the post was not sent`);
   }
   return out;
 }

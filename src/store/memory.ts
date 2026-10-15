@@ -57,6 +57,10 @@ export class InMemoryStore implements Store {
       logo_media_id: null,
       hours: clone(v.hours ?? DEFAULT_HOURS),
       change_limit: v.change_limit ?? null,
+      comment_mode: "each",
+      comment_digest_hour: 9,
+      comment_limit: 300,
+      last_comment_digest_at: null,
       tz: v.tz ?? "Europe/Sofia",
       default_lang: v.default_lang ?? "bg",
       theme: clone(v.theme ?? { accent: "#2f6b4f" }),
@@ -293,6 +297,7 @@ export class InMemoryStore implements Store {
       reverted_by: null,
       undoes_id: cs.undoes_id ?? null,
       message_ref: cs.message_ref ?? null,
+      proposal_refs: null,
       created_at: this.clock(),
       changes: clone(cs.changes).map((c, i) => ({ ...c, position: i })),
     };

@@ -169,7 +169,7 @@ create table if not exists public.change_sets (
   summary_en text not null default '',
   preview_bg text not null default '',
   preview_en text not null default '',
-  source text not null check (source in ('text', 'voice', 'photo', 'dashboard', 'auto', 'undo')),
+  source text not null check (source in ('text', 'voice', 'photo', 'dashboard', 'auto', 'undo', 'comment')),
   status text not null default 'proposed'
     check (status in ('proposed', 'scheduled', 'applied', 'rejected', 'expired', 'cancelled', 'reverted')),
   apply_at timestamptz,
@@ -187,6 +187,11 @@ create index if not exists change_sets_status_idx on public.change_sets (status,
 create index if not exists change_sets_chat_ref_idx on public.change_sets (venue_id, chat_ref) where status = 'proposed';
 -- countAppliedChangeSets: applied sets of one venue in a month.
 create index if not exists change_sets_applied_idx on public.change_sets (venue_id, applied_at) where applied_at is not null;
+
+-- Comment replies (2026-10-15): proposals made by the comment poller / reply_to_comments. Re-created so an existing database learns the new source.
+alter table public.change_sets drop constraint if exists change_sets_source_check;
+alter table public.change_sets add constraint change_sets_source_check
+  check (source in ('text', 'voice', 'photo', 'dashboard', 'auto', 'undo', 'comment'));
 
 create table if not exists public.changes (
   id uuid primary key default gen_random_uuid(),

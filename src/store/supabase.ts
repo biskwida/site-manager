@@ -34,6 +34,10 @@ export function toVenue(r: Row): Venue {
     hours: (r.hours as Venue["hours"]) ?? DEFAULT_HOURS,
     // Missing before the column is added (schema.sql): unlimited.
     change_limit: r.change_limit === null || r.change_limit === undefined ? null : num(r.change_limit),
+    comment_mode: "each",
+    comment_digest_hour: 9,
+    comment_limit: 300,
+    last_comment_digest_at: null,
     tz: str(r.tz) || "Europe/Sofia",
     default_lang: (r.default_lang as Lang) ?? "bg",
     theme: (r.theme as Venue["theme"]) ?? { accent: "#2f6b4f" },
@@ -109,6 +113,7 @@ export function toChangeSet(r: Row): ChangeSet {
     reverted_by: strOrNull(r.reverted_by),
     undoes_id: strOrNull(r.undoes_id),
     message_ref: strOrNull(r.message_ref),
+    proposal_refs: null,
     created_at: iso(r.created_at),
     changes: ((r.changes as Row[]) ?? []).map(toChange).sort((a, b) => a.position - b.position),
   };

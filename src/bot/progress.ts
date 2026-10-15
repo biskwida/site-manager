@@ -22,6 +22,9 @@ const LABELS: Record<string, [string, string]> = {
   undo: PROPOSAL,
   cancel_change_set: PROPOSAL,
   social_post: ["📣 Подготвям публикацията…", "📣 Preparing the post…"],
+  list_comments: ["💬 Чета коментарите…", "💬 Reading the comments…"],
+  reply_to_comments: ["💬 Подготвям отговора…", "💬 Preparing the reply…"],
+  set_comment_mode: ["💬 Подготвям предложението…", "💬 Preparing the proposal…"],
 };
 const WORDPRESS: [string, string] = ["🌐 Работя по WordPress сайта…", "🌐 Working on the WordPress site…"];
 
