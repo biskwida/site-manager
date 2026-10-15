@@ -601,9 +601,10 @@ export class InMemoryStore implements Store {
   async redactComments(before: string) {
     let n = 0;
     for (const c of this.comments.values()) {
-      if (c.created_at >= before || (c.text === "" && c.author_name === "")) continue;
+      if (c.created_at >= before || (c.text === "" && c.author_name === "" && c.author_id === "")) continue;
       c.text = "";
       c.author_name = "";
+      c.author_id = "";
       n++;
     }
     return n;

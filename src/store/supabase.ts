@@ -725,10 +725,10 @@ export class SupabaseStore implements Store {
     return (data ?? []).length;
   }
   async redactComments(before: string) {
-    // Two plain filters instead of an or(): rows with text left, then rows with only the author left (none after the first).
+    // Plain filters instead of an or(): rows with text left, then rows with only an author name or id left (none after the first).
     let n = 0;
-    for (const column of ["text", "author_name"] as const) {
-      const { data, error } = await this.db.from("social_comments").update({ text: "", author_name: "" }).lt("created_at", before).neq(column, "").select("id");
+    for (const column of ["text", "author_name", "author_id"] as const) {
+      const { data, error } = await this.db.from("social_comments").update({ text: "", author_name: "", author_id: "" }).lt("created_at", before).neq(column, "").select("id");
       if (error) throw new Error(`redactComments: ${error.message}`);
       n += (data ?? []).length;
     }

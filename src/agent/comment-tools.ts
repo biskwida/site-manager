@@ -11,7 +11,7 @@ import { copy } from "../bot/copy";
 import { commentModeLabel } from "../domain/comment-preview";
 import { COMMENT_MODES, type ChangeSet, type CommentMode } from "../domain/types";
 import { REPLY_MAX } from "../social/comments-draft";
-import { cancelCommentSet, COMMENT_SET_MAX_ROWS, commentLimitState, createCommentSet, type CommentSetItem } from "../social/comments-propose";
+import { cancelCommentSet, commentLimitState, createCommentSet, previewLength, splitCommentItems, type CommentSetItem } from "../social/comments-propose";
 import type { CommentStatus, SocialComment } from "../store/types";
 import type { AgentDeps, ToolKit } from "./tools";
 
@@ -38,7 +38,7 @@ export const ReplyItemSchema = z.object({
 export const ReplyToCommentsSchema = z.object({
   summary_bg: z.string().min(1).optional().describe("Optional one-line summary in Bulgarian (default: built from the comments)"),
   summary_en: z.string().min(1).optional().describe("The same in English"),
-  replies: z.array(ReplyItemSchema).min(1).max(COMMENT_SET_MAX_ROWS).describe(`One entry per comment, 1–${COMMENT_SET_MAX_ROWS}. For a digest the owner corrected, send every comment again: the unchanged drafts and the changed one.`),
+  replies: z.array(ReplyItemSchema).min(1).max(20).describe(`One entry per comment, 1–20 (more than fit one message go out as several proposals). For a digest the owner corrected, send every comment again: the unchanged drafts and the changed one.`),
 });
 
 /** Statuses a reply or moderation may be proposed for ("proposed": the pending set holding it is replaced). */
@@ -99,7 +99,7 @@ export function commentTools(d: AgentDeps, k: ToolKit) {
 
   const reply = betaZodTool({
     name: "reply_to_comments",
-    description: "Propose replies to customer comments (or hiding/deleting spam): one change set with one row per comment, sent to every owner with ✅ Apply / ✏️ Change / ❌ Cancel. Replaces a pending comment proposal that covers any of the same comments. Never blocked by a pending menu proposal. Nothing is posted before ✅. Owner only.",
+    description: "Propose replies to customer comments (or hiding/deleting spam): one change set with one row per comment (several sets when they do not fit one message, at most 10 comments each), sent to every owner with ✅ Apply / ✏️ Change / ❌ Cancel. Replaces a pending comment proposal that covers any of the same comments. Never blocked by a pending menu proposal. Nothing is posted before ✅. Owner only.",
     inputSchema: ReplyToCommentsSchema,
     run: (input) =>
       k.attempt(async () => {
@@ -141,12 +141,40 @@ export function commentTools(d: AgentDeps, k: ToolKit) {
           if (why) throw new Error(why);
           it.comment = c;
         }
-        const r = await createCommentSet({ store: d.store, messenger: d.messenger, now: d.now }, venue, items, { chatRef: d.chatRef, batch: items.length > 1 });
-        if (r.limited) throw new Error("Comment limit reached: nothing was proposed. Do not retry.");
-        if (!r.set) throw new Error("No owner could be messaged right now; the comments are kept and proposed again later. Tell the owner in one short sentence.");
+        // One proposal per group that fits a message (at most 10 comments, under Telegram's size; splitCommentItems, like the
+        // digest): usually one; a long batch becomes several, each to every owner.
+        const site = await d.store.getSite(d.venueId);
+        const groups = splitCommentItems(items, { batch: true, extra: previewLength(site, venue.tz) });
         const summary = { ...(input.summary_bg ? { summary_bg: input.summary_bg } : {}), ...(input.summary_en ? { summary_en: input.summary_en } : {}) };
-        if (Object.keys(summary).length) await d.store.updateChangeSet(r.set.id, summary);
-        return { change_set_id: r.set.id, status: "proposed", rows: items.length, preview: k.mine(r.set), next: "The owner decides with the buttons. Reply with at most one short sentence, or nothing." };
+        const made: ChangeSet[] = [];
+        let rows = 0;
+        let stopped: "limited" | "held" | null = null;
+        for (const g of groups) {
+          const r = await createCommentSet({ store: d.store, messenger: d.messenger, now: d.now }, venue, g, { chatRef: d.chatRef, batch: items.length > 1 });
+          if (r.limited) {
+            stopped = "limited";
+            break;
+          }
+          if (!r.set) {
+            stopped = "held";
+            continue;
+          }
+          if (Object.keys(summary).length) await d.store.updateChangeSet(r.set.id, summary);
+          made.push(r.set);
+          rows += g.length;
+        }
+        if (made.length === 0 && stopped === "limited") throw new Error("Comment limit reached: nothing was proposed. Do not retry.");
+        if (made.length === 0) throw new Error("No owner could be messaged right now; the comments are kept and proposed again later. Tell the owner in one short sentence.");
+        const rest = items.length - rows;
+        return {
+          change_set_id: made[0].id,
+          change_set_ids: made.map((x) => x.id),
+          status: "proposed",
+          rows,
+          preview: made.map((x) => k.mine(x)).join("\n\n"),
+          ...(rest > 0 ? { not_proposed: rest, why: stopped === "limited" ? "The comment limit was reached; the rest stay unanswered (dashboard)." : "No owner could be messaged for the rest; they are kept and proposed again later." } : {}),
+          next: made.length > 1 ? `Sent as ${made.length} proposals (one message holds at most 10 comments). The owner decides each with its buttons. Reply with at most one short sentence, or nothing.` : "The owner decides with the buttons. Reply with at most one short sentence, or nothing.",
+        };
       }),
   });
 

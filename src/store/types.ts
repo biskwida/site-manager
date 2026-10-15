@@ -417,7 +417,7 @@ export interface Store {
   /** Deletes every venue's rows with created_at < before (60 days: COMMENT_ROW_RETENTION_MS); returns how many. */
   purgeComments(before: string): Promise<number>;
   /**
-   * The 30-day rule for the rows themselves: blanks text and author_name of every venue's rows with created_at < before that
+   * The 30-day rule for the rows themselves: blanks text, author_name and author_id (the commenter's Meta id) of every venue's rows with created_at < before that
    * still hold any (the row, its status and replied_at stay for the monthly comment count). Returns how many it blanked.
    */
   redactComments(before: string): Promise<number>;

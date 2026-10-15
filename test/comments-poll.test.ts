@@ -175,7 +175,7 @@ describe("pollVenueComments", () => {
     const venue = await v.store.getVenue(v.venue.id);
     expect((await commentLimitState(v.store, venue, T0)).used).toBe(1);
     expect(await purgeOldComments(v.store, T0)).toBe(1); // the 60-day row
-    expect((await v.store.listComments(v.venue.id)).map((c) => [c.comment_id, c.text, c.author_name])).toEqual([["k2", "fresh", "Мария"], ["k1", "", ""]]);
+    expect((await v.store.listComments(v.venue.id)).map((c) => [c.comment_id, c.text, c.author_name, c.author_id])).toEqual([["k2", "fresh", "Мария", ""], ["k1", "", "", ""]]);
     expect((await commentLimitState(v.store, venue, T0)).used).toBe(1); // the early-month reply is still counted
   });
 

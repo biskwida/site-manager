@@ -122,7 +122,7 @@ export async function pollVenueComments(d: SyncDeps, venue: Venue, now: Date): P
 }
 
 /**
- * Customer content is kept for 30 days at most (Meta policy): blanks the text and author of every venue's older comments and
+ * Customer content is kept for 30 days at most (Meta policy): blanks the text, author name and author id of every venue's older comments and
  * of the comment change sets older than that. The blanked rows stay until 60 days so a reply made early in the month still
  * counts toward comment_limit (countCommentActions reads replied_at), then they are deleted. Returns how many rows were
  * deleted. Logs nothing of the text.

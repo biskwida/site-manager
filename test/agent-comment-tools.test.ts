@@ -71,6 +71,28 @@ describe("reply_to_comments", () => {
     expect(t.replies(t.maria.comment_id).map((x) => x.text)).toEqual(["Да, имаме безглутенов хляб от вторник."]);
     expect(await t.fresh(t.maria)).toMatchObject({ status: "replied" });
   });
+  it("15 replies to long comments become two sets under Telegram's limit, each comment in exactly one, every set id returned", async () => {
+    const t = await setup();
+    const many = await t.store.upsertComments(t.venue.id, Array.from({ length: 15 }, (_, i) => ({
+      network: "instagram" as const, post_ref: t.maria.post_ref, comment_id: `long-${i}`, parent_id: null, author_id: `9${i}`, author_name: `гост.${i}`,
+      text: `Въпрос ${i}: ${"имате ли места на терасата за голяма група в събота вечер ".repeat(5)}`, created_at: at(-5 * MIN).toISOString(), seen_at: T0.toISOString(), status: "new" as const,
+      post_caption: "Днешното предложение: тиквена супа с печени семки и крутони от домашен хляб",
+    })));
+    const r = await call(t.tools, "reply_to_comments", { replies: many.map((c, i) => ({ comment_id: c.id, reply_text: `Да, имаме места за група в събота вечер; обадете се на 0888 123 456 за резервация (${i}).` })) });
+    expect(r).toMatchObject({ status: "proposed", rows: 15 });
+    const ids = r.change_set_ids as string[];
+    expect(ids).toHaveLength(2);
+    expect(r.change_set_id).toBe(ids[0]);
+    const sets = await Promise.all(ids.map((id) => t.store.getChangeSet(id)));
+    const covered = sets.flatMap((s) => s.changes.map((c) => c.entity_id));
+    expect(covered.sort()).toEqual(many.map((c) => c.comment_id).sort());
+    for (const s of sets) {
+      const msg = t.messenger.sent.find((m) => m.setId === s.id)!;
+      expect(msg.text.length).toBeLessThan(4096);
+      expect(s.preview_bg.length).toBeLessThan(4096);
+    }
+    for (const c of many) expect(ids).toContain((await t.fresh(c))?.change_set_id);
+  });
   it("keeps the summaries the model gives", async () => {
     const t = await setup();
     const r = await call(t.tools, "reply_to_comments", { summary_bg: "Отговор на Мария", summary_en: "Reply to Maria", replies: [{ comment_id: t.maria.id, reply_text: "Да." }] });
