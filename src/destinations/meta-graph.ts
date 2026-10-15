@@ -13,6 +13,11 @@ const TIMEOUT_MS = 20_000;
 /** Meta's throttling codes (app, user, page, API-call limits): worth another attempt later. */
 const RATE_LIMIT_CODES = new Set([4, 17, 32, 613]);
 
+/** Meta's "2026-10-11T09:00:00+0000" → ms (NaN when unreadable). */
+export function metaTime(s: unknown): number {
+  return typeof s === "string" ? Date.parse(s.replace(/([+-]\d\d)(\d\d)$/, "$1:$2")) : NaN;
+}
+
 export class MetaApiError extends Error {
   readonly metaCode: number | null;
   /** Meta's error_subcode (33 = the object does not exist). */

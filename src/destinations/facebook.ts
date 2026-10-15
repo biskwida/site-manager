@@ -5,7 +5,7 @@
 // there (when the Page cannot be checked, it fails without retry and asks the owner to look). Undo deletes the feed post; a story
 // cannot be deleted through the API and disappears on its own within 24 hours, so undo only says so.
 import type { SocialPostRow, SocialTarget } from "../domain/types";
-import { FB_GRAPH, GraphClient, MetaApiError } from "./meta-graph";
+import { FB_GRAPH, GraphClient, MetaApiError, metaTime } from "./meta-graph";
 import { deletedIn, entriesIn, networkTargets, publishedIn, relevantFor, safeLink, type SocialPublished } from "./social-common";
 import type { DestinationAdapter, PushContext, PushResult } from "./types";
 
@@ -22,11 +22,6 @@ export function socialFailure(e: unknown, lines: typeof LINES, partial: Record<s
   const retry = e instanceof MetaApiError ? e.retryable : true;
   const msg = e instanceof Error ? e.message : String(e);
   return { ok: false, retry, error: msg, line: retry ? lines.retry : lines.error(msg), partial, ...(e instanceof MetaApiError ? { code: e.code } : {}) };
-}
-
-/** Meta's "2026-10-11T09:00:00+0000" → ms (NaN when unreadable). */
-export function metaTime(s: unknown): number {
-  return typeof s === "string" ? Date.parse(s.replace(/([+-]\d\d)(\d\d)$/, "$1:$2")) : NaN;
 }
 
 async function permalink(fb: GraphClient, id: string): Promise<string | null> {

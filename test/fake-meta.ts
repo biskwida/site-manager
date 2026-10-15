@@ -5,6 +5,9 @@
 //   GET /{page}/published_posts, GET /{page}/stories (what a retry checks before posting again)
 // - graph.instagram.com/v25.0: /me, /{ig}/media (containers with status polling), /{ig}/media_publish, GET /{media}?fields=permalink,
 //   /access_token (ig_exchange_token), /refresh_access_token (ig_refresh_token)
+// - comments (comment replies): Facebook GET /{post}/comments (filter=toplevel, since, limit), POST /{comment}/comments,
+//   POST /{comment} {is_hidden}, DELETE /{comment}; Instagram GET /{media}/comments (top-level with a replies edge),
+//   POST /{comment}/replies (top-level only), POST /{comment} {hide}, DELETE /{comment}. Seed with addFacebookComment/addInstagramComment.
 // - api.instagram.com/oauth/access_token (form POST): the short-lived Instagram token
 // Tokens are read from the bearer header or an access_token query parameter, exactly like Graph.
 import { randomBytes } from "node:crypto";
@@ -16,6 +19,8 @@ export interface FakeContainer { id: string; user_id: string; image_url: string;
 export interface FakeIgMedia { id: string; user_id: string; image_url: string; caption: string; media_type: "IMAGE" | "STORIES"; permalink: string }
 export interface FakeFailure { status: number; code: number; message: string; transient?: boolean; subcode?: number }
 export interface FakeCall { method: string; host: string; path: string; url: string; body: Record<string, unknown> | null; auth: boolean }
+/** A comment under a Facebook post or Instagram media (comment replies, 2026-10-15). owner_id = the Page id / Instagram user id whose token may act on it. */
+export interface FakeComment { id: string; network: "facebook" | "instagram"; post_ref: string; owner_id: string; parent_id: string | null; from_id: string; from_name: string; text: string; created_time: string; hidden: boolean; deleted: boolean }
 
 type Json = Record<string, unknown>;
 const tok = (p: string) => `${p}${randomBytes(12).toString("hex")}`;
@@ -38,6 +43,21 @@ export class FakeMeta {
   igUsers = new Map<string, FakeIgUser>();
   containers = new Map<string, FakeContainer>();
   igMedia = new Map<string, FakeIgMedia>();
+  comments = new Map<string, FakeComment>();
+  addFacebookComment(postId: string, o: { message: string; from_id?: string; from_name?: string; parent_id?: string; created?: Date }): FakeComment {
+    const post = this.posts.get(postId);
+    if (!post) throw new Error(`no post ${postId}`);
+    const c: FakeComment = { id: `${postId}_${num()}`, network: "facebook", post_ref: postId, owner_id: post.page_id, parent_id: o.parent_id ?? null, from_id: o.from_id ?? num(), from_name: o.from_name ?? "Customer", text: o.message, created_time: this.stampAt(o.created), hidden: false, deleted: false };
+    this.comments.set(c.id, c);
+    return c;
+  }
+  addInstagramComment(mediaId: string, o: { text: string; from_id?: string; username?: string; parent_id?: string; created?: Date }): FakeComment {
+    const m = this.igMedia.get(mediaId);
+    if (!m) throw new Error(`no media ${mediaId}`);
+    const c: FakeComment = { id: `178${num()}`, network: "instagram", post_ref: mediaId, owner_id: m.user_id, parent_id: o.parent_id ?? null, from_id: o.from_id ?? num(), from_name: o.username ?? "customer", text: o.text, created_time: this.stampAt(o.created), hidden: false, deleted: false };
+    this.comments.set(c.id, c);
+    return c;
+  }
   calls: FakeCall[] = [];
   revoked = new Set<string>();
   failNext: FakeFailure | null = null;
@@ -126,7 +146,24 @@ export class FakeMeta {
 
   /** Meta's timestamp format: 2026-10-11T09:00:00+0000. */
   private stamp(): string {
-    return this.now().toISOString().replace(/\.\d{3}Z$/, "+0000");
+    return this.stampAt();
+  }
+  private stampAt(d: Date = this.now()): string {
+    return d.toISOString().replace(/\.\d{3}Z$/, "+0000");
+  }
+
+  /** Facebook: `{ id, message, from, created_time, parent }`; Instagram: `{ id, text, timestamp, username, from, replies }`. Deleted comments are never listed. */
+  private commentJson(c: FakeComment, withReplies: boolean): Json {
+    if (c.network === "facebook") return { id: c.id, message: c.text, from: { id: c.from_id, name: c.from_name }, created_time: c.created_time, ...(c.parent_id ? { parent: { id: c.parent_id } } : {}) };
+    const replies = withReplies ? [...this.comments.values()].filter((r) => r.parent_id === c.id && !r.deleted) : [];
+    return { id: c.id, text: c.text, timestamp: c.created_time, username: c.from_name, from: { id: c.from_id, username: c.from_name }, ...(c.parent_id ? { parent_id: c.parent_id } : {}), ...(replies.length ? { replies: { data: replies.map((r) => this.commentJson(r, false)) } } : {}) };
+  }
+  private listComments(network: "facebook" | "instagram", postRef: string, q: URLSearchParams): Json {
+    const since = q.get("since") ? Number(q.get("since")) * 1000 : null;
+    const all = [...this.comments.values()].filter((c) => c.network === network && c.post_ref === postRef && !c.deleted);
+    const top = q.get("filter") === "toplevel" || network === "instagram" ? all.filter((c) => c.parent_id === null) : all;
+    const rows = top.filter((c) => since === null || Date.parse(c.created_time.replace(/([+-]\d\d)(\d\d)$/, "$1:$2")) >= since).sort((a, b) => b.created_time.localeCompare(a.created_time)).slice(0, Number(q.get("limit") ?? 25));
+    return { data: rows.map((c) => this.commentJson(c, true)) };
   }
 
   private pageForToken(token: string | null): FakePage | null {
@@ -162,6 +199,37 @@ export class FakeMeta {
       return Response.json({ data: u.pages.map((id) => this.pages.get(id)).filter((p): p is FakePage => !!p).map((p) => ({ id: p.id, name: p.name, access_token: p.access_token, tasks: p.tasks })) });
     }
     const parts = path.split("/").filter(Boolean);
+    // Comments (comment replies, 2026-10-15): GET /{post}/comments, POST /{comment}/comments, POST /{comment} {is_hidden}, DELETE /{comment}.
+    if (parts.length === 2 && parts[1] === "comments") {
+      const post = this.posts.get(parts[0]);
+      const parent = this.comments.get(parts[0]);
+      const ownerId = post?.page_id ?? parent?.owner_id;
+      if ((!post || post.deleted) && (!parent || parent.deleted || parent.network !== "facebook")) return graphError(400, 100, "Unsupported request. Object does not exist.", { error_subcode: 33 });
+      const page = this.pageForToken(token);
+      if (!page || page.id !== ownerId) return graphError(400, 190, "Invalid OAuth access token.");
+      if (method === "GET") return Response.json(this.listComments("facebook", post ? post.post_id : (parent as FakeComment).id, q));
+      if (method === "POST" && parent) {
+        const c: FakeComment = { id: `${parent.post_ref}_${num()}`, network: "facebook", post_ref: parent.post_ref, owner_id: page.id, parent_id: parent.id, from_id: page.id, from_name: page.name, text: String(body?.message ?? ""), created_time: this.stamp(), hidden: false, deleted: false };
+        this.comments.set(c.id, c);
+        return Response.json({ id: c.id });
+      }
+      return graphError(400, 100, "Unsupported request");
+    }
+    if (parts.length === 1 && this.comments.has(parts[0]) && this.comments.get(parts[0])!.network === "facebook") {
+      const c = this.comments.get(parts[0])!;
+      if (c.deleted) return graphError(400, 100, "Unsupported request. Object does not exist.", { error_subcode: 33 });
+      if (this.pageForToken(token)?.id !== c.owner_id) return graphError(400, 190, "Invalid OAuth access token.");
+      if (method === "GET") return Response.json({ id: c.id, message: c.text, is_hidden: c.hidden });
+      if (method === "POST" && typeof body?.is_hidden === "boolean") {
+        c.hidden = body.is_hidden;
+        return Response.json({ success: true });
+      }
+      if (method === "DELETE") {
+        c.deleted = true;
+        return Response.json({ success: true });
+      }
+      return graphError(400, 100, "Unsupported request");
+    }
     if (parts.length === 2 && method === "POST") {
       const page = this.pages.get(parts[0]);
       if (!page) return graphError(400, 100, "Unsupported post request. Object does not exist.", { error_subcode: 33 });
@@ -249,6 +317,34 @@ export class FakeMeta {
       return Response.json(this.wrapMe ? { data: [me] } : me);
     }
     const parts = path.split("/").filter(Boolean);
+    // Comments (comment replies, 2026-10-15): GET /{media}/comments, POST /{comment}/replies, POST /{comment} {hide}, DELETE /{comment}.
+    if (parts.length === 2 && parts[1] === "comments" && method === "GET") {
+      const m = this.igMedia.get(parts[0]);
+      if (!m) return graphError(400, 100, "Unsupported get request. Object does not exist.", { error_subcode: 33 });
+      if (m.user_id !== user.user_id) return graphError(400, 190, "Invalid OAuth access token.");
+      return Response.json(this.listComments("instagram", m.id, q));
+    }
+    const ic = parts.length >= 1 ? this.comments.get(parts[0]) : undefined;
+    if (ic && ic.network === "instagram") {
+      if (ic.deleted) return graphError(400, 100, "Unsupported request. Object does not exist.", { error_subcode: 33 });
+      if (ic.owner_id !== user.user_id) return graphError(400, 190, "Invalid OAuth access token.");
+      if (parts.length === 2 && parts[1] === "replies" && method === "POST") {
+        if (ic.parent_id !== null) return graphError(400, 100, "Instagram cannot reply to a reply.");
+        const c: FakeComment = { id: `178${num()}`, network: "instagram", post_ref: ic.post_ref, owner_id: user.user_id, parent_id: ic.id, from_id: user.user_id, from_name: user.username, text: String(body?.message ?? ""), created_time: this.stamp(), hidden: false, deleted: false };
+        this.comments.set(c.id, c);
+        return Response.json({ id: c.id });
+      }
+      if (parts.length === 1 && method === "GET") return Response.json({ id: ic.id, text: ic.text, hidden: ic.hidden });
+      if (parts.length === 1 && method === "POST" && typeof body?.hide === "boolean") {
+        ic.hidden = body.hide;
+        return Response.json({ success: true });
+      }
+      if (parts.length === 1 && method === "DELETE") {
+        ic.deleted = true;
+        return Response.json({ success: true });
+      }
+      return graphError(400, 100, "Unsupported request");
+    }
     if (method === "POST" && parts.length === 2 && parts[0] === user.user_id) {
       if (parts[1] === "media") {
         const imageUrl = String(body?.image_url ?? "");
