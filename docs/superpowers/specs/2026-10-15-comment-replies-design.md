@@ -4,7 +4,7 @@
 
 When a customer comments under a post Site Manager published to the venue's Instagram account or Facebook Page, the owner gets the comment and a drafted reply in their chat, taps ✅, and the reply is posted as the venue. ✏️ lets them reword it, ❌ ignores it. Nothing is ever posted without the owner's tap. The owner can also ask in the chat: "отговори на коментара на Мария, че имаме безглутенови". The dashboard shows pending and answered comments.
 
-Out of scope for v1: hiding or deleting customer comments, replying to DMs (a separate feature), comments on posts not published through Site Manager, Facebook Page mentions, live videos.
+Out of scope for v1: replying to DMs (a separate feature), comments on posts not published through Site Manager, Facebook Page mentions, live videos.
 
 ## Facts that shape it (verified 2026-10-14/15)
 
@@ -58,7 +58,7 @@ Store methods (both stores, contract-tested): `upsertComments(venueId, rows[]) �
 
 Venue gets `comment_mode text check (each|digest|off) default 'each'` and `comment_digest_hour int default 9` (schema.sql, both stores, contract test, kept out of the public feed).
 
-Change model: new external entity `social_reply`, op `social_reply`, row `{ network, comment_id, post_ref, author_name, comment_text, reply_text, permalink? }`; a set may hold several rows (digest/batch); `isExternalEntity` includes it; `changes_entity_check` extended; preview lines: "• Отговор на коментар от Мария: „…“ → „…“"; undo row inverts to `after: null`, adapter deletes the reply.
+Change model: new external entities `social_reply` (op `social_reply`) and `social_moderate` (op `social_moderate`, row `{ network, comment_id, author_name, comment_text, action: hide|unhide|delete }`), op `social_reply`, row `{ network, comment_id, post_ref, author_name, comment_text, reply_text, permalink? }`; a set may hold several rows (digest/batch); `isExternalEntity` includes it; `changes_entity_check` extended; preview lines: "• Отговор на коментар от Мария: „…“ → „…“"; undo row inverts to `after: null`, adapter deletes the reply.
 
 `ChangeSource` gains `comment` (CHECK constraint extended). A `comment` set: does not count toward the monthly change limit (replies are reactions, not changes; see open questions), expires after 24 h instead of 2 h (tick expiry reads a per-source TTL), is not blocked by `ensureNoPending` (a pending menu proposal must not stop a reply) and does not block it either; `ensureNoPending` ignores `comment` sets in both directions.
 
@@ -68,7 +68,7 @@ Tick step 9 (`if (d.sync)`): for each live venue with a facebook or instagram de
 
 ### Drafting
 
-`draftReply({venue, post caption, comment, language})` → one Messages API call to `COMMENT_DRAFT_MODEL` (default `claude-haiku-5-5`, effort low), system prompt with: venue name, tagline/about, opening hours, the menu (names and prices), the post's caption, rules: answer in the comment's language (Bulgarian default), 1–2 sentences, warm, no emojis unless the comment has them, use the menu for price/allergen/availability questions and never invent facts, a complaint gets an apology and an invitation to write to the venue, never argue, never mention being an assistant. Output JSON `{ reply: string, kind: "question"|"praise"|"complaint"|"spam"|"other" }`. For `spam` the proposal says "Предлагам да не отговаряме" with ❌ preselected in the text (buttons unchanged). The draft model's output is validated (non-empty, ≤ 500 chars) and falls back to a neutral "Благодарим! Пишете ни на … за подробности." when the call fails.
+`draftReply({venue, post caption, comment, language})` → one Messages API call to `COMMENT_DRAFT_MODEL` (default `claude-haiku-5-5`, effort low), system prompt with: venue name, tagline/about, opening hours, the menu (names and prices), the post's caption, rules: answer in the comment's language (Bulgarian default), 1–2 sentences, warm, no emojis unless the comment has them, use the menu for price/allergen/availability questions and never invent facts, a complaint gets an apology and an invitation to write to the venue, never argue, never mention being an assistant. Output JSON `{ reply: string, kind: "question"|"praise"|"complaint"|"spam"|"other" }`. For `spam` or abusive comments (`kind: "spam"|"abuse"`) the proposal is a moderation, not a reply: "Този коментар изглежда спам/обиден. Предлагам да го скрием." with a `social_moderate` row `{ network, comment_id, action: "hide" }`; ✅ hides it (Instagram `POST /{ig-comment-id}?hide=true`, Facebook `POST /{comment-id}?is_hidden=true`), ❌ leaves it, and the owner can answer "изтрий го" (`action: "delete"`, `DELETE /{comment-id}`) or "отговори му" to get a reply draft instead. Meta has no report-to-Meta API, so reporting stays manual in the Instagram/Facebook app. Undo of a hide un-hides; a delete cannot be undone and the preview says so. The draft model's output is validated (non-empty, ≤ 500 chars) and falls back to a neutral "Благодарим! Пишете ни на … за подробности." when the call fails.
 
 ### Notification
 
@@ -102,14 +102,14 @@ At connect time subscribe the venue: Instagram `POST /me/subscribed_apps?subscri
 
 Unit: comment parsing for both networks (fixtures), own-account and nested skipping, 30-day purge, draft validation and fallback, proposal text, deferred Meta-window case, limit exemption, expiry TTL, `ensureNoPending` ignoring comment sets, adapter push and undo with the fake Meta server, agent tool with the fake tool-call harness, dashboard render, store contract for the new methods. Live check script `scripts/social-comments-live-check.mts`: posts a comment with a second tester account? Not possible through the API as another user; instead the script lists comments of the latest @sitemanager.bg post and replies to one chosen by id, then deletes the reply. Tests the same path as production minus the poll.
 
-## Open questions (answer in one message)
+## Decisions (2026-10-15)
 
-0. Default mode for new venues: `each` (my proposal) or `digest`?
-1. Do replies count toward the monthly change limit (60 for Coffique)? Proposal: no, with a separate cap of 300 replies a month to bound cost.
+0. Default mode for new venues: `each`.
+1. Replies and moderation do not count toward the monthly change limit; a separate cap of 300 comment actions a month per venue (`comment_limit`, default 300, same month window as the change limit; the digest/batch tells the owner when it is reached).
 2. ~~Two owners~~: decided, both get the buttons, first tap wins.
-3. Draft tone source: until the brand/tone field exists, use the venue's tagline and about text. OK?
-4. Spam or abuse: propose "не отговаряме" (owner still decides) or skip silently? Proposal: propose, so the owner sees it.
-5. Conference demo: Instagram only (sitemanager.bg test account) or both networks? Facebook needs the Page connect and the two new scopes on the test Page.
+3. Draft tone: the venue's tagline and about text until a brand field exists.
+4. Spam or abuse: propose hiding (owner decides); delete on request; no API for reporting.
+5. Both networks, Instagram first in the build order; Facebook needs the test Page reconnected with the new scopes.
 
 ## Effort
 
