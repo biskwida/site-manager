@@ -138,7 +138,7 @@ describe("pollVenueComments", () => {
     const dest = (await v.store.getDestination(v.venue.id, "instagram"))!;
     await v.store.updateDestination(dest.id, { config: { ...dest.config, token_refreshed_at: at(-40 * DAY).toISOString() } });
     v.meta.addInstagramComment(igMediaId!, { text: "hi", created: at(-MIN) });
-    const r = await runTick({ store: v.store, messenger: v.messenger, now: T0, sync: v.d, venueId: v.venue.id });
+    const r = await runTick({ store: v.store, messenger: v.messenger, now: T0, sync: v.d });
     expect(r.comments_found).toBe(1);
     const refresh = v.meta.calls.findIndex((c) => c.path === "/refresh_access_token");
     const read = v.meta.calls.findIndex((c) => c.path === `/${igMediaId}/comments`);
@@ -182,11 +182,12 @@ describe("pollVenueComments", () => {
     expect(logs.join("\n")).not.toContain("стар коментар");
   });
 
-  it("tick step 9 polls every live venue (one venue on a scoped tick) and reports comments_found", async () => {
+  it("tick step 9 polls every live venue on the global tick (never on a scoped one) and reports comments_found", async () => {
     const v = await connectedVenue();
     const { igMediaId } = await v.publishPost(["instagram_post"]);
     v.meta.addInstagramComment(igMediaId!, { text: "hi", created: at(-MIN) });
-    const r = await runTick({ store: v.store, messenger: v.messenger, now: T0, sync: v.d, venueId: v.venue.id });
+    expect((await runTick({ store: v.store, messenger: v.messenger, now: T0, sync: v.d, venueId: v.venue.id })).comments_found).toBe(0);
+    const r = await runTick({ store: v.store, messenger: v.messenger, now: T0, sync: v.d });
     expect(r.comments_found).toBe(1);
     await v.store.upsertComments(v.venue.id, [{ network: "instagram", post_ref: "p", comment_id: "k-old", parent_id: null, author_id: "", author_name: "", text: "old", created_at: at(-COMMENT_RETENTION_MS - DAY).toISOString(), seen_at: T0.toISOString(), status: "replied", post_caption: "" }]);
     const none = await runTick({ store: v.store, messenger: v.messenger, now: at(MIN), sync: v.d });

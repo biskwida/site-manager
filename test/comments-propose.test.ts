@@ -429,8 +429,26 @@ describe("tick: TTL and proposing", () => {
     expect(held.comments_proposed).toBe(0);
     expect((await v.store.listComments(v.venue.id, { status: ["new"] })).every((c) => c.deferred)).toBe(true);
     await v.store.touchMember("wa:359888000111", at(50 * MIN).toISOString());
+    const reads = v.meta.calls.length;
     const resent = await tick(at(50 * MIN), v.venue.id);
     expect(resent.comments_proposed).toBe(1); // "Още!"; the first comment's set is still proposed to the removed owner
+    expect(resent.comments_found).toBe(0); // the per-venue tick re-sends held drafts only: no Graph read, no model call
+    expect(v.meta.calls).toHaveLength(reads);
     expect(v.messenger.sent.filter((m) => m.setId && m.chatRef === "wa:359888000111")).toHaveLength(1);
+  });
+  it("a per-venue tick (before an owner's message) never reads Meta or drafts; the global tick does both", async () => {
+    const v = await setup();
+    const { igMediaId } = await v.publishPost(["instagram_post"]);
+    v.meta.addInstagramComment(igMediaId!, { text: "Супер!", from_id: "1784", username: "maria.k", created: at(-MIN) });
+    await v.add("c-new", "Кога отваряте?"); // stored earlier, not drafted yet
+    const reads = v.meta.calls.length;
+    const scoped = await runTick({ store: v.store, messenger: v.messenger, now: T0, sync: v.sync, comments: { draft: v.d.draft }, venueId: v.venue.id });
+    expect(scoped).toMatchObject({ comments_found: 0, comments_proposed: 0 });
+    expect(v.meta.calls).toHaveLength(reads);
+    expect(v.calls).toHaveLength(0);
+    expect(v.messenger.sent.filter((m) => m.setId)).toHaveLength(0);
+    const global = await runTick({ store: v.store, messenger: v.messenger, now: T0, sync: v.sync, comments: { draft: v.d.draft } });
+    expect(global).toMatchObject({ comments_found: 1, comments_proposed: 2 });
+    expect(v.calls).toHaveLength(2);
   });
 });

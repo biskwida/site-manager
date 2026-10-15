@@ -174,10 +174,11 @@ export async function runTick(d: TickDeps): Promise<TickReport> {
     } catch (e) {
       console.error("[tick] instagram token refresh failed:", e instanceof Error ? e.message : e);
     }
-    // 9. Customer comments under the venue's posts (comment replies, 2026-10-15): read every 15 min per venue (after step 8, so
-    //    Instagram tokens are fresh) and propose in mode "each" (digest venues wait for their daily digest, "off" venues only
-    //    show them on the dashboard); held comments are retried here once an owner is reachable. Keep 30 days: the purge
-    //    runs on the global tick only.
+    // 9. Customer comments under the venue's posts (comment replies, 2026-10-15), global tick only: read every 15 min per venue
+    //    (after step 8, so Instagram tokens are fresh) and propose in mode "each" (digest venues wait for their daily digest,
+    //    "off" venues only show them on the dashboard). The per-venue tick runs before an owner's agent turn inside the webhook
+    //    budget: it makes no Graph read and no model call, and only re-sends that venue's held comments (deferred, drafts
+    //    stored), so the owner who just wrote gets them at once. Keep 30 days: the purge runs on the global tick only.
     report.comments_found = 0;
     report.comments_proposed = 0;
     let venues: Venue[] = [];
@@ -189,13 +190,16 @@ export async function runTick(d: TickDeps): Promise<TickReport> {
     for (const venue of venues) {
       // One venue's failure (Graph, drafting) never stops the others.
       try {
-        const r = await pollVenueComments(d.sync, venue, d.now);
-        report.comments_found += r.inserted.length;
+        if (!d.venueId) {
+          const r = await pollVenueComments(d.sync, venue, d.now);
+          report.comments_found += r.inserted.length;
+        }
         if (!d.comments || !d.messenger || venue.comment_mode !== "each") continue;
         const since = new Date(d.now.getTime() - COMMENT_POST_WINDOW_MS).toISOString();
-        const fresh = (await d.store.listComments(venue.id, { status: ["new"], since })).filter((c) => c.parent_id === null);
+        const fresh = (await d.store.listComments(venue.id, { status: ["new"], since })).filter((c) => c.parent_id === null && (!d.venueId || (c.deferred && c.draft_kind !== null)));
         if (fresh.length === 0) continue;
-        const p = await proposeForComments({ store: d.store, messenger: d.messenger, now: () => d.now, draft: d.comments.draft, log: d.sync.log }, venue, fresh, { mode: "each" });
+        const draft = d.venueId ? noDraftOnScopedTick : d.comments.draft;
+        const p = await proposeForComments({ store: d.store, messenger: d.messenger, now: () => d.now, draft, log: d.sync.log }, venue, fresh, { mode: "each" });
         report.comments_proposed += p.sets.length;
       } catch (e) {
         console.error(`[tick] comments for venue ${venue.id} failed:`, e instanceof Error ? e.name : "error");
@@ -221,6 +225,11 @@ export async function runTick(d: TickDeps): Promise<TickReport> {
   }
   return report;
 }
+
+/** The per-venue tick only re-sends held comments, whose drafts are stored: it never calls the model. */
+const noDraftOnScopedTick: DraftFn = async () => {
+  throw new Error("no drafting on a per-venue tick");
+};
 
 /**
  * Deletes draft venues created more than DRAFT_TTL_MS ago (cookie-only drafts nobody published), with their stored images.
