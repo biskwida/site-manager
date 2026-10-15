@@ -21,6 +21,16 @@ describe("comment scopes", () => {
     await v.store.upsertDestination({ venue_id: v.venue.id, kind: "instagram", config: { ...older, [COMMENTS_CAPABILITY]: true }, secrets: ig.secrets });
     expect((await commentsOverview(v.store, await v.store.getVenue(v.venue.id), T0)).needs_reconnect).toEqual({ facebook: false, instagram: false });
   });
+  it("the same for a Facebook Page connected before the comment scopes", async () => {
+    const v = await connectedVenue();
+    const fb = (await v.store.getDestination(v.venue.id, "facebook"))!;
+    const { comments: _c, ...older } = fb.config;
+    void _c;
+    await v.store.upsertDestination({ venue_id: v.venue.id, kind: "facebook", config: older, secrets: fb.secrets });
+    expect((await commentsOverview(v.store, await v.store.getVenue(v.venue.id), T0)).needs_reconnect).toEqual({ facebook: true, instagram: false });
+    await v.store.upsertDestination({ venue_id: v.venue.id, kind: "facebook", config: { ...older, [COMMENTS_CAPABILITY]: true }, secrets: fb.secrets });
+    expect((await commentsOverview(v.store, await v.store.getVenue(v.venue.id), T0)).needs_reconnect).toEqual({ facebook: false, instagram: false });
+  });
 });
 
 describe("connection errors", () => {

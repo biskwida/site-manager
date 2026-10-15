@@ -21,14 +21,15 @@ for (let i = 0; i < args.length; i++) {
   else if (args[i] === "--keep") keep = true;
 }
 const token = process.env.IG_TEST_TOKEN ?? "";
-if (!token) throw new Error("IG_TEST_TOKEN is missing");
 
 async function main() {
+  if (!token) throw new Error("IG_TEST_TOKEN is missing (set it in .env.local)");
   const client = new GraphClient(IG_GRAPH, token, fetch);
   const me = await client.get<{ id?: string; user_id?: string; username?: string }>("/me?fields=id,user_id,username");
   if (!me.user_id) throw new Error("token check failed: no user_id");
   // What the connect stores (src/server/social-connect.ts): ig_user_id = /me user_id as a string of digits.
   const igUserId = String(me.user_id);
+  const isOwn = (authorId: string) => authorId !== "" && (authorId === igUserId || authorId === me.id);
   console.log(`== Instagram account @${me.username} (ig_user_id ${igUserId}, app-scoped id ${me.id ?? "?"})`);
   const media = await metaFetch<{ data?: { id: string; caption?: string; permalink?: string }[] }>(fetch, `${IG_GRAPH}/${encodeURIComponent(igUserId)}/media?fields=id,caption,permalink&limit=1`, { headers: { authorization: `Bearer ${token}` } });
   const latest = media.data?.[0];
@@ -37,9 +38,11 @@ async function main() {
   const comments = await fetchInstagramComments(client, latest.id);
   console.log(`== ${comments.length} comment(s)`);
   for (const c of comments) console.log(`   ${c.parent_id ? "  ↳ " : ""}${c.comment_id} ${c.author_name} (from ${c.author_id || "?"}): ${c.text.slice(0, 80)} (${c.created_at})`);
-  const target = commentId ? comments.find((c) => c.comment_id === commentId) : comments.find((c) => c.parent_id === null && c.author_id !== igUserId);
+  // Auto-pick: a top-level customer comment the venue has not answered yet (a --keep rerun never replies twice).
+  const answered = new Set(comments.filter((c) => c.parent_id !== null && isOwn(c.author_id)).map((c) => c.parent_id));
+  const target = commentId ? comments.find((c) => c.comment_id === commentId) : comments.find((c) => c.parent_id === null && !isOwn(c.author_id) && !answered.has(c.comment_id));
   if (!target) {
-    console.log(commentId ? `comment ${commentId} is not under the latest post` : "no top-level customer comment to reply to; write one in the Instagram app and run again with --comment <id>");
+    console.log(commentId ? `comment ${commentId} is not under the latest post` : "no unanswered top-level customer comment to reply to; write one in the Instagram app and run again with --comment <id>");
     process.exitCode = 1;
     return;
   }
@@ -52,21 +55,34 @@ async function main() {
   const replyId = await replyInstagram(client, target.comment_id, reply);
   console.log(`   posted reply ${replyId}`);
 
-  const after = await fetchInstagramComments(client, latest.id);
-  const seen = after.find((c) => c.comment_id === replyId);
-  console.log(`   reader sees it under its parent: ${seen ? `yes (parent ${seen.parent_id})` : "NO"}`);
-  const fromId = seen?.author_id ?? "";
-  const fromMatches = fromId !== "" && fromId === igUserId;
-  console.log(`   its from.id ${fromId || "(missing)"} equals the stored ig_user_id ${igUserId}: ${fromMatches ? "yes" : `NO${fromId && fromId === me.id ? " (it is the app-scoped id)" : ""}`}`);
-  // The exact lookup the push runs after a lost answer, so a retry never posts the reply twice.
-  const guard = await findOwnReply(client, "instagram", target.comment_id, igUserId, reply);
-  console.log(`   re-reply guard (findOwnReply) finds it: ${guard === replyId ? "yes" : guard ? `another reply ${guard}` : "NO"}`);
-
-  if (!keep) {
-    await deleteReply(client, replyId);
-    console.log("   reply deleted");
+  // From here a live reply exists on a public account: whatever fails, it is deleted (unless --keep) or its id is printed.
+  let ok = false;
+  try {
+    const after = await fetchInstagramComments(client, latest.id);
+    const seen = after.find((c) => c.comment_id === replyId);
+    console.log(`   reader sees it under its parent: ${seen ? `yes (parent ${seen.parent_id})` : "NO"}`);
+    const fromId = seen?.author_id ?? "";
+    const fromMatches = fromId !== "" && fromId === igUserId;
+    console.log(`   its from.id ${fromId || "(missing)"} equals the stored ig_user_id ${igUserId}: ${fromMatches ? "yes" : `NO${fromId && fromId === me.id ? " (it is the app-scoped id)" : ""}`}`);
+    // The exact lookup the push runs after a lost answer, so a retry never posts the reply twice.
+    const guard = await findOwnReply(client, "instagram", target.comment_id, igUserId, reply);
+    console.log(`   re-reply guard (findOwnReply) finds it: ${guard === replyId ? "yes" : guard ? `another reply ${guard}` : "NO"}`);
+    ok = !!seen && fromMatches && guard === replyId;
+  } catch (e) {
+    console.error(`   check failed after posting reply ${replyId}: ${e instanceof Error ? e.message : String(e)}`);
+  } finally {
+    if (keep) {
+      console.log(`   reply ${replyId} kept (--keep)`);
+    } else {
+      try {
+        await deleteReply(client, replyId);
+        console.log("   reply deleted");
+      } catch (e) {
+        ok = false;
+        console.error(`   could NOT delete reply ${replyId} (${e instanceof Error ? e.message : String(e)}); delete it by hand in the Instagram app`);
+      }
+    }
   }
-  const ok = !!seen && fromMatches && guard === replyId;
   console.log(ok ? "\nSOCIAL COMMENTS LIVE CHECK OK" : "\nSOCIAL COMMENTS LIVE CHECK FAILED");
   if (!ok) process.exitCode = 1;
 }
