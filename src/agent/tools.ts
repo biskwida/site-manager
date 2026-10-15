@@ -295,8 +295,11 @@ export function makeTools(deps: AgentDeps) {
     run: (input) =>
       attempt(async () => {
         const cs = await getSet(input.change_set_id);
-        // A comment proposal went to every owner and holds comment rows: only ❌ on it (or ignoring the comment) concludes all of them.
-        if (isCommentReplySet(cs)) throw new Error(`Change set ${cs.id} is a comment reply proposal; cancel_change_set does not cancel those. Tell the owner in one short sentence: ❌ on that proposal ignores the comment ("игнорирай коментара"); the dashboard's comments card can ignore it too.`);
+        // A comment proposal went to every owner and holds comment rows: only ❌ on it (or Ignore in the dashboard) concludes all of them.
+        if (isCommentReplySet(cs)) {
+          const say = tr(lang, "„Натиснете ❌ на предложението в чата или „Пропусни“ в картата „Коментари“ в таблото.“", "“Tap ❌ on the proposal in the chat, or Ignore in the dashboard's Comments card.”");
+          throw new Error(`Change set ${cs.id} is a comment reply proposal; cancel_change_set does not cancel those, and no tool ignores a comment. Tell the owner in one short sentence: ${say}`);
+        }
         if (cs.status !== "proposed" && cs.status !== "scheduled") throw new Error(`Change set is "${cs.status}"; only proposed or scheduled sets can be cancelled.`);
         await cancelPending(cs, tr(lang, "❌ Отказано.", "❌ Cancelled."));
         return { change_set_id: cs.id, status: "cancelled" };

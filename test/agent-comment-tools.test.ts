@@ -146,12 +146,14 @@ describe("reply_to_comments", () => {
 });
 
 describe("cancel_change_set on a comment set", () => {
-  it("refuses and points to ❌ or ignoring the comment; the set and its comments stay as they are", async () => {
+  it("refuses and points to ❌ on the proposal or the dashboard's comments card, in the owner's language; nothing changes", async () => {
     const t = await setup();
     const { set } = await createCommentSet(t.pd, t.venue, [{ comment: t.maria, reply_text: "Да, имаме.", moderate: null }]);
     const r = await call(t.tools, "cancel_change_set", { change_set_id: set!.id });
-    expect(r).toMatchObject({ error: expect.stringContaining("❌") });
-    expect(r.error).toContain("игнорирай коментара");
+    expect(r).toMatchObject({ error: expect.stringContaining("„Натиснете ❌ на предложението в чата или „Пропусни“ в картата „Коментари“ в таблото.“") });
+    expect(r.error).not.toContain("игнорирай коментара"); // no tool handles that phrase
+    const en = await call(makeTools({ ...t.deps, member: { ...t.deps.member, lang: "en" } }), "cancel_change_set", { change_set_id: set!.id });
+    expect(en.error).toContain("“Tap ❌ on the proposal in the chat, or Ignore in the dashboard's Comments card.”");
     expect((await t.store.getChangeSet(set!.id)).status).toBe("proposed");
     expect(await t.fresh(t.maria)).toMatchObject({ status: "proposed", change_set_id: set!.id });
     expect(t.messenger.concluded).toEqual([]);
