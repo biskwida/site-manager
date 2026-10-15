@@ -2,7 +2,7 @@
 import { describe, expect, it } from "vitest";
 import { planChanges } from "@/src/domain/changes";
 import type { Change } from "@/src/domain/types";
-import type { NewSocialComment, Store } from "@/src/store/types";
+import { COMMENT_REDACTED, type NewSocialComment, type Store } from "@/src/store/types";
 import { NOW } from "./fixtures";
 
 const LATER = "2026-10-09T10:00:00.000Z";
@@ -602,6 +602,23 @@ export function storeContract(name: string, make: () => Promise<Store>, storageH
       expect(await s.listSyncs({ venueId: v.id })).toEqual([]);
     });
 
+    it("lists sync rows created at or after a time, newest first, bounded by the limit (comment poller)", async () => {
+      const s = await make();
+      const v = await s.createVenue({ slug: `t-sync-since-${crypto.randomUUID().slice(0, 8)}`, name: "Since" });
+      const d = await s.upsertDestination({ venue_id: v.id, kind: "facebook", config: {}, secrets: "enc" });
+      const cs = await s.createChangeSet({ venue_id: v.id, chat_ref: null, summary_bg: "x", summary_en: "x", preview_bg: "", preview_en: "", source: "text", status: "proposed", changes: [] });
+      const mk = () => s.createSync({ venue_id: v.id, destination_id: d.id, change_set_id: cs.id, payload: { kind: "facebook" }, next_at: NOW });
+      const y1 = await mk();
+      const y2 = await mk();
+      const y3 = await mk();
+      expect((await s.listSyncs({ venueId: v.id, order: "desc" })).map((x) => x.id)).toEqual([y3.id, y2.id, y1.id]);
+      expect((await s.listSyncs({ venueId: v.id, createdSince: y2.created_at, order: "desc" })).map((x) => x.id)).toEqual([y3.id, y2.id]);
+      expect((await s.listSyncs({ venueId: v.id, createdSince: y2.created_at })).map((x) => x.id)).toEqual([y2.id, y3.id]); // default stays oldest first
+      expect((await s.listSyncs({ venueId: v.id, order: "desc", limit: 1 })).map((x) => x.id)).toEqual([y3.id]);
+      await s.updateSync(y3.id, { status: "done" });
+      expect((await s.listSyncs({ venueId: v.id, status: ["done"], createdSince: y1.created_at, order: "desc" })).map((x) => x.id)).toEqual([y3.id]);
+    });
+
     it("claims a pending sync row for one run at a time (lease), and frees it again", async () => {
       const s = await make();
       const v = await s.createVenue({ slug: `t-claim-${crypto.randomUUID().slice(0, 8)}`, name: "Claim" });
@@ -816,6 +833,29 @@ export function storeContract(name: string, make: () => Promise<Store>, storageH
       expect(await s.purgeComments("2026-09-15T00:00:00.000Z")).toBe(1);
       expect((await s.listComments(v.id)).map((x) => x.comment_id)).toEqual([`${t}-fc`, `${t}-fb`, `${t}-fa`]);
       expect(await s.purgeComments("2026-09-15T00:00:00.000Z")).toBe(0);
+    });
+
+    it("redacts the customer text of comment sets created before a time, once, and leaves other sets alone", async () => {
+      const s = await make();
+      const v = await s.createVenue({ slug: "tc8", name: "Test" });
+      const reply: Change = { position: 0, op: "social_reply", entity: "social_reply", entity_id: "c-1", before: null, after: { network: "instagram", comment_id: "c-1", post_ref: "m-1", author_name: "maria.k", comment_text: "Имате ли безглутенови?", reply_text: "Да, всеки ден!" } };
+      const hide: Change = { position: 1, op: "social_moderate", entity: "social_moderate", entity_id: "c-2", before: { network: "facebook", comment_id: "c-2", author_name: "Spam Bot", comment_text: "buy now", action: "unhide" }, after: { network: "facebook", comment_id: "c-2", author_name: "Spam Bot", comment_text: "buy now", action: "hide" } };
+      const text = "Имате ли безглутенови?";
+      const cs = await s.createChangeSet({ venue_id: v.id, chat_ref: "tg:10", summary_bg: `Отговор на maria.k: ${text}`, summary_en: `Reply to maria.k: ${text}`, preview_bg: `„${text}“`, preview_en: `“${text}”`, source: "comment", status: "proposed", changes: [reply, hide] });
+      const other = await s.createChangeSet({ venue_id: v.id, chat_ref: "tg:10", summary_bg: "Цена", summary_en: "Price", preview_bg: "p", preview_en: "p", source: "text", status: "proposed", changes: [] });
+      expect(await s.redactCommentSets(cs.created_at, v.id)).toBe(0); // created_at < before: the set itself is not older than the cutoff
+      expect((await s.getChangeSet(cs.id)).summary_en).toContain(text);
+      const after = new Date(Date.parse(other.created_at) + 1000).toISOString();
+      expect(await s.redactCommentSets(after, v.id)).toBe(1);
+      const r = await s.getChangeSet(cs.id);
+      expect(r).toMatchObject({ summary_bg: COMMENT_REDACTED.bg, summary_en: COMMENT_REDACTED.en, preview_bg: COMMENT_REDACTED.bg, preview_en: COMMENT_REDACTED.en, status: "proposed" });
+      expect(r.changes[0].after).toEqual({ network: "instagram", comment_id: "c-1", post_ref: "m-1", author_name: "", comment_text: "", reply_text: "Да, всеки ден!" });
+      expect(r.changes[1].before).toMatchObject({ author_name: "", comment_text: "", action: "unhide" });
+      expect(r.changes[1].after).toMatchObject({ author_name: "", comment_text: "", action: "hide" });
+      expect(JSON.stringify(r)).not.toContain("безглутенови");
+      expect(JSON.stringify(r)).not.toContain("Spam Bot");
+      expect(await s.getChangeSet(other.id)).toMatchObject({ summary_en: "Price", preview_en: "p" });
+      expect(await s.redactCommentSets(after, v.id)).toBe(0); // already redacted
     });
 
     it("stores one proposal message ref per owner chat on a change set", async () => {

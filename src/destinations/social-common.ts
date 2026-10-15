@@ -2,6 +2,7 @@
 // Pure helpers shared by the Facebook and Instagram adapters and the owner-facing sync lines.
 import type { Change, SocialTarget } from "../domain/types";
 import { SOCIAL_TARGETS } from "../domain/types";
+import type { Store } from "../store/types";
 
 export type SocialNetwork = "facebook" | "instagram";
 /**
@@ -91,4 +92,51 @@ export function safeLink(u: unknown): string | null {
   } catch {
     return null;
   }
+}
+
+/** A feed post Site Manager published, as the comment poller needs it (comment replies, 2026-10-15). */
+export interface PublishedTarget {
+  network: SocialNetwork;
+  target: SocialTarget;
+  /** Meta's post id (Facebook) or media id (Instagram). */
+  post_ref: string;
+  change_set_id: string;
+  caption: string;
+  permalink: string | null;
+  /** When the sync row was created (ISO): the publish. */
+  published_at: string;
+}
+
+/** At most this many sync rows are read per poll (newest first): a bounded query, never a scan of the venue's history. */
+export const PUBLISHED_TARGETS_MAX_ROWS = 200;
+
+/**
+ * Feed posts (never stories: they take no comments) with a Meta id, from the venue's done sync rows created at or after
+ * `sinceIso` (newest first, at most PUBLISHED_TARGETS_MAX_ROWS rows), one entry per post id. The caption comes from the set's
+ * social_post row.
+ */
+export async function publishedTargets(store: Pick<Store, "listSyncs" | "getChangeSet">, venueId: string, sinceIso: string): Promise<PublishedTarget[]> {
+  const rows = await store.listSyncs({ venueId, status: ["done"], createdSince: sinceIso, order: "desc", limit: PUBLISHED_TARGETS_MAX_ROWS });
+  const seen = new Set<string>();
+  const out: PublishedTarget[] = [];
+  for (const s of rows) {
+    if (s.payload.kind !== "facebook" && s.payload.kind !== "instagram") continue;
+    const network: SocialNetwork = s.payload.kind;
+    const published = publishedIn([s.result]).filter((p) => p.id !== null && p.target === `${network}_post` && !seen.has(p.id));
+    if (published.length === 0) continue;
+    let captions = new Map<string, string>();
+    try {
+      const cs = await store.getChangeSet(s.change_set_id);
+      captions = new Map(cs.changes.filter((c) => c.entity === "social_post" && c.after).map((c) => [c.entity_id, typeof c.after?.caption === "string" ? c.after.caption : ""]));
+    } catch {
+      // the set is gone (venue content cleared): the post is still readable, without its caption
+    }
+    for (const p of published) {
+      const id = p.id as string;
+      if (seen.has(id)) continue;
+      seen.add(id);
+      out.push({ network, target: p.target, post_ref: id, change_set_id: s.change_set_id, caption: captions.get(p.media_id) ?? "", permalink: p.permalink, published_at: s.created_at });
+    }
+  }
+  return out;
 }

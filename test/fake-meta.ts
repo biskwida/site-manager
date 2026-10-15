@@ -154,7 +154,8 @@ export class FakeMeta {
 
   /** Facebook: `{ id, message, from, created_time, parent }`; Instagram: `{ id, text, timestamp, username, from, replies }`. Deleted comments are never listed. */
   private commentJson(c: FakeComment, withReplies: boolean): Json {
-    if (c.network === "facebook") return { id: c.id, message: c.text, from: { id: c.from_id, name: c.from_name }, created_time: c.created_time, ...(c.parent_id ? { parent: { id: c.parent_id } } : {}) };
+    // A Facebook author who keeps their profile private comes without `from` (seed with from_id "").
+    if (c.network === "facebook") return { id: c.id, message: c.text, ...(c.from_id ? { from: { id: c.from_id, name: c.from_name } } : {}), created_time: c.created_time, ...(c.parent_id ? { parent: { id: c.parent_id } } : {}) };
     const replies = withReplies ? [...this.comments.values()].filter((r) => r.parent_id === c.id && !r.deleted) : [];
     return { id: c.id, text: c.text, timestamp: c.created_time, username: c.from_name, from: { id: c.from_id, username: c.from_name }, ...(c.parent_id ? { parent_id: c.parent_id } : {}), ...(replies.length ? { replies: { data: replies.map((r) => this.commentJson(r, false)) } } : {}) };
   }

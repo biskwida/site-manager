@@ -12,9 +12,11 @@ export interface Demo {
   items: Record<string, Item>; // by name_en
 }
 
-/** A memory store with the demo venue and an owner (chat tg:1001, bg) and a staff member (chat tg:1002, en). */
-export async function makeDemo(): Promise<Demo> {
-  const store = new InMemoryStore();
+/**
+ * A memory store with the demo venue and an owner (chat tg:1001, bg) and a staff member (chat tg:1002, en). Pass a store whose
+ * clock is already set to seed everything (members included) under that clock.
+ */
+export async function makeDemo(store: InMemoryStore = new InMemoryStore()): Promise<Demo> {
   const seeded = await seedDemo(store);
   await store.upsertMember({ venue_id: seeded.venue.id, chat_ref: "tg:1001", role: "owner", lang: "bg" });
   await store.upsertMember({ venue_id: seeded.venue.id, chat_ref: "tg:1002", role: "staff", lang: "en" });

@@ -78,6 +78,12 @@ describe("fetchFacebookComments", () => {
     await fetchFacebookComments(new GraphClient(FB_GRAPH, "t", f), "123");
     expect(new URL(calls[0].url).searchParams.has("since")).toBe(false);
   });
+  it("drops an unreadable since instead of sending since=NaN", async () => {
+    const { f, calls } = scripted({ data: [] });
+    await fetchFacebookComments(new GraphClient(FB_GRAPH, "t", f), "123", "not a date");
+    expect(calls[0].url).not.toContain("NaN");
+    expect(new URL(calls[0].url).searchParams.has("since")).toBe(false);
+  });
 });
 
 describe("replies and moderation against the fake Meta server", () => {

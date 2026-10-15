@@ -273,6 +273,7 @@ export interface NewSync {
   payload: Record<string, unknown>;
   next_at: string;
 }
+export interface ListSyncsOpts { venueId?: string; changeSetId?: string; status?: SyncStatus[]; dueBefore?: string; createdSince?: string; order?: "asc" | "desc"; limit?: number }
 export type SyncPatch = Partial<Pick<DestinationSync, "status" | "attempts" | "next_at" | "last_error" | "result" | "updated_at" | "leased_until">>;
 
 // Declaration merging: the Store interface above gains the destination methods.
@@ -286,8 +287,11 @@ export interface Store {
   deleteDestination(id: string): Promise<void>;
   createSync(s: NewSync): Promise<DestinationSync>;
   getSync(id: string): Promise<DestinationSync>;
-  /** Oldest first (created_at). `dueBefore` keeps rows with next_at <= dueBefore. */
-  listSyncs(opts: { venueId?: string; changeSetId?: string; status?: SyncStatus[]; dueBefore?: string; limit?: number }): Promise<DestinationSync[]>;
+  /**
+   * Oldest first (created_at), or newest first with order "desc". `dueBefore` keeps rows with next_at <= dueBefore;
+   * `createdSince` keeps rows with created_at >= createdSince (the comment poller's 14-day window).
+   */
+  listSyncs(opts: ListSyncsOpts): Promise<DestinationSync[]>;
   updateSync(id: string, patch: SyncPatch): Promise<void>;
   /**
    * Takes a pending row for one push: sets leased_until = leaseUntil only when the row is free (no lease, or the lease ended at
@@ -406,6 +410,23 @@ export interface Store {
   updateComment(id: string, patch: SocialCommentPatch): Promise<void>;
   /** Deletes every venue's rows with created_at < before; returns how many. */
   purgeComments(before: string): Promise<number>;
+  /**
+   * The 30-day rule for the customer text kept on change sets: every set with source "comment" created before `before` (and not
+   * redacted yet) gets comment_text and author_name blanked in its rows' before/after and COMMENT_REDACTED as its summaries and
+   * previews. `venueId` narrows it to one venue (tests on a shared database). Returns how many sets it redacted.
+   */
+  redactCommentSets(before: string, venueId?: string): Promise<number>;
   /** Replies and moderations that went out in [fromIso, toIso): rows with status replied, hidden or deleted and replied_at in the window. */
   countCommentActions(venueId: string, fromIso: string, toIso: string): Promise<number>;
+}
+
+/** What a comment set says once its customer text is gone (redactCommentSets). */
+export const COMMENT_REDACTED = { bg: "Коментар, изтрит след 30 дни", en: "Comment removed after 30 days" } as const;
+/** A change row's before/after without the customer's text and name (other keys kept); null stays null. */
+export function redactCommentRow(row: Record<string, unknown> | null): Record<string, unknown> | null {
+  if (!row) return row;
+  const out = { ...row };
+  if ("comment_text" in out) out.comment_text = "";
+  if ("author_name" in out) out.author_name = "";
+  return out;
 }

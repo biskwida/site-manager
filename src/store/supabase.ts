@@ -5,7 +5,7 @@ import { isExternalEntity, type CommentMode, type SocialEntity, type WpEntity } 
 import type { Announcement, BusinessType, Category, Change, ChangeSet, Conversation, DeployInfo, DeployStatus, Holiday, InstagramImport, Item, Lang, Media, Member, Role, SiteState, SiteText, SiteTextKey, TemplateId, Venue, VenueStatus } from "../domain/types";
 import type { WizardDraft } from "../wizard/schema";
 import { legacyTelegramId } from "../channels/ref";
-import { DEFAULT_HOURS, extensionFor, newInviteCode, newToken, PUBLISH_CLAIM_TTL_MS, type ChangeSetPatch, type ExpiredTimer, type NewCategory, type NewChangeSet, type NewItem, type NewVenue, type Store, type VenuePatch, type Destination, type DestinationKind, type DestinationPatch, type DestinationSync, type DestinationWithSecrets, type NewDestination, type NewSync, type SyncPatch, type SyncStatus, type ApplyResult, checkLimitValue, CONFIG_KEY_RE, newConfirmationCode, type DataDeletionRequest, type DeletionProvider, type DeletionStatus, type CommentStatus, type ListCommentsOpts, type NewSocialComment, type SocialComment, type SocialCommentPatch } from "./types";
+import { DEFAULT_HOURS, extensionFor, newInviteCode, newToken, PUBLISH_CLAIM_TTL_MS, type ChangeSetPatch, type ExpiredTimer, type NewCategory, type NewChangeSet, type NewItem, type NewVenue, type Store, type VenuePatch, type Destination, type DestinationKind, type DestinationPatch, type DestinationSync, type DestinationWithSecrets, type NewDestination, type NewSync, type SyncPatch, type SyncStatus, type ListSyncsOpts, type ApplyResult, checkLimitValue, CONFIG_KEY_RE, newConfirmationCode, type DataDeletionRequest, type DeletionProvider, type DeletionStatus, type CommentStatus, type ListCommentsOpts, type NewSocialComment, type SocialComment, type SocialCommentPatch, COMMENT_REDACTED, redactCommentRow } from "./types";
 import { limitBlocks } from "./usage";
 
 type Row = Record<string, unknown>;
@@ -579,13 +579,15 @@ export class SupabaseStore implements Store {
   async getSync(id: string) {
     return toSync(await must(this.db.from("destination_syncs").select("*").eq("id", id).single(), `getSync ${id}`));
   }
-  async listSyncs(opts: { venueId?: string; changeSetId?: string; status?: SyncStatus[]; dueBefore?: string; limit?: number }) {
+  async listSyncs(opts: ListSyncsOpts) {
     if (badVenue(opts.venueId)) return [];
-    let q = this.db.from("destination_syncs").select("*").order("created_at").order("id");
+    const ascending = opts.order !== "desc";
+    let q = this.db.from("destination_syncs").select("*").order("created_at", { ascending }).order("id", { ascending });
     if (opts.venueId) q = q.eq("venue_id", opts.venueId);
     if (opts.changeSetId) q = q.eq("change_set_id", opts.changeSetId);
     if (opts.status) q = q.in("status", opts.status);
     if (opts.dueBefore) q = q.lte("next_at", opts.dueBefore);
+    if (opts.createdSince) q = q.gte("created_at", opts.createdSince);
     if (opts.limit) q = q.limit(opts.limit);
     return (await must(q, "listSyncs")).map(toSync);
   }
@@ -712,6 +714,21 @@ export class SupabaseStore implements Store {
     const { data, error } = await this.db.from("social_comments").delete().lt("created_at", before).select("id");
     if (error) throw new Error(`purgeComments: ${error.message}`);
     return (data ?? []).length;
+  }
+  async redactCommentSets(before: string, venueId?: string) {
+    if (badVenue(venueId)) return 0;
+    // At most 200 sets per call (the next tick takes the rest); a redacted set no longer matches (its summary_en is the fixed line).
+    let q = this.db.from("change_sets").select("id, changes(id, before, after)").eq("source", "comment").lt("created_at", before).neq("summary_en", COMMENT_REDACTED.en).order("created_at").limit(200);
+    if (venueId) q = q.eq("venue_id", venueId);
+    const sets = await must<Row[]>(q, "redactCommentSets");
+    for (const cs of sets) {
+      for (const c of (cs.changes as Row[] | null) ?? []) {
+        const row = { before: redactCommentRow((c.before as Row | null) ?? null), after: redactCommentRow((c.after as Row | null) ?? null) };
+        await mustRows(this.db.from("changes").update(row).eq("id", c.id as string).select("id"), "redactCommentSets change");
+      }
+      await mustRows(this.db.from("change_sets").update({ summary_bg: COMMENT_REDACTED.bg, summary_en: COMMENT_REDACTED.en, preview_bg: COMMENT_REDACTED.bg, preview_en: COMMENT_REDACTED.en }).eq("id", cs.id as string).select("id"), "redactCommentSets set");
+    }
+    return sets.length;
   }
   async countCommentActions(venueId: string, fromIso: string, toIso: string) {
     if (badVenue(venueId)) return 0;

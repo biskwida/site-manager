@@ -11,6 +11,7 @@ import type { ApplyResult, ExpiredTimer, Store } from "./store/types";
 import { limitReachedLine, usageLine } from "./bot/limit";
 import { channelOf, isMetaChannel } from "./channels/ref";
 import { formatDateTime } from "./time";
+import { pollVenueComments, purgeOldComments } from "./social/comments-poll";
 
 export interface TickDeps {
   store: Store;
@@ -37,6 +38,8 @@ export interface TickReport {
   pushed?: string[];
   /** Due scheduled sets refused by the monthly change limit (now cancelled). */
   limited?: string[];
+  /** New customer comments stored this tick (comment replies, 2026-10-15); absent without sync deps. */
+  comments_found?: number;
 }
 
 const HOUR = 3_600_000;
@@ -155,6 +158,25 @@ export async function runTick(d: TickDeps): Promise<TickReport> {
       await refreshInstagramTokens(d.sync, { venueId: d.venueId, now: d.now });
     } catch (e) {
       console.error("[tick] instagram token refresh failed:", e instanceof Error ? e.message : e);
+    }
+    // 9. Customer comments under the venue's posts (comment replies, 2026-10-15): read every 15 min per venue (after step 8, so
+    // Instagram tokens are fresh), keep 30 days. The purge runs on the global tick only.
+    report.comments_found = 0;
+    try {
+      const venues = d.venueId ? [await d.store.getVenue(d.venueId)] : await d.store.listVenues({ status: "live" });
+      for (const venue of venues) {
+        const r = await pollVenueComments(d.sync, venue, d.now);
+        report.comments_found += r.inserted.length;
+      }
+    } catch (e) {
+      console.error("[tick] comment poll failed:", e instanceof Error ? e.name : "error");
+    }
+    if (!d.venueId) {
+      try {
+        await purgeOldComments(d.store, d.now);
+      } catch (e) {
+        console.error("[tick] comment purge failed:", e instanceof Error ? e.name : "error");
+      }
     }
   }
   return report;

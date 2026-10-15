@@ -59,7 +59,8 @@ export async function fetchInstagramComments(client: GraphClient, mediaId: strin
 
 /** Top-level comments of one Facebook post, newest first; `since` (ISO) limits to comments created at or after it. */
 export async function fetchFacebookComments(client: GraphClient, postId: string, since?: string): Promise<IncomingComment[]> {
-  const sinceParam = since ? `&since=${Math.floor(Date.parse(since) / 1000)}` : "";
+  const s = since ? Date.parse(since) : NaN;
+  const sinceParam = Number.isFinite(s) ? `&since=${Math.floor(s / 1000)}` : ""; // an unreadable since is dropped, never sent as NaN
   const r = await client.get<{ data?: unknown }>(`/${enc(postId)}/comments?filter=toplevel&order=reverse_chronological&fields=${FB_FIELDS}&limit=${COMMENTS_PER_CALL}${sinceParam}`);
   const out: IncomingComment[] = [];
   for (const raw of rows(r.data)) {

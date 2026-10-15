@@ -2,7 +2,7 @@
 import { applyChanges } from "../domain/changes";
 import { COMMENT_LIMIT_DEFAULT, countsTowardLimit } from "../domain/limits";
 import type { Category, ChangeSet, Conversation, DeployInfo, DeployStatus, Item, Lang, Media, Member, Role, SiteState, SiteTextKey, Venue, VenueStatus } from "../domain/types";
-import { DEFAULT_HOURS, extensionFor, newInviteCode, newToken, PUBLISH_CLAIM_TTL_MS, type ChangeSetPatch, type ExpiredTimer, type NewCategory, type NewChangeSet, type NewItem, type NewVenue, type Store, type VenuePatch, type Destination, type DestinationKind, type DestinationPatch, type DestinationSync, type DestinationWithSecrets, type NewDestination, type NewSync, type SyncPatch, type SyncStatus, type ApplyResult, checkLimitValue, CONFIG_KEY_RE, newConfirmationCode, type DataDeletionRequest, type DeletionProvider, type ListCommentsOpts, type NewSocialComment, type SocialComment, type SocialCommentPatch } from "./types";
+import { DEFAULT_HOURS, extensionFor, newInviteCode, newToken, PUBLISH_CLAIM_TTL_MS, type ChangeSetPatch, type ExpiredTimer, type NewCategory, type NewChangeSet, type NewItem, type NewVenue, type Store, type VenuePatch, type Destination, type DestinationKind, type DestinationPatch, type DestinationSync, type DestinationWithSecrets, type NewDestination, type NewSync, type SyncPatch, type ListSyncsOpts, type ApplyResult, checkLimitValue, CONFIG_KEY_RE, newConfirmationCode, type DataDeletionRequest, type DeletionProvider, type ListCommentsOpts, type NewSocialComment, type SocialComment, type SocialCommentPatch, COMMENT_REDACTED, redactCommentRow } from "./types";
 import { limitBlocks } from "./usage";
 
 const clone = <T>(v: T): T => structuredClone(v);
@@ -484,10 +484,11 @@ export class InMemoryStore implements Store {
     if (!s) throw new Error(`sync ${id} not found`);
     return clone(s);
   }
-  async listSyncs(opts: { venueId?: string; changeSetId?: string; status?: SyncStatus[]; dueBefore?: string; limit?: number }) {
+  async listSyncs(opts: ListSyncsOpts) {
+    const dir = opts.order === "desc" ? -1 : 1;
     const rows = [...this.syncs.values()]
-      .filter((s) => (!opts.venueId || s.venue_id === opts.venueId) && (!opts.changeSetId || s.change_set_id === opts.changeSetId) && (!opts.status || opts.status.includes(s.status)) && (!opts.dueBefore || s.next_at <= opts.dueBefore))
-      .sort((a, b) => a.created_at.localeCompare(b.created_at) || a.id.localeCompare(b.id));
+      .filter((s) => (!opts.venueId || s.venue_id === opts.venueId) && (!opts.changeSetId || s.change_set_id === opts.changeSetId) && (!opts.status || opts.status.includes(s.status)) && (!opts.dueBefore || s.next_at <= opts.dueBefore) && (!opts.createdSince || s.created_at >= opts.createdSince))
+      .sort((a, b) => dir * (a.created_at.localeCompare(b.created_at) || a.id.localeCompare(b.id)));
     return (opts.limit ? rows.slice(0, opts.limit) : rows).map(clone);
   }
   async claimSync(id: string, now: string, leaseUntil: string) {
@@ -579,6 +580,16 @@ export class InMemoryStore implements Store {
         this.comments.delete(id);
         n++;
       }
+    }
+    return n;
+  }
+  async redactCommentSets(before: string, venueId?: string) {
+    let n = 0;
+    for (const cs of this.sets.values()) {
+      if (cs.source !== "comment" || cs.created_at >= before || (venueId && cs.venue_id !== venueId) || cs.summary_en === COMMENT_REDACTED.en) continue;
+      cs.changes = cs.changes.map((c) => ({ ...c, before: redactCommentRow(c.before), after: redactCommentRow(c.after) }));
+      Object.assign(cs, { summary_bg: COMMENT_REDACTED.bg, summary_en: COMMENT_REDACTED.en, preview_bg: COMMENT_REDACTED.bg, preview_en: COMMENT_REDACTED.en });
+      n++;
     }
     return n;
   }
