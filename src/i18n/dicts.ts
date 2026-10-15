@@ -328,6 +328,8 @@ const en = {
   "admin.comments.status.expired": "expired",
   "admin.comments.status.hidden": "hidden",
   "admin.comments.status.deleted": "deleted",
+  "admin.comments.error.limit": "This month's limit of comment replies is reached.",
+  "admin.comments.error.decided": "This was just decided in the chat; the list is up to date now.",
 };
 export type MessageKey = keyof typeof en;
 
@@ -654,6 +656,8 @@ const bg: Record<MessageKey, string> = {
   "admin.comments.status.expired": "изтекъл",
   "admin.comments.status.hidden": "скрит",
   "admin.comments.status.deleted": "изтрит",
+  "admin.comments.error.limit": "Лимитът на отговорите на коментари за този месец е достигнат.",
+  "admin.comments.error.decided": "Това току-що беше решено в чата; списъкът вече е обновен.",
 };
 
 export const DICTS = { en, bg } as const;

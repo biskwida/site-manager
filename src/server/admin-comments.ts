@@ -7,8 +7,9 @@ import { copy } from "../bot/copy";
 import { syncLines } from "../destinations/sync";
 import { commentModeLabel } from "../domain/comment-preview";
 import { quote, tr } from "../domain/format";
-import { COMMENT_MODES, type ChangeSet, type CommentMode, type CommentNetwork, type Venue } from "../domain/types";
-import { cancelCommentSet, commentLimitState, createCommentSet, reachableOwners, type CommentSetDeps, type CommentSetItem } from "../social/comments-propose";
+import { maskRef } from "../channels/ref";
+import { COMMENT_MODES, type ChangeSet, type CommentMode, type CommentNetwork, type Lang, type ModerateAction, type Venue } from "../domain/types";
+import { cancelCommentSet, commentLimitState, commentsOfSet, createCommentSet, reachableOwners, type CommentSetDeps, type CommentSetItem } from "../social/comments-propose";
 import type { DraftKind } from "../social/comments-draft";
 import type { CommentStatus, SocialComment, Store } from "../store/types";
 import type { AdminDeps } from "./admin";
@@ -101,65 +102,130 @@ async function pendingSetOf(store: Store, c: SocialComment): Promise<ChangeSet |
   return cs && cs.source === "comment" && cs.status === "proposed" ? cs : null;
 }
 
-type Result = { ok: boolean; status?: string; change_set_id?: string; error?: string };
-const DECIDED_MEANWHILE = "The proposal in the chat was decided meanwhile.";
+/** Why an action was refused: the card shows "limit" and "decided" in words, everything else as the generic failure line. */
+export type AdminCommentErrorCode = "not_found" | "answered" | "state" | "limit" | "decided" | "invalid" | "failed";
+type Result = { ok: boolean; status?: string; change_set_id?: string; error?: string; code?: AdminCommentErrorCode };
+const DECIDED_MEANWHILE: Result = { ok: false, code: "decided", error: "The proposal in the chat was decided meanwhile." };
+
+/** Sends each reachable owner its line; one failed send never stops the others or costs the dashboard's answer. */
+async function tellOwners(d: AdminDeps, venueId: string, now: Date, text: (lang: Lang) => Promise<string> | string): Promise<void> {
+  const { reachable } = await reachableOwners(d.store, venueId, now);
+  for (const m of reachable) {
+    try {
+      await d.messenger.send(m.chat_ref, await text(m.lang), { proactive: true });
+    } catch (e) {
+      console.error(`[comments] dashboard notice to ${maskRef(m.chat_ref)} failed:`, e instanceof Error ? e.name : "error");
+    }
+  }
+}
 
 /** Notification mode: the venue fields at once (choosing how to hear about comments is not a site change), owners told. */
 async function setCommentMode(d: AdminDeps, venue: Venue, a: Extract<AdminCommentAction, { action: "set_comment_mode" }>): Promise<Result> {
-  if (a.digest_hour !== undefined && !validHour(a.digest_hour)) return { ok: false, error: "digest_hour must be a whole hour 0–23." };
+  if (a.digest_hour !== undefined && !validHour(a.digest_hour)) return { ok: false, code: "invalid", error: "digest_hour must be a whole hour 0–23." };
+  // A second click on the active mode (and hour) changes nothing and tells nobody.
+  if (a.mode === venue.comment_mode && (a.digest_hour === undefined || a.digest_hour === venue.comment_digest_hour)) return { ok: true, status: "unchanged" };
   let updated: Venue;
   try {
     updated = await d.store.updateVenue(venue.id, { comment_mode: a.mode, ...(a.digest_hour !== undefined ? { comment_digest_hour: a.digest_hour } : {}) });
   } catch {
-    return { ok: false, error: "The notification mode could not be saved." };
+    return { ok: false, code: "failed", error: "The notification mode could not be saved." };
   }
-  const { reachable } = await reachableOwners(d.store, venue.id, d.now());
-  for (const m of reachable) {
-    const summary = copy(m.lang).commentModeSummary(commentModeLabel(updated.comment_mode, updated.comment_digest_hour, m.lang));
-    await d.messenger.send(m.chat_ref, `${summary}\n\n${tr(m.lang, "✅ Приложено от таблото.", "✅ Applied from the dashboard.")}`, { proactive: true });
-  }
+  await tellOwners(d, venue.id, d.now(), (lang) => `${copy(lang).commentModeSummary(commentModeLabel(updated.comment_mode, updated.comment_digest_hour, lang))}\n\n${tr(lang, "✅ Приложено от таблото.", "✅ Applied from the dashboard.")}`);
   return { ok: true, status: "applied" };
+}
+
+/** What a pending set proposed for each of its comments but `exceptId` (reply text or moderation), read before the cancel frees them. */
+async function restOf(store: Store, cs: ChangeSet, exceptId: string): Promise<CommentSetItem[]> {
+  const position = (x: SocialComment) => cs.changes.findIndex((c) => c.entity_id === x.comment_id);
+  // In the set's own order (commentsOfSet is newest first).
+  const others = (await commentsOfSet(store, cs)).filter((x) => x.id !== exceptId && x.status === "proposed").sort((a, b) => position(a) - position(b));
+  return others.map((x) => {
+    const ch = cs.changes.find((c) => c.entity_id === x.comment_id);
+    const row = (ch?.after ?? {}) as Record<string, unknown>;
+    const moderate = ch?.op === "social_moderate" && (row.action === "hide" || row.action === "delete") ? (row.action as ModerateAction) : null;
+    const reply = moderate ? null : typeof row.reply_text === "string" ? row.reply_text : (x.draft_text ?? "");
+    return { comment: x, reply_text: reply, moderate, ...(x.draft_kind ? { kind: x.draft_kind as DraftKind } : {}) };
+  });
+}
+
+/**
+ * Takes one comment out of its pending set: cancels the set with an accurate line for every owner's message and returns the
+ * set's other comments to propose again at once (empty when there are none or `room` is false: the comment limit leaves no
+ * room, so they wait in the dashboard as new). Null when the set was decided meanwhile (nothing changed).
+ */
+async function releaseFromSet(cd: CommentSetDeps, cs: ChangeSet, c: SocialComment, decision: "reply" | "ignore", room: boolean): Promise<CommentSetItem[] | null> {
+  const rest = await restOf(cd.store, cs, c.id);
+  const restMode = rest.length === 0 ? "none" : room ? "again" : "waiting";
+  const line = { bg: copy("bg").dashboardCommentDecided(decision, restMode), en: copy("en").dashboardCommentDecided(decision, restMode) };
+  if (!(await cancelCommentSet(cd, cs, line))) return null;
+  return restMode === "again" ? rest : [];
+}
+
+/** The rest of a batch as one new proposal to every reachable owner (createCommentSet handles the limit and unreachable owners). */
+async function proposeRest(cd: CommentSetDeps, venue: Venue, rest: CommentSetItem[]): Promise<void> {
+  if (rest.length === 0) return;
+  try {
+    await createCommentSet(cd, venue, rest, { batch: rest.length > 1 });
+  } catch (e) {
+    console.error(`[comments] venue ${venue.id}: re-proposing ${rest.length} comment(s) failed:`, e instanceof Error ? e.name : "error");
+  }
 }
 
 export async function adminCommentAction(d: AdminDeps, venue: Venue, a: AdminCommentAction): Promise<Result> {
   if (a.action === "set_comment_mode") return setCommentMode(d, venue, a);
   const cd: CommentSetDeps = { store: d.store, messenger: d.messenger, now: d.now };
   const c = await d.store.getComment(a.comment_id);
-  if (!c || c.venue_id !== venue.id) return { ok: false, error: "Comment not found." };
+  if (!c || c.venue_id !== venue.id) return { ok: false, code: "not_found", error: "Comment not found." };
+  const now = d.now();
+  const limit = await commentLimitState(d.store, venue, now);
 
   if (a.action === "ignore_comment") {
     if (c.status === "ignored") return { ok: true, status: "ignored" };
-    if (c.status !== "new" && c.status !== "proposed" && c.status !== "expired") return { ok: false, error: `Comment is "${c.status}".` };
+    if (c.status !== "new" && c.status !== "proposed" && c.status !== "expired") return { ok: false, code: "state", error: `Comment is "${c.status}".` };
     const pending = await pendingSetOf(d.store, c);
-    // The whole set is cancelled (a batch puts its other comments back to new); only this comment becomes ignored.
-    if (pending && !(await cancelCommentSet(cd, pending, { bg: "❌ Отказано от таблото.", en: "❌ Cancelled from the dashboard." }))) return { ok: false, error: DECIDED_MEANWHILE };
+    let rest: CommentSetItem[] = [];
+    if (pending) {
+      const r = await releaseFromSet(cd, pending, c, "ignore", !limit.reached);
+      if (r === null) return DECIDED_MEANWHILE;
+      rest = r;
+    }
     await d.store.updateComment(c.id, { status: "ignored", change_set_id: null, deferred: false });
+    await proposeRest(cd, venue, rest);
     return { ok: true, status: "ignored" };
   }
 
-  if (c.status === "replied") return { ok: false, error: "Comment already answered." };
-  if (c.status === "own" || c.status === "nested" || c.status === "deleted") return { ok: false, error: `Comment is "${c.status}".` };
-  const now = d.now();
-  const limit = await commentLimitState(d.store, venue, now);
-  if (limit.reached) return { ok: false, error: copy("en").commentLimitReached(limit.limit ?? limit.used, limit.used, limit.resets_on) };
+  if (c.status === "replied") return { ok: false, code: "answered", error: "Comment already answered." };
+  if (c.status === "own" || c.status === "nested" || c.status === "deleted") return { ok: false, code: "state", error: `Comment is "${c.status}".` };
+  if (limit.reached) return { ok: false, code: "limit", error: copy("en").commentLimitReached(limit.limit ?? limit.used, limit.used, limit.resets_on) };
   const pending = await pendingSetOf(d.store, c);
-  if (pending && !(await cancelCommentSet(cd, pending, { bg: "✅ Отговорено от таблото.", en: "✅ Answered from the dashboard." }))) return { ok: false, error: DECIDED_MEANWHILE };
-  const fresh = (await d.store.getComment(c.id)) ?? c;
-  const item: CommentSetItem = { comment: fresh, reply_text: a.reply_text, moderate: null, ...(fresh.draft_kind ? { kind: fresh.draft_kind as DraftKind } : {}) };
-  const made = await createCommentSet(cd, venue, [item], { silent: true });
-  if (!made.set) return { ok: false, error: made.limited ? "Comment limit reached." : "Could not create the reply." };
-  const r = await d.store.applyChangeSet(made.set.id, now.toISOString());
-  if (r !== "applied") {
-    // Refused at apply time (the comment limit, a race): the comment is free again for the next try.
-    await d.store.updateComment(c.id, { status: "new", change_set_id: null });
-    return { ok: false, status: r, change_set_id: made.set.id, error: r === "limited" ? "Comment limit reached." : `Change set is "${r}".` };
+  let rest: CommentSetItem[] = [];
+  if (pending) {
+    // This reply takes one action of the limit: the rest is proposed again only when room is left after it.
+    const r = await releaseFromSet(cd, pending, c, "reply", limit.limit === null || limit.used + 1 < limit.limit);
+    if (r === null) return DECIDED_MEANWHILE;
+    rest = r;
   }
-  // Like the other dashboard decisions, the owners' chats hear about it (Meta channels within the window).
-  const { reachable } = await reachableOwners(d.store, venue.id, now);
-  for (const m of reachable) {
-    const who = c.author_name || tr(m.lang, "клиент", "a customer");
-    const head = tr(m.lang, `✅ Отговорено от таблото на ${who}: ${quote(a.reply_text, "bg")}`, `✅ Answered from the dashboard to ${who}: ${quote(a.reply_text, "en")}`);
-    await d.messenger.send(m.chat_ref, [head, ...(await syncLines(d.store, made.set.id, m.lang))].join("\n"), { proactive: true });
+  try {
+    const fresh = (await d.store.getComment(c.id)) ?? c;
+    const item: CommentSetItem = { comment: fresh, reply_text: a.reply_text, moderate: null, ...(fresh.draft_kind ? { kind: fresh.draft_kind as DraftKind } : {}) };
+    const made = await createCommentSet(cd, venue, [item], { silent: true });
+    if (!made.set) return made.limited ? { ok: false, code: "limit", error: "Comment limit reached." } : { ok: false, code: "failed", error: "Could not create the reply." };
+    const r = await d.store.applyChangeSet(made.set.id, now.toISOString());
+    if (r !== "applied") {
+      // Refused at apply time (the comment limit, a race): the comment is free again for the next try.
+      await d.store.updateComment(c.id, { status: "new", change_set_id: null });
+      return { ok: false, status: r, change_set_id: made.set.id, ...(r === "limited" ? { code: "limit", error: "Comment limit reached." } : { code: "failed", error: `Change set is "${r}".` }) };
+    }
+    // Like the other dashboard decisions, the owners' chats hear about it (Meta channels within the window).
+    const setId = made.set.id;
+    await tellOwners(d, venue.id, now, async (lang) => {
+      const who = c.author_name || tr(lang, "клиент", "a customer");
+      const head = tr(lang, `✅ Отговорено от таблото на ${who}: ${quote(a.reply_text, "bg")}`, `✅ Answered from the dashboard to ${who}: ${quote(a.reply_text, "en")}`);
+      return [head, ...(await syncLines(d.store, setId, lang))].join("\n");
+    });
+    return { ok: true, status: "applied", change_set_id: setId };
+  } finally {
+    // The rest of a batch goes out again after the owners heard about this reply, whatever its outcome.
+    await proposeRest(cd, venue, rest);
   }
-  return { ok: true, status: "applied", change_set_id: made.set.id };
 }

@@ -98,18 +98,75 @@ describe("adminCommentAction", () => {
     expect(await adminCommentAction(t.d, await t.store.getVenue(t.venue.id), { action: "set_comment_mode", mode: "off" })).toMatchObject({ ok: true, status: "applied" });
     expect(await t.store.getVenue(t.venue.id)).toMatchObject({ comment_mode: "off", comment_digest_hour: 11 });
     expect(t.messenger.sent.at(-1)?.text).toBe("Известия за коментари: изключени\n\n✅ Приложено от таблото.");
+    const sentCount = t.messenger.sent.length;
+    expect(await adminCommentAction(t.d, await t.store.getVenue(t.venue.id), { action: "set_comment_mode", mode: "off" })).toMatchObject({ ok: true, status: "unchanged" });
+    expect(t.messenger.sent).toHaveLength(sentCount);
     expect(await adminCommentAction(t.d, await t.store.getVenue(t.venue.id), { action: "set_comment_mode", mode: "digest", digest_hour: 24 })).toMatchObject({ ok: false, error: expect.stringMatching(/0–23/) });
     expect(await t.store.getVenue(t.venue.id)).toMatchObject({ comment_mode: "off", comment_digest_hour: 11 });
   });
-  it("ignore_comment on a batch proposal ignores only that comment; the others go back to new", async () => {
+  async function batchOfThree(t: Awaited<ReturnType<typeof setup>>) {
+    const [gosho] = await t.store.upsertComments(t.venue.id, [{ network: "instagram", post_ref: t.maria.post_ref, comment_id: "g-1", parent_id: null, author_id: "1786", author_name: "gosho", text: "Купи последователи тук", created_at: at(-5 * MIN).toISOString(), seen_at: T0.toISOString(), status: "new", post_caption: "Днешното предложение" }]);
+    const { set } = await createCommentSet(t.pd, t.venue, [
+      { comment: t.maria, reply_text: "Да, имаме.", moderate: null, kind: "question" },
+      { comment: t.pesho, reply_text: "Благодарим!", moderate: null, kind: "praise" },
+      { comment: gosho, reply_text: null, moderate: "hide", kind: "spam" },
+    ], { batch: true });
+    return { gosho, set: set! };
+  }
+  /** The one comment set still proposed, with its rows and the comments it holds. */
+  async function onlyProposed(t: Awaited<ReturnType<typeof setup>>) {
+    const proposed = (await t.store.listChangeSets(t.venue.id, { status: ["proposed"] })).filter((s) => s.source === "comment");
+    expect(proposed).toHaveLength(1);
+    return proposed[0];
+  }
+  it("reply_comment on a 3-comment batch answers that one and proposes the other two again in one new set", async () => {
     const t = await setup();
-    const { set } = await createCommentSet(t.pd, t.venue, [{ comment: t.maria, reply_text: "Да, имаме.", moderate: null }, { comment: t.pesho, reply_text: "Благодарим!", moderate: null }], { batch: true });
+    const { gosho, set } = await batchOfThree(t);
+    const sentBefore = t.messenger.sent.length;
+    const r = await adminCommentAction(t.d, t.venue, { action: "reply_comment", comment_id: t.maria.id, reply_text: "Да, от вторник." });
+    expect(r).toMatchObject({ ok: true, status: "applied" });
+    expect((await t.store.getChangeSet(set.id)).status).toBe("cancelled");
+    expect(t.messenger.concluded.map((c) => c.short)).toEqual(["✅ 1 отговорено от таблото; останалите са предложени отново"]);
+    expect(await t.store.getComment(t.maria.id)).toMatchObject({ status: "replied", draft_text: "Да, от вторник." });
+    expect(t.replies(t.maria.comment_id).map((x) => x.text)).toEqual(["Да, от вторник."]);
+    expect(t.replies(t.pesho.comment_id)).toHaveLength(0);
+    const again = await onlyProposed(t);
+    expect(again.id).not.toBe(set.id);
+    expect(again.changes.map((c) => [c.op, c.entity_id])).toEqual([["social_reply", t.pesho.comment_id], ["social_moderate", "g-1"]]);
+    expect((again.changes[1].after as { action?: string }).action).toBe("hide");
+    expect(await t.store.getComment(t.pesho.id)).toMatchObject({ status: "proposed", change_set_id: again.id, draft_text: "Благодарим!" });
+    expect(await t.store.getComment(gosho.id)).toMatchObject({ status: "proposed", change_set_id: again.id, draft_kind: "spam" });
+    // The owner first hears about the reply, then gets the new proposal with the buttons.
+    expect(t.messenger.sent.slice(sentBefore).map((m) => [m.chatRef, m.setId ?? null])).toEqual([["tg:1001", null], ["tg:1001", again.id]]);
+    expect(t.messenger.sent.at(-1)?.text).toContain("pesho");
+    expect(t.messenger.sent.at(-1)?.text).toContain("gosho");
+    expect(t.messenger.sent.at(-1)?.text).not.toContain("maria.k");
+  });
+  it("ignore_comment on a 3-comment batch ignores only that one and proposes the other two again in one new set", async () => {
+    const t = await setup();
+    const { gosho, set } = await batchOfThree(t);
     expect(await adminCommentAction(t.d, t.venue, { action: "ignore_comment", comment_id: t.maria.id })).toMatchObject({ ok: true, status: "ignored" });
-    expect((await t.store.getChangeSet(set!.id)).status).toBe("cancelled");
+    expect((await t.store.getChangeSet(set.id)).status).toBe("cancelled");
+    expect(t.messenger.concluded.map((c) => c.short)).toEqual(["❌ 1 игнорирано от таблото; останалите са предложени отново"]);
     expect(await t.store.getComment(t.maria.id)).toMatchObject({ status: "ignored", change_set_id: null });
-    expect(await t.store.getComment(t.pesho.id)).toMatchObject({ status: "new", change_set_id: null, draft_text: "Благодарим!" });
-    expect(await adminCommentAction(t.d, t.venue, { action: "ignore_comment", comment_id: t.old.id })).toMatchObject({ ok: false, error: expect.stringMatching(/replied/) });
+    const again = await onlyProposed(t);
+    expect(again.changes.map((c) => [c.op, c.entity_id])).toEqual([["social_reply", t.pesho.comment_id], ["social_moderate", "g-1"]]);
+    expect(await t.store.getComment(t.pesho.id)).toMatchObject({ status: "proposed", change_set_id: again.id });
+    expect(await t.store.getComment(gosho.id)).toMatchObject({ status: "proposed", change_set_id: again.id });
+    expect(t.messenger.sent.at(-1)).toMatchObject({ chatRef: "tg:1001", setId: again.id });
+    expect(await adminCommentAction(t.d, t.venue, { action: "ignore_comment", comment_id: t.old.id })).toMatchObject({ ok: false, code: "state", error: expect.stringMatching(/replied/) });
     expect(await t.store.getComment(t.old.id)).toMatchObject({ status: "replied" });
+  });
+  it("a batch reply that uses the last of the comment limit leaves the rest waiting in the dashboard, and says so", async () => {
+    const t = await setup();
+    await t.store.updateVenue(t.venue.id, { comment_limit: 2 }); // 1 used by ivan's reply: this reply takes the last one
+    const venue = await t.store.getVenue(t.venue.id);
+    await batchOfThree(t);
+    expect(await adminCommentAction(t.d, venue, { action: "reply_comment", comment_id: t.maria.id, reply_text: "Да." })).toMatchObject({ ok: true, status: "applied" });
+    expect(t.messenger.concluded.map((c) => c.short)).toEqual(["✅ 1 отговорено от таблото; останалите чакат в таблото"]);
+    expect((await t.store.listChangeSets(t.venue.id, { status: ["proposed"] })).filter((s) => s.source === "comment")).toHaveLength(0);
+    expect(await t.store.getComment(t.pesho.id)).toMatchObject({ status: "new", change_set_id: null, draft_text: "Благодарим!" });
+    expect(await adminCommentAction(t.d, venue, { action: "reply_comment", comment_id: t.pesho.id, reply_text: "x" })).toMatchObject({ ok: false, code: "limit" });
   });
   it("comment sets stay out of the generic pending list and adminAction refuses to decide them", async () => {
     const t = await setup();
@@ -152,6 +209,7 @@ describe("CommentsCard", () => {
     expect(html).toContain("Благодарим!");
     expect(html).toContain(DICTS.bg["admin.comments.status.replied"]);
     expect(html).toContain('href="https://www.instagram.com/p/C1/"');
+    expect(html).toContain(`aria-label="${DICTS.bg["admin.comments.replyPlaceholder"]}"`);
   });
   it("renders in English and shows the empty state without a connected network", () => {
     const en = render("en", overview);

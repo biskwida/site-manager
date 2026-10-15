@@ -16,7 +16,8 @@ const TONE: Record<CommentView["status"], "plain" | "good" | "warn"> = { new: "w
 export function CommentsCard({ overview, post, tz }: { overview: CommentsOverview | null; post: Post; tz: string }) {
   const { lang, t } = useLang();
   const [busy, setBusy] = useState<string | null>(null);
-  const [failed, setFailed] = useState<string | null>(null);
+  /** The action that failed and, for a refusal the owner can act on, why (the server's code). */
+  const [failed, setFailed] = useState<{ key: string; code: string | null } | null>(null);
   const [drafts, setDrafts] = useState<Record<string, string>>({});
   if (!overview) return null;
   const o = overview;
@@ -25,9 +26,10 @@ export function CommentsCard({ overview, post, tz }: { overview: CommentsOvervie
     setBusy(key);
     setFailed(null);
     const r = await post(body);
-    if (!r.ok) setFailed(key);
+    if (!r.ok) setFailed({ key, code: typeof (r.data as { code?: unknown } | null)?.code === "string" ? (r.data as { code: string }).code : null });
     setBusy(null);
   }
+  const failureText = (code: string | null) => (code === "limit" ? t("admin.comments.error.limit") : code === "decided" ? t("admin.comments.error.decided") : t("admin.failed"));
   const draftOf = (c: CommentView) => drafts[c.id] ?? c.draft_text ?? "";
   const statusKey = (s: CommentView["status"]) => `admin.comments.status.${s}` as MessageKey;
 
@@ -54,7 +56,7 @@ export function CommentsCard({ overview, post, tz }: { overview: CommentsOvervie
       {pending ? (
         <div className="mt-3">
           {(c.draft_kind === "spam" || c.draft_kind === "abuse") && <p className="mb-2 text-sm font-semibold text-amber">{t("admin.comments.spam")}</p>}
-          <textarea value={draftOf(c)} onChange={(e) => setDrafts({ ...drafts, [c.id]: e.target.value })} rows={2} maxLength={500} placeholder={t("admin.comments.replyPlaceholder")} aria-label={t("admin.comments.reply")}
+          <textarea value={draftOf(c)} onChange={(e) => setDrafts({ ...drafts, [c.id]: e.target.value })} rows={2} maxLength={500} placeholder={t("admin.comments.replyPlaceholder")} aria-label={t("admin.comments.replyPlaceholder")}
             className="w-full rounded-2xl bg-paper-deep px-4 py-3 text-ink ring-1 ring-ink/10 focus:outline-none focus:ring-2 focus:ring-accent" />
           <div className="mt-2 flex flex-wrap items-center gap-2">
             <button type="button" disabled={busy !== null || draftOf(c).trim() === ""} aria-busy={busy === `reply:${c.id}`} onClick={() => void run(`reply:${c.id}`, { action: "reply_comment", comment_id: c.id, reply_text: draftOf(c).trim() })}
@@ -66,7 +68,7 @@ export function CommentsCard({ overview, post, tz }: { overview: CommentsOvervie
               {busy === `ignore:${c.id}` ? t("admin.busy") : t("admin.comments.ignore")}
             </button>
           </div>
-          {(failed === `reply:${c.id}` || failed === `ignore:${c.id}`) && <p role="alert" className="mt-2 text-sm font-semibold text-clay">{t("admin.failed")}</p>}
+          {(failed?.key === `reply:${c.id}` || failed?.key === `ignore:${c.id}`) && <p role="alert" className="mt-2 text-sm font-semibold text-clay">{failureText(failed.code)}</p>}
         </div>
       ) : (
         c.reply_text && <p className="mt-2 whitespace-pre-wrap [overflow-wrap:anywhere] text-sm text-ink">→ {c.reply_text}</p>
@@ -99,7 +101,7 @@ export function CommentsCard({ overview, post, tz }: { overview: CommentsOvervie
           )}
           {o.limit.limit !== null && <span className="ml-auto text-sm text-ink-soft">{t("admin.comments.limit", { used: String(o.limit.used), limit: String(o.limit.limit) })}</span>}
         </div>
-        {failed?.startsWith("mode:") && <p role="alert" className="mt-2 text-sm font-semibold text-clay">{t("admin.failed")}</p>}
+        {failed?.key.startsWith("mode:") && <p role="alert" className="mt-2 text-sm font-semibold text-clay">{failureText(failed.code)}</p>}
 
         <h3 className="mt-6 text-sm font-semibold uppercase tracking-wide text-ink-soft">{t("admin.comments.pending")}</h3>
         {o.pending.length === 0 ? <p className="mt-2 text-sm text-ink-soft">{t("admin.comments.nonePending")}</p> : <ul className="mt-2 divide-y divide-ink/10">{o.pending.map((c) => row(c, true))}</ul>}

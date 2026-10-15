@@ -60,6 +60,14 @@ const BG = {
   alreadyDecided: "Вече решено.",
   /** set_comment_mode summary; `label` is commentModeLabel (src/domain/comment-preview.ts). */
   commentModeSummary: (label: string) => `Известия за коментари: ${label}`,
+  /**
+   * The line on a comment proposal decided in the dashboard: one comment answered or ignored; for a batch, whether the rest were
+   * proposed again at once ("again") or stay in the dashboard (the comment limit leaves no room: "waiting").
+   */
+  dashboardCommentDecided: (decision: "reply" | "ignore", rest: "none" | "again" | "waiting") =>
+    rest === "none"
+      ? (decision === "reply" ? "✅ Отговорено от таблото." : "❌ Отказано от таблото.")
+      : `${decision === "reply" ? "✅ 1 отговорено от таблото" : "❌ 1 игнорирано от таблото"}; ${rest === "again" ? "останалите са предложени отново" : "останалите чакат в таблото"}`,
   expiredAfter: expiredBg,
   status: {
     proposed: "Чака решение.",
@@ -117,6 +125,10 @@ const EN: typeof BG = {
   decidedByOther: (decision, channel) => (decision === "apply" ? `✅ Answered by another owner (${channel})` : `❌ Declined by another owner (${channel})`),
   alreadyDecided: "Already decided.",
   commentModeSummary: (label) => `Comment notifications: ${label}`,
+  dashboardCommentDecided: (decision, rest) =>
+    rest === "none"
+      ? (decision === "reply" ? "✅ Answered from the dashboard." : "❌ Cancelled from the dashboard.")
+      : `${decision === "reply" ? "✅ 1 answered from the dashboard" : "❌ 1 ignored from the dashboard"}; ${rest === "again" ? "the others are proposed again" : "the others wait in the dashboard"}`,
   expiredAfter: expiredEn,
   status: {
     proposed: "Waiting for a decision.",
