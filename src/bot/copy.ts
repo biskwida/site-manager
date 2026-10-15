@@ -14,10 +14,10 @@ const HELP_EN_BODY =
 
 const MONTHS_BG = ["януари", "февруари", "март", "април", "май", "юни", "юли", "август", "септември", "октомври", "ноември", "декември"];
 const MONTHS_EN = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
-/** YYYY-MM-DD → "1 ноември" / "1 November". */
 /** "not confirmed within N hours": 2 for ordinary proposals, 24 for comment sets (proposalTtlHours). */
 const expiredBg = (hours: number) => `Изтекло: не беше потвърдено в рамките на ${hours} часа.`;
 const expiredEn = (hours: number) => `Expired: not confirmed within ${hours} hours.`;
+/** YYYY-MM-DD → "1 ноември" / "1 November". */
 const dayMonth = (date: string, months: string[]) => `${Number(date.slice(8, 10))} ${months[Number(date.slice(5, 7)) - 1]}`;
 
 function membersText(head: string, roles: Record<Role, string>, you: string, lastSeen: string, never: string, joined: string, codesHead: string, validUntil: string, noCodes: string, tail: string, members: MemberView[], invites: InviteView[]): string {
