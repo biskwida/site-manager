@@ -69,7 +69,7 @@ check("anon sees no admin tokens", (tokens.data?.length ?? 0) === 0, tokens.erro
 const publicUrl = db.storage.from("media").getPublicUrl("x").data.publicUrl;
 check("media public URL uses the public object path", publicUrl.includes("/object/public/media/"));
 
-for (const t of ["venue_destinations", "destination_syncs"]) {
+for (const t of ["venue_destinations", "destination_syncs", "social_comments"]) {
   const r = await db.from(t).select("*").limit(1);
   check(`anon cannot read ${t}`, !!r.error || (r.data?.length ?? 0) === 0, r.error?.code ?? `${r.data?.length ?? 0} rows`);
 }

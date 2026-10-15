@@ -19,8 +19,9 @@ revoke execute on function public.bump_rate_limit(text, int, int, timestamptz) f
 revoke insert, update, delete, truncate on public.venues, public.site_texts, public.categories, public.items, public.holidays, public.announcements, public.media from anon, authenticated;
 grant select on public.site_texts, public.categories, public.items, public.holidays, public.announcements, public.media to anon, authenticated;
 -- R27: venues are readable column by column. The list is exactly PublicVenue (src/server/site.ts, the public feed's venue), so
--- deploy, wizard_draft, draft_token_hash, publishing_at, instagram_import, site_url and change_limit are never readable with the anon key, not even on
--- a live row. Revoking the table privilege also drops every column grant, so a re-run (db:apply) starts clean each time.
+-- deploy, wizard_draft, draft_token_hash, publishing_at, instagram_import, site_url, change_limit, comment_mode, comment_digest_hour, comment_limit
+-- and last_comment_digest_at are never readable with the anon key, not even on a live row. Revoking the table privilege also
+-- drops every column grant, so a re-run (db:apply) starts clean each time.
 -- test/policies-grants.test.ts keeps this list equal to PublicVenue.
 revoke select on public.venues from anon, authenticated;
 grant select (id, slug, name, tagline_bg, tagline_en, about_bg, about_en, address, phone, maps_url, instagram, cover_media_id, logo_media_id, hours, tz, default_lang, theme, template, business_type, status, created_at) on public.venues to anon, authenticated;

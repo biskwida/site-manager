@@ -1,8 +1,8 @@
 // src/store/memory.ts
 import { applyChanges } from "../domain/changes";
-import { countsTowardLimit } from "../domain/limits";
+import { COMMENT_LIMIT_DEFAULT, countsTowardLimit } from "../domain/limits";
 import type { Category, ChangeSet, Conversation, DeployInfo, DeployStatus, Item, Lang, Media, Member, Role, SiteState, SiteTextKey, Venue, VenueStatus } from "../domain/types";
-import { DEFAULT_HOURS, extensionFor, newInviteCode, newToken, PUBLISH_CLAIM_TTL_MS, type ChangeSetPatch, type ExpiredTimer, type NewCategory, type NewChangeSet, type NewItem, type NewVenue, type Store, type VenuePatch, type Destination, type DestinationKind, type DestinationPatch, type DestinationSync, type DestinationWithSecrets, type NewDestination, type NewSync, type SyncPatch, type SyncStatus, type ApplyResult, checkLimitValue, CONFIG_KEY_RE, newConfirmationCode, type DataDeletionRequest, type DeletionProvider } from "./types";
+import { DEFAULT_HOURS, extensionFor, newInviteCode, newToken, PUBLISH_CLAIM_TTL_MS, type ChangeSetPatch, type ExpiredTimer, type NewCategory, type NewChangeSet, type NewItem, type NewVenue, type Store, type VenuePatch, type Destination, type DestinationKind, type DestinationPatch, type DestinationSync, type DestinationWithSecrets, type NewDestination, type NewSync, type SyncPatch, type SyncStatus, type ApplyResult, checkLimitValue, CONFIG_KEY_RE, newConfirmationCode, type DataDeletionRequest, type DeletionProvider, type ListCommentsOpts, type NewSocialComment, type SocialComment, type SocialCommentPatch } from "./types";
 import { limitBlocks } from "./usage";
 
 const clone = <T>(v: T): T => structuredClone(v);
@@ -57,9 +57,9 @@ export class InMemoryStore implements Store {
       logo_media_id: null,
       hours: clone(v.hours ?? DEFAULT_HOURS),
       change_limit: v.change_limit ?? null,
-      comment_mode: "each",
-      comment_digest_hour: 9,
-      comment_limit: 300,
+      comment_mode: v.comment_mode ?? "each",
+      comment_digest_hour: v.comment_digest_hour ?? 9,
+      comment_limit: v.comment_limit === undefined ? COMMENT_LIMIT_DEFAULT : v.comment_limit,
       last_comment_digest_at: null,
       tz: v.tz ?? "Europe/Sofia",
       default_lang: v.default_lang ?? "bg",
@@ -140,6 +140,7 @@ export class InMemoryStore implements Store {
     for (const key of [...this.conversations.keys()]) if (key.startsWith(`${id}:`)) this.conversations.delete(key);
     for (const [did, d] of this.destinations) if (d.venue_id === id) this.destinations.delete(did);
     for (const [sid, s] of this.syncs) if (s.venue_id === id) this.syncs.delete(sid);
+    for (const [cid, c] of this.comments) if (c.venue_id === id) this.comments.delete(cid);
   }
   async getSite(venueId: string) {
     return clone(this.site(venueId));
@@ -196,6 +197,8 @@ export class InMemoryStore implements Store {
     for (const [id, cs] of this.sets) if (cs.venue_id === venueId) this.sets.delete(id);
     for (const key of [...this.conversations.keys()]) if (key.startsWith(`${venueId}:`)) this.conversations.delete(key);
     for (const [sid, s] of this.syncs) if (s.venue_id === venueId) this.syncs.delete(sid);
+    // Comments stay (customer content with its own 30-day purge); their sets are gone, like `on delete set null` in Supabase.
+    for (const c of this.comments.values()) if (c.change_set_id !== null && !this.sets.has(c.change_set_id)) c.change_set_id = null;
   }
 
   async findMember(chatRef: string) {
@@ -297,7 +300,7 @@ export class InMemoryStore implements Store {
       reverted_by: null,
       undoes_id: cs.undoes_id ?? null,
       message_ref: cs.message_ref ?? null,
-      proposal_refs: null,
+      proposal_refs: cs.proposal_refs ? clone(cs.proposal_refs) : null,
       created_at: this.clock(),
       changes: clone(cs.changes).map((c, i) => ({ ...c, position: i })),
     };
@@ -337,7 +340,7 @@ export class InMemoryStore implements Store {
   async updateChangeSet(id: string, patch: ChangeSetPatch) {
     const cs = this.sets.get(id);
     if (!cs) throw new Error(`change set ${id} not found`);
-    for (const [k, v] of Object.entries(patch)) if (v !== undefined) (cs as unknown as Record<string, unknown>)[k] = v;
+    for (const [k, v] of Object.entries(patch)) if (v !== undefined) (cs as unknown as Record<string, unknown>)[k] = typeof v === "object" && v !== null ? clone(v) : v; // proposal_refs is an object
   }
   async applyChangeSet(id: string, now: string): Promise<ApplyResult> {
     const cs = this.sets.get(id);
@@ -502,7 +505,7 @@ export class InMemoryStore implements Store {
 
   // --- Monthly change limit (appended 2026-10-13) ---
   async countAppliedChangeSets(venueId: string, fromIso: string, toIso: string) {
-    return [...this.sets.values()].filter((x) => x.venue_id === venueId && x.applied_at !== null && x.applied_at >= fromIso && x.applied_at < toIso && countsTowardLimit(x.source)).length;
+    return [...this.sets.values()].filter((x) => x.venue_id === venueId && x.applied_at !== null && x.applied_at >= fromIso && x.applied_at < toIso && countsTowardLimit(x.source, x.changes)).length;
   }
   async setChangeLimit(venueId: string, limit: number | null) {
     checkLimitValue(limit);
@@ -531,5 +534,55 @@ export class InMemoryStore implements Store {
   async getDeletionRequest(code: string) {
     const row = this.deletionRequests.get(code);
     return row ? clone(row) : null;
+  }
+
+  // --- Comment replies (appended 2026-10-15) ---
+  comments = new Map<string, SocialComment>(); // by row id
+  async upsertComments(venueId: string, rows: NewSocialComment[]) {
+    if (rows.length === 0) return [];
+    this.site(venueId);
+    const known = new Set([...this.comments.values()].map((c) => c.comment_id)); // unique across venues, like the Supabase column
+    const out: SocialComment[] = [];
+    for (const r of rows) {
+      if (known.has(r.comment_id)) continue;
+      known.add(r.comment_id);
+      const row: SocialComment = { id: crypto.randomUUID(), venue_id: venueId, ...clone(r), post_permalink: r.post_permalink ?? null, change_set_id: null, reply_id: null, replied_at: null, draft_text: null, draft_kind: null, deferred: false };
+      this.comments.set(row.id, row);
+      out.push(clone(row));
+    }
+    return out;
+  }
+  async listComments(venueId: string, opts: ListCommentsOpts = {}) {
+    return [...this.comments.values()]
+      .filter((c) => c.venue_id === venueId && (!opts.status || opts.status.includes(c.status)) && (!opts.since || c.created_at >= opts.since) && (opts.changeSetId === undefined || c.change_set_id === opts.changeSetId))
+      .sort((a, b) => b.created_at.localeCompare(a.created_at) || b.id.localeCompare(a.id))
+      .slice(0, opts.limit ?? 100)
+      .map(clone);
+  }
+  async getComment(id: string) {
+    const c = this.comments.get(id);
+    return c ? clone(c) : null;
+  }
+  async findComment(venueId: string, commentId: string) {
+    const c = [...this.comments.values()].find((x) => x.venue_id === venueId && x.comment_id === commentId);
+    return c ? clone(c) : null;
+  }
+  async updateComment(id: string, patch: SocialCommentPatch) {
+    const c = this.comments.get(id);
+    if (!c) throw new Error(`comment ${id} not found`);
+    for (const [k, v] of Object.entries(patch)) if (v !== undefined) (c as unknown as Record<string, unknown>)[k] = v;
+  }
+  async purgeComments(before: string) {
+    let n = 0;
+    for (const [id, c] of this.comments) {
+      if (c.created_at < before) {
+        this.comments.delete(id);
+        n++;
+      }
+    }
+    return n;
+  }
+  async countCommentActions(venueId: string, fromIso: string, toIso: string) {
+    return [...this.comments.values()].filter((c) => c.venue_id === venueId && (c.status === "replied" || c.status === "hidden" || c.status === "deleted") && c.replied_at !== null && c.replied_at >= fromIso && c.replied_at < toIso).length;
   }
 }

@@ -1,6 +1,6 @@
 // src/store/types.ts
 import type {
-  BusinessType, Category, Change, ChangeSet, ChangeSetStatus, ChangeSource, Conversation, DeployInfo, DeployStatus, Item, Lang, Media, Member, Role, SiteState, SiteTextKey, TemplateId, Venue, VenueStatus, WeekHours,
+  BusinessType, Category, Change, ChangeSet, ChangeSetStatus, ChangeSource, CommentMode, CommentNetwork, Conversation, DeployInfo, DeployStatus, Item, Lang, Media, Member, Role, SiteState, SiteTextKey, TemplateId, Venue, VenueStatus, WeekHours,
 } from "../domain/types";
 import type { WizardDraft } from "../wizard/schema";
 
@@ -31,6 +31,10 @@ export interface NewVenue {
   hours?: WeekHours;
   /** Monthly change limit; default null (unlimited). */
   change_limit?: number | null;
+  /** Comment replies: how the owner hears about comments (default "each"), the digest hour (default 9) and the monthly cap on comment actions (default COMMENT_LIMIT_DEFAULT; null = unlimited). */
+  comment_mode?: CommentMode;
+  comment_digest_hour?: number;
+  comment_limit?: number | null;
   tz?: string;
   default_lang?: Lang;
   theme?: Venue["theme"];
@@ -73,12 +77,15 @@ export interface NewChangeSet {
   apply_at?: string | null;
   undoes_id?: string | null;
   message_ref?: string | null;
+  /** Comment sets: one proposal message per owner chat, { chat_ref: message_ref }. */
+  proposal_refs?: Record<string, string> | null;
   changes: Change[];
 }
-export type ChangeSetPatch = Partial<Pick<ChangeSet, "status" | "apply_at" | "reminded_at" | "decided_at" | "applied_at" | "reverted_by" | "message_ref" | "preview_bg" | "preview_en">>;
+export type ChangeSetPatch = Partial<Pick<ChangeSet, "status" | "apply_at" | "reminded_at" | "decided_at" | "applied_at" | "reverted_by" | "message_ref" | "preview_bg" | "preview_en" | "proposal_refs">>;
 export type VenuePatch = Partial<Pick<Venue,
   "slug" | "name" | "tagline_bg" | "tagline_en" | "about_bg" | "about_en" | "address" | "phone" | "maps_url" | "instagram" |
-  "hours" | "tz" | "default_lang" | "theme" | "template" | "business_type" | "status" | "wizard_draft" | "instagram_import" | "site_url">>;
+  "hours" | "tz" | "default_lang" | "theme" | "template" | "business_type" | "status" | "wizard_draft" | "instagram_import" | "site_url" |
+  "comment_mode" | "comment_digest_hour" | "comment_limit" | "last_comment_digest_at">>;
 
 export interface InviteSummary {
   role: Role;
@@ -295,8 +302,8 @@ export type ApplyResult = "applied" | "skipped" | "limited";
 // Declaration merging: the Store interface above gains the limit methods.
 export interface Store {
   /**
-   * Change sets of the venue with applied_at in [fromIso, toIso) whose source counts toward the monthly limit (not "undo",
-   * not "auto"). A set applied and later reverted still counts: it reached `applied`. Proposed, scheduled, rejected,
+   * Change sets of the venue with applied_at in [fromIso, toIso) that count toward the monthly limit (countsTowardLimit:
+   * not "undo", "auto" or "comment", and not made only of set_comment_mode rows). A set applied and later reverted still counts: it reached `applied`. Proposed, scheduled, rejected,
    * expired and cancelled sets have no applied_at and never count.
    */
   countAppliedChangeSets(venueId: string, fromIso: string, toIso: string): Promise<number>;
@@ -339,4 +346,66 @@ export interface Store {
 export function newConfirmationCode(): string {
   const bytes = crypto.getRandomValues(new Uint8Array(12));
   return [...bytes].map((b) => CODE_ALPHABET[b % CODE_ALPHABET.length]).join("");
+}
+
+// --- Comment replies (appended 2026-10-15; spec docs/superpowers/specs/2026-10-15-comment-replies-design.md) ---
+/** new: seen, not proposed yet · proposed: a change set is waiting · replied/hidden/deleted: the action went out · ignored: ❌ or un-hidden · expired: the proposal timed out or the comment is gone · own: the venue's own comment · nested: a reply to a reply (never proposed in v1). */
+export type CommentStatus = "new" | "proposed" | "replied" | "ignored" | "expired" | "own" | "nested" | "hidden" | "deleted";
+export const COMMENT_STATUSES: readonly CommentStatus[] = ["new", "proposed", "replied", "ignored", "expired", "own", "nested", "hidden", "deleted"];
+/** One customer comment under a post Site Manager published. Customer content: purged after 30 days (src/social/comments-poll.ts). */
+export interface SocialComment {
+  id: string;
+  venue_id: string;
+  network: CommentNetwork;
+  /** Meta post id (Facebook) or media id (Instagram). */
+  post_ref: string;
+  /** Meta's comment id; unique across networks. */
+  comment_id: string;
+  parent_id: string | null;
+  author_id: string;
+  author_name: string;
+  text: string;
+  /** When the customer wrote it (Meta's timestamp). */
+  created_at: string;
+  /** When the poll stored it. */
+  seen_at: string;
+  status: CommentStatus;
+  change_set_id: string | null;
+  reply_id: string | null;
+  /** When the reply or moderation went out (countCommentActions). */
+  replied_at: string | null;
+  /** The caption of the post it is under (for the proposal text and the dashboard). */
+  post_caption: string;
+  post_permalink: string | null;
+  /** The drafted reply and its kind, kept so the dashboard and ✏️ show them without a second model call. */
+  draft_text: string | null;
+  draft_kind: string | null;
+  /** Held because no owner could be reached inside Meta's 24 h window; retried by the next tick. */
+  deferred: boolean;
+}
+export type NewSocialComment = Pick<SocialComment, "network" | "post_ref" | "comment_id" | "parent_id" | "author_id" | "author_name" | "text" | "created_at" | "seen_at" | "status" | "post_caption"> & { post_permalink?: string | null };
+export type SocialCommentPatch = Partial<Pick<SocialComment, "status" | "change_set_id" | "reply_id" | "replied_at" | "draft_text" | "draft_kind" | "deferred">>;
+export interface ListCommentsOpts {
+  status?: CommentStatus[];
+  limit?: number;
+  /** Keeps created_at >= since. */
+  since?: string;
+  /** Only the comments of this change set. */
+  changeSetId?: string;
+}
+// Declaration merging: the Store interface above gains the comment methods.
+export interface Store {
+  /** Inserts the rows whose comment_id is not stored yet and returns exactly those (a comment seen by two polls is stored once). */
+  upsertComments(venueId: string, rows: NewSocialComment[]): Promise<SocialComment[]>;
+  /** Newest first (created_at, then id). Default limit 100. */
+  listComments(venueId: string, opts?: ListCommentsOpts): Promise<SocialComment[]>;
+  getComment(id: string): Promise<SocialComment | null>;
+  /** By Meta's comment id, within one venue. */
+  findComment(venueId: string, commentId: string): Promise<SocialComment | null>;
+  /** Throws on an unknown id. Keys set to undefined are ignored. */
+  updateComment(id: string, patch: SocialCommentPatch): Promise<void>;
+  /** Deletes every venue's rows with created_at < before; returns how many. */
+  purgeComments(before: string): Promise<number>;
+  /** Replies and moderations that went out in [fromIso, toIso): rows with status replied, hidden or deleted and replied_at in the window. */
+  countCommentActions(venueId: string, fromIso: string, toIso: string): Promise<number>;
 }

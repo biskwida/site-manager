@@ -29,17 +29,24 @@ const store = (client: unknown) => {
 };
 
 describe("SupabaseStore change limit", () => {
-  it("counts applied sets of the venue in [from, to) without undo and automatic sets, as a head count", async () => {
-    const { calls, client } = fakeClient(() => ({ data: null, error: null, count: 7 }));
-    expect(await store(client).countAppliedChangeSets(VENUE, "2026-09-30T21:00:00.000Z", "2026-10-31T22:00:00.000Z")).toBe(7);
+  it("counts applied sets of the venue in [from, to) without undo, automatic and comment sets, nor sets of set_comment_mode rows only", async () => {
+    const rows = [
+      { source: "text", changes: [{ op: "set_price" }] },
+      { source: "voice", changes: [{ op: "set_comment_mode" }, { op: "set_price" }] },
+      { source: "text", changes: [{ op: "set_comment_mode" }] }, // choosing how to hear about comments: not a change
+      { source: "dashboard", changes: [{ op: "set_comment_mode" }, { op: "set_comment_mode" }] },
+      { source: "dashboard", changes: [] }, // an empty set still counts, like countsTowardLimit says
+    ];
+    const { calls, client } = fakeClient(() => ({ data: rows, error: null }));
+    expect(await store(client).countAppliedChangeSets(VENUE, "2026-09-30T21:00:00.000Z", "2026-10-31T22:00:00.000Z")).toBe(3);
     expect(calls).toHaveLength(1);
     expect(calls[0].table).toBe("change_sets");
     expect(calls[0].steps).toEqual([
-      ["select", ["id", { count: "exact", head: true }]],
+      ["select", ["source, changes(op)"]],
       ["eq", ["venue_id", VENUE]],
       ["gte", ["applied_at", "2026-09-30T21:00:00.000Z"]],
       ["lt", ["applied_at", "2026-10-31T22:00:00.000Z"]],
-      ["not", ["source", "in", "(undo,auto)"]],
+      ["not", ["source", "in", "(undo,auto,comment)"]],
     ]);
     expect(await store(client).countAppliedChangeSets("not-a-uuid", "a", "b")).toBe(0);
   });
@@ -57,7 +64,7 @@ describe("SupabaseStore change limit", () => {
     const { calls, client } = fakeClient((c) => {
       if (c.table === "change_sets" && c.steps.some(([m]) => m === "maybeSingle")) return { data: { status: "scheduled", source: "text", venue_id: VENUE }, error: null };
       if (c.table === "venues") return { data: { id: VENUE, slug: "coffique", name: "Coffique", tz: "Europe/Sofia", change_limit: 2, created_at: "2026-10-09T09:00:00Z" }, error: null };
-      if (c.steps.some(([m, a]) => m === "select" && a[0] === "id" && (a[1] as { head?: boolean } | undefined)?.head)) return { data: null, error: null, count: 2 };
+      if (c.steps.some(([m, a]) => m === "select" && a[0] === "source, changes(op)")) return { data: [{ source: "text", changes: [] }, { source: "voice", changes: [] }], error: null };
       return { data: [{ id: "cs1" }], error: null };
     });
     expect(await store(client).applyChangeSet("cs1", "2026-10-09T10:00:00.000Z")).toBe("limited");
@@ -65,6 +72,16 @@ describe("SupabaseStore change limit", () => {
     expect(cancel.table).toBe("change_sets");
     expect(cancel.steps).toEqual([["update", [{ status: "cancelled", decided_at: "2026-10-09T10:00:00.000Z" }]], ["eq", ["id", "cs1"]], ["in", ["status", ["proposed", "scheduled"]]], ["select", ["id"]]]);
     expect(calls.some((c) => c.steps.some(([m, a]) => m === "update" && (a[0] as { status?: string }).status === "applied"))).toBe(false);
+  });
+
+  it("applyChangeSet reads the set's ops: a set of set_comment_mode rows only is never limited", async () => {
+    const { calls, client } = fakeClient((c) => {
+      if (c.table === "change_sets" && c.steps.some(([m]) => m === "maybeSingle")) return { data: { status: "proposed", source: "text", venue_id: VENUE, changes: [{ op: "set_comment_mode" }] }, error: null };
+      return { data: [], error: null }; // the apply flip finds nothing: "skipped" is enough here
+    });
+    expect(await store(client).applyChangeSet("cs1", "2026-10-09T10:00:00.000Z")).toBe("skipped");
+    expect(calls[0].steps[0]).toEqual(["select", ["status, source, venue_id, changes(op)"]]);
+    expect(calls.some((c) => c.table === "venues")).toBe(false);
   });
 
   it("applyChangeSet never reads the limit for an undo set", async () => {

@@ -40,6 +40,18 @@ alter table public.venues add column if not exists site_url text;
 alter table public.venues add column if not exists change_limit integer;
 alter table public.venues drop constraint if exists venues_change_limit_check;
 alter table public.venues add constraint venues_change_limit_check check (change_limit is null or change_limit >= 0);
+-- Comment replies (2026-10-15): how the owner hears about comments under the venue's posts and the monthly cap on comment
+-- actions. Owner-only (policies.sql grants columns one by one, so these never reach the anon key).
+alter table public.venues add column if not exists comment_mode text not null default 'each';
+alter table public.venues drop constraint if exists venues_comment_mode_check;
+alter table public.venues add constraint venues_comment_mode_check check (comment_mode in ('each', 'digest', 'off'));
+alter table public.venues add column if not exists comment_digest_hour integer not null default 9;
+alter table public.venues drop constraint if exists venues_comment_digest_hour_check;
+alter table public.venues add constraint venues_comment_digest_hour_check check (comment_digest_hour between 0 and 23);
+alter table public.venues add column if not exists comment_limit integer default 300;
+alter table public.venues drop constraint if exists venues_comment_limit_check;
+alter table public.venues add constraint venues_comment_limit_check check (comment_limit is null or comment_limit >= 0);
+alter table public.venues add column if not exists last_comment_digest_at timestamptz;
 alter table public.venues drop constraint if exists venues_template_check;
 alter table public.venues add constraint venues_template_check check (template in ('classic', 'nocturne', 'lumen', 'furna', 'mehana', 'kvartal'));
 alter table public.venues drop constraint if exists venues_business_type_check;
@@ -192,6 +204,8 @@ create index if not exists change_sets_applied_idx on public.change_sets (venue_
 alter table public.change_sets drop constraint if exists change_sets_source_check;
 alter table public.change_sets add constraint change_sets_source_check
   check (source in ('text', 'voice', 'photo', 'dashboard', 'auto', 'undo', 'comment'));
+-- One proposal message per owner chat for comment sets: { "<chat_ref>": "<message_ref>" }.
+alter table public.change_sets add column if not exists proposal_refs jsonb;
 
 create table if not exists public.changes (
   id uuid primary key default gen_random_uuid(),

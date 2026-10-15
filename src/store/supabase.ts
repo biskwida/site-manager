@@ -1,10 +1,11 @@
 // src/store/supabase.ts
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
-import { isExternalEntity, type SocialEntity, type WpEntity } from "../domain/types";
+import { COMMENT_LIMIT_DEFAULT, countsTowardLimit } from "../domain/limits";
+import { isExternalEntity, type CommentMode, type SocialEntity, type WpEntity } from "../domain/types";
 import type { Announcement, BusinessType, Category, Change, ChangeSet, Conversation, DeployInfo, DeployStatus, Holiday, InstagramImport, Item, Lang, Media, Member, Role, SiteState, SiteText, SiteTextKey, TemplateId, Venue, VenueStatus } from "../domain/types";
 import type { WizardDraft } from "../wizard/schema";
 import { legacyTelegramId } from "../channels/ref";
-import { DEFAULT_HOURS, extensionFor, newInviteCode, newToken, PUBLISH_CLAIM_TTL_MS, type ChangeSetPatch, type ExpiredTimer, type NewCategory, type NewChangeSet, type NewItem, type NewVenue, type Store, type VenuePatch, type Destination, type DestinationKind, type DestinationPatch, type DestinationSync, type DestinationWithSecrets, type NewDestination, type NewSync, type SyncPatch, type SyncStatus, type ApplyResult, checkLimitValue, CONFIG_KEY_RE, newConfirmationCode, type DataDeletionRequest, type DeletionProvider, type DeletionStatus } from "./types";
+import { DEFAULT_HOURS, extensionFor, newInviteCode, newToken, PUBLISH_CLAIM_TTL_MS, type ChangeSetPatch, type ExpiredTimer, type NewCategory, type NewChangeSet, type NewItem, type NewVenue, type Store, type VenuePatch, type Destination, type DestinationKind, type DestinationPatch, type DestinationSync, type DestinationWithSecrets, type NewDestination, type NewSync, type SyncPatch, type SyncStatus, type ApplyResult, checkLimitValue, CONFIG_KEY_RE, newConfirmationCode, type DataDeletionRequest, type DeletionProvider, type DeletionStatus, type CommentStatus, type ListCommentsOpts, type NewSocialComment, type SocialComment, type SocialCommentPatch } from "./types";
 import { limitBlocks } from "./usage";
 
 type Row = Record<string, unknown>;
@@ -34,10 +35,11 @@ export function toVenue(r: Row): Venue {
     hours: (r.hours as Venue["hours"]) ?? DEFAULT_HOURS,
     // Missing before the column is added (schema.sql): unlimited.
     change_limit: r.change_limit === null || r.change_limit === undefined ? null : num(r.change_limit),
-    comment_mode: "each",
-    comment_digest_hour: 9,
-    comment_limit: 300,
-    last_comment_digest_at: null,
+    // Comment replies (2026-10-15). Missing before schema.sql is applied: the defaults.
+    comment_mode: (r.comment_mode as CommentMode) ?? "each",
+    comment_digest_hour: r.comment_digest_hour === null || r.comment_digest_hour === undefined ? 9 : num(r.comment_digest_hour),
+    comment_limit: r.comment_limit === undefined ? COMMENT_LIMIT_DEFAULT : r.comment_limit === null ? null : num(r.comment_limit),
+    last_comment_digest_at: isoOrNull(r.last_comment_digest_at),
     tz: str(r.tz) || "Europe/Sofia",
     default_lang: (r.default_lang as Lang) ?? "bg",
     theme: (r.theme as Venue["theme"]) ?? { accent: "#2f6b4f" },
@@ -113,7 +115,7 @@ export function toChangeSet(r: Row): ChangeSet {
     reverted_by: strOrNull(r.reverted_by),
     undoes_id: strOrNull(r.undoes_id),
     message_ref: strOrNull(r.message_ref),
-    proposal_refs: null,
+    proposal_refs: (r.proposal_refs as Record<string, string> | null) ?? null,
     created_at: iso(r.created_at),
     changes: ((r.changes as Row[]) ?? []).map(toChange).sort((a, b) => a.position - b.position),
   };
@@ -371,7 +373,7 @@ export class SupabaseStore implements Store {
 
   async createChangeSet(cs: NewChangeSet) {
     const { changes, message_ref, ...head } = cs;
-    const row = await must<Row>(this.db.from("change_sets").insert({ ...head, apply_at: head.apply_at ?? null, undoes_id: head.undoes_id ?? null, message_ref: message_ref ?? null, ...legacyColumns(head.chat_ref, message_ref) }).select("*").single(), "createChangeSet");
+    const row = await must<Row>(this.db.from("change_sets").insert({ ...head, apply_at: head.apply_at ?? null, undoes_id: head.undoes_id ?? null, message_ref: message_ref ?? null, proposal_refs: head.proposal_refs ?? null, ...legacyColumns(head.chat_ref, message_ref) }).select("*").single(), "createChangeSet");
     if (changes.length) {
       await must(this.db.from("changes").insert(changes.map((c, i) => ({ change_set_id: row.id, position: i, op: c.op, entity: c.entity, entity_id: c.entity_id, before: c.before, after: c.after }))).select("id"), "createChangeSet changes");
     }
@@ -419,7 +421,8 @@ export class SupabaseStore implements Store {
    * If any write fails, the set is reset to its prior status so it can be retried (every write is idempotent).
    */
   async applyChangeSet(id: string, now: string): Promise<ApplyResult> {
-    const prior = await must<{ status: ChangeSet["status"]; source: ChangeSet["source"]; venue_id: string }>(this.db.from("change_sets").select("status, source, venue_id").eq("id", id).maybeSingle(), `applyChangeSet ${id}`);
+    // The ops come along because a set made only of set_comment_mode rows is never limited (countsTowardLimit).
+    const prior = await must<{ status: ChangeSet["status"]; source: ChangeSet["source"]; venue_id: string; changes?: { op: Change["op"] }[] }>(this.db.from("change_sets").select("status, source, venue_id, changes(op)").eq("id", id).maybeSingle(), `applyChangeSet ${id}`);
     if ((prior.status === "proposed" || prior.status === "scheduled") && (await limitBlocks(this, prior, now))) {
       // Conditional like the apply flip: a set decided meanwhile stays as it is. Two applies racing past the count can
       // overshoot the limit by one; the count is not a lock.
@@ -619,15 +622,18 @@ export class SupabaseStore implements Store {
   // --- Monthly change limit (appended 2026-10-13) ---
   async countAppliedChangeSets(venueId: string, fromIso: string, toIso: string) {
     if (badVenue(venueId)) return 0;
-    const { count, error } = await this.db
+    // The sources that never count are left out in SQL; the by-op exemption (a set made only of set_comment_mode rows) needs
+    // each set's ops, so the window's sets come back with them and countsTowardLimit decides. A venue applies at most
+    // hundreds of sets a month, far below PostgREST's row cap.
+    const { data, error } = await this.db
       .from("change_sets")
-      .select("id", { count: "exact", head: true })
+      .select("source, changes(op)")
       .eq("venue_id", venueId)
       .gte("applied_at", fromIso)
       .lt("applied_at", toIso)
-      .not("source", "in", "(undo,auto)"); // countsTowardLimit (src/domain/limits.ts)
+      .not("source", "in", "(undo,auto,comment)");
     if (error) throw new Error(`countAppliedChangeSets: ${error.message}`);
-    return count ?? 0;
+    return ((data ?? []) as { source: ChangeSet["source"]; changes: { op: Change["op"] }[] | null }[]).filter((r) => countsTowardLimit(r.source, r.changes ?? [])).length;
   }
   async setChangeLimit(venueId: string, limit: number | null) {
     checkLimitValue(limit);
@@ -659,6 +665,65 @@ export class SupabaseStore implements Store {
     const { data, error } = await this.db.from("data_deletion_requests").select("*").eq("confirmation_code", code).maybeSingle();
     if (error) throw new Error(`getDeletionRequest: ${error.message}`);
     return data ? toDeletionRequest(data) : null;
+  }
+
+  // --- Comment replies (appended 2026-10-15) ---
+  async upsertComments(venueId: string, rows: NewSocialComment[]) {
+    if (rows.length === 0 || badVenue(venueId)) return [];
+    // ON CONFLICT (comment_id) DO NOTHING; RETURNING gives only the rows that were inserted.
+    const { data, error } = await this.db
+      .from("social_comments")
+      .upsert(rows.map((r) => ({ venue_id: venueId, ...r, post_permalink: r.post_permalink ?? null })), { onConflict: "comment_id", ignoreDuplicates: true })
+      .select("*");
+    if (error) throw new Error(`upsertComments: ${error.message}`);
+    const order = (c: SocialComment) => rows.findIndex((r) => r.comment_id === c.comment_id);
+    return (data ?? []).map(toComment).sort((a, b) => order(a) - order(b));
+  }
+  async listComments(venueId: string, opts: ListCommentsOpts = {}) {
+    if (badVenue(venueId) || (opts.changeSetId !== undefined && !UUID.test(opts.changeSetId))) return [];
+    let q = this.db.from("social_comments").select("*").eq("venue_id", venueId).order("created_at", { ascending: false }).order("id", { ascending: false }).limit(opts.limit ?? 100);
+    if (opts.status) q = q.in("status", opts.status);
+    if (opts.since) q = q.gte("created_at", opts.since);
+    if (opts.changeSetId !== undefined) q = q.eq("change_set_id", opts.changeSetId);
+    return (await must(q, "listComments")).map(toComment);
+  }
+  async getComment(id: string) {
+    if (!UUID.test(id)) return null;
+    const { data, error } = await this.db.from("social_comments").select("*").eq("id", id).maybeSingle();
+    if (error) throw new Error(`getComment: ${error.message}`);
+    return data ? toComment(data) : null;
+  }
+  async findComment(venueId: string, commentId: string) {
+    if (badVenue(venueId)) return null;
+    const { data, error } = await this.db.from("social_comments").select("*").eq("venue_id", venueId).eq("comment_id", commentId).maybeSingle();
+    if (error) throw new Error(`findComment: ${error.message}`);
+    return data ? toComment(data) : null;
+  }
+  async updateComment(id: string, patch: SocialCommentPatch) {
+    const clean: Row = Object.fromEntries(Object.entries(patch).filter(([, v]) => v !== undefined));
+    if (Object.keys(clean).length === 0) {
+      if (!(await this.getComment(id))) throw new Error(`updateComment ${id}: not found`);
+      return;
+    }
+    if (!UUID.test(id)) throw new Error(`updateComment ${id}: not found`);
+    await mustRows(this.db.from("social_comments").update(clean).eq("id", id).select("id"), `updateComment ${id}`);
+  }
+  async purgeComments(before: string) {
+    const { data, error } = await this.db.from("social_comments").delete().lt("created_at", before).select("id");
+    if (error) throw new Error(`purgeComments: ${error.message}`);
+    return (data ?? []).length;
+  }
+  async countCommentActions(venueId: string, fromIso: string, toIso: string) {
+    if (badVenue(venueId)) return 0;
+    const { count, error } = await this.db
+      .from("social_comments")
+      .select("id", { count: "exact", head: true })
+      .eq("venue_id", venueId)
+      .in("status", ["replied", "hidden", "deleted"])
+      .gte("replied_at", fromIso)
+      .lt("replied_at", toIso);
+    if (error) throw new Error(`countCommentActions: ${error.message}`);
+    return count ?? 0;
   }
 }
 
@@ -703,5 +768,31 @@ export function toSync(r: Row): DestinationSync {
     created_at: iso(r.created_at),
     updated_at: iso(r.updated_at),
     leased_until: r.leased_until ? iso(r.leased_until) : null,
+  };
+}
+
+// --- Comment replies (appended 2026-10-15) ---
+export function toComment(r: Row): SocialComment {
+  return {
+    id: r.id as string,
+    venue_id: r.venue_id as string,
+    network: r.network as SocialComment["network"],
+    post_ref: str(r.post_ref),
+    comment_id: str(r.comment_id),
+    parent_id: strOrNull(r.parent_id),
+    author_id: str(r.author_id),
+    author_name: str(r.author_name),
+    text: str(r.text),
+    created_at: iso(r.created_at),
+    seen_at: iso(r.seen_at),
+    status: (r.status as CommentStatus) ?? "new",
+    change_set_id: strOrNull(r.change_set_id),
+    reply_id: strOrNull(r.reply_id),
+    replied_at: isoOrNull(r.replied_at),
+    post_caption: str(r.post_caption),
+    post_permalink: strOrNull(r.post_permalink),
+    draft_text: strOrNull(r.draft_text),
+    draft_kind: strOrNull(r.draft_kind),
+    deferred: Boolean(r.deferred),
   };
 }
