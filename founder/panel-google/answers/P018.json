@@ -1,0 +1,13 @@
+{
+  "id": "P018",
+  "buys": false,
+  "purchases_first_month": 0,
+  "reason_code": "need",
+  "reason": "My customers find me on Instagram and walk past the door, nobody is reading a café website. 25 euros a month is real money for me when my daughter already does the Instagram for free.",
+  "objection": "I don't need a website at all, and I don't want to learn another app or connect Google things I don't understand. It's paying every month for something nobody looks at.",
+  "would_change_my_mind": "If it posted my specials straight to Instagram and Facebook from the same message, so it saves me the posting I already do.",
+  "price_too_cheap": 3,
+  "price_cheap": 8,
+  "price_expensive": 15,
+  "price_too_expensive": 25
+}

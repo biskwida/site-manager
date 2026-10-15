@@ -16,7 +16,9 @@ import { formatDateTime, nowText } from "../time";
 import { copy } from "../bot/copy";
 import { usageLine } from "../bot/limit";
 import { changeUsage } from "../store/usage";
+import { countsTowardLimit } from "../domain/limits";
 import { BulkSchema, CancelSchema, CheckAllergensSchema, ListSchema, ProposeSchema, ScheduleSchema, UndoSchema, type ChangeInput } from "./tool-schemas";
+import { commentTools, isCommentReplySet } from "./comment-tools";
 import { socialTools } from "./social-tools";
 import { visualTools } from "./visual-tools";
 import type { VisualClient } from "../visual/client";
@@ -82,7 +84,7 @@ function canonical(x: string | null): string | null {
 }
 
 /** Replaces "next_opening" / "closing_today" with ISO instants from the venue's hours and normalises explicit instants to UTC. */
-export function resolveTokens(ops: ChangeInput[], site: SiteState, now: Date): ChangeOp[] {
+export function resolveTokens(ops: ProposeInput["changes"], site: SiteState, now: Date): ChangeOp[] {
   const { hours, tz } = site.venue;
   const opening = () => {
     const iso = nextOpening(hours, site.holidays, now, tz);
@@ -101,6 +103,12 @@ export function resolveTokens(ops: ChangeInput[], site: SiteState, now: Date): C
     return op as ChangeOp;
   });
 }
+
+/**
+ * What propose takes: propose_changes' input, plus the set_comment_mode op, which only the set_comment_mode tool (src/agent/comment-tools.ts)
+ * sends (it is not in ChangeInputSchema, so propose_changes cannot mix it with menu changes).
+ */
+export type ProposeInput = Omit<z.infer<typeof ProposeSchema>, "changes"> & { changes: (ChangeInput | Extract<ChangeOp, { op: "set_comment_mode" }>)[] };
 
 /** The Telegram message for a proposal: preview, optional schedule line, and the question. */
 export function proposalText(preview: string, lang: Lang, applyAt: string | null, tz: string): string {
@@ -162,7 +170,8 @@ export function makeTools(deps: AgentDeps) {
 
   /** Proposals from earlier messages block new ones: the one the owner pressed ✏️ on is replaced, any other refuses. This message's own proposals never block. */
   const ensureNoPending = async () => {
-    const earlier = (await d.store.listChangeSets(d.venueId, { status: ["proposed"], limit: 50 })).filter((cs) => cs.chat_ref === d.chatRef && !turnSets.has(cs.id));
+    // Comment proposals (source "comment") never block a menu change and are never blocked by one.
+    const earlier = (await d.store.listChangeSets(d.venueId, { status: ["proposed"], limit: 50 })).filter((cs) => cs.chat_ref === d.chatRef && cs.source !== "comment" && !turnSets.has(cs.id));
     const corrected = d.correctionFor ? earlier.find((cs) => cs.id === d.correctionFor) : undefined;
     const pending = earlier.find((cs) => cs !== corrected);
     if (!pending) {
@@ -186,8 +195,9 @@ export function makeTools(deps: AgentDeps) {
   };
 
   /** Shared by propose_changes and schedule_changes. */
-  const propose = async (input: z.infer<typeof ProposeSchema>, applyAt: string | null) => {
-    await ensureWithinLimit();
+  const propose = async (input: ProposeInput, applyAt: string | null) => {
+    // A set made only of set_comment_mode rows never counts toward the limit (countsTowardLimit), so it is never refused here.
+    if (countsTowardLimit(d.source ?? "text", input.changes)) await ensureWithinLimit();
     const s = await site();
     const ops = resolveTokens(input.changes, s, d.now());
     requireRole(d.member, ops);
@@ -285,6 +295,11 @@ export function makeTools(deps: AgentDeps) {
     run: (input) =>
       attempt(async () => {
         const cs = await getSet(input.change_set_id);
+        // A comment proposal went to every owner and holds comment rows: only ❌ on it (or Ignore in the dashboard) concludes all of them.
+        if (isCommentReplySet(cs)) {
+          const say = tr(lang, "„Натиснете ❌ на предложението в чата или „Пропусни“ в картата „Коментари“ в таблото.“", "“Tap ❌ on the proposal in the chat, or Ignore in the dashboard's Comments card.”");
+          throw new Error(`Change set ${cs.id} is a comment reply proposal; cancel_change_set does not cancel those, and no tool ignores a comment. Tell the owner in one short sentence: ${say}`);
+        }
         if (cs.status !== "proposed" && cs.status !== "scheduled") throw new Error(`Change set is "${cs.status}"; only proposed or scheduled sets can be cancelled.`);
         await cancelPending(cs, tr(lang, "❌ Отказано.", "❌ Cancelled."));
         return { change_set_id: cs.id, status: "cancelled" };
@@ -310,7 +325,7 @@ export function makeTools(deps: AgentDeps) {
 
   // Task 11 appends schedule_changes, propose_bulk_price_change, check_allergens, undo here.
   const kit: ToolKit = { attempt, site, ctx, previews, mine, propose, getSet, ensureNoPending, ensureWithinLimit, lang };
-  return [getSite, getMenu, proposeChanges, cancelChangeSet, listChanges, ...extraTools(d, kit), ...wpTools(d, kit), ...socialTools(d, kit), ...visualTools(d, kit)];
+  return [getSite, getMenu, proposeChanges, cancelChangeSet, listChanges, ...extraTools(d, kit), ...wpTools(d, kit), ...socialTools(d, kit), ...commentTools(d, kit), ...visualTools(d, kit)];
 }
 
 /** What the shared helpers of makeTools expose to the second group of tools. */
@@ -320,7 +335,7 @@ export interface ToolKit {
   ctx: () => PlanContext;
   previews: (s: SiteState, changes: ReturnType<typeof planChanges>) => { preview_bg: string; preview_en: string };
   mine: (p: { preview_bg: string; preview_en: string }) => string;
-  propose: (input: z.infer<typeof ProposeSchema>, applyAt: string | null) => Promise<unknown>;
+  propose: (input: ProposeInput, applyAt: string | null) => Promise<unknown>;
   getSet: (id: string) => Promise<ChangeSet>;
   ensureNoPending: () => Promise<void>;
   /** Throws the owner's limit line when the venue's monthly change limit is reached; call before creating any non-undo set. */

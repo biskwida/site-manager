@@ -1,0 +1,15 @@
+# Site Manager
+
+- What it is: a website for a café, bar or restaurant that the owner runs from a chat app (Telegram, WhatsApp, Messenger) by talking to an AI agent: "cappuccino is 3.20 now", "we're out of the lemon cake until tomorrow", a voice note, or a photo of the specials board. The agent prepares the change, shows a preview, and it goes live after one tap. It also supports scheduled changes, auto-revert, a change log and undo, in Bulgarian and English.
+- Who it is for: independent cafés, bars and small restaurants in Sofia, Bulgaria (then the rest of Bulgaria), run by an owner-operator who has no web person, whose menu, prices, hours and specials change often, and who today keeps the site out of date or only uses Instagram/Facebook/Google.
+- What it sells, at what price: a monthly subscription, list price 25 € per venue per month (before VAT), hosting and setup included. Tier idea: Start 15 € (text and voice, 40 changes/month), Standard 25 € (photos, scheduling, staff, 150 changes), Pro 40 € (400 changes, several locations, own domain). Real evidence: four Sofia venues the founder knows said what they would pay per month before a product existed: Coffique 20 €, Bar and Dinner Central 30 €, Family House 50 €, The High End Bar 70 €.
+- Where and how: online SaaS. Onboarding: the owner picks one of three templates, fills a 7-step wizard (menu read from a photo or PDF, texts written by AI), the site is deployed on its own Vercel project, then they connect the chat bot. Existing WordPress sites can be managed through a plugin. Sales: founder sells door to door to venues they know, then referrals; a Lovable-built landing page.
+- Budget and constraints: solo founder (technical, builds with Claude Code). Product already built and live in production (Next.js on Vercel, Supabase, Claude Opus 5.5, Groq speech-to-text). Known running costs: about 42 €/month fixed infrastructure (Supabase Pro + Vercel Pro), and an estimated ~6.4 € of AI cost per venue per month at 2 messages a day (founder's own model). No outside funding stated. Started as a hackathon entry (theme "AI That Does the Work", October 2026).
+
+## Extra context a stranger would need
+
+- Status on 2026-10-11: working product in production at site-manager-lovat.vercel.app with a demo café; one real venue (Coffique) already reads its live menu from Site Manager. WhatsApp and Messenger channels live, Instagram channel pending. 435 automated tests on the templates track.
+- The four price quotes are conversations, not signed contracts or payments.
+- Market size, current competitor prices in Bulgaria and the cost of acquiring a customer are NOT known yet; treat them as open questions.
+- Viber, the most used messenger in Bulgaria, costs about 100 €/month per bot for a business account, so it is not offered yet.
+- Planned add-ons the founder has noted but not built: Google Business Profile hours/pin updates from the chat, posting to the venue's Instagram from the chat.

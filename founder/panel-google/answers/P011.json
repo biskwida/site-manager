@@ -1,0 +1,13 @@
+{
+  "id": "P011",
+  "buys": false,
+  "purchases_first_month": 0,
+  "reason_code": "habit",
+  "reason": "I already have a site and I already pay for POS, accounting and the delivery apps, so another 25 euros a month to move everything over is not happening. The lunch special I just write on the board, people walking by see it.",
+  "objection": "Moving off my current site is a hassle, and it's one more monthly fee on top of all the others for something I can mostly live without.",
+  "would_change_my_mind": "If it kept my existing site and just handled the daily special on Google Maps, with a free first month so I could see if it actually brings people in at lunch.",
+  "price_too_cheap": 3,
+  "price_cheap": 8,
+  "price_expensive": 15,
+  "price_too_expensive": 25
+}

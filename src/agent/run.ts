@@ -7,7 +7,9 @@ import { copy } from "../bot/copy";
 import { startProgress } from "../bot/progress";
 import { nowText } from "../time";
 import { appendMemory, loadMemory, NO_REPLY } from "./memory";
-import { PHOTO_NO_CAPTION, SYSTEM_PROMPT, userMessage } from "./prompt";
+import { commentsOfSet } from "../social/comments-propose";
+import { isCommentReplySet } from "./comment-tools";
+import { PHOTO_NO_CAPTION, SYSTEM_PROMPT, userMessage, type CorrectionComment } from "./prompt";
 import { makeTools, type AgentDeps } from "./tools";
 
 export interface ImageInput {
@@ -43,9 +45,10 @@ export async function runTurn(deps: AgentDeps, input: TurnInput, cfg: AgentConfi
   const memory = await loadMemory(deps.store, deps.venueId, deps.chatRef, now, input.mediaId);
   const lang = deps.member.lang;
   const held = memory.waiting;
+  const correctionComments = memory.correctionFor ? await correctionCommentsOf(deps, memory.correctionFor) : undefined;
   const text = userMessage({
     venueName: venue.name, slug: venue.slug, nowText: nowText(now, venue.tz), lang, role: deps.member.role,
-    memory: memory.text, correctionFor: memory.correctionFor, mediaId: input.mediaId, heldMediaIds: held, text: input.text, source: input.source,
+    memory: memory.text, correctionFor: memory.correctionFor, correctionComments, mediaId: input.mediaId, heldMediaIds: held, text: input.text, source: input.source,
   });
   const content = [
     ...(await heldPhotoUrls(deps, held)).map((url) => ({ type: "image" as const, source: { type: "url" as const, url } })),
@@ -112,6 +115,23 @@ export async function runTurn(deps: AgentDeps, input: TurnInput, cfg: AgentConfi
   } finally {
     await progress.stop(); // also after an unexpected throw, so typing never outlives the turn
   }
+}
+
+/**
+ * ✏️ on a comment reply set: its comments and the previous drafts, so the owner can type only what changes. Undefined for any
+ * other set (menu changes, set_comment_mode) and for a set that is no longer waiting.
+ */
+async function correctionCommentsOf(deps: AgentDeps, setId: string): Promise<CorrectionComment[] | undefined> {
+  const cs = await deps.store.getChangeSet(setId).catch(() => null);
+  if (!cs || cs.venue_id !== deps.venueId || cs.status !== "proposed" || !isCommentReplySet(cs)) return undefined;
+  const rows = await commentsOfSet(deps.store, cs);
+  return cs.changes.flatMap((ch): CorrectionComment[] => {
+    if (ch.op !== "social_reply" && ch.op !== "social_moderate") return [];
+    const row = (ch.after ?? {}) as Record<string, unknown>;
+    const stored = rows.find((r) => r.comment_id === ch.entity_id);
+    const action = row.action === "hide" || row.action === "delete" ? row.action : null;
+    return [{ id: stored?.id ?? ch.entity_id, network: String(row.network ?? ""), author: String(row.author_name ?? ""), text: String(row.comment_text ?? ""), draft: typeof row.reply_text === "string" ? row.reply_text : null, action }];
+  });
 }
 
 /** Every proposal still waiting in this chat (earlier ones first, then this turn's in the order they were made), for the memory line. */

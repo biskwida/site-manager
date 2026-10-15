@@ -1,0 +1,13 @@
+{
+  "id": "P014",
+  "buys": false,
+  "purchases_first_month": 0,
+  "reason_code": "need",
+  "reason": "My customers find me on Instagram and Facebook, and nobody looks at café websites any more, so paying 25 € a month for a site I don't need makes no sense on my margins. And it doesn't even work on Viber, which is what we actually use.",
+  "objection": "It solves a website problem I don't have, and it skips Viber and Instagram, the two places I actually live.",
+  "would_change_my_mind": "If the same message also posted my special to Instagram and Facebook and worked from Viber, I'd think about it for the Google Maps hours alone.",
+  "price_too_cheap": 3,
+  "price_cheap": 7,
+  "price_expensive": 15,
+  "price_too_expensive": 25
+}

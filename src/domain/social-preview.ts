@@ -2,7 +2,7 @@
 // Preview lines for social_post rows (a photo published to Facebook and/or Instagram). Pure; both languages; undo-safe
 // (the inverted row has after = null and reads as a removal).
 import { quote, tr } from "./format";
-import type { Change, Lang, Row, SocialTarget } from "./types";
+import { NETWORK_NAMES, type Change, type Lang, type Row, type SocialTarget } from "./types";
 
 const FORMAT: Record<"post" | "story", { bg: string; en: string }> = {
   post: { bg: "пост", en: "post" },
@@ -12,7 +12,8 @@ const FORMAT: Record<"post" | "story", { bg: string; en: string }> = {
 /** "Facebook (пост, история), Instagram (пост)" from the row's targets, Facebook first, post before story. */
 export function socialTargetsText(targets: readonly SocialTarget[], lang: Lang): string {
   const parts: string[] = [];
-  for (const [network, name] of [["facebook", "Facebook"], ["instagram", "Instagram"]] as const) {
+  for (const network of ["facebook", "instagram"] as const) {
+    const name = NETWORK_NAMES[network];
     const formats = (["post", "story"] as const).filter((f) => targets.includes(`${network}_${f}` as SocialTarget));
     if (formats.length) parts.push(`${name} (${formats.map((f) => FORMAT[f][lang]).join(", ")})`);
   }

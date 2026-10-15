@@ -1,4 +1,5 @@
 import { after } from "next/server";
+import { adminCommentAction, parseAdminCommentAction } from "@/src/server/admin-comments";
 import { adminAction, adminOverview, checkDomain, connectDomain, setTemplate, type AdminActionName } from "@/src/server/admin";
 import { newOwnerCode } from "@/src/server/connect-apps";
 import { getServerDeps } from "@/src/server/deps";
@@ -45,6 +46,13 @@ export async function POST(req: Request, ctx: RouteContext<"/api/admin/[slug]">)
     // "Connect another app": a fresh single-use owner code with one link per enabled app (rate limit shared with the wizard).
     const r = await newOwnerCode(deps.store, deps.config, venue, new Date());
     return Response.json(r, { status: r.ok ? 200 : r.error === "rate_limited" ? 429 : 409, headers: { "cache-control": "no-store" } });
+  }
+  if (body.action === "reply_comment" || body.action === "ignore_comment" || body.action === "set_comment_mode") {
+    // The Comments card (owner's key): reply posts at once, ignore, notification mode. 400 for a malformed body; 409 when refused.
+    const a = parseAdminCommentAction(body);
+    if (!a) return Response.json({ error: "bad request" }, { status: 400 });
+    const r = await adminCommentAction({ store: deps.store, messenger: deps.messenger, now: () => new Date(), baseUrl: deps.config.publicBaseUrl }, venue, a);
+    return Response.json(r, { status: r.ok ? 200 : 409 });
   }
   const actions: AdminActionName[] = ["apply", "reject", "cancel", "undo"];
   if (!actions.includes(body.action as AdminActionName) || typeof body.change_set_id !== "string") return Response.json({ error: "bad request" }, { status: 400 });

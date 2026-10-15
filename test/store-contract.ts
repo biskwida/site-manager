@@ -1,7 +1,8 @@
 // test/store-contract.ts
 import { describe, expect, it } from "vitest";
 import { planChanges } from "@/src/domain/changes";
-import type { Store } from "@/src/store/types";
+import type { Change } from "@/src/domain/types";
+import { COMMENT_REDACTED, type NewSocialComment, type Store } from "@/src/store/types";
 import { NOW } from "./fixtures";
 
 const LATER = "2026-10-09T10:00:00.000Z";
@@ -133,6 +134,13 @@ export function storeContract(name: string, make: () => Promise<Store>, storageH
       const applied = await s.createChangeSet({ ...base, status: "proposed" });
       expect(await s.applyChangeSet(applied.id, NOW)).toBe("applied");
       expect(await s.expireChangeSet(applied.id, LATER)).toBe("skipped");
+      expect(await s.getChangeSet(applied.id)).toMatchObject({ status: "applied", decided_at: NOW });
+      // cancelChangeSet is conditional the same way: a set decided meanwhile keeps its status.
+      const open = await s.createChangeSet({ ...base, status: "proposed" });
+      expect(await s.cancelChangeSet(open.id, LATER)).toBe("cancelled");
+      expect(await s.getChangeSet(open.id)).toMatchObject({ status: "cancelled", decided_at: LATER });
+      expect(await s.cancelChangeSet(open.id, LATER)).toBe("skipped");
+      expect(await s.cancelChangeSet(applied.id, LATER)).toBe("skipped");
       expect(await s.getChangeSet(applied.id)).toMatchObject({ status: "applied", decided_at: NOW });
     });
 
@@ -601,6 +609,23 @@ export function storeContract(name: string, make: () => Promise<Store>, storageH
       expect(await s.listSyncs({ venueId: v.id })).toEqual([]);
     });
 
+    it("lists sync rows created at or after a time, newest first, bounded by the limit (comment poller)", async () => {
+      const s = await make();
+      const v = await s.createVenue({ slug: `t-sync-since-${crypto.randomUUID().slice(0, 8)}`, name: "Since" });
+      const d = await s.upsertDestination({ venue_id: v.id, kind: "facebook", config: {}, secrets: "enc" });
+      const cs = await s.createChangeSet({ venue_id: v.id, chat_ref: null, summary_bg: "x", summary_en: "x", preview_bg: "", preview_en: "", source: "text", status: "proposed", changes: [] });
+      const mk = () => s.createSync({ venue_id: v.id, destination_id: d.id, change_set_id: cs.id, payload: { kind: "facebook" }, next_at: NOW });
+      const y1 = await mk();
+      const y2 = await mk();
+      const y3 = await mk();
+      expect((await s.listSyncs({ venueId: v.id, order: "desc" })).map((x) => x.id)).toEqual([y3.id, y2.id, y1.id]);
+      expect((await s.listSyncs({ venueId: v.id, createdSince: y2.created_at, order: "desc" })).map((x) => x.id)).toEqual([y3.id, y2.id]);
+      expect((await s.listSyncs({ venueId: v.id, createdSince: y2.created_at })).map((x) => x.id)).toEqual([y2.id, y3.id]); // default stays oldest first
+      expect((await s.listSyncs({ venueId: v.id, order: "desc", limit: 1 })).map((x) => x.id)).toEqual([y3.id]);
+      await s.updateSync(y3.id, { status: "done" });
+      expect((await s.listSyncs({ venueId: v.id, status: ["done"], createdSince: y1.created_at, order: "desc" })).map((x) => x.id)).toEqual([y3.id]);
+    });
+
     it("claims a pending sync row for one run at a time (lease), and frees it again", async () => {
       const s = await make();
       const v = await s.createVenue({ slug: `t-claim-${crypto.randomUUID().slice(0, 8)}`, name: "Claim" });
@@ -639,7 +664,7 @@ export function storeContract(name: string, make: () => Promise<Store>, storageH
       const v = await s.createVenue({ slug: "tl3", name: "Test" });
       const other = await s.createVenue({ slug: "tl4", name: "Test" });
       const base = { chat_ref: null, summary_bg: "x", summary_en: "x", preview_bg: "x", preview_en: "x", status: "proposed" as const, changes: [] };
-      const applied = async (source: "text" | "voice" | "dashboard" | "auto" | "undo", at: string, extra: { venue_id?: string; undoes_id?: string } = {}) => {
+      const applied = async (source: "text" | "voice" | "dashboard" | "auto" | "undo" | "comment", at: string, extra: { venue_id?: string; undoes_id?: string; changes?: Change[] } = {}) => {
         const cs = await s.createChangeSet({ ...base, venue_id: v.id, source, ...extra });
         expect(await s.applyChangeSet(cs.id, at)).toBe("applied");
         return cs;
@@ -650,6 +675,9 @@ export function storeContract(name: string, make: () => Promise<Store>, storageH
       const voice = await applied("voice", "2026-10-20T10:00:00.000Z");
       await applied("undo", "2026-10-21T10:00:00.000Z", { undoes_id: voice.id }); // voice is now reverted: it still counts, the undo does not
       await applied("auto", "2026-10-06T10:00:00.000Z");
+      await applied("comment", "2026-10-10T10:00:00.000Z"); // replies are reactions, not changes
+      // A set made only of set_comment_mode rows keeps its source and does not count either (by op, src/domain/limits.ts).
+      await applied("text", "2026-10-11T10:00:00.000Z", { changes: planChanges(await s.getSite(v.id), [{ op: "set_comment_mode", mode: "digest" }], ctx) });
       await applied("dashboard", "2026-10-07T10:00:00.000Z");
       await applied("text", TO); // the window's end is exclusive
       await applied("text", "2026-09-30T20:59:59.000Z"); // the month before
@@ -687,6 +715,13 @@ export function storeContract(name: string, make: () => Promise<Store>, storageH
       expect((await s.getSite(v.id)).items[0].price_eur).toBe(2);
       const auto = await s.createChangeSet({ ...base, chat_ref: null, source: "auto", status: "proposed", changes: [] });
       expect(await s.applyChangeSet(auto.id, LATER)).toBe("applied");
+      // Comment replies have their own cap (comment_limit) and never use a change.
+      const reply = await s.createChangeSet({ ...base, chat_ref: null, source: "comment", status: "proposed", changes: [] });
+      expect(await s.applyChangeSet(reply.id, LATER)).toBe("applied");
+      // Choosing how to hear about comments is not a site change: a text set made only of set_comment_mode rows applies at 2/2.
+      const mode = await s.createChangeSet({ ...base, source: "text", status: "proposed", changes: planChanges(await s.getSite(v.id), [{ op: "set_comment_mode", mode: "digest", digest_hour: 10 }], ctx) });
+      expect(await s.applyChangeSet(mode.id, LATER)).toBe("applied");
+      expect(await s.getVenue(v.id)).toMatchObject({ comment_mode: "digest", comment_digest_hour: 10 });
       // The next calendar month in the venue's zone (1 Nov 2026 00:00 Sofia = 31 Oct 22:00 UTC) starts from zero.
       const november = await s.createChangeSet({ ...base, source: "text", status: "proposed", changes: await price(3) });
       expect(await s.applyChangeSet(november.id, "2026-10-31T22:00:00.000Z")).toBe("applied");
@@ -697,6 +732,193 @@ export function storeContract(name: string, make: () => Promise<Store>, storageH
       await s.setChangeLimit(v.id, 0);
       const none = await s.createChangeSet({ ...base, source: "dashboard", status: "proposed", changes: [] });
       expect(await s.applyChangeSet(none.id, "2026-10-31T22:00:02.000Z")).toBe("limited");
+    });
+
+    it("finds social destinations by a config value across venues, of one kind only", async () => {
+      const s = await make();
+      const a = await s.createVenue({ slug: "fd-a", name: "A" });
+      const b = await s.createVenue({ slug: "fd-b", name: "B" });
+      const subject = `asid-${crypto.randomUUID()}`; // unique: a live store holds other venues' rows too
+      const fa = await s.upsertDestination({ venue_id: a.id, kind: "facebook", config: { page_id: "1", app_user_id: subject }, secrets: "x" });
+      await s.upsertDestination({ venue_id: b.id, kind: "facebook", config: { page_id: "2", app_user_id: `${subject}-other` }, secrets: "y" });
+      const ib = await s.upsertDestination({ venue_id: b.id, kind: "instagram", config: { ig_user_id: subject }, secrets: "z" });
+      const fb = await s.findDestinationsByConfig("facebook", "app_user_id", subject);
+      expect(fb.map((d) => d.id)).toEqual([fa.id]);
+      expect(fb[0]).not.toHaveProperty("secrets");
+      expect((await s.findDestinationsByConfig("instagram", "ig_user_id", subject)).map((d) => d.id)).toEqual([ib.id]);
+      expect(await s.findDestinationsByConfig("instagram", "app_user_id", subject)).toEqual([]);
+      await expect(s.findDestinationsByConfig("facebook", "bad key;", subject)).rejects.toThrow();
+    });
+
+    it("records data deletion requests with a confirmation code and completes them", async () => {
+      const s = await make();
+      const r = await s.createDeletionRequest({ provider: "facebook", subject_id: "asid-1", now: NOW });
+      expect(r).toMatchObject({ provider: "facebook", subject_id: "asid-1", status: "pending", completed_at: null });
+      expect(r.confirmation_code).toMatch(/^[A-Z2-9]{12}$/);
+      expect(new Date(r.created_at).toISOString()).toBe(NOW);
+      const other = await s.createDeletionRequest({ provider: "instagram", subject_id: "asid-1", now: NOW });
+      expect(other.confirmation_code).not.toBe(r.confirmation_code);
+      await s.completeDeletionRequest(r.confirmation_code, LATER);
+      const done = (await s.getDeletionRequest(r.confirmation_code))!;
+      expect(done).toMatchObject({ id: r.id, status: "completed", confirmation_code: r.confirmation_code });
+      expect(new Date(done.completed_at!).toISOString()).toBe(LATER);
+      expect((await s.getDeletionRequest(other.confirmation_code))!.status).toBe("pending");
+      expect(await s.getDeletionRequest("NOPENOPENOPE")).toBeNull();
+    });
+
+    // --- Comment replies (appended 2026-10-15) ---
+    // Meta's comment ids are unique across every venue (a unique column in Supabase): each test run uses fresh ones so the
+    // live contract can run again against the same database.
+    const tag = () => crypto.randomUUID().slice(0, 8);
+
+    it("stores the venue's comment settings with defaults (each, 9, 300) and updates them", async () => {
+      const s = await make();
+      const v = await s.createVenue({ slug: "tc1", name: "Test" });
+      expect(v).toMatchObject({ comment_mode: "each", comment_digest_hour: 9, comment_limit: 300, last_comment_digest_at: null });
+      const w = await s.createVenue({ slug: "tc2", name: "Test", comment_mode: "digest", comment_digest_hour: 10, comment_limit: null });
+      expect(w).toMatchObject({ comment_mode: "digest", comment_digest_hour: 10, comment_limit: null });
+      const u = await s.updateVenue(v.id, { comment_mode: "off", comment_digest_hour: 8, comment_limit: 50, last_comment_digest_at: LATER });
+      expect(u).toMatchObject({ comment_mode: "off", comment_digest_hour: 8, comment_limit: 50, last_comment_digest_at: LATER });
+      expect(await s.getVenueBySlug("tc1")).toEqual(u);
+      expect((await s.updateVenue(v.id, { comment_limit: null })).comment_limit).toBeNull();
+    });
+
+    it("rejects a comment_digest_hour outside 0–23 on create and update, changing nothing (venues_comment_digest_hour_check)", async () => {
+      const s = await make();
+      await expect(s.createVenue({ slug: "tch1", name: "Test", comment_digest_hour: 24 })).rejects.toThrow(/comment_digest_hour/);
+      expect(await s.getVenueBySlug("tch1")).toBeNull();
+      const v = await s.createVenue({ slug: "tch2", name: "Test", comment_digest_hour: 0 });
+      expect(v.comment_digest_hour).toBe(0);
+      await expect(s.updateVenue(v.id, { comment_digest_hour: -1, comment_mode: "digest" })).rejects.toThrow(/comment_digest_hour/);
+      await expect(s.updateVenue(v.id, { comment_digest_hour: 24 })).rejects.toThrow(/comment_digest_hour/);
+      expect(await s.getVenue(v.id)).toMatchObject({ comment_digest_hour: 0, comment_mode: "each" });
+      expect((await s.updateVenue(v.id, { comment_digest_hour: 23 })).comment_digest_hour).toBe(23);
+    });
+
+    it("upsertComments inserts new comment ids only and returns just the inserted rows", async () => {
+      const s = await make();
+      const v = await s.createVenue({ slug: "tc3", name: "Test" });
+      const other = await s.createVenue({ slug: "tc4", name: "Other" });
+      const t = tag();
+      const k = (x: string) => `${t}-${x}`;
+      const ids = (cs: { comment_id: string }[]) => cs.map((c) => c.comment_id.slice(t.length + 1));
+      const row = (comment_id: string, extra: Partial<NewSocialComment> = {}): NewSocialComment => ({
+        network: "instagram", post_ref: "media-1", comment_id: k(comment_id), parent_id: null, author_id: "u1", author_name: "Мария", text: `Коментар ${comment_id}`,
+        created_at: "2026-10-15T08:00:00.000Z", seen_at: NOW, status: "new", post_caption: "Днешното предложение", ...extra,
+      });
+      const first = await s.upsertComments(v.id, [row("c1"), row("c2", { created_at: "2026-10-15T08:05:00.000Z" })]);
+      expect(ids(first)).toEqual(["c1", "c2"]);
+      expect(first[0]).toMatchObject({ venue_id: v.id, status: "new", change_set_id: null, reply_id: null, replied_at: null, draft_text: null, draft_kind: null, deferred: false, post_permalink: null });
+      const second = await s.upsertComments(v.id, [row("c2"), row("c3", { parent_id: k("c1"), status: "nested", created_at: "2026-10-15T08:10:00.000Z" })]);
+      expect(ids(second)).toEqual(["c3"]); // c2 was known
+      expect(second[0]).toMatchObject({ parent_id: k("c1"), status: "nested" });
+      expect(await s.upsertComments(v.id, [])).toEqual([]);
+      // A known id stays the first poll's row: nothing is overwritten.
+      expect(await s.upsertComments(v.id, [row("c1", { text: "changed", status: "own" })])).toEqual([]);
+      expect(await s.getComment(first[0].id)).toEqual(first[0]);
+      const listed = await s.listComments(v.id);
+      expect(ids(listed)).toEqual(["c3", "c2", "c1"]); // newest created_at first
+      expect(ids(await s.listComments(v.id, { status: ["new"] }))).toEqual(["c2", "c1"]);
+      expect(ids(await s.listComments(v.id, { status: ["new"], limit: 1 }))).toEqual(["c2"]);
+      expect(ids(await s.listComments(v.id, { since: "2026-10-15T08:01:00.000Z" }))).toEqual(["c3", "c2"]);
+      expect(await s.listComments(other.id)).toEqual([]);
+      expect((await s.findComment(v.id, k("c1")))?.id).toBe(first[0].id);
+      expect(await s.findComment(other.id, k("c1"))).toBeNull();
+      expect(await s.getComment(first[0].id)).toEqual(first[0]);
+      expect(await s.getComment(crypto.randomUUID())).toBeNull();
+    });
+
+    it("updates a comment, counts actions in a month window and purges old rows", async () => {
+      const s = await make();
+      const v = await s.createVenue({ slug: "tc5", name: "Test" });
+      const t = tag();
+      const cs = await s.createChangeSet({ venue_id: v.id, chat_ref: null, summary_bg: "x", summary_en: "x", preview_bg: "", preview_en: "", source: "comment", status: "proposed", changes: [] });
+      const base = { network: "facebook" as const, post_ref: "p1", parent_id: null, author_id: "u", author_name: "A", text: "t", seen_at: NOW, status: "new" as const, post_caption: "" };
+      const [a, b, c, old] = await s.upsertComments(v.id, [
+        { ...base, comment_id: `${t}-fa`, created_at: "2026-10-15T08:00:00.000Z" },
+        { ...base, comment_id: `${t}-fb`, created_at: "2026-10-15T08:01:00.000Z" },
+        { ...base, comment_id: `${t}-fc`, created_at: "2026-10-15T08:02:00.000Z" },
+        { ...base, comment_id: `${t}-fold`, created_at: "2026-09-01T08:00:00.000Z" },
+      ]);
+      expect(a).toMatchObject({ hold_attempts: 0, held_at: null });
+      await s.updateComment(a.id, { status: "proposed", change_set_id: cs.id, draft_text: "Благодарим!", draft_kind: "praise", deferred: true, hold_attempts: 2, held_at: "2026-10-15T08:30:00.000Z" });
+      expect(await s.getComment(a.id)).toMatchObject({ status: "proposed", change_set_id: cs.id, draft_text: "Благодарим!", draft_kind: "praise", deferred: true, hold_attempts: 2, held_at: "2026-10-15T08:30:00.000Z" });
+      await s.updateComment(a.id, { status: "replied", reply_id: "r1", replied_at: "2026-10-15T09:00:00.000Z", deferred: false });
+      await s.updateComment(b.id, { status: "hidden", replied_at: "2026-10-15T09:01:00.000Z" });
+      await s.updateComment(c.id, { status: "replied", reply_id: "r3", replied_at: "2026-11-01T09:00:00.000Z" });
+      await s.updateComment(old.id, { status: "ignored" });
+      await expect(s.updateComment(crypto.randomUUID(), { status: "ignored" })).rejects.toThrow();
+      expect(await s.countCommentActions(v.id, "2026-09-30T21:00:00.000Z", "2026-10-31T22:00:00.000Z")).toBe(2);
+      expect(await s.countCommentActions(v.id, "2026-10-31T22:00:00.000Z", "2026-11-30T22:00:00.000Z")).toBe(1);
+      // 30 days: the customer text and author are blanked, the row (status, replied_at) stays for the monthly count.
+      await s.updateComment(old.id, { status: "replied", reply_id: "r0", replied_at: "2026-10-01T09:00:00.000Z" });
+      expect(await s.redactComments("2026-09-15T00:00:00.000Z")).toBe(1);
+      expect(await s.getComment(old.id)).toMatchObject({ text: "", author_name: "", author_id: "", status: "replied", replied_at: "2026-10-01T09:00:00.000Z", comment_id: `${t}-fold` });
+      expect(await s.getComment(a.id)).toMatchObject({ text: "t", author_name: "A", author_id: "u" });
+      expect(await s.redactComments("2026-09-15T00:00:00.000Z")).toBe(0); // already blank
+      expect(await s.countCommentActions(v.id, "2026-09-30T21:00:00.000Z", "2026-10-31T22:00:00.000Z")).toBe(3);
+      // 60 days: the row itself goes.
+      expect(await s.purgeComments("2026-09-15T00:00:00.000Z")).toBe(1);
+      expect((await s.listComments(v.id)).map((x) => x.comment_id)).toEqual([`${t}-fc`, `${t}-fb`, `${t}-fa`]);
+      expect(await s.purgeComments("2026-09-15T00:00:00.000Z")).toBe(0);
+    });
+
+    it("redacts the customer text of comment sets created before a time, once, and leaves other sets alone", async () => {
+      const s = await make();
+      const v = await s.createVenue({ slug: "tc8", name: "Test" });
+      const reply: Change = { position: 0, op: "social_reply", entity: "social_reply", entity_id: "c-1", before: null, after: { network: "instagram", comment_id: "c-1", post_ref: "m-1", author_name: "maria.k", comment_text: "Имате ли безглутенови?", reply_text: "Да, всеки ден!" } };
+      const hide: Change = { position: 1, op: "social_moderate", entity: "social_moderate", entity_id: "c-2", before: { network: "facebook", comment_id: "c-2", author_name: "Spam Bot", comment_text: "buy now", action: "unhide" }, after: { network: "facebook", comment_id: "c-2", author_name: "Spam Bot", comment_text: "buy now", action: "hide" } };
+      const text = "Имате ли безглутенови?";
+      const cs = await s.createChangeSet({ venue_id: v.id, chat_ref: "tg:10", summary_bg: `Отговор на maria.k: ${text}`, summary_en: `Reply to maria.k: ${text}`, preview_bg: `„${text}“`, preview_en: `“${text}”`, source: "comment", status: "proposed", changes: [reply, hide] });
+      const other = await s.createChangeSet({ venue_id: v.id, chat_ref: "tg:10", summary_bg: "Цена", summary_en: "Price", preview_bg: "p", preview_en: "p", source: "text", status: "proposed", changes: [] });
+      expect(await s.redactCommentSets(cs.created_at, v.id)).toBe(0); // created_at < before: the set itself is not older than the cutoff
+      expect((await s.getChangeSet(cs.id)).summary_en).toContain(text);
+      const after = new Date(Date.parse(other.created_at) + 1000).toISOString();
+      expect(await s.redactCommentSets(after, v.id)).toBe(1);
+      const r = await s.getChangeSet(cs.id);
+      expect(r).toMatchObject({ summary_bg: COMMENT_REDACTED.bg, summary_en: COMMENT_REDACTED.en, preview_bg: COMMENT_REDACTED.bg, preview_en: COMMENT_REDACTED.en, status: "proposed" });
+      expect(r.changes[0].after).toEqual({ network: "instagram", comment_id: "c-1", post_ref: "m-1", author_name: "", comment_text: "", reply_text: "Да, всеки ден!" });
+      expect(r.changes[1].before).toMatchObject({ author_name: "", comment_text: "", action: "unhide" });
+      expect(r.changes[1].after).toMatchObject({ author_name: "", comment_text: "", action: "hide" });
+      expect(JSON.stringify(r)).not.toContain("безглутенови");
+      expect(JSON.stringify(r)).not.toContain("Spam Bot");
+      expect(await s.getChangeSet(other.id)).toMatchObject({ summary_en: "Price", preview_en: "p" });
+      expect(await s.redactCommentSets(after, v.id)).toBe(0); // already redacted
+    });
+
+    it("stores one proposal message ref per owner chat on a change set", async () => {
+      const s = await make();
+      const v = await s.createVenue({ slug: "tc6", name: "Test" });
+      const cs = await s.createChangeSet({ venue_id: v.id, chat_ref: "tg:10", summary_bg: "x", summary_en: "x", preview_bg: "", preview_en: "", source: "comment", status: "proposed", message_ref: "42", proposal_refs: { "tg:10": "42", "fb:77": "m.9" }, changes: [] });
+      expect(cs.proposal_refs).toEqual({ "tg:10": "42", "fb:77": "m.9" });
+      const plain = await s.createChangeSet({ venue_id: v.id, chat_ref: "tg:10", summary_bg: "x", summary_en: "x", preview_bg: "", preview_en: "", source: "text", status: "proposed", changes: [] });
+      expect(plain.proposal_refs).toBeNull();
+      await s.updateChangeSet(plain.id, { proposal_refs: { "tg:10": "43" } });
+      expect((await s.getChangeSet(plain.id)).proposal_refs).toEqual({ "tg:10": "43" });
+      expect((await s.listChangeSets(v.id, { status: ["proposed"] })).find((x) => x.id === cs.id)?.proposal_refs).toEqual({ "tg:10": "42", "fb:77": "m.9" });
+    });
+
+    it("lists a change set's comments by changeSetId; a demo reset keeps comments, deleting the venue removes them", async () => {
+      const s = await make();
+      const v = await s.createVenue({ slug: "tc7", name: "Test" });
+      const t = tag();
+      const cs = await s.createChangeSet({ venue_id: v.id, chat_ref: null, summary_bg: "x", summary_en: "x", preview_bg: "", preview_en: "", source: "comment", status: "proposed", changes: [] });
+      const base = { network: "instagram" as const, post_ref: "m1", parent_id: null, author_id: "u", author_name: "A", text: "t", seen_at: NOW, status: "new" as const, post_caption: "" };
+      const [a, b] = await s.upsertComments(v.id, [
+        { ...base, comment_id: `${t}-ga`, created_at: "2026-10-15T08:00:00.000Z" },
+        { ...base, comment_id: `${t}-gb`, created_at: "2026-10-15T08:01:00.000Z", post_permalink: "https://www.instagram.com/p/x/" },
+      ]);
+      expect(b.post_permalink).toBe("https://www.instagram.com/p/x/");
+      await s.updateComment(a.id, { status: "proposed", change_set_id: cs.id });
+      expect((await s.listComments(v.id, { changeSetId: cs.id })).map((x) => x.id)).toEqual([a.id]);
+      expect(await s.listComments(v.id, { changeSetId: cs.id, status: ["new"] })).toEqual([]);
+      expect(await s.listComments(v.id, { changeSetId: crypto.randomUUID() })).toEqual([]);
+      await s.clearVenueContent(v.id); // the demo reset deletes change sets; the comments stay, unlinked
+      expect((await s.listComments(v.id)).map((x) => x.id)).toEqual([b.id, a.id]);
+      expect(await s.getComment(a.id)).toMatchObject({ status: "proposed", change_set_id: null });
+      await s.deleteVenue(v.id);
+      expect(await s.getComment(a.id)).toBeNull();
+      expect(await s.getComment(b.id)).toBeNull();
     });
   });
 }

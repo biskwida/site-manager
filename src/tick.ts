@@ -6,11 +6,15 @@ import { pollDeployments } from "./deploy/run";
 import type { Deployer } from "./deploy/types";
 import { planChange } from "./domain/changes";
 import { itemName, tr } from "./domain/format";
-import type { Lang } from "./domain/types";
+import type { Lang, Venue } from "./domain/types";
 import type { ApplyResult, ExpiredTimer, Store } from "./store/types";
 import { limitReachedLine, usageLine } from "./bot/limit";
 import { channelOf, isMetaChannel } from "./channels/ref";
 import { formatDateTime } from "./time";
+import { COMMENT_POST_WINDOW_MS, pollVenueComments, purgeOldComments } from "./social/comments-poll";
+import { COMMENT_PROPOSAL_TTL_MS, commentsOfSet, proposalTargets, proposalTtlHours, proposeForComments } from "./social/comments-propose";
+import type { DraftFn } from "./social/comments-draft";
+import { runCommentDigests } from "./social/comments-digest";
 
 export interface TickDeps {
   store: Store;
@@ -22,6 +26,8 @@ export interface TickDeps {
   sync?: SyncDeps | null;
   /** When set, in-flight deployments are polled (pollDeployments). */
   deployer?: Deployer | null;
+  /** Comment reply drafting (src/social/comments-draft.ts); null/undefined = comments are polled but never proposed. */
+  comments?: { draft: DraftFn } | null;
 }
 export interface TickReport {
   applied: string[];
@@ -37,6 +43,12 @@ export interface TickReport {
   pushed?: string[];
   /** Due scheduled sets refused by the monthly change limit (now cancelled). */
   limited?: string[];
+  /** New customer comments stored this tick (comment replies, 2026-10-15); absent without sync deps. */
+  comments_found?: number;
+  /** Comment sets proposed this tick (mode "each"); absent without sync deps. */
+  comments_proposed?: number;
+  /** Venue ids that got their daily comment digest this tick (global tick only). */
+  digests?: string[];
 }
 
 const HOUR = 3_600_000;
@@ -56,18 +68,24 @@ export async function runTick(d: TickDeps): Promise<TickReport> {
   const now = d.now.toISOString();
   const report: TickReport = { applied: [], auto: [], reminded: [], expired: [], deployed: [], deployFailed: [], cleaned: [], limited: [] };
 
-  // 1. Stale proposals (before applying, so a 2 h-old proposal cannot be applied by a late tap).
+  // 1. Stale proposals (before applying, so an old proposal cannot be applied by a late tap). 2 h; comment sets 24 h, and
+  //    every owner who got a comment set's buttons is told; its comments become expired.
   const cutoff = new Date(d.now.getTime() - PROPOSAL_TTL_MS).toISOString();
   for (const cs of await d.store.listProposedBefore(cutoff, d.venueId)) {
+    if (cs.source === "comment" && Date.parse(cs.created_at) > d.now.getTime() - COMMENT_PROPOSAL_TTL_MS) continue;
     // Conditional: a tap that confirmed the set between the list and this write wins.
     if ((await d.store.expireChangeSet(cs.id, now)) !== "expired") continue;
     report.expired.push(cs.id);
-    if (d.messenger && cs.chat_ref !== null) {
-      const { lang } = await langFor(d.store, cs.venue_id, cs.chat_ref);
-      const preview = lang === "bg" ? cs.preview_bg : cs.preview_en;
-      const line = tr(lang, "⌛ Изтекло: предложението не беше потвърдено в рамките на 2 часа.", "⌛ Expired: the proposal was not confirmed within 2 hours.");
-      await d.messenger.conclude(cs.chat_ref, cs.message_ref, `${preview}\n\n${line}`, line, { proactive: true });
+    if (d.messenger) {
+      const hours = proposalTtlHours(cs.source);
+      for (const [chatRef, messageRef] of proposalTargets(cs)) {
+        const { lang } = await langFor(d.store, cs.venue_id, chatRef);
+        const preview = lang === "bg" ? cs.preview_bg : cs.preview_en;
+        const line = tr(lang, `⌛ Изтекло: предложението не беше потвърдено в рамките на ${hours} часа.`, `⌛ Expired: the proposal was not confirmed within ${hours} hours.`);
+        await d.messenger.conclude(chatRef, messageRef, `${preview}\n\n${line}`, line, { proactive: true });
+      }
     }
+    if (cs.source === "comment") for (const c of await commentsOfSet(d.store, cs)) await d.store.updateComment(c.id, { status: "expired" });
   }
 
   // 2. Due scheduled sets.
@@ -156,9 +174,62 @@ export async function runTick(d: TickDeps): Promise<TickReport> {
     } catch (e) {
       console.error("[tick] instagram token refresh failed:", e instanceof Error ? e.message : e);
     }
+    // 9. Customer comments under the venue's posts (comment replies, 2026-10-15), global tick only: read every 15 min per venue
+    //    (after step 8, so Instagram tokens are fresh) and propose in mode "each" (digest venues wait for their daily digest,
+    //    "off" venues only show them on the dashboard). The per-venue tick runs before an owner's agent turn inside the webhook
+    //    budget: it makes no Graph read and no model call, and only re-sends that venue's held comments (deferred, drafts
+    //    stored), so the owner who just wrote gets them at once. Keep 30 days: the purge runs on the global tick only.
+    report.comments_found = 0;
+    report.comments_proposed = 0;
+    let venues: Venue[] = [];
+    try {
+      venues = d.venueId ? [await d.store.getVenue(d.venueId)] : await d.store.listVenues({ status: "live" });
+    } catch (e) {
+      console.error("[tick] comment poll failed:", e instanceof Error ? e.name : "error");
+    }
+    for (const venue of venues) {
+      // One venue's failure (Graph, drafting) never stops the others.
+      try {
+        if (!d.venueId) {
+          const r = await pollVenueComments(d.sync, venue, d.now);
+          report.comments_found += r.inserted.length;
+        }
+        if (!d.comments || !d.messenger || venue.comment_mode !== "each") continue;
+        const since = new Date(d.now.getTime() - COMMENT_POST_WINDOW_MS).toISOString();
+        const fresh = (await d.store.listComments(venue.id, { status: ["new"], since })).filter((c) => c.parent_id === null && (!d.venueId || (c.deferred && c.draft_kind !== null)));
+        if (fresh.length === 0) continue;
+        const draft = d.venueId ? noDraftOnScopedTick : d.comments.draft;
+        const p = await proposeForComments({ store: d.store, messenger: d.messenger, now: () => d.now, draft, log: d.sync.log }, venue, fresh, { mode: "each" });
+        report.comments_proposed += p.sets.length;
+      } catch (e) {
+        console.error(`[tick] comments for venue ${venue.id} failed:`, e instanceof Error ? e.name : "error");
+      }
+    }
+    // 10. Daily comment digests (venues in "digest" mode) at their local hour, once per local day. Global tick only: the
+    //     per-venue tick before an owner's message leaves it to the cron.
+    if (!d.venueId && d.comments && d.messenger) {
+      try {
+        const r = await runCommentDigests({ store: d.store, messenger: d.messenger, now: () => d.now, draft: d.comments.draft, log: d.sync.log }, { now: d.now });
+        report.digests = r.sent;
+      } catch (e) {
+        console.error("[tick] comment digests failed:", e instanceof Error ? e.name : "error");
+      }
+    }
+    if (!d.venueId) {
+      try {
+        await purgeOldComments(d.store, d.now);
+      } catch (e) {
+        console.error("[tick] comment purge failed:", e instanceof Error ? e.name : "error");
+      }
+    }
   }
   return report;
 }
+
+/** The per-venue tick only re-sends held comments, whose drafts are stored: it never calls the model. */
+const noDraftOnScopedTick: DraftFn = async () => {
+  throw new Error("no drafting on a per-venue tick");
+};
 
 /**
  * Deletes draft venues created more than DRAFT_TTL_MS ago (cookie-only drafts nobody published), with their stored images.

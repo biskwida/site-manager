@@ -1,0 +1,13 @@
+{
+  "id": "P012",
+  "buys": false,
+  "purchases_first_month": 0,
+  "reason_code": "price",
+  "reason": "Another 25 euros a month on top of all the subscriptions I already pay. The menu changes, sure, but my manager writes it on the board and people come in anyway.",
+  "objection": "It's one more monthly bill, and I'm not the one who'd use it. My manager would have to keep messaging it, and if they stop, I'm paying for a site nobody updates.",
+  "would_change_my_mind": "My manager tries it free for a month, actually uses it, and I can see it brought in more customers from Google.",
+  "price_too_cheap": 3,
+  "price_cheap": 8,
+  "price_expensive": 15,
+  "price_too_expensive": 25
+}

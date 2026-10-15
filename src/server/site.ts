@@ -49,18 +49,22 @@ export async function loadSite(store: Store, slug: string, opts: LoadSiteOptions
   return { state, draft };
 }
 
-/** The venue as the public feed sends it: no deploy record (provider ids, build errors), no wizard draft, no Instagram import list, no own-site URL, no change limit. */
-export type PublicVenue = Omit<Venue, "deploy" | "wizard_draft" | "instagram_import" | "site_url" | "change_limit">;
+/** The venue as the public feed sends it: no deploy record (provider ids, build errors), no wizard draft, no Instagram import list, no own-site URL, no change limit, no comment settings. */
+export type PublicVenue = Omit<Venue, "deploy" | "wizard_draft" | "instagram_import" | "site_url" | "change_limit" | "comment_mode" | "comment_digest_hour" | "comment_limit" | "last_comment_digest_at">;
 export type PublicSiteState = Omit<SiteState, "venue"> & { venue: PublicVenue };
 
 /** For GET /api/site/[slug]: everything templates and outside readers (Coffique) use, minus the owner-only venue fields. */
 export function publicSiteState(state: SiteState): PublicSiteState {
-  const { deploy, wizard_draft, instagram_import, site_url, change_limit, ...venue } = state.venue;
+  const { deploy, wizard_draft, instagram_import, site_url, change_limit, comment_mode, comment_digest_hour, comment_limit, last_comment_digest_at, ...venue } = state.venue;
   void deploy;
   void wizard_draft;
   void instagram_import;
   void site_url;
   void change_limit; // the plan's limit is the owner's business, not the public's
+  void comment_mode; // how the owner hears about comments is the owner's business
+  void comment_digest_hour;
+  void comment_limit;
+  void last_comment_digest_at;
   // background is always present for outside readers: null = the design's own page colour.
   return { ...state, venue: { ...venue, theme: { ...venue.theme, background: venue.theme.background ?? null } } };
 }

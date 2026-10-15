@@ -3,7 +3,7 @@ import { bestInkContrast, isReadableBackground, READABLE_BACKGROUND_MIN } from "
 import { isValidHours } from "./hours";
 import { PRICE_MAX, PRICE_MIN, round2 } from "./pricing";
 import {
-  isExternalEntity, MONO_TEXT_KEYS, SITE_TEXT_KEYS, VENUE_TEXT_KEYS,
+  COMMENT_MODES, isExternalEntity, MONO_TEXT_KEYS, SITE_TEXT_KEYS, VENUE_TEXT_KEYS,
   type Announcement, type Change, type ChangeOp, type Entity, type Holiday, type Item, type Row, type SiteState, type SiteText, type TextKey,
 } from "./types";
 
@@ -150,6 +150,11 @@ export function validateChange(s: SiteState, op: ChangeOp, ctx: PlanContext): st
       }
       return null;
     }
+    case "set_comment_mode": {
+      if (!(COMMENT_MODES as readonly string[]).includes(op.mode)) return `mode must be one of ${COMMENT_MODES.join(", ")}.`;
+      if (op.digest_hour !== undefined && !(Number.isInteger(op.digest_hour) && op.digest_hour >= 0 && op.digest_hour <= 23)) return "digest_hour must be a whole hour 0–23 in the venue's time zone.";
+      return null;
+    }
     default:
       return `unknown op "${(op as { op: string }).op}".`;
   }
@@ -261,6 +266,10 @@ export function planChange(s: SiteState, op: ChangeOp, ctx: PlanContext, positio
       if (op.accent !== undefined) theme.accent = op.accent.toLowerCase();
       if (op.background !== undefined) theme.background = op.background === null ? null : op.background.toLowerCase();
       return change(position, op, "venue", v.id, { theme: clone(v.theme) }, { theme });
+    }
+    case "set_comment_mode": {
+      const after: Row = { comment_mode: op.mode, comment_digest_hour: op.digest_hour ?? v.comment_digest_hour };
+      return change(position, op, "venue", v.id, { comment_mode: v.comment_mode, comment_digest_hour: v.comment_digest_hour }, after);
     }
   }
 }

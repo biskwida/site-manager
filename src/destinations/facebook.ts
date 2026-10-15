@@ -5,8 +5,9 @@
 // there (when the Page cannot be checked, it fails without retry and asks the owner to look). Undo deletes the feed post; a story
 // cannot be deleted through the API and disappears on its own within 24 hours, so undo only says so.
 import type { SocialPostRow, SocialTarget } from "../domain/types";
-import { FB_GRAPH, GraphClient, MetaApiError } from "./meta-graph";
-import { deletedIn, entriesIn, networkTargets, publishedIn, relevantFor, safeLink, type SocialPublished } from "./social-common";
+import { pushCommentChanges } from "./comment-push";
+import { FB_GRAPH, GraphClient, MetaApiError, metaTime } from "./meta-graph";
+import { commentNetworkOf, commentResultIn, deletedIn, entriesIn, networkTargets, publishedIn, relevantFor, safeLink, type SocialPublished } from "./social-common";
 import type { DestinationAdapter, PushContext, PushResult } from "./types";
 
 const LINES = {
@@ -22,11 +23,6 @@ export function socialFailure(e: unknown, lines: typeof LINES, partial: Record<s
   const retry = e instanceof MetaApiError ? e.retryable : true;
   const msg = e instanceof Error ? e.message : String(e);
   return { ok: false, retry, error: msg, line: retry ? lines.retry : lines.error(msg), partial, ...(e instanceof MetaApiError ? { code: e.code } : {}) };
-}
-
-/** Meta's "2026-10-11T09:00:00+0000" → ms (NaN when unreadable). */
-export function metaTime(s: unknown): number {
-  return typeof s === "string" ? Date.parse(s.replace(/([+-]\d\d)(\d\d)$/, "$1:$2")) : NaN;
 }
 
 async function permalink(fb: GraphClient, id: string): Promise<string | null> {
@@ -64,15 +60,20 @@ export const facebookAdapter: DestinationAdapter = {
     const token = ctx.secrets.page_token;
     if (!/^\d{1,32}$/.test(pageId) || !token) return { ok: false, retry: false, error: "Facebook is not connected.", code: "sm_social_not_connected", line: LINES.error("not connected") };
     const fb = new GraphClient(FB_GRAPH, token, ctx.fetch ?? fetch);
+    // A set holds post rows or comment rows (replies / moderation, 2026-10-15); each kind keeps its own part of the result.
+    const posts = ctx.changes.filter((c) => c.entity === "social_post");
+    const comments = ctx.changes.filter((c) => commentNetworkOf(c) === "facebook");
+    const acc = commentResultIn(ctx.prior ?? []);
     const entries = new Map<string, SocialPublished>(entriesIn(ctx.prior ?? []).map((e) => [`${e.target}|${e.media_id}`, e]));
-    const current = () => ({ published: [...entries.values()] });
+    const current = () => ({ ...(posts.length ? { published: [...entries.values()] } : {}), ...(comments.length ? acc : {}) });
     const save = async () => ctx.checkpoint?.(current());
     const deleted: { target: string; id: string }[] = [];
     const stories: { target: string; id: string | null }[] = [];
     const alreadyDeleted = new Set(deletedIn(ctx.prior ?? []));
     let undo = false;
+    const outcome = () => ({ ...(posts.length ? (undo ? { undo: true, deleted, stories } : { published: [...entries.values()] }) : {}), ...(comments.length ? acc : {}) });
     try {
-      for (const c of ctx.changes) {
+      for (const c of posts) {
         const targets = networkTargets(c, "facebook");
         if (c.after) {
           const row = c.after as unknown as SocialPostRow;
@@ -112,9 +113,10 @@ export const facebookAdapter: DestinationAdapter = {
           }
         }
       }
-      return { ok: true, result: undo ? { undo: true, deleted, stories } : current(), line: LINES.ok };
+      if (comments.length) await pushCommentChanges(ctx, "facebook", fb, acc, save);
+      return { ok: true, result: outcome(), line: LINES.ok };
     } catch (e) {
-      return socialFailure(e, LINES, undo ? { undo: true, deleted, stories } : current());
+      return socialFailure(e, LINES, outcome());
     }
   },
 };

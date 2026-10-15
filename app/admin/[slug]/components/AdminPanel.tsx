@@ -3,6 +3,7 @@ import { LangToggle, useLang } from "@/src/i18n";
 import type { AdminOverview } from "@/src/server/admin";
 import { formatDateTime } from "@/src/time";
 import { AppsCard } from "./AppsCard";
+import { CommentsCard } from "./CommentsCard";
 import { Empty, Section } from "./bits";
 import { PendingList, ScheduledList } from "./Decisions";
 import { DomainCard } from "./DomainCard";
@@ -51,6 +52,7 @@ export function AdminPanel({ slug, adminKey, initial }: { slug: string; adminKey
         <AppsCard apps={o.connected_apps ?? []} post={post} />
         <WordPressCard overview={o.wordpress ?? null} slug={slug} adminKey={adminKey} baseUrl={o.public_url.replace(new RegExp(`/${slug}$`), "")} tz={tz} />
         <SocialCard overview={o.social ?? null} slug={slug} adminKey={adminKey} tz={tz} />
+        <CommentsCard overview={o.comments ?? null} post={post} tz={tz} />
         {/* Hosted mode (no deployer on this server) or an own site: there is no provider project of ours to attach a domain to. */}
         {!o.hosted && !o.own_site && <DomainCard overview={o} post={post} />}
         <QrCard siteUrl={o.site_url} />

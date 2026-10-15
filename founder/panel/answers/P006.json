@@ -1,0 +1,13 @@
+{
+  "id": "P006",
+  "buys": false,
+  "purchases_first_month": 0,
+  "reason_code": "trust",
+  "reason": "I don't buy things from an ad or an app I've never heard of. My daughter does the Instagram and that's enough for now; if another café owner I know used this and told me it works, maybe, but not from a stranger.",
+  "objection": "The AI puts a wrong price on my site and customers come in arguing that the cappuccino is cheaper than what I charge. And who do I call when it goes wrong, a WhatsApp bot?",
+  "would_change_my_mind": "Another café owner in Sofia I know shows me it on their phone, tells me it never got a price wrong, and there's a real person who speaks Bulgarian I can call.",
+  "price_too_cheap": 5,
+  "price_cheap": 10,
+  "price_expensive": 20,
+  "price_too_expensive": 30
+}

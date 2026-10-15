@@ -77,6 +77,14 @@ export interface Venue {
   hours: WeekHours;
   /** Change sets the owner may apply per calendar month in `tz` (src/domain/limits.ts); null = unlimited. Server-only. */
   change_limit: number | null;
+  /** Comment replies (2026-10-15). Server-only, never in the public feed. */
+  comment_mode: CommentMode;
+  /** 0–23, the venue's local hour for the daily digest. */
+  comment_digest_hour: number;
+  /** Comment actions (replies + moderations) per calendar month; null = unlimited. Default 300. */
+  comment_limit: number | null;
+  /** ISO of the last digest sent (or skipped for lack of comments); one per local day. */
+  last_comment_digest_at: string | null;
   tz: string;
   default_lang: Lang;
   theme: Theme;
@@ -230,12 +238,13 @@ export type ChangeOp =
   | { op: "add_announcement"; text_bg: string; text_en: string; expires_at: string | null; id?: string }
   | { op: "remove_announcement"; announcement_id: string }
   | { op: "set_text"; key: TextKey; text_bg: string; text_en: string }
-  | { op: "set_theme"; accent?: string; background?: string | null };
+  | { op: "set_theme"; accent?: string; background?: string | null }
+  | { op: "set_comment_mode"; mode: CommentMode; digest_hour?: number };
 export type OpName = ChangeOp["op"];
 export const OP_NAMES: readonly OpName[] = [
   "set_price", "set_sold_out", "add_item", "update_item", "remove_item", "set_item_image", "set_cover_image", "set_logo_image",
   "add_gallery_image", "remove_gallery_image", "set_hours", "add_holiday", "remove_holiday", "add_announcement", "remove_announcement",
-  "set_text", "set_theme",
+  "set_text", "set_theme", "set_comment_mode",
 ];
 
 export type Entity = "venue" | "category" | "item" | "holiday" | "announcement" | "media" | "site_text" | WpEntity | SocialEntity;
@@ -255,7 +264,8 @@ export interface Change {
   after: Row | null;
 }
 
-export type ChangeSource = "text" | "voice" | "photo" | "dashboard" | "auto" | "undo";
+/** "comment": made by the comment poller or reply_to_comments; sent to every owner, 24 h TTL, outside the monthly change limit. */
+export type ChangeSource = "text" | "voice" | "photo" | "dashboard" | "auto" | "undo" | "comment";
 export type ChangeSetStatus = "proposed" | "scheduled" | "applied" | "rejected" | "expired" | "cancelled" | "reverted";
 
 export interface ChangeSet {
@@ -277,6 +287,8 @@ export interface ChangeSet {
   undoes_id: string | null;
   /** The proposal message on the owner's channel (Telegram message id as text; Meta ids as given). */
   message_ref: string | null;
+  /** Comment sets: one proposal message per owner chat, `{ "<chat_ref>": "<message_ref>" }`; chat_ref/message_ref keep the first owner. */
+  proposal_refs: Record<string, string> | null;
   created_at: string;
   changes: Change[];
 }
@@ -321,11 +333,15 @@ export function isWpEntity(e: string): e is WpEntity {
   return (WP_ENTITIES as readonly string[]).includes(e);
 }
 
-// --- Social posting (social track, appended 2026-10-11) ---
-/** The op produced by the social_post agent tool (src/agent/social-tools.ts); never by planChange. */
-export type SocialOpName = "social_post";
-/** A photo published to the venue's Facebook Page and/or Instagram account: the store applies it as a no-op, the destinations publish it. */
-export type SocialEntity = "social_post";
+// --- Social posting (social track, appended 2026-10-11) and comment replies (2026-10-15) ---
+/** Ops produced by the social tools (src/agent/social-tools.ts, src/agent/comment-tools.ts) and the comment poller; never by planChange. */
+export type SocialOpName = "social_post" | "social_reply" | "social_moderate";
+/** Entities that live on Facebook/Instagram: the store applies them as no-ops, the destinations publish them. */
+export type SocialEntity = "social_post" | "social_reply" | "social_moderate";
+export const SOCIAL_ENTITIES: readonly SocialEntity[] = ["social_post", "social_reply", "social_moderate"];
+export function isSocialEntity(e: string): e is SocialEntity {
+  return (SOCIAL_ENTITIES as readonly string[]).includes(e);
+}
 export type SocialTarget = "facebook_post" | "facebook_story" | "instagram_post" | "instagram_story";
 export const SOCIAL_TARGETS: readonly SocialTarget[] = ["facebook_post", "facebook_story", "instagram_post", "instagram_story"];
 /** `after` of a social_post row (entity_id = our media id); undo swaps it into `before`. */
@@ -340,5 +356,32 @@ export interface SocialPostRow {
 }
 /** Entities that live outside our database (the owner's WordPress site, Facebook, Instagram): applied as no-ops, written by destination pushes. */
 export function isExternalEntity(e: string): e is WpEntity | SocialEntity {
-  return isWpEntity(e) || e === "social_post";
+  return isWpEntity(e) || isSocialEntity(e);
+}
+
+// --- Comment replies (2026-10-15) ---
+export type CommentNetwork = "facebook" | "instagram";
+/** The one display name per network (previews, sync lines, dashboard). */
+export const NETWORK_NAMES: Readonly<Record<CommentNetwork, string>> = { facebook: "Facebook", instagram: "Instagram" };
+/** How the owner hears about new comments: one proposal each, one digest a day, or only on the dashboard. */
+export type CommentMode = "each" | "digest" | "off";
+export const COMMENT_MODES: readonly CommentMode[] = ["each", "digest", "off"];
+export type ModerateAction = "hide" | "unhide" | "delete";
+/** `after` of a social_reply row (entity_id = Meta's comment id); undo swaps it into `before` and the adapter deletes the reply. */
+export interface SocialReplyRow {
+  network: CommentNetwork;
+  comment_id: string;
+  post_ref: string;
+  author_name: string;
+  comment_text: string;
+  reply_text: string;
+  permalink?: string;
+}
+/** `after` of a social_moderate row (entity_id = Meta's comment id). Undo of hide un-hides; a delete cannot be undone. */
+export interface SocialModerateRow {
+  network: CommentNetwork;
+  comment_id: string;
+  author_name: string;
+  comment_text: string;
+  action: ModerateAction;
 }

@@ -1,0 +1,13 @@
+{
+  "id": "P017",
+  "buys": false,
+  "purchases_first_month": 0,
+  "reason_code": "need",
+  "reason": "My guests find me on Google Maps, Glovo and Wolt, and my menu lives there. I don't need a website, and paying 25 euros a month for one when the delivery apps already bring the orders is money I'd rather keep.",
+  "objection": "It doesn't update Glovo or Wolt, and that's where my menu and prices actually matter. So I'd still be changing things in the apps by hand, and this would be one more thing to keep track of.",
+  "would_change_my_mind": "If the same message also changed my menu and sold-out items on Glovo and Wolt, not just Google and a website.",
+  "price_too_cheap": 3,
+  "price_cheap": 8,
+  "price_expensive": 15,
+  "price_too_expensive": 25
+}

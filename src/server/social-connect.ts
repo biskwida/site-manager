@@ -1,9 +1,11 @@
 // src/server/social-connect.ts
 // Server-only. Connects a venue's Facebook Page and Instagram professional account for posting (src/destinations/facebook.ts,
 // instagram.ts). Started from the dashboard (admin key), finished by Meta's OAuth redirect:
-// - Facebook Login → user token → long-lived user token → /me/accounts → one Page is stored; several → a BG/EN chooser whose
+// - Facebook Login → user token → long-lived user token → /me/accounts → one Page is stored (with the user's app-scoped id); several → a BG/EN chooser whose
 //   forms carry a signed, short-lived state with the encrypted long-lived user token; choosing re-reads /me/accounts.
 // - Instagram API with Instagram Login (publishing scopes) → short-lived token → long-lived token → /me; personal accounts refused.
+// Scopes now include reading and replying to comments; existing connections reconnect once (the dashboard says so): a stored
+// connection carries `comments: true` (COMMENTS_CAPABILITY) only when it was made with the comment scopes.
 // Separate from the wizard's photo import (src/server/instagram.ts): own authorize request, own state key and cookie, own callback;
 // only the constants and the code exchange are shared. State = base64url(JSON) "." base64url(HMAC) under a key derived from the
 // app secret; a nonce cookie set by the start ties the callback to the browser that started it; the admin key rides in the state
@@ -20,8 +22,10 @@ import { exchangeCode, IG_AUTHORIZE_URL, instagramConfigured } from "./instagram
 
 export type SocialKind = "facebook" | "instagram";
 export const SOCIAL_KINDS: readonly SocialKind[] = ["facebook", "instagram"];
-export const FB_SCOPES = "pages_manage_posts,pages_read_engagement,pages_show_list";
-export const IG_PUBLISH_SCOPES = "instagram_business_basic,instagram_business_content_publish";
+export const FB_SCOPES = "pages_manage_posts,pages_read_engagement,pages_show_list,pages_read_user_content,pages_manage_engagement";
+export const IG_PUBLISH_SCOPES = "instagram_business_basic,instagram_business_content_publish,instagram_business_manage_insights,instagram_business_manage_comments";
+/** Destination config flag set at connect time (comment replies, 2026-10-15): the token carries the comment scopes. */
+export const COMMENTS_CAPABILITY = "comments";
 export const FB_DIALOG_URL = "https://www.facebook.com/v25.0/dialog/oauth";
 export const FB_CALLBACK_PATH = "/api/social/facebook/callback";
 export const FB_SELECT_PATH = "/api/social/facebook/select";
@@ -212,11 +216,27 @@ async function facebookPages(d: SocialConnectDeps, userToken: string): Promise<F
     .map((p) => ({ id: p.id as string, name: typeof p.name === "string" ? p.name.slice(0, 200) : String(p.id), access_token: p.access_token as string }));
 }
 
-async function storeFacebook(d: SocialConnectDeps, venueId: string, page: FbPage): Promise<void> {
+/** Graph ids are strings of digits; anything else (or a number that may have lost precision) is not used. */
+const graphId = (v: unknown): string | null => (typeof v === "string" && /^\d{1,32}$/.test(v) ? v : null);
+
+/**
+ * The Facebook user's app-scoped id: Meta's deauthorize and data deletion callbacks name the user by it (src/server/meta-deletion.ts).
+ * Best effort: a failed lookup still connects the Page, it just cannot be matched by those callbacks.
+ */
+async function facebookAppUserId(d: SocialConnectDeps, userToken: string): Promise<string | null> {
+  try {
+    return graphId((await new GraphClient(FB_GRAPH, userToken, d.fetch).get<{ id?: unknown }>("/me?fields=id")).id);
+  } catch (e) {
+    console.error(`[social] facebook /me failed: ${e instanceof Error ? e.name : "error"}`);
+    return null;
+  }
+}
+
+async function storeFacebook(d: SocialConnectDeps, venueId: string, page: FbPage, appUserId: string | null): Promise<void> {
   await d.store.upsertDestination({
     venue_id: venueId,
     kind: "facebook",
-    config: { page_id: page.id, page_name: page.name, connected_at: d.now().toISOString() },
+    config: { page_id: page.id, page_name: page.name, ...(appUserId ? { app_user_id: appUserId } : {}), connected_at: d.now().toISOString(), [COMMENTS_CAPABILITY]: true },
     secrets: encryptSecrets({ page_token: page.access_token }, d.secretKey!),
     status: "connected",
   });
@@ -251,7 +271,7 @@ export async function handleFacebookCallback(req: Request, d: SocialConnectDeps)
     const pages = await facebookPages(d, userToken);
     if (pages.length === 0) return back("facebook_no_pages");
     if (pages.length === 1) {
-      await storeFacebook(d, venue.id, pages[0]);
+      await storeFacebook(d, venue.id, pages[0], await facebookAppUserId(d, userToken));
       return back("facebook_connected");
     }
     const selectState = signSocialState(
@@ -278,7 +298,7 @@ export async function handleFacebookSelect(req: Request, d: SocialConnectDeps): 
     const userToken = decryptSecrets(checked.state.t, d.secretKey!).user_token ?? "";
     const page = (await facebookPages(d, userToken)).find((p) => p.id === pageId);
     if (!page) return back("facebook_error");
-    await storeFacebook(d, checked.venue.id, page);
+    await storeFacebook(d, checked.venue.id, page, await facebookAppUserId(d, userToken));
     return back("facebook_connected");
   } catch (e) {
     console.error(`[social] facebook select failed: ${e instanceof Error ? e.name : "error"}`);
@@ -301,18 +321,20 @@ export async function handleInstagramPublishCallback(req: Request, d: SocialConn
     const long = await metaFetch<{ access_token?: unknown }>(d.fetch, `${IG_EXCHANGE_URL}?${new URLSearchParams({ grant_type: "ig_exchange_token", client_secret: d.config.instagramAppSecret!, access_token: short })}`);
     const token = typeof long.access_token === "string" && long.access_token ? long.access_token : null;
     if (!token) return back("instagram_error");
-    const me = firstRow(await new GraphClient(IG_GRAPH, token, d.fetch).get<unknown>("/me?fields=user_id,username,account_type")) ?? {};
+    const me = firstRow(await new GraphClient(IG_GRAPH, token, d.fetch).get<unknown>("/me?fields=id,user_id,username,account_type")) ?? {};
     const type = typeof me.account_type === "string" ? me.account_type.toUpperCase() : "";
     if (type === "PERSONAL") return back("instagram_personal");
     // Publishing needs the professional account id (user_id), not the app-scoped id. A numeric value may have lost precision in
     // JSON.parse: only a string of digits is used; without one the connect fails rather than storing a wrong id.
-    const igId = typeof me.user_id === "string" && /^\d{1,32}$/.test(me.user_id) ? me.user_id : null;
+    const igId = graphId(me.user_id);
     if (!igId) return back("instagram_error");
+    // `id` is the app-scoped id Meta's deauthorize / data deletion callbacks may name the user by (src/server/meta-deletion.ts).
+    const appUserId = typeof me.id === "string" && /^[\w-]{1,64}$/.test(me.id) ? me.id : null;
     const now = d.now().toISOString();
     await d.store.upsertDestination({
       venue_id: venue.id,
       kind: "instagram",
-      config: { ig_user_id: igId, username: typeof me.username === "string" && /^[A-Za-z0-9._]{1,30}$/.test(me.username) ? me.username : "", account_type: type || null, connected_at: now, token_refreshed_at: now },
+      config: { ig_user_id: igId, ...(appUserId ? { app_user_id: appUserId } : {}), username: typeof me.username === "string" && /^[A-Za-z0-9._]{1,30}$/.test(me.username) ? me.username : "", account_type: type || null, connected_at: now, token_refreshed_at: now, [COMMENTS_CAPABILITY]: true },
       secrets: encryptSecrets({ token }, d.secretKey!),
       status: "connected",
     });

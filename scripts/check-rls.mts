@@ -35,7 +35,7 @@ const star = await db.from("venues").select("*").limit(1);
 check("anon cannot select venues.*: permission denied", star.error?.code === "42501", star.error?.code ?? `no error, ${star.data?.length ?? 0} rows`);
 const liveCols = await db.from("venues").select("id, slug, name").eq("status", "live").limit(1);
 check("anon can read id, slug, name of a live venue", !liveCols.error && (liveCols.data?.length ?? 0) === 1 && typeof liveCols.data?.[0]?.name === "string", liveCols.error?.code ?? `${liveCols.data?.length ?? 0} rows`);
-for (const t of ["venue_members", "venue_invites", "venue_admin_tokens", "change_sets", "changes", "conversations"]) {
+for (const t of ["venue_members", "venue_invites", "venue_admin_tokens", "change_sets", "changes", "conversations", "data_deletion_requests"]) {
   const r = await db.from(t).select("*").limit(1);
   check(`anon cannot read ${t}`, !!r.error || (r.data?.length ?? 0) === 0, r.error?.code ?? `${r.data?.length ?? 0} rows`);
 }
@@ -69,7 +69,7 @@ check("anon sees no admin tokens", (tokens.data?.length ?? 0) === 0, tokens.erro
 const publicUrl = db.storage.from("media").getPublicUrl("x").data.publicUrl;
 check("media public URL uses the public object path", publicUrl.includes("/object/public/media/"));
 
-for (const t of ["venue_destinations", "destination_syncs"]) {
+for (const t of ["venue_destinations", "destination_syncs", "social_comments"]) {
   const r = await db.from(t).select("*").limit(1);
   check(`anon cannot read ${t}`, !!r.error || (r.data?.length ?? 0) === 0, r.error?.code ?? `${r.data?.length ?? 0} rows`);
 }

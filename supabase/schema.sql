@@ -40,6 +40,18 @@ alter table public.venues add column if not exists site_url text;
 alter table public.venues add column if not exists change_limit integer;
 alter table public.venues drop constraint if exists venues_change_limit_check;
 alter table public.venues add constraint venues_change_limit_check check (change_limit is null or change_limit >= 0);
+-- Comment replies (2026-10-15): how the owner hears about comments under the venue's posts and the monthly cap on comment
+-- actions. Owner-only (policies.sql grants columns one by one, so these never reach the anon key).
+alter table public.venues add column if not exists comment_mode text not null default 'each';
+alter table public.venues drop constraint if exists venues_comment_mode_check;
+alter table public.venues add constraint venues_comment_mode_check check (comment_mode in ('each', 'digest', 'off'));
+alter table public.venues add column if not exists comment_digest_hour integer not null default 9;
+alter table public.venues drop constraint if exists venues_comment_digest_hour_check;
+alter table public.venues add constraint venues_comment_digest_hour_check check (comment_digest_hour between 0 and 23);
+alter table public.venues add column if not exists comment_limit integer default 300;
+alter table public.venues drop constraint if exists venues_comment_limit_check;
+alter table public.venues add constraint venues_comment_limit_check check (comment_limit is null or comment_limit >= 0);
+alter table public.venues add column if not exists last_comment_digest_at timestamptz;
 alter table public.venues drop constraint if exists venues_template_check;
 alter table public.venues add constraint venues_template_check check (template in ('classic', 'nocturne', 'lumen', 'furna', 'mehana', 'kvartal'));
 alter table public.venues drop constraint if exists venues_business_type_check;
@@ -169,7 +181,7 @@ create table if not exists public.change_sets (
   summary_en text not null default '',
   preview_bg text not null default '',
   preview_en text not null default '',
-  source text not null check (source in ('text', 'voice', 'photo', 'dashboard', 'auto', 'undo')),
+  source text not null check (source in ('text', 'voice', 'photo', 'dashboard', 'auto', 'undo', 'comment')),
   status text not null default 'proposed'
     check (status in ('proposed', 'scheduled', 'applied', 'rejected', 'expired', 'cancelled', 'reverted')),
   apply_at timestamptz,
@@ -187,6 +199,13 @@ create index if not exists change_sets_status_idx on public.change_sets (status,
 create index if not exists change_sets_chat_ref_idx on public.change_sets (venue_id, chat_ref) where status = 'proposed';
 -- countAppliedChangeSets: applied sets of one venue in a month.
 create index if not exists change_sets_applied_idx on public.change_sets (venue_id, applied_at) where applied_at is not null;
+
+-- Comment replies (2026-10-15): proposals made by the comment poller / reply_to_comments. Re-created so an existing database learns the new source.
+alter table public.change_sets drop constraint if exists change_sets_source_check;
+alter table public.change_sets add constraint change_sets_source_check
+  check (source in ('text', 'voice', 'photo', 'dashboard', 'auto', 'undo', 'comment'));
+-- One proposal message per owner chat for comment sets: { "<chat_ref>": "<message_ref>" }.
+alter table public.change_sets add column if not exists proposal_refs jsonb;
 
 create table if not exists public.changes (
   id uuid primary key default gen_random_uuid(),
@@ -238,3 +257,15 @@ begin
 end $$;
 drop trigger if exists items_touch on public.items;
 create trigger items_touch before update on public.items for each row execute function public.touch_updated_at();
+
+-- Meta data deletion requests (2026-10-14): one row per "Data Deletion Request" callback (src/server/meta-deletion.ts); the
+-- confirmation code is what /data-deletion?code= looks up. Server-only (policies.sql). Apply only this: npm run db:apply -- schema.sql policies.sql
+create table if not exists public.data_deletion_requests (
+  id uuid primary key default gen_random_uuid(),
+  provider text not null check (provider in ('facebook', 'instagram')),
+  subject_id text not null,               -- app-scoped user id from Meta's signed_request
+  confirmation_code text not null unique,
+  status text not null default 'pending' check (status in ('pending', 'completed')),
+  created_at timestamptz not null default now(),
+  completed_at timestamptz
+);

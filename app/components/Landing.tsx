@@ -2,6 +2,7 @@
 import Link from "next/link";
 import { LangToggle, useLang } from "@/src/i18n";
 import { SITE_NAME } from "@/src/i18n/dicts";
+import { LegalLinks } from "./Legal";
 
 export function Landing({ demoSlug }: { demoSlug: string }) {
   const { t } = useLang();
@@ -51,7 +52,10 @@ export function Landing({ demoSlug }: { demoSlug: string }) {
       <section className="mt-12 text-ink-soft">
         <p>{t("landing.built")}</p>
       </section>
-      <footer className="mt-16 text-sm text-ink-soft">{t("landing.footer")}</footer>
+      <footer className="mt-16 text-sm text-ink-soft">
+        <p>{t("landing.footer")}</p>
+        <LegalLinks className="mt-2" />
+      </footer>
     </main>
   );
 }

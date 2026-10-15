@@ -1,0 +1,13 @@
+{
+  "id": "P008",
+  "buys": false,
+  "purchases_first_month": 0,
+  "reason_code": "habit",
+  "reason": "I already have a site and my guests find me on Google Maps, Glovo and Wolt, where the menu already lives. Moving to a new site and paying 25 € a month every month for it is not something I have time or money for right now.",
+  "objection": "I'd have to switch away from the site I already have, and it doesn't touch Glovo or Wolt, which is where most people actually see my menu. So it's one more thing to pay for and I'd still be updating the delivery apps by hand.",
+  "would_change_my_mind": "If the same message also updated my menu and prices on Glovo and Wolt, and they moved my existing site over for me without me doing anything.",
+  "price_too_cheap": 3,
+  "price_cheap": 8,
+  "price_expensive": 15,
+  "price_too_expensive": 25
+}

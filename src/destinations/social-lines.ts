@@ -1,11 +1,11 @@
 // src/destinations/social-lines.ts
-// Pure: the owner's confirmation line per social network from its sync row ("Facebook: публикувано ✅ <links>").
-import type { Change, Lang, SocialTarget } from "../domain/types";
+// Pure: the owner's confirmation line per social network from its sync row ("Facebook: публикувано ✅ <links>"; for comment
+// sets "Instagram: 2 отговора са публикувани ✅; коментарът вече не съществува").
+import { NETWORK_NAMES, type Change, type Lang, type SocialTarget } from "../domain/types";
 import type { DestinationKind, SyncStatus } from "../store/types";
-import { networkTargets, publishedIn, safeLink, type SocialNetwork } from "./social-common";
+import { commentResultIn, hasCommentResult, networkTargets, publishedIn, safeLink, type SocialNetwork } from "./social-common";
 import { socialErrorText } from "./social-errors";
 
-const NAME: Record<SocialNetwork, string> = { facebook: "Facebook", instagram: "Instagram" };
 const FORMAT: Record<SocialTarget, { bg: string; en: string }> = {
   facebook_post: { bg: "пост", en: "post" },
   facebook_story: { bg: "история", en: "story" },
@@ -14,7 +14,7 @@ const FORMAT: Record<SocialTarget, { bg: string; en: string }> = {
 };
 
 export function socialSyncLine(kind: SocialNetwork, status: SyncStatus, result: Record<string, unknown> | null, lastError: string | null, lang: Lang): string {
-  const name = NAME[kind];
+  const name = NETWORK_NAMES[kind];
   const bg = lang === "bg";
   const r = result ?? {};
   if (status !== "done") {
@@ -25,6 +25,8 @@ export function socialSyncLine(kind: SocialNetwork, status: SyncStatus, result: 
     if (status === "pending") return (bg ? `${name}: не успях да публикувам, ще опитам пак` : `${name}: publishing failed, will retry`) + tail;
     return (bg ? `${name}: грешка: ${socialErrorText(lastError, lang)}` : `${name}: error: ${socialErrorText(lastError, lang)}`) + tail;
   }
+  const cr = commentResultIn([r]);
+  if (hasCommentResult(cr)) return `${name}: ${commentParts(cr, bg).join("; ")}`;
   if (Array.isArray(r.manual_delete)) {
     const links = r.manual_delete.map((m) => safeLink((m as { permalink?: unknown }).permalink)).filter((x): x is string => !!x);
     if (r.manual_delete.length === 0) return bg ? `${name}: няма какво да се изтрие` : `${name}: nothing to delete`;
@@ -45,6 +47,24 @@ export function socialSyncLine(kind: SocialNetwork, status: SyncStatus, result: 
   return bg ? `${name}: публикувано ✅${tail}` : `${name}: published ✅${tail}`;
 }
 
+/** What a done comment push did, in the owner's language (counts when more than one). */
+function commentParts(cr: ReturnType<typeof commentResultIn>, bg: boolean): string[] {
+  const parts: string[] = [];
+  const n = (k: number, one: string, many: string) => (k === 1 ? one : many.replace("{n}", String(k)));
+  if (cr.replied.length) parts.push(bg ? n(cr.replied.length, "отговорът е публикуван ✅", "{n} отговора са публикувани ✅") : n(cr.replied.length, "reply published ✅", "{n} replies published ✅"));
+  for (const action of ["hide", "unhide", "delete"] as const) {
+    const k = cr.moderated.filter((m) => m.action === action).length;
+    if (!k) continue;
+    if (action === "hide") parts.push(bg ? n(k, "коментарът е скрит ✅", "{n} коментара са скрити ✅") : n(k, "comment hidden ✅", "{n} comments hidden ✅"));
+    else if (action === "unhide") parts.push(bg ? n(k, "коментарът е показан отново ✅", "{n} коментара са показани отново ✅") : n(k, "comment shown again ✅", "{n} comments shown again ✅"));
+    else parts.push(bg ? n(k, "коментарът е изтрит ✅", "{n} коментара са изтрити ✅") : n(k, "comment deleted ✅", "{n} comments deleted ✅"));
+  }
+  if (cr.deleted_replies.length) parts.push(bg ? n(cr.deleted_replies.length, "отговорът е изтрит ✅", "{n} отговора са изтрити ✅") : n(cr.deleted_replies.length, "reply deleted ✅", "{n} replies deleted ✅"));
+  if (cr.gone.length) parts.push(bg ? n(cr.gone.length, "коментарът вече не съществува", "{n} коментара вече не съществуват") : n(cr.gone.length, "the comment no longer exists", "{n} comments no longer exist"));
+  if (cr.kept.length) parts.push(bg ? "изтритият коментар не може да бъде върнат" : "a deleted comment cannot be restored");
+  return parts;
+}
+
 /** "Instagram: не е свързан, публикацията не е изпратена" for each network the set targets without an active connection. */
 export function socialMissingLines(changes: Change[], active: Set<DestinationKind>, lang: Lang): string[] {
   const out: string[] = [];
@@ -52,8 +72,8 @@ export function socialMissingLines(changes: Change[], active: Set<DestinationKin
     const rows = changes.filter((c) => networkTargets(c, network).length > 0);
     if (active.has(network) || rows.length === 0) continue;
     const undo = rows.every((c) => c.after === null);
-    if (undo) out.push(lang === "bg" ? `${NAME[network]}: не е свързан, публикацията не е изтрита` : `${NAME[network]}: not connected, the post was not deleted`);
-    else out.push(lang === "bg" ? `${NAME[network]}: не е свързан, публикацията не е изпратена` : `${NAME[network]}: not connected, the post was not sent`);
+    if (undo) out.push(lang === "bg" ? `${NETWORK_NAMES[network]}: не е свързан, публикацията не е изтрита` : `${NETWORK_NAMES[network]}: not connected, the post was not deleted`);
+    else out.push(lang === "bg" ? `${NETWORK_NAMES[network]}: не е свързан, публикацията не е изпратена` : `${NETWORK_NAMES[network]}: not connected, the post was not sent`);
   }
   return out;
 }

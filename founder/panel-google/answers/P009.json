@@ -1,0 +1,13 @@
+{
+  "id": "P009",
+  "buys": false,
+  "purchases_first_month": 0,
+  "reason_code": "trust",
+  "reason": "Honestly the idea of fixing prices by just texting is nice, I raised prices twice this year and the old site still shows the old ones. But my own domain is only on the 40 € plan, so on 25 € I'd be renting a site on someone else's address, and if I stop paying I'm back to zero again.",
+  "objection": "If I stop paying, what stays mine? My domain, my menu, my Google profile. I don't want to be locked in to a monthly bill for something I already paid a freelancer for once.",
+  "would_change_my_mind": "A clear promise that my own domain works on the 25 € plan and that if I cancel I keep the domain, can export the site and menu, and my Google profile stays untouched.",
+  "price_too_cheap": 5,
+  "price_cheap": 10,
+  "price_expensive": 20,
+  "price_too_expensive": 35
+}

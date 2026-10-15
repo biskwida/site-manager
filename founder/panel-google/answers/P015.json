@@ -1,0 +1,13 @@
+{
+  "id": "P015",
+  "buys": false,
+  "purchases_first_month": 0,
+  "reason_code": "habit",
+  "reason": "My whole day is on Viber, my suppliers, my staff, everybody. You tell me to send my voice notes to WhatsApp or Messenger instead, so it's one more thing to remember, and the old site has been wrong for years and the bar still fills up.",
+  "objection": "No Viber. I'm not going to start juggling a second chat app just to talk to a website, and I'm not sure a robot will understand me shouting over the kitchen.",
+  "would_change_my_mind": "If it worked on Viber and somebody came by and set it all up for me, I'd try it.",
+  "price_too_cheap": 5,
+  "price_cheap": 10,
+  "price_expensive": 20,
+  "price_too_expensive": 35
+}

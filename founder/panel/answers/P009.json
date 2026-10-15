@@ -1,0 +1,13 @@
+{
+  "id": "P009",
+  "buys": false,
+  "purchases_first_month": 0,
+  "reason_code": "trust",
+  "reason": "I already have a domain from the old site, and here my own domain only comes with the 40 € plan. On 25 € the site lives on your address, so if I stop paying I lose it. I raised my prices twice this year and I'm not signing up for another monthly bill that leaves me with nothing when I cancel.",
+  "objection": "If I cancel, do I keep my domain, my menu and my photos, or does the site just disappear? Your own domain on the 40 € plan only tells me I'd be renting my web address from you.",
+  "would_change_my_mind": "My existing domain connected on the 25 € plan, plus a written promise that if I cancel I get a full export of the site and menu that I can host elsewhere.",
+  "price_too_cheap": 5,
+  "price_cheap": 10,
+  "price_expensive": 20,
+  "price_too_expensive": 30
+}

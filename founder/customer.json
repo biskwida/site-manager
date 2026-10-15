@@ -1,0 +1,38 @@
+{
+  "business": "Site Manager: a venue website the owner runs by chatting with an AI agent",
+  "target": "Owner-operators of independent cafés, bars and small restaurants in Sofia, Bulgaria, who run the place themselves and have no web person",
+  "where": "Sofia, Bulgaria",
+  "age": [26, 58],
+  "segments": [
+    {"name": "Small café or coffee bar owner (1 location, under 10 staff)", "share": 0.45, "income": [14000, 32000]},
+    {"name": "Bar or bistro owner with a kitchen (1 location, changing menu)", "share": 0.30, "income": [20000, 48000]},
+    {"name": "Restaurant owner or manager (1-3 locations)", "share": 0.25, "income": [30000, 80000]}
+  ],
+  "behaviours": [
+    {"name": "Instagram is enough", "share": 0.22, "how": "Posts specials on Instagram and Facebook; thinks nobody looks at websites any more."},
+    {"name": "Has an outdated site", "share": 0.18, "how": "Paid a freelancer or nephew for a site years ago; prices and hours on it are wrong; never touches it."},
+    {"name": "Penny-pincher", "share": 0.16, "how": "Questions every monthly fee; already pays for POS, accounting software and delivery-app commissions."},
+    {"name": "Tech-curious early adopter", "share": 0.12, "how": "Uses voice notes and ChatGPT already, likes trying new tools if they save time."},
+    {"name": "Relies on Google and delivery apps", "share": 0.14, "how": "Guests find them on Google Maps, Glovo or Wolt; menu lives there."},
+    {"name": "Busy, delegates to a manager", "share": 0.10, "how": "Too busy to decide on software; a manager or staff member handles small digital tasks."},
+    {"name": "Trusts people, not apps", "share": 0.08, "how": "Buys only from someone they know or who was recommended by another owner."}
+  ],
+  "objections": [
+    "Another monthly subscription? I already pay for too many.",
+    "Will the AI put a wrong price on my site?",
+    "My guests find me on Instagram and Google Maps, not on a website.",
+    "Who do I call when it breaks? Is there a real person in Bulgaria?",
+    "I don't want to learn a new app.",
+    "I already have a site; moving is a hassle.",
+    "Is my data and my domain mine if I stop paying?",
+    "We use Viber, not Telegram."
+  ],
+  "habits": [
+    "you open at 7:30 and do the supplier orders yourself",
+    "your menu board changes every day with the lunch special",
+    "you send voice notes on Viber all day",
+    "you check the Glovo tablet between orders",
+    "your daughter set up the Instagram account",
+    "you raised prices twice this year because of costs"
+  ]
+}

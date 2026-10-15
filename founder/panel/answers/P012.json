@@ -1,0 +1,13 @@
+{
+  "id": "P012",
+  "buys": false,
+  "purchases_first_month": 0,
+  "reason_code": "need",
+  "reason": "My regulars know what's on the board, and I'm up at 7:30 doing supplier orders, not thinking about a website. Another 25 a month for something nobody asked me for is easy to say no to.",
+  "objection": "Who is actually going to message this thing every day? Not me, and my manager already has enough on his plate. If it doesn't get updated, I'm paying for an empty website.",
+  "would_change_my_mind": "My manager sets it up, uses it for a month on a free trial without bothering me, and I can see it actually brought in tables or saved us phone calls.",
+  "price_too_cheap": 3,
+  "price_cheap": 8,
+  "price_expensive": 15,
+  "price_too_expensive": 25
+}

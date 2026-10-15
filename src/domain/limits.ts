@@ -7,11 +7,13 @@
 // - Sets with source "undo" never count: undo is a safety feature. Sets with source "auto" never count either: the tick
 //   writes them when a sold-out mark or a special runs out, and the wizard publish writes the venue's initial photos as one,
 //   so they only record what the owner already decided.
+// - Sets with source "comment" never count (replies to customer comments are reactions with their own cap, Venue.comment_limit),
+//   and neither does a set made only of set_comment_mode rows: choosing how to hear about comments is not a site change.
 // - Rejected, expired and cancelled sets never reached `applied`, so they do not count.
 // - The month is the calendar month in the venue's time zone (venue.tz, e.g. Europe/Sofia).
 // - Venue.change_limit null = unlimited (the default).
 import { localDate, zonedToIso } from "../time";
-import type { ChangeSource } from "./types";
+import type { Change, ChangeSource } from "./types";
 
 export interface LimitState {
   used: number;
@@ -35,9 +37,16 @@ export function limitState(used: number, limit: number | null): LimitState {
   return { used, limit, remaining: Math.max(0, limit - used), reached: used >= limit };
 }
 
-/** Whether an applied set of this source uses up one change of the month. */
-export function countsTowardLimit(source: ChangeSource): boolean {
-  return source !== "undo" && source !== "auto";
+/** Comment actions a venue may take per calendar month when `comment_limit` is not set explicitly (spec decision 1). */
+export const COMMENT_LIMIT_DEFAULT = 300;
+
+/**
+ * Whether an applied set of this source (and, when given, these rows) uses up one change of the month. Comment replies are
+ * reactions, not changes (they have their own cap); a set whose every row is set_comment_mode keeps its source and is exempt.
+ */
+export function countsTowardLimit(source: ChangeSource, rows?: readonly Pick<Change, "op">[]): boolean {
+  if (source === "undo" || source === "auto" || source === "comment") return false;
+  return !(rows && rows.length > 0 && rows.every((r) => r.op === "set_comment_mode"));
 }
 
 /** Parses a --change-limit argument: "none" (or "null", "unlimited") clears the limit, a whole number >= 0 sets it; anything else is an Error. */
