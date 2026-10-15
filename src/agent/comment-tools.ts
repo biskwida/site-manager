@@ -11,7 +11,7 @@ import { copy } from "../bot/copy";
 import { commentModeLabel } from "../domain/comment-preview";
 import { COMMENT_MODES, type ChangeSet, type CommentMode } from "../domain/types";
 import { REPLY_MAX } from "../social/comments-draft";
-import { cancelCommentSet, commentLimitState, createCommentSet, type CommentSetItem } from "../social/comments-propose";
+import { cancelCommentSet, COMMENT_SET_MAX_ROWS, commentLimitState, createCommentSet, type CommentSetItem } from "../social/comments-propose";
 import type { CommentStatus, SocialComment } from "../store/types";
 import type { AgentDeps, ToolKit } from "./tools";
 
@@ -38,7 +38,7 @@ export const ReplyItemSchema = z.object({
 export const ReplyToCommentsSchema = z.object({
   summary_bg: z.string().min(1).optional().describe("Optional one-line summary in Bulgarian (default: built from the comments)"),
   summary_en: z.string().min(1).optional().describe("The same in English"),
-  replies: z.array(ReplyItemSchema).min(1).max(20).describe("One entry per comment, 1–20. For a digest the owner corrected, send every comment again: the unchanged drafts and the changed one."),
+  replies: z.array(ReplyItemSchema).min(1).max(COMMENT_SET_MAX_ROWS).describe(`One entry per comment, 1–${COMMENT_SET_MAX_ROWS}. For a digest the owner corrected, send every comment again: the unchanged drafts and the changed one.`),
 });
 
 /** Statuses a reply or moderation may be proposed for ("proposed": the pending set holding it is replaced). */

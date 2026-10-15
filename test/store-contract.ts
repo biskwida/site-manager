@@ -840,8 +840,9 @@ export function storeContract(name: string, make: () => Promise<Store>, storageH
         { ...base, comment_id: `${t}-fc`, created_at: "2026-10-15T08:02:00.000Z" },
         { ...base, comment_id: `${t}-fold`, created_at: "2026-09-01T08:00:00.000Z" },
       ]);
-      await s.updateComment(a.id, { status: "proposed", change_set_id: cs.id, draft_text: "Благодарим!", draft_kind: "praise", deferred: true });
-      expect(await s.getComment(a.id)).toMatchObject({ status: "proposed", change_set_id: cs.id, draft_text: "Благодарим!", draft_kind: "praise", deferred: true });
+      expect(a).toMatchObject({ hold_attempts: 0, held_at: null });
+      await s.updateComment(a.id, { status: "proposed", change_set_id: cs.id, draft_text: "Благодарим!", draft_kind: "praise", deferred: true, hold_attempts: 2, held_at: "2026-10-15T08:30:00.000Z" });
+      expect(await s.getComment(a.id)).toMatchObject({ status: "proposed", change_set_id: cs.id, draft_text: "Благодарим!", draft_kind: "praise", deferred: true, hold_attempts: 2, held_at: "2026-10-15T08:30:00.000Z" });
       await s.updateComment(a.id, { status: "replied", reply_id: "r1", replied_at: "2026-10-15T09:00:00.000Z", deferred: false });
       await s.updateComment(b.id, { status: "hidden", replied_at: "2026-10-15T09:01:00.000Z" });
       await s.updateComment(c.id, { status: "replied", reply_id: "r3", replied_at: "2026-11-01T09:00:00.000Z" });

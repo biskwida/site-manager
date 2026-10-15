@@ -820,5 +820,7 @@ export function toComment(r: Row): SocialComment {
     draft_text: strOrNull(r.draft_text),
     draft_kind: strOrNull(r.draft_kind),
     deferred: Boolean(r.deferred),
+    hold_attempts: num(r.hold_attempts ?? 0),
+    held_at: isoOrNull(r.held_at),
   };
 }

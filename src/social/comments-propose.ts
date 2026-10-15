@@ -2,7 +2,9 @@
 // Turns customer comments into change sets with source "comment": one social_reply or social_moderate row per comment, sent
 // with the ✅/✏️/❌ buttons to every owner of the venue (the first tap wins, src/bot/approvals.ts). Telegram owners always get
 // the buttons; an owner on a Meta channel only inside the 23-hour window since their last message. When no owner can be
-// reached the comments are held (deferred, status stays new) for the next tick. A comment set never counts toward the monthly
+// reached the comments are held (deferred, status stays new) for the next tick; after HOLD_MAX_ATTEMPTS sends that reached
+// nobody (the bot blocked) a comment waits until an owner writes. A set holds at most COMMENT_SET_MAX_ROWS comments and stays
+// under Telegram's message size (splitCommentItems); a larger batch becomes several sets. A comment set never counts toward the monthly
 // change limit; the venue's comment_limit caps replies and moderations instead (here and at apply time, src/store/usage.ts).
 // Never logs comment text or drafts: log lines carry ids and counts only.
 import { CHANNEL_NAMES } from "../bot/members";
@@ -19,6 +21,16 @@ import { commentUsage, type CommentUsage } from "../store/usage";
 import { draftContextOf, type DraftFn, type DraftKind } from "./comments-draft";
 
 const HOUR = 3_600_000;
+/** At most this many comments in one set; a larger batch (the digest, held comments) is split into further sets. */
+export const COMMENT_SET_MAX_ROWS = 10;
+/** The proposal message and the set's preview stay under this (Telegram refuses a message over 4096 characters). */
+const MESSAGE_BUDGET = 3800;
+/** A comment in a batch line is cut to this many characters (the dashboard shows it in full). */
+const BATCH_COMMENT_MAX = 200;
+/** A single comment's text in its own proposal is cut to this (a Facebook comment can be 8000 characters). */
+const SINGLE_COMMENT_MAX = 1500;
+/** After this many proposal sends in a row that reached no owner, the comment waits (new) until an owner writes. */
+export const HOLD_MAX_ATTEMPTS = 5;
 /** A comment proposal waits a day for the owners (spec); every other proposal keeps the 2 hours of src/tick.ts. */
 export const COMMENT_PROPOSAL_TTL_MS = 24 * HOUR;
 const DEFAULT_TTL_MS = 2 * HOUR;
@@ -76,6 +88,12 @@ const author = (c: SocialComment, lang: Lang) => c.author_name || tr(lang, "кл
 const captionOf = (c: SocialComment, lang: Lang) => (c.post_caption.trim() ? excerpt(c.post_caption) : tr(lang, "(без текст)", "(no caption)"));
 const networkName = (c: SocialComment) => NETWORK_NAMES[c.network] ?? c.network;
 
+/** Keeps the lines (unlike excerpt), cut to `max` characters. */
+function clip(text: string, max: number): string {
+  const chars = Array.from(text.trim());
+  return chars.length > max ? `${chars.slice(0, max - 1).join("")}…` : text.trim();
+}
+
 function bgCount(n: number, one: string, many: string): string {
   return n === 1 ? `1 ${one}` : `${n} ${many}`;
 }
@@ -87,8 +105,8 @@ export function commentProposalText(items: CommentSetItem[], lang: Lang, o: { ba
     const it = items[0];
     const c = it.comment;
     const where = bg
-      ? `под поста ${quote(captionOf(c, lang), lang)} (${networkName(c)}) от ${author(c, lang)}: ${quote(c.text, lang)}`
-      : `under the post ${quote(captionOf(c, lang), lang)} (${networkName(c)}) by ${author(c, lang)}: ${quote(c.text, lang)}`;
+      ? `под поста ${quote(captionOf(c, lang), lang)} (${networkName(c)}) от ${author(c, lang)}: ${quote(clip(c.text, SINGLE_COMMENT_MAX), lang)}`
+      : `under the post ${quote(captionOf(c, lang), lang)} (${networkName(c)}) by ${author(c, lang)}: ${quote(clip(c.text, SINGLE_COMMENT_MAX), lang)}`;
     if (it.moderate) {
       const why = bg ? "Този коментар изглежда спам или обиден." : "This comment looks like spam or abuse.";
       const what = it.moderate === "delete"
@@ -104,7 +122,7 @@ export function commentProposalText(items: CommentSetItem[], lang: Lang, o: { ba
     : `💬 ${items.length} new ${items.length === 1 ? "comment" : "comments"} under ${posts} ${posts === 1 ? "post" : "posts"}`;
   const lines = items.flatMap((it, i) => {
     const c = it.comment;
-    const first = `${i + 1}. ${author(c, lang)} (${networkName(c)}) ${bg ? "под" : "under"} ${quote(captionOf(c, lang), lang)}: ${quote(c.text, lang)}`;
+    const first = `${i + 1}. ${author(c, lang)} (${networkName(c)}) ${bg ? "под" : "under"} ${quote(captionOf(c, lang), lang)}: ${quote(excerpt(c.text, BATCH_COMMENT_MAX), lang)}`;
     const second = it.moderate
       ? `   → ${it.moderate === "delete" ? tr(lang, "изтриване (спам или обиден)", "deletion (spam or abuse)") : tr(lang, "скриване (спам или обиден)", "hiding (spam or abuse)")}`
       : `   → ${quote(it.reply_text ?? "", lang)}`;
@@ -124,6 +142,37 @@ export function commentSetSummary(items: CommentSetItem[]): { summary_bg: string
     return { summary_bg: `Отговор на коментар от ${name}`, summary_en: `Reply to ${nameEn}'s comment` };
   }
   return { summary_bg: `Отговори на ${bgCount(items.length, "коментар", "коментара")}`, summary_en: `Replies to ${items.length} comments` };
+}
+
+/**
+ * Splits items into proposal-sized groups, in order: at most COMMENT_SET_MAX_ROWS each, and only as many as keep the proposal
+ * text (both languages) and `extra` (the set's preview) under MESSAGE_BUDGET. A single item always makes a group of its own.
+ */
+export function splitCommentItems(items: CommentSetItem[], o: { batch: boolean; extra?: (group: CommentSetItem[]) => number }): CommentSetItem[][] {
+  const fits = (g: CommentSetItem[]) => {
+    const batch = o.batch || g.length > 1;
+    const text = Math.max(commentProposalText(g, "bg", { batch }).length, commentProposalText(g, "en", { batch }).length);
+    return text <= MESSAGE_BUDGET && (o.extra?.(g) ?? 0) <= MESSAGE_BUDGET;
+  };
+  const groups: CommentSetItem[][] = [];
+  let cur: CommentSetItem[] = [];
+  for (const it of items) {
+    const next = [...cur, it];
+    if (cur.length > 0 && (next.length > COMMENT_SET_MAX_ROWS || !fits(next))) {
+      groups.push(cur);
+      cur = [it];
+    } else cur = next;
+  }
+  if (cur.length > 0) groups.push(cur);
+  return groups;
+}
+
+/** The longer of a group's two previews (renderPreview), for splitCommentItems. */
+export function previewLength(site: Parameters<typeof renderPreview>[0], tz: string): (group: CommentSetItem[]) => number {
+  return (g) => {
+    const changes = commentChanges(g);
+    return Math.max(renderPreview(site, changes, "bg", tz).length, renderPreview(site, changes, "en", tz).length);
+  };
 }
 
 /** The venue's comment actions this calendar month (in its zone) against comment_limit (null = unlimited). */
@@ -177,13 +226,20 @@ export async function createCommentSet(d: CommentSetDeps, venue: Venue, items: C
   const now = d.now();
   if ((await commentLimitState(d.store, venue, now)).reached) return { set: null, sent: [], deferred: false, limited: true };
   const reachable = o.silent ? [] : (await reachableOwners(d.store, venue.id, now)).reachable;
-  /** Nobody has the buttons: the comments stay `new`, keep their drafts and are retried by the next tick. */
-  const hold = async (why: string): Promise<CommentSetResult> => {
-    for (const it of items) await d.store.updateComment(it.comment.id, { status: "new", change_set_id: null, deferred: true, draft_text: it.reply_text, draft_kind: it.kind ?? it.comment.draft_kind ?? null });
+  /**
+   * Nobody has the buttons: the comments stay `new`, keep their drafts and are retried by the next tick. `failedSend` (a send
+   * was tried and reached nobody) counts toward HOLD_MAX_ATTEMPTS; "no owner reachable" costs nothing and is not counted.
+   */
+  const hold = async (why: string, failedSend: boolean): Promise<CommentSetResult> => {
+    const nowIso = d.now().toISOString();
+    for (const it of items) {
+      const attempts = failedSend ? ((await d.store.getComment(it.comment.id))?.hold_attempts ?? it.comment.hold_attempts ?? 0) + 1 : undefined;
+      await d.store.updateComment(it.comment.id, { status: "new", change_set_id: null, deferred: true, draft_text: it.reply_text, draft_kind: it.kind ?? it.comment.draft_kind ?? null, ...(failedSend ? { hold_attempts: attempts, held_at: nowIso } : {}) });
+    }
     log(d, `[comments] venue ${venue.id}: ${why}, ${items.length} comment(s) held`);
     return { set: null, sent: [], deferred: true, limited: false };
   };
-  if (!o.silent && reachable.length === 0) return hold("no owner reachable");
+  if (!o.silent && reachable.length === 0) return hold("no owner reachable", false);
   const primary = reachable.find((m) => m.chat_ref === o.chatRef) ?? reachable[0] ?? null;
   const ordered = primary ? [primary, ...reachable.filter((m) => m !== primary)] : [];
   const changes = commentChanges(items);
@@ -201,23 +257,37 @@ export async function createCommentSet(d: CommentSetDeps, venue: Venue, items: C
   if (!o.silent && Object.keys(refs).length === 0) {
     // Every send failed (outage, bot blocked): a set nobody can tap would expire unseen and lose the comments.
     await d.store.cancelChangeSet(cs.id, d.now().toISOString());
-    return hold(`set ${cs.id} reached no owner and was cancelled`);
+    return hold(`set ${cs.id} reached no owner and was cancelled`, true);
   }
   await d.store.updateChangeSet(cs.id, { message_ref: primary ? refs[primary.chat_ref] ?? null : null, proposal_refs: refs });
-  for (const it of items) await d.store.updateComment(it.comment.id, { status: "proposed", change_set_id: cs.id, draft_text: it.reply_text, draft_kind: it.kind ?? it.comment.draft_kind ?? null, deferred: false });
+  for (const it of items) await d.store.updateComment(it.comment.id, { status: "proposed", change_set_id: cs.id, draft_text: it.reply_text, draft_kind: it.kind ?? it.comment.draft_kind ?? null, deferred: false, hold_attempts: 0, held_at: null });
   log(d, `[comments] set ${cs.id} for venue ${venue.id}: ${items.length} row(s), sent to ${Object.keys(refs).length} owner(s)`);
   return { set: await d.store.getChangeSet(cs.id), sent: Object.keys(refs), deferred: false, limited: false };
 }
 
 /**
  * Drafts a reply for every new top-level comment (a stored draft is reused: a held comment is not drafted twice) and proposes.
- * `batch` makes one set for all (the digest, "answer the unanswered comments"). `each` makes one set per comment, except that
- * comments held earlier (deferred) that become sendable together go out as ONE batch set (a single held one as its own set).
+ * `batch` makes batch sets for all (the digest, "answer the unanswered comments"), split by splitCommentItems. `each` makes one
+ * set per comment, except that comments held earlier (deferred) that become sendable together go out as batch sets (a single
+ * held one as its own set). Comments that gave up after HOLD_MAX_ATTEMPTS failed sends are skipped until an owner writes.
  * Spam or abuse becomes a hide proposal (by the draft's kind, never by an empty reply). When the comment limit is reached a
  * batch tells the reachable owners once; `each` only logs.
  */
 export async function proposeForComments(d: ProposeDeps, venue: Venue, comments: SocialComment[], o: { mode: "each" | "batch" }): Promise<{ sets: ChangeSet[]; deferred: number; limited: boolean }> {
-  const fresh = comments.filter((c) => c.status === "new" && c.parent_id === null);
+  const candidates = comments.filter((c) => c.status === "new" && c.parent_id === null);
+  if (candidates.length === 0) return { sets: [], deferred: 0, limited: false };
+  // A comment whose proposal reached nobody HOLD_MAX_ATTEMPTS times waits until an owner writes (a message after the last
+  // failed send) or the dashboard decides it: no more sets nobody can tap, tick after tick.
+  const gaveUp = candidates.filter((c) => (c.hold_attempts ?? 0) >= HOLD_MAX_ATTEMPTS);
+  let fresh = candidates;
+  if (gaveUp.length > 0) {
+    const seen = (await d.store.listMembers(venue.id)).filter((m) => m.role === "owner" && m.last_seen_at !== null).map((m) => Date.parse(m.last_seen_at as string));
+    const waiting = new Set(gaveUp.filter((c) => !seen.some((t) => c.held_at !== null && t > Date.parse(c.held_at))).map((c) => c.id));
+    if (waiting.size > 0) {
+      log(d, `[comments] venue ${venue.id}: ${waiting.size} comment(s) not proposed after ${HOLD_MAX_ATTEMPTS} failed sends; waiting for an owner's message`);
+      fresh = candidates.filter((c) => !waiting.has(c.id));
+    }
+  }
   if (fresh.length === 0) return { sets: [], deferred: 0, limited: false };
   const now = d.now();
   const limit = await commentLimitState(d.store, venue, now);
@@ -244,11 +314,12 @@ export async function proposeForComments(d: ProposeDeps, venue: Venue, comments:
     items.push({ comment: c, reply_text: moderate ? null : reply ?? "", moderate: moderate ? "hide" : null, kind });
   }
   const groups: { items: CommentSetItem[]; batch: boolean }[] = [];
-  if (o.mode === "batch") groups.push({ items, batch: true });
+  const extra = previewLength(site, venue.tz);
+  if (o.mode === "batch") for (const g of splitCommentItems(items, { batch: true, extra })) groups.push({ items: g, batch: true });
   else {
     for (const it of items.filter((x) => !x.comment.deferred)) groups.push({ items: [it], batch: false });
     const held = items.filter((x) => x.comment.deferred);
-    if (held.length > 0) groups.push({ items: held, batch: held.length > 1 });
+    for (const g of splitCommentItems(held, { batch: false, extra })) groups.push({ items: g, batch: g.length > 1 });
   }
   const sets: ChangeSet[] = [];
   let deferred = 0;

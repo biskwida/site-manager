@@ -27,7 +27,8 @@ describe("supabase row mappers", () => {
   });
   it("maps a social comment row", () => {
     const c = toComment({ id: "r", venue_id: "v", network: "instagram", post_ref: "m1", comment_id: "c1", parent_id: null, author_id: "u", author_name: "Мария", text: "Браво", created_at: "2026-10-15T08:00:00+00:00", seen_at: "2026-10-15T08:01:00+00:00", status: "replied", change_set_id: null, reply_id: "r1", replied_at: "2026-10-15T09:00:00+00:00", post_caption: null, post_permalink: null, draft_text: null, draft_kind: null, deferred: null });
-    expect(c).toEqual({ id: "r", venue_id: "v", network: "instagram", post_ref: "m1", comment_id: "c1", parent_id: null, author_id: "u", author_name: "Мария", text: "Браво", created_at: "2026-10-15T08:00:00.000Z", seen_at: "2026-10-15T08:01:00.000Z", status: "replied", change_set_id: null, reply_id: "r1", replied_at: "2026-10-15T09:00:00.000Z", post_caption: "", post_permalink: null, draft_text: null, draft_kind: null, deferred: false });
+    expect(c).toEqual({ id: "r", venue_id: "v", network: "instagram", post_ref: "m1", comment_id: "c1", parent_id: null, author_id: "u", author_name: "Мария", text: "Браво", created_at: "2026-10-15T08:00:00.000Z", seen_at: "2026-10-15T08:01:00.000Z", status: "replied", change_set_id: null, reply_id: "r1", replied_at: "2026-10-15T09:00:00.000Z", post_caption: "", post_permalink: null, draft_text: null, draft_kind: null, deferred: false, hold_attempts: 0, held_at: null });
+    expect(toComment({ id: "r", venue_id: "v", network: "facebook", created_at: "2026-10-15T08:00:00+00:00", seen_at: "2026-10-15T08:01:00+00:00", hold_attempts: 3, held_at: "2026-10-15T08:05:00+00:00" })).toMatchObject({ hold_attempts: 3, held_at: "2026-10-15T08:05:00.000Z" });
   });
   it("writes legacy bigint columns only for Telegram refs (Review Focus 2)", () => {
     expect(legacyColumns("tg:-100123", "55")).toEqual({ chat_id: -100123, tg_message_id: 55 });

@@ -71,7 +71,12 @@ create table if not exists public.social_comments (
   post_permalink text,
   draft_text text,
   draft_kind text,
-  deferred boolean not null default false
+  deferred boolean not null default false,
+  hold_attempts integer not null default 0,
+  held_at timestamptz
 );
+-- Proposal sends that reached no owner (2026-10-15 fix wave): after 5 the comment waits until an owner writes.
+alter table public.social_comments add column if not exists hold_attempts integer not null default 0;
+alter table public.social_comments add column if not exists held_at timestamptz;
 create index if not exists social_comments_venue_status_idx on public.social_comments (venue_id, status);
 create index if not exists social_comments_created_idx on public.social_comments (created_at);

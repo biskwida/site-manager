@@ -562,7 +562,7 @@ export class InMemoryStore implements Store {
     for (const r of rows) {
       if (known.has(r.comment_id)) continue;
       known.add(r.comment_id);
-      const row: SocialComment = { id: crypto.randomUUID(), venue_id: venueId, ...clone(r), post_permalink: r.post_permalink ?? null, change_set_id: null, reply_id: null, replied_at: null, draft_text: null, draft_kind: null, deferred: false };
+      const row: SocialComment = { id: crypto.randomUUID(), venue_id: venueId, ...clone(r), post_permalink: r.post_permalink ?? null, change_set_id: null, reply_id: null, replied_at: null, draft_text: null, draft_kind: null, deferred: false, hold_attempts: 0, held_at: null };
       this.comments.set(row.id, row);
       out.push(clone(row));
     }

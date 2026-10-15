@@ -7,7 +7,7 @@ import { copy } from "@/src/bot/copy";
 import { planChanges } from "@/src/domain/changes";
 import type { SocialComment } from "@/src/store/types";
 import type { DraftContext, ReplyDraft } from "@/src/social/comments-draft";
-import { cancelCommentSet, COMMENT_PROPOSAL_TTL_MS, commentLimitState, commentProposalText, commentsOfSet, createCommentSet, proposalTtlHours, proposeForComments, type CommentSetItem, type ProposeDeps } from "@/src/social/comments-propose";
+import { cancelCommentSet, COMMENT_PROPOSAL_TTL_MS, commentLimitState, commentProposalText, commentsOfSet, createCommentSet, proposalTtlHours, proposeForComments, splitCommentItems, type CommentSetItem, type ProposeDeps } from "@/src/social/comments-propose";
 import { runTick } from "@/src/tick";
 import { at, connectedVenue, DAY, HOUR, MIN, T0 } from "./comments-helpers";
 import { call } from "./tool-call";
@@ -45,6 +45,18 @@ describe("commentProposalText", () => {
     expect(commentProposalText([item(c, "Yes, every day.")], "en")).toBe(
       "💬 New comment under the post “Днешното предложение: тиквена супа” (Instagram) by Мария: “Имате ли безглутенови?”\n\nSuggested reply:\n“Yes, every day.”\n\nReply?",
     );
+  });
+  it("keeps every message under Telegram's limit: a long single comment is cut, batches split by rows and by length", async () => {
+    const { add } = await setup();
+    const long = await add("c-long", "дълъг ".repeat(1500), "Мария", { network: "facebook" });
+    expect(commentProposalText([item(long, "Благодарим!")], "bg").length).toBeLessThan(2000);
+    const many: CommentSetItem[] = [];
+    for (let i = 0; i < 10; i++) many.push(item(await add(`c-r${i}`, `Въпрос ${i}?`), "Отговор ".repeat(62).trim())); // ~500-character replies
+    const groups = splitCommentItems(many, { batch: true });
+    expect(groups.length).toBeGreaterThan(1);
+    expect(groups.flat()).toEqual(many);
+    for (const g of groups) expect(commentProposalText(g, "bg", { batch: true }).length).toBeLessThan(4096);
+    expect(splitCommentItems([...many.slice(0, 1), ...many.slice(0, 1)].map((x) => ({ ...x, reply_text: "Да." })), { batch: true })).toHaveLength(1);
   });
   it("a moderation: says why and asks to hide (or delete, not undoable)", async () => {
     const { add } = await setup();

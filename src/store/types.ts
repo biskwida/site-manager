@@ -388,9 +388,13 @@ export interface SocialComment {
   draft_kind: string | null;
   /** Held because no owner could be reached inside Meta's 24 h window; retried by the next tick. */
   deferred: boolean;
+  /** Proposal sends that reached no owner in a row (the bot blocked, an outage); reset when a proposal goes out. */
+  hold_attempts: number;
+  /** When the last of those failed sends was (null when none). */
+  held_at: string | null;
 }
 export type NewSocialComment = Pick<SocialComment, "network" | "post_ref" | "comment_id" | "parent_id" | "author_id" | "author_name" | "text" | "created_at" | "seen_at" | "status" | "post_caption"> & { post_permalink?: string | null };
-export type SocialCommentPatch = Partial<Pick<SocialComment, "status" | "change_set_id" | "reply_id" | "replied_at" | "draft_text" | "draft_kind" | "deferred">>;
+export type SocialCommentPatch = Partial<Pick<SocialComment, "status" | "change_set_id" | "reply_id" | "replied_at" | "draft_text" | "draft_kind" | "deferred" | "hold_attempts" | "held_at">>;
 export interface ListCommentsOpts {
   status?: CommentStatus[];
   limit?: number;

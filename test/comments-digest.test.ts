@@ -92,6 +92,51 @@ describe("runCommentDigests", () => {
     const later = Z("2026-10-15T07:10:00.000Z");
     expect((await runCommentDigests(v.deps(later), { venueId: v.venueId, now: later })).sent).toEqual([v.venueId]);
   });
+  it("25 new comments go out as three sets (10/10/5), each message under Telegram's 4096 characters, comments excerpted", async () => {
+    const v = await digestVenue();
+    for (let i = 0; i < 25; i++) await v.addNew(Z(`2026-10-15T05:${String(10 + i).padStart(2, "0")}:00.000Z`), `Коментар ${i}: ${"много дълъг текст ".repeat(60)}`);
+    const now = Z("2026-10-15T07:00:00.000Z");
+    expect((await runCommentDigests(v.deps(now), { now })).sent).toEqual([v.venueId]);
+    const sets = (await v.store.listChangeSets(v.venueId, { status: ["proposed"] })).filter((s) => s.source === "comment");
+    expect(sets.map((s) => s.changes.length).sort((a, b) => b - a)).toEqual([10, 10, 5]);
+    expect(new Set(sets.flatMap((s) => s.changes.map((c) => c.entity_id))).size).toBe(25);
+    const proposals = v.messenger.sent.filter((m) => m.setId);
+    expect(proposals).toHaveLength(3);
+    for (const m of proposals) {
+      expect(m.text.length).toBeLessThan(4096);
+      expect(m.text).toMatch(/^💬 (10|5) нови коментара под 1 пост\n/);
+      expect(m.text).not.toContain("много дълъг текст ".repeat(15)); // each comment is cut to 200 characters in the batch
+    }
+    for (const s of sets) {
+      expect(s.preview_bg.length).toBeLessThan(4096);
+      expect(s.preview_en.length).toBeLessThan(4096);
+    }
+    expect((await v.venue()).last_comment_digest_at).toBe(now.toISOString());
+    expect((await v.store.listComments(v.venueId, { status: ["proposed"] }))).toHaveLength(25);
+  });
+  it("an owner who blocked the bot: at most 5 cancelled sets, then the comments wait (new) until an owner writes", async () => {
+    const v = await digestVenue();
+    v.messenger.sendProposal = async (): Promise<string> => null as unknown as string; // every send fails (bot blocked)
+    await v.addNew(Z("2026-10-15T06:00:00.000Z"));
+    await v.addNew(Z("2026-10-15T06:01:00.000Z"));
+    const ticks = Array.from({ length: 12 }, (_, i) => new Date(Z("2026-10-15T07:00:00.000Z").getTime() + i * 5 * 60_000));
+    for (const t of ticks) await runCommentDigests(v.deps(t), { now: t });
+    const cancelled = async () => (await v.store.listChangeSets(v.venueId, { status: ["cancelled"] })).filter((s) => s.source === "comment");
+    expect(await cancelled()).toHaveLength(5);
+    const rows = await v.store.listComments(v.venueId);
+    expect(rows.map((c) => [c.status, c.deferred, c.hold_attempts])).toEqual([["new", true, 5], ["new", true, 5]]);
+    expect(v.logs.some((l) => /2 comment\(s\) not proposed after 5 failed sends/.test(l))).toBe(true);
+    expect(v.logs.join("\n")).not.toContain("Супер");
+    // The next days' digests leave them alone too, until the owner writes again; then one more attempt.
+    const nextDay = Z("2026-10-16T07:00:00.000Z");
+    await runCommentDigests(v.deps(nextDay), { now: nextDay });
+    expect(await cancelled()).toHaveLength(5);
+    await v.store.touchMember("tg:1001", Z("2026-10-16T08:00:00.000Z").toISOString());
+    const third = Z("2026-10-17T07:00:00.000Z");
+    await runCommentDigests(v.deps(third), { now: third });
+    expect(await cancelled()).toHaveLength(6);
+    expect((await v.store.listComments(v.venueId)).map((c) => c.hold_attempts)).toEqual([6, 6]);
+  });
   it("tick step 10 runs the digests on the global tick when comment deps are wired, never on a per-venue tick", async () => {
     const v = await digestVenue();
     await v.addNew(Z("2026-10-15T06:00:00.000Z"));

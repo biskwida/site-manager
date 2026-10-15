@@ -9,7 +9,7 @@ import { commentModeLabel } from "../domain/comment-preview";
 import { quote, tr } from "../domain/format";
 import { maskRef } from "../channels/ref";
 import { COMMENT_MODES, type ChangeSet, type CommentMode, type CommentNetwork, type Lang, type ModerateAction, type Venue } from "../domain/types";
-import { cancelCommentSet, commentLimitState, commentsOfSet, createCommentSet, reachableOwners, type CommentSetDeps, type CommentSetItem } from "../social/comments-propose";
+import { cancelCommentSet, commentLimitState, commentsOfSet, createCommentSet, previewLength, reachableOwners, splitCommentItems, type CommentSetDeps, type CommentSetItem } from "../social/comments-propose";
 import type { DraftKind } from "../social/comments-draft";
 import type { CommentStatus, SocialComment, Store } from "../store/types";
 import type { AdminDeps } from "./admin";
@@ -180,11 +180,13 @@ async function releaseFromSet(cd: CommentSetDeps, cs: ChangeSet, c: SocialCommen
   return restMode === "again" ? rest : [];
 }
 
-/** The rest of a batch as one new proposal to every reachable owner (createCommentSet handles the limit and unreachable owners). */
+/** The rest of a batch as a new proposal to every reachable owner (createCommentSet handles the limit and unreachable owners),
+ *  split like any batch (splitCommentItems) so an old, larger set never becomes a message Telegram refuses. */
 async function proposeRest(cd: CommentSetDeps, venue: Venue, rest: CommentSetItem[]): Promise<void> {
   if (rest.length === 0) return;
   try {
-    await createCommentSet(cd, venue, rest, { batch: rest.length > 1 });
+    const site = await cd.store.getSite(venue.id);
+    for (const g of splitCommentItems(rest, { batch: false, extra: previewLength(site, venue.tz) })) await createCommentSet(cd, venue, g, { batch: g.length > 1 });
   } catch (e) {
     console.error(`[comments] venue ${venue.id}: re-proposing ${rest.length} comment(s) failed:`, e instanceof Error ? e.name : "error");
   }
