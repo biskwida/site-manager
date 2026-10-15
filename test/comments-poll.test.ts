@@ -108,6 +108,20 @@ describe("pollVenueComments", () => {
     expect(next.inserted.map((c) => c.network)).toEqual(["facebook"]);
   });
 
+  it("a destination saved without its token or account id is marked once (error, polled), not re-read and logged every tick", async () => {
+    const v = await connectedVenue({ instagram: false });
+    const { fbPostId } = await v.publishPost(["facebook_post"]);
+    v.meta.addFacebookComment(fbPostId!, { message: "hi", created: at(-MIN) });
+    const dest = (await v.store.getDestination(v.venue.id, "facebook"))!;
+    await v.store.updateDestination(dest.id, { config: { ...dest.config, page_id: "" } });
+    const r = await pollVenueComments(v.d, v.venue, T0);
+    expect(r.errors).toEqual([{ network: "facebook", code: "sm_social_not_connected" }]);
+    expect(await v.store.getDestination(v.venue.id, "facebook")).toMatchObject({ status: "error", last_error: expect.stringMatching(/^sm_social_not_connected/), config: expect.objectContaining({ last_comment_poll_at: T0.toISOString() }) });
+    const logged = v.logs.length;
+    for (const t of [at(5 * MIN), at(10 * MIN), at(COMMENT_POLL_EVERY_MS + MIN)]) expect(await pollVenueComments(v.d, v.venue, t)).toEqual({ polled: [], inserted: [], errors: [] });
+    expect(v.logs).toHaveLength(logged);
+  });
+
   it("never treats a comment without an author id as the venue's own", async () => {
     const v = await connectedVenue({ instagram: false });
     const { fbPostId } = await v.publishPost(["facebook_post"]);

@@ -21,6 +21,11 @@ export const COMMENT_ROW_RETENTION_MS = 60 * 24 * 3_600_000;
 /** Facebook `since` on a repeat poll: the last poll minus this margin (the unique comment_id makes the overlap harmless). */
 const SINCE_MARGIN_MS = 3_600_000;
 const NETWORKS: readonly CommentNetwork[] = ["instagram", "facebook"];
+/**
+ * Errors that a retry cannot fix: the destination is marked `error` (the owner connects again) and polled, so it is neither
+ * re-read nor logged every tick. CONNECTION_CODES (token, permission) plus a destination saved without its token or account id.
+ */
+const STOP_CODES: ReadonlySet<string> = new Set([...CONNECTION_CODES, "sm_social_not_connected"]);
 
 export interface PollReport {
   polled: CommentNetwork[];
@@ -62,7 +67,7 @@ async function readNetwork(d: SyncDeps, dest: DestinationWithSecrets, network: C
         log(d, `[comments] ${network} read for venue ${dest.venue_id} skipped a post: ${e.code}`);
         continue; // this post refuses to be read (e.g. a 4xx of its own); the others still are
       }
-      throw e; // token/permission: the destination is marked; transient: the whole network is retried on the next tick
+      throw e; // token/permission (STOP_CODES): the destination is marked; transient: the whole network is retried on the next tick
     }
     for (const c of comments) if (Date.parse(c.created_at) >= oldest) rows.push(toRow(c, t, ownId, now)); // never store > 30 days
   }
@@ -77,7 +82,8 @@ async function markPolled(d: SyncDeps, venueId: string, network: CommentNetwork,
 }
 
 /**
- * One venue's poll: each connected network at most every 15 min. A token/permission error marks the destination `error`
+ * One venue's poll: each connected network at most every 15 min. A token/permission error (or a destination saved without its
+ * token or account id) marks the destination `error`
  * (the owner reconnects); any other error is logged and the network is tried again on the next tick (no last_comment_poll_at).
  * Never throws.
  */
@@ -107,7 +113,7 @@ export async function pollVenueComments(d: SyncDeps, venue: Venue, now: Date): P
       const code = codeOf(e);
       report.errors.push({ network, code });
       log(d, `[comments] ${network} poll for venue ${venue.id} failed: ${code}`);
-      if (e instanceof MetaApiError && CONNECTION_CODES.has(e.code)) {
+      if (e instanceof MetaApiError && STOP_CODES.has(e.code)) {
         await markPolled(d, venue.id, network, now, { status: "error", last_error: formatSyncError(e.code, e.message) }).catch(() => undefined);
       }
     }
