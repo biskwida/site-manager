@@ -1,0 +1,165 @@
+{
+ "business": "Site Manager: a venue website the owner runs by chatting with an AI agent",
+ "seed": 1011,
+ "dealt": 20,
+ "answered": 20,
+ "skipped": [],
+ "buys": 2,
+ "passes": 18,
+ "buy_rate": 0.1,
+ "by_segment": [
+  [
+   "Restaurant owner or manager (1-3 locations)",
+   5,
+   0.2
+  ],
+  [
+   "Bar or bistro owner with a kitchen (1 location, changing menu)",
+   6,
+   0.16666666666666666
+  ],
+  [
+   "Small café or coffee bar owner (1 location, under 10 staff)",
+   9,
+   0.0
+  ]
+ ],
+ "by_behaviour": [
+  [
+   "Tech-curious early adopter",
+   2,
+   1.0
+  ],
+  [
+   "Instagram is enough",
+   4,
+   0.0
+  ],
+  [
+   "Penny-pincher",
+   3,
+   0.0
+  ],
+  [
+   "Trusts people, not apps",
+   2,
+   0.0
+  ],
+  [
+   "Has an outdated site",
+   4,
+   0.0
+  ],
+  [
+   "Relies on Google and delivery apps",
+   3,
+   0.0
+  ],
+  [
+   "Busy, delegates to a manager",
+   2,
+   0.0
+  ]
+ ],
+ "by_income": [
+  [
+   "$28,000 to $43,000",
+   7,
+   0.14285714285714285
+  ],
+  [
+   "$43,000 and up",
+   7,
+   0.14285714285714285
+  ],
+  [
+   "under $28,000",
+   6,
+   0.0
+  ]
+ ],
+ "why_not": [
+  [
+   "need",
+   9,
+   [
+    "My customers find me on Instagram and Facebook, and I already post the specials there myself for free. Paying 25 euros a month for a website nobody looks at, on a margin like mine, makes no sense.",
+    "My guests find me on Instagram and Google Maps, I already post the specials there for free. I raised prices twice this year, I'm not adding 25 € a month for a website nobody opens."
+   ],
+   [
+    "P001",
+    "P003"
+   ]
+  ],
+  [
+   "trust",
+   4,
+   [
+    "I already bleed money on POS, accounting and the delivery apps, and my lunch special goes on the board and on Facebook for free. Another 25 € plus VAT every month to an AI I can't phone when it breaks is not something I sign up for from an ad.",
+    "I don't buy things from an ad or an app I've never heard of. My daughter does the Instagram and that's enough for now; if another café owner I know used this and told me it works, maybe, but not from a stranger."
+   ],
+   [
+    "P005",
+    "P006"
+   ]
+  ],
+  [
+   "habit",
+   4,
+   [
+    "My whole day runs on Viber voice notes, with staff, suppliers, everyone. I'm not installing WhatsApp or Telegram just to talk to my website, and if it's not where I already am, I'll forget it exists within a week, like the old site.",
+    "I already have a site and my manager updates the menu when it matters; moving everything to a new site for 25 euros a month is a hassle I don't need right now. Most of my customers see us on Glovo and Google anyway."
+   ],
+   [
+    "P007",
+    "P010"
+   ]
+  ],
+  [
+   "price",
+   1,
+   [
+    "I already pay for POS, accounting and give the delivery apps their cut, and I raised my prices twice this year. Another 25 a month, 30 with VAT, for a menu page I can fix on Facebook and Google myself is money I don't have spare right now."
+   ],
+   [
+    "P002"
+   ]
+  ]
+ ],
+ "why_yes": [
+  [
+   "convenience",
+   2,
+   [
+    "My lunch special changes every single day and right now it never makes it onto my site, so sending a photo of the board from my phone and tapping once is exactly the kind of thing I'd try. I'd start on one venue for a month, keep my old site running alongside, and point the table QR at this.",
+    "My lunch special changes every day and right now the website is always wrong, so sending a voice note I'm already used to and tapping once is exactly how I'd want to do it. 25 a month is less than one slow lunch service, so I'll try it for a month and cancel if it messes up."
+   ],
+   [
+    "P004",
+    "P020"
+   ]
+  ]
+ ],
+ "flip": [
+  "If one message from Viber updated my Instagram, Facebook and Google listing at the same time, so it saved me time instead of adding another thing to feed.",
+  "A free first month, plus it also updates my Google listing hours and menu, and a promise in writing that if I cancel I keep my domain and get my site and menu exported.",
+  "If one message also updated my Google Maps hours and menu and posted the special to Instagram, not just the website.",
+  "A local person who sets it up with me in the restaurant, a phone number that answers in Bulgarian, and a first month free so I can see if it actually saves me time.",
+  "Another café owner in Sofia I know shows me it on their phone, tells me it never got a price wrong, and there's a real person who speaks Bulgarian I can call.",
+  "Viber support, so I can send it a voice note in the same app I use all day.",
+  "If the same WhatsApp message also updated my prices, hours and specials on Google Maps, Glovo and Wolt, without me having to move off my current site.",
+  "My existing domain connected on the 25 € plan, plus a written promise that if I cancel I get a full export of the site and menu that I can host elsewhere.",
+  "If it worked on top of my existing site without moving anything and my manager could do it from Viber, with a free first month to see it actually saves time.",
+  "If it worked with the site I already have instead of making me move, and the first months were free so I could see it actually saves me time on the daily special.",
+  "My manager sets it up, uses it for a month on a free trial without bothering me, and I can see it actually brought in tables or saved us phone calls.",
+  "If the same WhatsApp message also updated my hours and menu on Google Maps and Glovo/Wolt, and there was a Bulgarian person I could phone when something goes wrong.",
+  "If it worked through Viber and also pushed the same update to my Instagram and Facebook and Google listing in one message, so it saves me time instead of adding another thing.",
+  "If it worked on Viber, so I could just send it a voice note the same way I message my supplier, and someone set it up for me in person.",
+  "Another café owner I know telling me they use it, it really works by just messaging, and the person behind it setting it up for me face to face.",
+  "If the same WhatsApp message also updated my menu and prices on Glovo, Wolt and Google Maps at once, then I'd pay, because that is the work that eats my time.",
+  "If the same message also updated my Instagram and Facebook, so I don't do the work twice, and I saw real customers in Sofia using the table QR menu.",
+  "If it also fixed my Google page and Glovo menu from the same message, and someone I know with a café showed me it working for a few months without mistakes, maybe I try the 15 euro plan."
+ ],
+ "purchases_first_month_per_buyer": 1.0,
+ "price_answers": 20
+}

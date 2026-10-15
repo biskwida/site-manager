@@ -1,0 +1,7 @@
+country,food_service_units,year,source_url,website_share_pct,website_share_year,main_messenger,currency,competitor_price_low_eur,competitor_price_high_eur,agency_site_price_eur,avg_net_wage_eur,recommended_price_eur,attractiveness_1_10
+Serbia,18317,2024,https://ec.europa.eu/eurostat/api/dissemination/statistics/1.0/data/sbs_ovw_act?nace_r2=I56&indic_sbs=ENT_NR&geo=RS,84.6,2025,Viber,RSD,11,47,300,1034,20,7
+North Macedonia,4615,2024,https://ec.europa.eu/eurostat/api/dissemination/statistics/1.0/data/sbs_ovw_act?nace_r2=I56&indic_sbs=ENT_NR&geo=MK,48.8,2021,Viber,MKD,2.5,119,199,793,15,5
+Albania,15333,2023,https://ec.europa.eu/eurostat/api/dissemination/statistics/1.0/data/sbs_ovw_act?nace_r2=I56&indic_sbs=ENT_NR&geo=AL,60.6,2025,WhatsApp/Viber (unclear),ALL,5,15,250,800,15,6
+Bosnia and Herzegovina,9099,2024,https://ec.europa.eu/eurostat/api/dissemination/statistics/1.0/data/sbs_ovw_act?nace_r2=I56&indic_sbs=ENT_NR&geo=BA,68.0,2025,Viber (ESTIMATE),BAM,5.9,51,256,872,18,5
+Montenegro,6855,2024,https://www.monstat.org/uploads/files/publikacije/registri/Broj%20i%20struktura%20poslovnih%20subjekata%20u%20Crnoj%20Gori%20%202024.god.pdf,87.3,2025,Viber (ESTIMATE),EUR,7,80,150,1037,20,6
+Kosovo,9501,2026,https://arbk.atlas-studio.eu/activity/5610,,,Viber,EUR,13,15,595,636,12,5

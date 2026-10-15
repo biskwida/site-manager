@@ -1,0 +1,13 @@
+{
+  "id": "P020",
+  "buys": true,
+  "purchases_first_month": 1,
+  "reason_code": "convenience",
+  "reason": "I already snap my lunch board every morning, so if that one photo updates the site and posts the special on Google, it saves me a daily chore and 25 € is fine for that. I'd try it for a month and cancel if it slows me down.",
+  "objection": "If the AI misreads my chalk handwriting and puts 4.50 instead of 14.50 on Google, customers will hold me to it, and in a lunch rush I might tap confirm without reading closely.",
+  "would_change_my_mind": "If the first two weeks show it misreading prices from my board photos, so I end up retyping everything anyway, I cancel.",
+  "price_too_cheap": 5,
+  "price_cheap": 12,
+  "price_expensive": 35,
+  "price_too_expensive": 50
+}

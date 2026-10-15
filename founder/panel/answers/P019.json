@@ -1,0 +1,13 @@
+{
+  "id": "P019",
+  "buys": false,
+  "purchases_first_month": 0,
+  "reason_code": "need",
+  "reason": "My site has had the wrong prices for years and the regulars still come, and the Glovo people see the menu on Glovo anyway. 25 euro every month, 300 a year, for a thing I already forget exists is hard for me to justify.",
+  "objection": "I don't trust a robot to touch my prices. If it writes 2.30 instead of 3.20 and a customer shows me the phone, I lose money or I look like a cheat, and I am too busy behind the counter to check every message it sends back.",
+  "would_change_my_mind": "If it also fixed my Google page and Glovo menu from the same message, and someone I know with a café showed me it working for a few months without mistakes, maybe I try the 15 euro plan.",
+  "price_too_cheap": 3,
+  "price_cheap": 8,
+  "price_expensive": 15,
+  "price_too_expensive": 25
+}

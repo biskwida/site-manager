@@ -1,0 +1,13 @@
+{
+  "id": "P004",
+  "buys": true,
+  "purchases_first_month": 1,
+  "reason_code": "convenience",
+  "reason": "My lunch special changes every day and right now it never makes it onto my site or Google, so snapping the board and tapping once is exactly the kind of thing I'd try. At 25 a month with cancel any time, I'd give it a month to see if it actually saves me the hassle.",
+  "objection": "I already have a site and I don't want to throw it away or move my domain; if this means replacing what I have, I'll probably let it slide after the trial.",
+  "would_change_my_mind": "If it can't keep my existing site or domain, or if the Google posts come out wrong even once in the first week, I'd cancel.",
+  "price_too_cheap": 5,
+  "price_cheap": 12,
+  "price_expensive": 35,
+  "price_too_expensive": 55
+}

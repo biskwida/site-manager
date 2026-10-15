@@ -1,0 +1,13 @@
+{
+  "id": "P006",
+  "buys": false,
+  "purchases_first_month": 0,
+  "reason_code": "trust",
+  "reason": "I don't buy things from an ad, I buy from people I know. Nobody I know uses this yet, and I'm not letting a robot change my prices and my Google page on its own word.",
+  "objection": "Will the AI put a wrong price on my site or a wrong closing time on Google, and customers come and shout at me? And who do I call when it goes wrong, a chat bot?",
+  "would_change_my_mind": "Another café owner I know telling me she uses it and it never got her prices wrong, and someone who comes in person to set it up with me.",
+  "price_too_cheap": 5,
+  "price_cheap": 10,
+  "price_expensive": 20,
+  "price_too_expensive": 30
+}

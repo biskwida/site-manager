@@ -1,0 +1,13 @@
+{
+  "id": "P003",
+  "buys": false,
+  "purchases_first_month": 0,
+  "reason_code": "need",
+  "reason": "My guests find me on Instagram and Google Maps, I already post the specials there for free. I raised prices twice this year, I'm not adding 25 € a month for a website nobody opens.",
+  "objection": "It updates a website, but my people look at Instagram and Google Maps. If it doesn't push the specials and hours there too, it's just one more place to keep updated.",
+  "would_change_my_mind": "If one message also updated my Google Maps hours and menu and posted the special to Instagram, not just the website.",
+  "price_too_cheap": 3,
+  "price_cheap": 8,
+  "price_expensive": 15,
+  "price_too_expensive": 25
+}

@@ -1,0 +1,13 @@
+{
+  "id": "P005",
+  "buys": false,
+  "purchases_first_month": 0,
+  "reason_code": "trust",
+  "reason": "Updating the lunch special on the site and on Google from one message would really save me time. But I'm not adding another 25 a month on top of the POS, the accounting and the delivery commissions for a company I've never heard of, when nobody says who I call when it breaks.",
+  "objection": "If it puts the wrong price on Google or the site goes down on a Friday night, is there an actual person in Sofia who picks up the phone, or am I chatting with the same bot that broke it?",
+  "would_change_my_mind": "A free first month and a Bulgarian phone number with a named person behind it, ideally recommended by another restaurant owner I know.",
+  "price_too_cheap": 5,
+  "price_cheap": 10,
+  "price_expensive": 20,
+  "price_too_expensive": 35
+}

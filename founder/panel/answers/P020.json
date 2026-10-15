@@ -1,0 +1,13 @@
+{
+  "id": "P020",
+  "buys": true,
+  "purchases_first_month": 1,
+  "reason_code": "convenience",
+  "reason": "My lunch special changes every day and right now the website is always wrong, so sending a voice note I'm already used to and tapping once is exactly how I'd want to do it. 25 a month is less than one slow lunch service, so I'll try it for a month and cancel if it messes up.",
+  "objection": "That the AI reads my chalkboard photo or a rushed voice note in a noisy kitchen wrong and puts the wrong price up, and I tap confirm without looking properly because I'm in the middle of service.",
+  "would_change_my_mind": "If in the first week it gets prices wrong more than once or twice, or the preview is too fiddly to check on my phone during service, I cancel.",
+  "price_too_cheap": 5,
+  "price_cheap": 12,
+  "price_expensive": 35,
+  "price_too_expensive": 55
+}

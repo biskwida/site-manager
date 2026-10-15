@@ -1,0 +1,13 @@
+{
+  "id": "P016",
+  "buys": false,
+  "purchases_first_month": 0,
+  "reason_code": "trust",
+  "reason": "I just raised my prices twice because everything costs more, and I'm not adding 25 € a month for something I saw scrolling from people I've never met. My Instagram and a chalkboard do the job for now.",
+  "objection": "I don't know who is behind this, and if the AI puts a wrong price on my menu or the thing shuts down, who do I even call? I don't want another app to learn either.",
+  "would_change_my_mind": "Another café owner I know telling me they use it, it really works by just messaging, and the person behind it setting it up for me face to face.",
+  "price_too_cheap": 3,
+  "price_cheap": 8,
+  "price_expensive": 15,
+  "price_too_expensive": 25
+}

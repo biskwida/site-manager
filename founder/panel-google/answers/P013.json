@@ -1,0 +1,13 @@
+{
+  "id": "P013",
+  "buys": false,
+  "purchases_first_month": 0,
+  "reason_code": "need",
+  "reason": "My guests find me on Google Maps, Glovo and Wolt, and the menu already lives there. A website nobody visits isn't worth 25 € a month to me, and this doesn't even touch Glovo or Wolt, which is where I actually have to change prices.",
+  "objection": "Who do I call when it breaks at 7:30 with a line at the counter? If there's no real person in Bulgaria who picks up the phone, I'm not handing my Google listing to an AI bot.",
+  "would_change_my_mind": "If the same message also updated my Glovo and Wolt menus, and there was a Bulgarian person I could phone, I'd try the cheap plan.",
+  "price_too_cheap": 5,
+  "price_cheap": 10,
+  "price_expensive": 20,
+  "price_too_expensive": 30
+}

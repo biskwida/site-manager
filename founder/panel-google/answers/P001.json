@@ -1,0 +1,13 @@
+{
+  "id": "P001",
+  "buys": false,
+  "purchases_first_month": 0,
+  "reason_code": "habit",
+  "reason": "My customers find me on Instagram and Facebook, and I post the specials there myself in two minutes. 25 euros a month for a website nobody looks at, run through apps I don't even use, is money I'd rather spend on coffee beans.",
+  "objection": "We use Viber, not Telegram, and it doesn't do Viber. It also doesn't post to my Instagram, which is the only place my regulars actually look.",
+  "would_change_my_mind": "If one message also posted the special to my Instagram and Facebook and worked from Viber, I'd think about it, because then it saves me time instead of adding one more thing.",
+  "price_too_cheap": 3,
+  "price_cheap": 8,
+  "price_expensive": 15,
+  "price_too_expensive": 25
+}

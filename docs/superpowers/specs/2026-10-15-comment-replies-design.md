@@ -14,6 +14,18 @@ Out of scope for v1: hiding or deleting customer comments, replying to DMs (a se
 - Meta policy: store customer content at most 30 days; a Meta-channel owner can only receive a proactive message within 24 h of their last message (our router already enforces 23 h for `send`/`conclude`; `sendProposal` is not gated and Meta would reject it outside the window).
 - Code today: `destination_syncs.result.published[]` holds, per published target, the Meta post/media id. The sync queue, change sets with external entities, the ✅/✏️/❌ buttons, `correction_for`, the tick and `GraphClient` with retry classification all exist and are reused. The agent has no precedent for runs the owner did not start; proposals today are created by the agent or by tools.
 
+## Notification modes (owner's choice)
+
+Per venue, `comment_mode` in `{ each, digest, off }` with `digest_hour` (default 9, venue tz). Default for new venues: `each`; the owner changes it from the chat ("спри известията за коментари", "известия за коментари веднъж дневно в 10", "уведомявай ме за всеки коментар") through a `set_comment_mode` agent tool (proposed and approved like any change, source `text`, exempt from the limit), or from the dashboard card toggle.
+
+- **each**: every new top-level comment becomes its own proposal within 15 minutes of being found.
+- **digest**: comments are collected; at `digest_hour` the owner gets one message: "💬 3 нови коментара под 2 поста" listing each comment with its drafted reply, as ONE change set with one `social_reply` row per comment. ✅ posts all; ❌ ignores all; ✏️ lets the owner say which to change ("Мария: имаме безглутенови от вторник; останалите са ок") and the agent re-proposes the batch with that row replaced. Nothing is sent on days without new comments.
+- **off**: comments are collected and shown in the dashboard; no proactive message ever. The owner asks when they want.
+
+In every mode the owner can ask: "отговори на всички неотговорени коментари" / "answer the unanswered comments" → the agent tool `reply_to_comments` drafts all pending (`new`) comments of the last 14 days as one batch proposal, same shape as the digest. "Отговори само на въпросите" filters by the draft `kind`. "Колко коментара чакат?" → `list_comments`.
+
+Deferred Meta-window cases (an owner on Messenger/WhatsApp outside the 23-hour window) fall back to the digest behaviour: the batch waits for the owner's next message or the dashboard.
+
 ## Architecture
 
 ```
@@ -44,7 +56,9 @@ New table `social_comments` (schema-integrations.sql, RLS on, no anon):
 
 Store methods (both stores, contract-tested): `upsertComments(venueId, rows[]) → inserted[]` (ignores known comment_ids), `listComments(venueId, {status?, limit?})`, `updateComment(id, patch)`, `purgeComments(before)`.
 
-Change model: new external entity `social_reply`, op `social_reply`, row `{ network, comment_id, post_ref, author_name, comment_text, reply_text, permalink? }`; `isExternalEntity` includes it; `changes_entity_check` extended; preview lines: "• Отговор на коментар от Мария: „…“ → „…“"; undo row inverts to `after: null`, adapter deletes the reply.
+Venue gets `comment_mode text check (each|digest|off) default 'each'` and `comment_digest_hour int default 9` (schema.sql, both stores, contract test, kept out of the public feed).
+
+Change model: new external entity `social_reply`, op `social_reply`, row `{ network, comment_id, post_ref, author_name, comment_text, reply_text, permalink? }`; a set may hold several rows (digest/batch); `isExternalEntity` includes it; `changes_entity_check` extended; preview lines: "• Отговор на коментар от Мария: „…“ → „…“"; undo row inverts to `after: null`, adapter deletes the reply.
 
 `ChangeSource` gains `comment` (CHECK constraint extended). A `comment` set: does not count toward the monthly change limit (replies are reactions, not changes; see open questions), expires after 24 h instead of 2 h (tick expiry reads a per-source TTL), is not blocked by `ensureNoPending` (a pending menu proposal must not stop a reply) and does not block it either; `ensureNoPending` ignores `comment` sets in both directions.
 
@@ -66,7 +80,11 @@ Adapters: `relevant()` keeps `social_post` and `social_reply` rows of their netw
 
 ### Agent
 
-New tool `reply_to_comment({ comment_id | author, reply_text })` in social-tools: lists the venue's `new|proposed` comments (last 7 days) for the model via `list_comments` (or inline in the tool description), creates a `social_reply` change set exactly like `proposeReply` (replacing a pending one for the same comment, reusing `correction_for`). Prompt rule 14: when the owner refers to a comment, use the tools; never post without a proposal. `userMessage` for a ✏️ on a comment set includes the comment and the previous draft so the owner can type just the new wording.
+Tools in social-tools (owner only, present when a network is connected):
+- `list_comments({ status?, days? })` → the venue's comments with id, network, author, text, post caption, status, draft kind.
+- `reply_to_comments({ replies: [{ comment_id, reply_text }] })` → one `social_reply` change set with one row per reply (1–20 rows), replacing a pending comment set that covers any of the same comments (reusing `correction_for`). Used for "answer all unanswered", for a single reply, and for the ✏️ path of a digest.
+- `set_comment_mode({ mode, digest_hour? })` → a `venue` change on the new fields, previewed as "Известия за коментари: при всеки → веднъж дневно в 9:00".
+Prompt rule 14: comments are answered only through `reply_to_comments`; when the owner refers to a comment by author or content, call `list_comments` first; drafts follow the same rules as `draftReply`; never post without a proposal. `userMessage` for a ✏️ on a comment set includes the comments and the previous drafts so the owner can type only what changes.
 
 ### Dashboard
 
@@ -86,6 +104,7 @@ Unit: comment parsing for both networks (fixtures), own-account and nested skipp
 
 ## Open questions (answer in one message)
 
+0. Default mode for new venues: `each` (my proposal) or `digest`?
 1. Do replies count toward the monthly change limit (60 for Coffique)? Proposal: no, with a separate cap of 300 replies a month to bound cost.
 2. Two owners: proposal with buttons to the first owner only, plain copy to the second? Or to both, first tap wins?
 3. Draft tone source: until the brand/tone field exists, use the venue's tagline and about text. OK?

@@ -1,0 +1,167 @@
+{
+ "business": "Site Manager: a venue website the owner runs by chatting with an AI agent",
+ "seed": 1011,
+ "dealt": 20,
+ "answered": 20,
+ "skipped": [],
+ "buys": 2,
+ "passes": 18,
+ "buy_rate": 0.1,
+ "by_segment": [
+  [
+   "Restaurant owner or manager (1-3 locations)",
+   5,
+   0.2
+  ],
+  [
+   "Bar or bistro owner with a kitchen (1 location, changing menu)",
+   6,
+   0.16666666666666666
+  ],
+  [
+   "Small café or coffee bar owner (1 location, under 10 staff)",
+   9,
+   0.0
+  ]
+ ],
+ "by_behaviour": [
+  [
+   "Tech-curious early adopter",
+   2,
+   1.0
+  ],
+  [
+   "Instagram is enough",
+   4,
+   0.0
+  ],
+  [
+   "Penny-pincher",
+   3,
+   0.0
+  ],
+  [
+   "Trusts people, not apps",
+   2,
+   0.0
+  ],
+  [
+   "Has an outdated site",
+   4,
+   0.0
+  ],
+  [
+   "Relies on Google and delivery apps",
+   3,
+   0.0
+  ],
+  [
+   "Busy, delegates to a manager",
+   2,
+   0.0
+  ]
+ ],
+ "by_income": [
+  [
+   "$28,000 to $43,000",
+   7,
+   0.14285714285714285
+  ],
+  [
+   "$43,000 and up",
+   7,
+   0.14285714285714285
+  ],
+  [
+   "under $28,000",
+   6,
+   0.0
+  ]
+ ],
+ "why_not": [
+  [
+   "habit",
+   6,
+   [
+    "My customers find me on Instagram and Facebook, and I post the specials there myself in two minutes. 25 euros a month for a website nobody looks at, run through apps I don't even use, is money I'd rather spend on coffee beans.",
+    "My whole day runs on Viber voice notes, and it's the one app you don't support. I'm not opening WhatsApp or Telegram just to fix a price on a website I've ignored for years."
+   ],
+   [
+    "P001",
+    "P007"
+   ]
+  ],
+  [
+   "need",
+   6,
+   [
+    "My guests find me on Instagram and Google Maps, I already post my specials there myself, and nobody opens a bar's website. Paying 25 € a month for a site is hard to justify in a year when I've had to raise prices twice to cover costs.",
+    "My guests find me on Google Maps, Glovo and Wolt, and the menu already lives there. A website nobody visits isn't worth 25 € a month to me, and this doesn't even touch Glovo or Wolt, which is where I actually have to change prices."
+   ],
+   [
+    "P003",
+    "P013"
+   ]
+  ],
+  [
+   "trust",
+   4,
+   [
+    "Updating the lunch special on the site and on Google from one message would really save me time. But I'm not adding another 25 a month on top of the POS, the accounting and the delivery commissions for a company I've never heard of, when nobody says who I call when it breaks.",
+    "I don't buy things from an ad, I buy from people I know. Nobody I know uses this yet, and I'm not letting a robot change my prices and my Google page on its own word."
+   ],
+   [
+    "P005",
+    "P006"
+   ]
+  ],
+  [
+   "price",
+   2,
+   [
+    "I already pay for POS, accounting and the delivery apps eat my margin, and I raised prices twice this year. Another 25 a month plus VAT, every month, just so I don't have to touch the menu myself? I can update Google hours on my phone for free.",
+    "Another 25 euros a month on top of all the subscriptions I already pay. The menu changes, sure, but my manager writes it on the board and people come in anyway."
+   ],
+   [
+    "P002",
+    "P012"
+   ]
+  ]
+ ],
+ "why_yes": [
+  [
+   "convenience",
+   2,
+   [
+    "My lunch special changes every day and right now it never makes it onto my site or Google, so snapping the board and tapping once is exactly the kind of thing I'd try. At 25 a month with cancel any time, I'd give it a month to see if it actually saves me the hassle.",
+    "I already snap my lunch board every morning, so if that one photo updates the site and posts the special on Google, it saves me a daily chore and 25 € is fine for that. I'd try it for a month and cancel if it slows me down."
+   ],
+   [
+    "P004",
+    "P020"
+   ]
+  ]
+ ],
+ "flip": [
+  "If one message also posted the special to my Instagram and Facebook and worked from Viber, I'd think about it, because then it saves me time instead of adding one more thing.",
+  "Own domain and a full export of my site and menu included even on the cheap plan, so I keep everything if I cancel, and a free first month to see if it actually saves me time.",
+  "If the same message also posted the special to my Instagram and Facebook, and kept Google Maps hours and menu right, so I'd stop updating three places separately.",
+  "A free first month and a Bulgarian phone number with a named person behind it, ideally recommended by another restaurant owner I know.",
+  "Another café owner I know telling me she uses it and it never got her prices wrong, and someone who comes in person to set it up with me.",
+  "Viber support, so I can send the voice note in the same app I already use all day.",
+  "If the same message also updated my menu and prices on Glovo and Wolt, and they moved my existing site over for me without me doing anything.",
+  "A clear promise that my own domain works on the 25 € plan and that if I cancel I keep the domain, can export the site and menu, and my Google profile stays untouched.",
+  "If my manager tried it, said it really saves time on Google hours and the menu, and it could keep my existing site address with nothing to move.",
+  "If it kept my existing site and just handled the daily special on Google Maps, with a free first month so I could see if it actually brings people in at lunch.",
+  "My manager tries it free for a month, actually uses it, and I can see it brought in more customers from Google.",
+  "If the same message also updated my Glovo and Wolt menus, and there was a Bulgarian person I could phone, I'd try the cheap plan.",
+  "If the same message also posted my special to Instagram and Facebook and worked from Viber, I'd think about it for the Google Maps hours alone.",
+  "If it worked on Viber and somebody came by and set it all up for me, I'd try it.",
+  "Another café owner I know telling me they've used it for a few months, that it really is just sending a WhatsApp message, and that it brought them customers from Google.",
+  "If the same message also changed my menu and sold-out items on Glovo and Wolt, not just Google and a website.",
+  "If it posted my specials straight to Instagram and Facebook from the same message, so it saves me the posting I already do.",
+  "A neighbouring café owner I know showing me it on their phone for a couple of months with no mistakes, and a free first month so I can see if anyone actually looks at the site."
+ ],
+ "purchases_first_month_per_buyer": 1.0,
+ "price_answers": 20
+}

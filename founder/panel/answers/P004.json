@@ -1,0 +1,13 @@
+{
+  "id": "P004",
+  "buys": true,
+  "purchases_first_month": 1,
+  "reason_code": "convenience",
+  "reason": "My lunch special changes every single day and right now it never makes it onto my site, so sending a photo of the board from my phone and tapping once is exactly the kind of thing I'd try. I'd start on one venue for a month, keep my old site running alongside, and point the table QR at this.",
+  "objection": "I already have a site and moving everything over is a hassle; if the new one looks worse than what I have or the AI gets a price wrong on a busy lunch, I've paid to make my life harder.",
+  "would_change_my_mind": "",
+  "price_too_cheap": 5,
+  "price_cheap": 12,
+  "price_expensive": 30,
+  "price_too_expensive": 45
+}

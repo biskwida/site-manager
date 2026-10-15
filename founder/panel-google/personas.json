@@ -1,0 +1,222 @@
+[
+ {
+  "id": "P001",
+  "name": "Sara",
+  "age": 44,
+  "segment": "Small café or coffee bar owner (1 location, under 10 staff)",
+  "income": 16000,
+  "behaviour": "Instagram is enough",
+  "behaviour_how": "Posts specials on Instagram and Facebook; thinks nobody looks at websites any more.",
+  "objection": "We use Viber, not Telegram.",
+  "habit": "you open at 7:30 and do the supplier orders yourself"
+ },
+ {
+  "id": "P002",
+  "name": "Raj",
+  "age": 53,
+  "segment": "Bar or bistro owner with a kitchen (1 location, changing menu)",
+  "income": 37000,
+  "behaviour": "Penny-pincher",
+  "behaviour_how": "Questions every monthly fee; already pays for POS, accounting software and delivery-app commissions.",
+  "objection": "Is my data and my domain mine if I stop paying?",
+  "habit": "you raised prices twice this year because of costs"
+ },
+ {
+  "id": "P003",
+  "name": "Min",
+  "age": 28,
+  "segment": "Bar or bistro owner with a kitchen (1 location, changing menu)",
+  "income": 47000,
+  "behaviour": "Instagram is enough",
+  "behaviour_how": "Posts specials on Instagram and Facebook; thinks nobody looks at websites any more.",
+  "objection": "My guests find me on Instagram and Google Maps, not on a website.",
+  "habit": "you raised prices twice this year because of costs"
+ },
+ {
+  "id": "P004",
+  "name": "Mason",
+  "age": 42,
+  "segment": "Restaurant owner or manager (1-3 locations)",
+  "income": 45000,
+  "behaviour": "Tech-curious early adopter",
+  "behaviour_how": "Uses voice notes and ChatGPT already, likes trying new tools if they save time.",
+  "objection": "I already have a site; moving is a hassle.",
+  "habit": "your menu board changes every day with the lunch special"
+ },
+ {
+  "id": "P005",
+  "name": "Rhys",
+  "age": 46,
+  "segment": "Restaurant owner or manager (1-3 locations)",
+  "income": 43000,
+  "behaviour": "Penny-pincher",
+  "behaviour_how": "Questions every monthly fee; already pays for POS, accounting software and delivery-app commissions.",
+  "objection": "Who do I call when it breaks? Is there a real person in Bulgaria?",
+  "habit": "your menu board changes every day with the lunch special"
+ },
+ {
+  "id": "P006",
+  "name": "Maya",
+  "age": 51,
+  "segment": "Small café or coffee bar owner (1 location, under 10 staff)",
+  "income": 29000,
+  "behaviour": "Trusts people, not apps",
+  "behaviour_how": "Buys only from someone they know or who was recommended by another owner.",
+  "objection": "Will the AI put a wrong price on my site?",
+  "habit": "your daughter set up the Instagram account"
+ },
+ {
+  "id": "P007",
+  "name": "Hugo",
+  "age": 40,
+  "segment": "Restaurant owner or manager (1-3 locations)",
+  "income": 74000,
+  "behaviour": "Has an outdated site",
+  "behaviour_how": "Paid a freelancer or nephew for a site years ago; prices and hours on it are wrong; never touches it.",
+  "objection": "We use Viber, not Telegram.",
+  "habit": "you send voice notes on Viber all day"
+ },
+ {
+  "id": "P008",
+  "name": "Farah",
+  "age": 45,
+  "segment": "Small café or coffee bar owner (1 location, under 10 staff)",
+  "income": 29000,
+  "behaviour": "Relies on Google and delivery apps",
+  "behaviour_how": "Guests find them on Google Maps, Glovo or Wolt; menu lives there.",
+  "objection": "I already have a site; moving is a hassle.",
+  "habit": "you open at 7:30 and do the supplier orders yourself"
+ },
+ {
+  "id": "P009",
+  "name": "Idris",
+  "age": 29,
+  "segment": "Small café or coffee bar owner (1 location, under 10 staff)",
+  "income": 27000,
+  "behaviour": "Has an outdated site",
+  "behaviour_how": "Paid a freelancer or nephew for a site years ago; prices and hours on it are wrong; never touches it.",
+  "objection": "Is my data and my domain mine if I stop paying?",
+  "habit": "you raised prices twice this year because of costs"
+ },
+ {
+  "id": "P010",
+  "name": "Nico",
+  "age": 55,
+  "segment": "Restaurant owner or manager (1-3 locations)",
+  "income": 74000,
+  "behaviour": "Busy, delegates to a manager",
+  "behaviour_how": "Too busy to decide on software; a manager or staff member handles small digital tasks.",
+  "objection": "I already have a site; moving is a hassle.",
+  "habit": "you check the Glovo tablet between orders"
+ },
+ {
+  "id": "P011",
+  "name": "Pablo",
+  "age": 53,
+  "segment": "Restaurant owner or manager (1-3 locations)",
+  "income": 39000,
+  "behaviour": "Penny-pincher",
+  "behaviour_how": "Questions every monthly fee; already pays for POS, accounting software and delivery-app commissions.",
+  "objection": "I already have a site; moving is a hassle.",
+  "habit": "your menu board changes every day with the lunch special"
+ },
+ {
+  "id": "P012",
+  "name": "Julian",
+  "age": 58,
+  "segment": "Bar or bistro owner with a kitchen (1 location, changing menu)",
+  "income": 39000,
+  "behaviour": "Busy, delegates to a manager",
+  "behaviour_how": "Too busy to decide on software; a manager or staff member handles small digital tasks.",
+  "objection": "Another monthly subscription? I already pay for too many.",
+  "habit": "you open at 7:30 and do the supplier orders yourself"
+ },
+ {
+  "id": "P013",
+  "name": "Tess",
+  "age": 33,
+  "segment": "Small café or coffee bar owner (1 location, under 10 staff)",
+  "income": 25000,
+  "behaviour": "Relies on Google and delivery apps",
+  "behaviour_how": "Guests find them on Google Maps, Glovo or Wolt; menu lives there.",
+  "objection": "Who do I call when it breaks? Is there a real person in Bulgaria?",
+  "habit": "you open at 7:30 and do the supplier orders yourself"
+ },
+ {
+  "id": "P014",
+  "name": "Dev",
+  "age": 43,
+  "segment": "Small café or coffee bar owner (1 location, under 10 staff)",
+  "income": 28000,
+  "behaviour": "Instagram is enough",
+  "behaviour_how": "Posts specials on Instagram and Facebook; thinks nobody looks at websites any more.",
+  "objection": "We use Viber, not Telegram.",
+  "habit": "you open at 7:30 and do the supplier orders yourself"
+ },
+ {
+  "id": "P015",
+  "name": "Theo",
+  "age": 50,
+  "segment": "Bar or bistro owner with a kitchen (1 location, changing menu)",
+  "income": 47000,
+  "behaviour": "Has an outdated site",
+  "behaviour_how": "Paid a freelancer or nephew for a site years ago; prices and hours on it are wrong; never touches it.",
+  "objection": "I don't want to learn a new app.",
+  "habit": "you send voice notes on Viber all day"
+ },
+ {
+  "id": "P016",
+  "name": "Poppy",
+  "age": 26,
+  "segment": "Small café or coffee bar owner (1 location, under 10 staff)",
+  "income": 16000,
+  "behaviour": "Trusts people, not apps",
+  "behaviour_how": "Buys only from someone they know or who was recommended by another owner.",
+  "objection": "I don't want to learn a new app.",
+  "habit": "you raised prices twice this year because of costs"
+ },
+ {
+  "id": "P017",
+  "name": "Ana",
+  "age": 46,
+  "segment": "Bar or bistro owner with a kitchen (1 location, changing menu)",
+  "income": 48000,
+  "behaviour": "Relies on Google and delivery apps",
+  "behaviour_how": "Guests find them on Google Maps, Glovo or Wolt; menu lives there.",
+  "objection": "I don't want to learn a new app.",
+  "habit": "you check the Glovo tablet between orders"
+ },
+ {
+  "id": "P018",
+  "name": "Kai",
+  "age": 31,
+  "segment": "Small café or coffee bar owner (1 location, under 10 staff)",
+  "income": 22000,
+  "behaviour": "Instagram is enough",
+  "behaviour_how": "Posts specials on Instagram and Facebook; thinks nobody looks at websites any more.",
+  "objection": "I don't want to learn a new app.",
+  "habit": "your daughter set up the Instagram account"
+ },
+ {
+  "id": "P019",
+  "name": "Malik",
+  "age": 53,
+  "segment": "Small café or coffee bar owner (1 location, under 10 staff)",
+  "income": 27000,
+  "behaviour": "Has an outdated site",
+  "behaviour_how": "Paid a freelancer or nephew for a site years ago; prices and hours on it are wrong; never touches it.",
+  "objection": "Will the AI put a wrong price on my site?",
+  "habit": "you check the Glovo tablet between orders"
+ },
+ {
+  "id": "P020",
+  "name": "Finn",
+  "age": 43,
+  "segment": "Bar or bistro owner with a kitchen (1 location, changing menu)",
+  "income": 41000,
+  "behaviour": "Tech-curious early adopter",
+  "behaviour_how": "Uses voice notes and ChatGPT already, likes trying new tools if they save time.",
+  "objection": "Will the AI put a wrong price on my site?",
+  "habit": "your menu board changes every day with the lunch special"
+ }
+]
