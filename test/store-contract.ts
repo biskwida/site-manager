@@ -135,6 +135,13 @@ export function storeContract(name: string, make: () => Promise<Store>, storageH
       expect(await s.applyChangeSet(applied.id, NOW)).toBe("applied");
       expect(await s.expireChangeSet(applied.id, LATER)).toBe("skipped");
       expect(await s.getChangeSet(applied.id)).toMatchObject({ status: "applied", decided_at: NOW });
+      // cancelChangeSet is conditional the same way: a set decided meanwhile keeps its status.
+      const open = await s.createChangeSet({ ...base, status: "proposed" });
+      expect(await s.cancelChangeSet(open.id, LATER)).toBe("cancelled");
+      expect(await s.getChangeSet(open.id)).toMatchObject({ status: "cancelled", decided_at: LATER });
+      expect(await s.cancelChangeSet(open.id, LATER)).toBe("skipped");
+      expect(await s.cancelChangeSet(applied.id, LATER)).toBe("skipped");
+      expect(await s.getChangeSet(applied.id)).toMatchObject({ status: "applied", decided_at: NOW });
     });
 
     it("lists expired sold-out and special timers", async () => {

@@ -461,6 +461,15 @@ export class SupabaseStore implements Store {
     return flipped.length === 0 ? "skipped" : "expired";
   }
 
+  /** Conditional flip, like expireChangeSet's: only a still-proposed set is cancelled. */
+  async cancelChangeSet(id: string, now: string) {
+    const flipped = await must(
+      this.db.from("change_sets").update({ status: "cancelled", decided_at: now }).eq("id", id).eq("status", "proposed").select("id"),
+      `cancelChangeSet ${id}`,
+    );
+    return flipped.length === 0 ? ("skipped" as const) : ("cancelled" as const);
+  }
+
   private async writeEntity(venueId: string, c: Change) {
     if (isExternalEntity(c.entity)) return; // lives on the owner's WordPress site or social accounts; the destination push writes it
     const table = TABLE[c.entity];

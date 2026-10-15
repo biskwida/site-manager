@@ -27,6 +27,7 @@ import { runTick } from "../tick";
 import { resolveSecretKey } from "../destinations/secrets";
 import { withDestinationSync } from "../destinations/store-hook";
 import type { SyncDeps } from "../destinations/sync";
+import { draftReply, type DraftFn } from "../social/comments-draft";
 import { connectWordPress, wordPressClientFor } from "../destinations/connect";
 import { socialConnections } from "../agent/social-tools";
 import { httpVisualClient } from "../visual/client";
@@ -50,6 +51,8 @@ export interface ServerDeps {
   destinationSecretKey: Buffer | null;
   /** Destination sync deps for the tick; null when integrations are off. */
   sync: SyncDeps | null;
+  /** Comment reply drafting for the tick; null when integrations are off. */
+  comments: { draft: DraftFn } | null;
   /**
    * FakeDeployer in memory mode; VercelDeployer when VERCEL_TOKEN is set; null otherwise (production without a token):
    * no venue projects are created and every site is served from the hosted /<slug>.
@@ -105,6 +108,8 @@ export async function makeServerDeps(o: DepsOptions): Promise<ServerDeps> {
   const sync: SyncDeps | null = destinationSecretKey ? { store: s, secretKey: destinationSecretKey, log } : null;
   // Every apply (bot button, dashboard, tick, agent) goes through store2 so wp_* rows reach the site right after the apply.
   const store2: Store = sync ? withDestinationSync(s, sync) : s;
+  // Without an API key draftReply answers with the neutral fallback line, so the owner still gets a proposal to edit.
+  const comments = sync ? { draft: (ctx: Parameters<DraftFn>[0]) => draftReply(anthropic, { model: config.commentDraftModel }, ctx) } : null;
   const transcribe =
     o.transcribe !== undefined ? o.transcribe : config.sttApiKey ? makeTranscriber({ apiKey: config.sttApiKey, baseUrl: config.sttBaseUrl, model: config.sttModel }) : null;
   // The fake deployer is for offline mode only: in production it would hand owners https://<slug>.example.test.
@@ -156,7 +161,7 @@ export async function makeServerDeps(o: DepsOptions): Promise<ServerDeps> {
 
   async function handleRun(r: RunRequest): Promise<void> {
     try {
-      await runTick({ store: store2, messenger, now: new Date(), venueId: r.venueId, deployer, sync });
+      await runTick({ store: store2, messenger, now: new Date(), venueId: r.venueId, deployer, sync, comments });
     } catch (e) {
       console.error("[tick] per-webhook tick failed:", e instanceof Error ? e.message : e);
     }
@@ -175,7 +180,7 @@ export async function makeServerDeps(o: DepsOptions): Promise<ServerDeps> {
   }
 
   const outbound: typeof fetch = o.fetch ?? ((input, init) => fetch(input, init));
-  return { config, store: store2, messenger, bot, botDeps, waDownload, fetchUrl, handleRun, isMemory, deployer, startDeploy, watchDeploy, anthropic, destinationSecretKey, sync, fetch: outbound };
+  return { config, store: store2, messenger, bot, botDeps, waDownload, fetchUrl, handleRun, isMemory, deployer, startDeploy, watchDeploy, anthropic, destinationSecretKey, sync, comments, fetch: outbound };
 }
 
 // On globalThis, not a module variable: `next dev` (HMR, separate route bundles) then shares one in-memory store between pages and API routes.

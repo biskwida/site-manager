@@ -49,6 +49,13 @@ const BG = {
   /** Monthly change limit (src/domain/limits.ts); `resetsOn` is YYYY-MM-DD, the 1st of next month. */
   limitReached: (limit: number, used: number, resetsOn: string) => `Лимитът от ${limit} промени за този месец е достигнат (${used}/${limit}). Нови промени от ${dayMonth(resetsOn, MONTHS_BG)}.`,
   changesThisMonth: (used: number, limit: number) => `Промени този месец: ${used}/${limit}`,
+  /** Comment replies (2026-10-15): the separate monthly cap on replies and moderations. */
+  commentLimitReached: (limit: number, used: number, resetsOn: string) => `Лимитът от ${limit} отговора на коментари за този месец е достигнат (${used}/${limit}). Нови отговори от ${dayMonth(resetsOn, MONTHS_BG)}.`,
+  /** Another owner tapped first on a comment proposal; `channel` is a CHANNEL_NAMES value. */
+  decidedByOther: (decision: "apply" | "cancel", channel: string) => (decision === "apply" ? `✅ Отговорено от друг собственик (${channel})` : `❌ Отказано от друг собственик (${channel})`),
+  /** A late tap on a comment proposal that is already decided (by this or another owner). */
+  alreadyDecided: "Вече решено.",
+  expiredAfter: (hours: number) => `Изтекло: не беше потвърдено в рамките на ${hours} часа.`,
   status: {
     proposed: "Чака решение.",
     scheduled: "Насрочено.",
@@ -101,6 +108,10 @@ const EN: typeof BG = {
   cancelled: "❌ Cancelled",
   limitReached: (limit, used, resetsOn) => `This month's limit of ${limit} changes is reached (${used}/${limit}). New changes from ${dayMonth(resetsOn, MONTHS_EN)}.`,
   changesThisMonth: (used, limit) => `Changes this month: ${used}/${limit}`,
+  commentLimitReached: (limit, used, resetsOn) => `This month's limit of ${limit} comment replies is reached (${used}/${limit}). New replies from ${dayMonth(resetsOn, MONTHS_EN)}.`,
+  decidedByOther: (decision, channel) => (decision === "apply" ? `✅ Answered by another owner (${channel})` : `❌ Declined by another owner (${channel})`),
+  alreadyDecided: "Already decided.",
+  expiredAfter: (hours) => `Expired: not confirmed within ${hours} hours.`,
   status: {
     proposed: "Waiting for a decision.",
     scheduled: "Scheduled.",

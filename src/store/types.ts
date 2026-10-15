@@ -190,6 +190,8 @@ export interface Store {
   applyChangeSet(id: string, now: string): Promise<ApplyResult>;
   /** Marks the set expired (decided_at = now) only if it is still proposed; "skipped" when it was already decided. */
   expireChangeSet(id: string, now: string): Promise<"expired" | "skipped">;
+  /** Marks the set cancelled (decided_at = now) only if it is still proposed; "skipped" when it was already decided (a racing ✅ wins). */
+  cancelChangeSet(id: string, now: string): Promise<"cancelled" | "skipped">;
   listExpiredTimers(now: string, venueId?: string): Promise<ExpiredTimer[]>;
 
   // media

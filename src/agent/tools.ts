@@ -162,7 +162,8 @@ export function makeTools(deps: AgentDeps) {
 
   /** Proposals from earlier messages block new ones: the one the owner pressed ✏️ on is replaced, any other refuses. This message's own proposals never block. */
   const ensureNoPending = async () => {
-    const earlier = (await d.store.listChangeSets(d.venueId, { status: ["proposed"], limit: 50 })).filter((cs) => cs.chat_ref === d.chatRef && !turnSets.has(cs.id));
+    // Comment proposals (source "comment") never block a menu change and are never blocked by one.
+    const earlier = (await d.store.listChangeSets(d.venueId, { status: ["proposed"], limit: 50 })).filter((cs) => cs.chat_ref === d.chatRef && cs.source !== "comment" && !turnSets.has(cs.id));
     const corrected = d.correctionFor ? earlier.find((cs) => cs.id === d.correctionFor) : undefined;
     const pending = earlier.find((cs) => cs !== corrected);
     if (!pending) {

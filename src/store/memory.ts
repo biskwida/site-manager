@@ -374,6 +374,14 @@ export class InMemoryStore implements Store {
     cs.decided_at = now;
     return "expired";
   }
+  async cancelChangeSet(id: string, now: string) {
+    const cs = this.sets.get(id);
+    if (!cs) throw new Error(`change set ${id} not found`);
+    if (cs.status !== "proposed") return "skipped" as const;
+    cs.status = "cancelled";
+    cs.decided_at = now;
+    return "cancelled" as const;
+  }
   async listExpiredTimers(now: string, venueId?: string) {
     const out: ExpiredTimer[] = [];
     for (const s of this.sites.values()) {
