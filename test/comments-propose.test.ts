@@ -328,6 +328,40 @@ describe("comment sets: races, the apply-time limit, held batches and logs", () 
     expect(messenger.sent.filter((m) => m.setId).map((m) => m.text.split("\n")[0])).toEqual([expect.stringMatching(/^💬 Нов коментар/), "💬 2 нови коментара под 1 пост"]);
     expect(await store.getComment(a.id)).toMatchObject({ status: "proposed", deferred: false });
   });
+  it("every proposal send fails: the set is cancelled, the comment held with its draft, and the next tick proposes it", async () => {
+    const v = await setup();
+    const real = v.messenger.sendProposal.bind(v.messenger);
+    v.messenger.sendProposal = async (): Promise<string> => null as unknown as string; // the Messenger contract: null = not sent
+    const c = await v.add("c1", "Супер!");
+    const r = await createCommentSet(v.d, await v.freshVenue(), [{ ...item(c, "Благодарим!"), kind: "praise" }]);
+    expect(r).toEqual({ set: null, sent: [], deferred: true, limited: false });
+    expect(await v.store.listChangeSets(v.venue.id, { status: ["proposed"] })).toEqual([]);
+    expect((await v.store.listChangeSets(v.venue.id, { status: ["cancelled"] })).map((x) => x.source)).toEqual(["comment"]);
+    expect(await v.store.getComment(c.id)).toMatchObject({ status: "new", change_set_id: null, deferred: true, draft_text: "Благодарим!", draft_kind: "praise" });
+    v.messenger.sendProposal = real;
+    const tick = await runTick({ store: v.store, messenger: v.messenger, now: at(MIN), sync: v.sync, comments: { draft: v.d.draft } });
+    expect(tick.comments_proposed).toBe(1);
+    expect(v.calls).toHaveLength(0); // the stored draft is reused
+    expect(await v.store.getComment(c.id)).toMatchObject({ status: "proposed", deferred: false });
+    expect(v.messenger.sent.filter((m) => m.setId).map((m) => m.chatRef)).toEqual(["tg:1001"]);
+  });
+  it("concluding the other owner fails (store error): the tapper still gets ✅ Приложено", async () => {
+    const { d, add, store, messenger, freshVenue } = await setup({}, [{ chat_ref: "fb:900", lang: "en", last_seen_at: at(-HOUR).toISOString() }]);
+    const c = await add("c1", "Супер!");
+    const { set } = await createCommentSet(d, await freshVenue(), [item(c, "Благодарим!")]);
+    const flaky = new Proxy(store, {
+      get(target, prop, receiver) {
+        if (prop === "findMember") return async (ref: string) => { if (ref === "fb:900") throw new Error("db down"); return target.findMember(ref); };
+        const val = Reflect.get(target, prop, receiver);
+        return typeof val === "function" ? val.bind(target) : val;
+      },
+    });
+    const r = await handleDecision({ store: flaky, messenger, now: () => T0 }, "tg:1001", "apply", set!.id);
+    expect(r.toast).toBe("✅ Приложено");
+    expect(r.edit?.short).toMatch(/^✅ Приложено/);
+    expect((await store.getChangeSet(set!.id)).status).toBe("applied");
+    expect(messenger.concluded).toHaveLength(0);
+  });
   it("a tap on an expired comment set says the 24-hour TTL", async () => {
     const { d, add, store, messenger, freshVenue } = await setup();
     const c = await add("c1", "Супер!");

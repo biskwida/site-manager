@@ -8,14 +8,14 @@
 import { CHANNEL_NAMES } from "../bot/members";
 import { copy } from "../bot/copy";
 import type { Messenger } from "../bot/messenger";
-import { channelOf, isMetaChannel } from "../channels/ref";
+import { channelOf, isMetaChannel, maskRef } from "../channels/ref";
 import { PROACTIVE_WINDOW_MS } from "../channels/router";
 import { excerpt } from "../domain/comment-preview";
 import { quote, tr } from "../domain/format";
 import { renderPreview } from "../domain/preview";
 import { NETWORK_NAMES, type Change, type ChangeSet, type ChangeSource, type Lang, type Member, type ModerateAction, type SocialModerateRow, type SocialReplyRow, type Venue } from "../domain/types";
 import type { CommentStatus, SocialComment, Store } from "../store/types";
-import { commentUsage } from "../store/usage";
+import { commentUsage, type CommentUsage } from "../store/usage";
 import { draftContextOf, type DraftFn, type DraftKind } from "./comments-draft";
 
 const HOUR = 3_600_000;
@@ -54,13 +54,8 @@ export interface CommentSetResult {
   /** True when the venue's comment_limit is reached: nothing was created. */
   limited: boolean;
 }
-export interface CommentLimitState {
-  used: number;
-  limit: number | null;
-  reached: boolean;
-  /** YYYY-MM-DD in the venue's zone: the 1st of next month. */
-  resets_on: string;
-}
+/** The venue's comment actions this calendar month against comment_limit (src/store/usage.ts). */
+export type CommentLimitState = CommentUsage;
 
 const log = (d: Pick<ProposeDeps, "log">, s: string) => (d.log ?? ((x: string) => console.log(x)))(s);
 
@@ -132,9 +127,7 @@ export function commentSetSummary(items: CommentSetItem[]): { summary_bg: string
 }
 
 /** The venue's comment actions this calendar month (in its zone) against comment_limit (null = unlimited). */
-export async function commentLimitState(store: Pick<Store, "countCommentActions">, venue: Pick<Venue, "id" | "tz" | "comment_limit">, now: Date): Promise<CommentLimitState> {
-  return commentUsage(store, venue, now);
-}
+export const commentLimitState = commentUsage;
 
 /** Owners who may be messaged now: every Telegram owner; a Meta-channel owner only within 23 h of their last message. */
 export async function reachableOwners(store: Pick<Store, "listMembers">, venueId: string, now: Date): Promise<{ reachable: Member[]; deferred: Member[] }> {
@@ -149,22 +142,30 @@ export async function commentsOfSet(store: Pick<Store, "listComments">, cs: Pick
 }
 
 /** Every owner chat that got this set's buttons, with its message ref (falls back to the primary chat for an old set). */
-function proposalTargets(cs: Pick<ChangeSet, "proposal_refs" | "chat_ref" | "message_ref">): [string, string | null][] {
+export function proposalTargets(cs: Pick<ChangeSet, "proposal_refs" | "chat_ref" | "message_ref">): [string, string | null][] {
   if (cs.proposal_refs) return Object.entries(cs.proposal_refs);
   return cs.chat_ref !== null ? [[cs.chat_ref, cs.message_ref]] : [];
 }
 
 /**
  * Concludes every owner's proposal message of a comment set but `except` (the chat that decided; its own message is concluded
- * by the caller): Telegram loses the buttons, Meta channels get `line` as a new message inside the window. Best-effort.
+ * by the caller): Telegram loses the buttons, Meta channels get `line` as a new message inside the window. Best-effort and
+ * never throws (like the router): it runs after the decision is stored, so a failure must not cost the tapper's own answer.
  */
 export async function concludeCommentOwners(d: Pick<CommentSetDeps, "store" | "messenger">, cs: ChangeSet, line: (lang: Lang) => string, o: { except?: string } = {}): Promise<void> {
+  let failed = 0;
   for (const [chatRef, messageRef] of proposalTargets(cs)) {
     if (chatRef === o.except) continue;
-    const lang = (await d.store.findMember(chatRef))?.lang ?? "bg";
-    const l = line(lang);
-    await d.messenger.conclude(chatRef, messageRef, `${lang === "bg" ? cs.preview_bg : cs.preview_en}\n\n${l}`, l, { proactive: true });
+    try {
+      const lang = (await d.store.findMember(chatRef))?.lang ?? "bg";
+      const l = line(lang);
+      await d.messenger.conclude(chatRef, messageRef, `${lang === "bg" ? cs.preview_bg : cs.preview_en}\n\n${l}`, l, { proactive: true });
+    } catch (e) {
+      failed++;
+      console.error(`[comments] conclude ${maskRef(chatRef)} for set ${cs.id} failed:`, e instanceof Error ? e.name : "error");
+    }
   }
+  if (failed > 0) console.error(`[comments] set ${cs.id}: ${failed} owner message(s) not concluded`);
 }
 
 /**
@@ -176,11 +177,13 @@ export async function createCommentSet(d: CommentSetDeps, venue: Venue, items: C
   const now = d.now();
   if ((await commentLimitState(d.store, venue, now)).reached) return { set: null, sent: [], deferred: false, limited: true };
   const reachable = o.silent ? [] : (await reachableOwners(d.store, venue.id, now)).reachable;
-  if (!o.silent && reachable.length === 0) {
-    for (const it of items) await d.store.updateComment(it.comment.id, { deferred: true, draft_text: it.reply_text, draft_kind: it.kind ?? it.comment.draft_kind ?? undefined });
-    log(d, `[comments] venue ${venue.id}: no owner reachable, ${items.length} comment(s) held`);
+  /** Nobody has the buttons: the comments stay `new`, keep their drafts and are retried by the next tick. */
+  const hold = async (why: string): Promise<CommentSetResult> => {
+    for (const it of items) await d.store.updateComment(it.comment.id, { status: "new", change_set_id: null, deferred: true, draft_text: it.reply_text, draft_kind: it.kind ?? it.comment.draft_kind ?? null });
+    log(d, `[comments] venue ${venue.id}: ${why}, ${items.length} comment(s) held`);
     return { set: null, sent: [], deferred: true, limited: false };
-  }
+  };
+  if (!o.silent && reachable.length === 0) return hold("no owner reachable");
   const primary = reachable.find((m) => m.chat_ref === o.chatRef) ?? reachable[0] ?? null;
   const ordered = primary ? [primary, ...reachable.filter((m) => m !== primary)] : [];
   const changes = commentChanges(items);
@@ -194,6 +197,11 @@ export async function createCommentSet(d: CommentSetDeps, venue: Venue, items: C
   for (const m of ordered) {
     const ref = await d.messenger.sendProposal(m.chat_ref, commentProposalText(items, m.lang, { batch: o.batch }), cs.id, m.lang);
     if (ref !== null) refs[m.chat_ref] = ref;
+  }
+  if (!o.silent && Object.keys(refs).length === 0) {
+    // Every send failed (outage, bot blocked): a set nobody can tap would expire unseen and lose the comments.
+    await d.store.cancelChangeSet(cs.id, d.now().toISOString());
+    return hold(`set ${cs.id} reached no owner and was cancelled`);
   }
   await d.store.updateChangeSet(cs.id, { message_ref: primary ? refs[primary.chat_ref] ?? null : null, proposal_refs: refs });
   for (const it of items) await d.store.updateComment(it.comment.id, { status: "proposed", change_set_id: cs.id, draft_text: it.reply_text, draft_kind: it.kind ?? it.comment.draft_kind ?? null, deferred: false });

@@ -15,6 +15,9 @@ const HELP_EN_BODY =
 const MONTHS_BG = ["януари", "февруари", "март", "април", "май", "юни", "юли", "август", "септември", "октомври", "ноември", "декември"];
 const MONTHS_EN = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
 /** YYYY-MM-DD → "1 ноември" / "1 November". */
+/** "not confirmed within N hours": 2 for ordinary proposals, 24 for comment sets (proposalTtlHours). */
+const expiredBg = (hours: number) => `Изтекло: не беше потвърдено в рамките на ${hours} часа.`;
+const expiredEn = (hours: number) => `Expired: not confirmed within ${hours} hours.`;
 const dayMonth = (date: string, months: string[]) => `${Number(date.slice(8, 10))} ${months[Number(date.slice(5, 7)) - 1]}`;
 
 function membersText(head: string, roles: Record<Role, string>, you: string, lastSeen: string, never: string, joined: string, codesHead: string, validUntil: string, noCodes: string, tail: string, members: MemberView[], invites: InviteView[]): string {
@@ -55,13 +58,13 @@ const BG = {
   decidedByOther: (decision: "apply" | "cancel", channel: string) => (decision === "apply" ? `✅ Отговорено от друг собственик (${channel})` : `❌ Отказано от друг собственик (${channel})`),
   /** A late tap on a comment proposal that is already decided (by this or another owner). */
   alreadyDecided: "Вече решено.",
-  expiredAfter: (hours: number) => `Изтекло: не беше потвърдено в рамките на ${hours} часа.`,
+  expiredAfter: expiredBg,
   status: {
     proposed: "Чака решение.",
     scheduled: "Насрочено.",
     applied: "Вече е приложено.",
     rejected: "Отхвърлено.",
-    expired: "Изтекло: не беше потвърдено в рамките на 2 часа.",
+    expired: expiredBg(2),
     cancelled: "Отказано.",
     reverted: "Отменено с по-късна промяна.",
   },
@@ -111,13 +114,13 @@ const EN: typeof BG = {
   commentLimitReached: (limit, used, resetsOn) => `This month's limit of ${limit} comment replies is reached (${used}/${limit}). New replies from ${dayMonth(resetsOn, MONTHS_EN)}.`,
   decidedByOther: (decision, channel) => (decision === "apply" ? `✅ Answered by another owner (${channel})` : `❌ Declined by another owner (${channel})`),
   alreadyDecided: "Already decided.",
-  expiredAfter: (hours) => `Expired: not confirmed within ${hours} hours.`,
+  expiredAfter: expiredEn,
   status: {
     proposed: "Waiting for a decision.",
     scheduled: "Scheduled.",
     applied: "Already applied.",
     rejected: "Rejected.",
-    expired: "Expired: not confirmed within 2 hours.",
+    expired: expiredEn(2),
     cancelled: "Cancelled.",
     reverted: "Reverted by a later change.",
   },

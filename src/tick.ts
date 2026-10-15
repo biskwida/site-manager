@@ -12,7 +12,7 @@ import { limitReachedLine, usageLine } from "./bot/limit";
 import { channelOf, isMetaChannel } from "./channels/ref";
 import { formatDateTime } from "./time";
 import { COMMENT_POST_WINDOW_MS, pollVenueComments, purgeOldComments } from "./social/comments-poll";
-import { COMMENT_PROPOSAL_TTL_MS, commentsOfSet, proposalTtlHours, proposeForComments } from "./social/comments-propose";
+import { COMMENT_PROPOSAL_TTL_MS, commentsOfSet, proposalTargets, proposalTtlHours, proposeForComments } from "./social/comments-propose";
 import type { DraftFn } from "./social/comments-draft";
 
 export interface TickDeps {
@@ -75,8 +75,7 @@ export async function runTick(d: TickDeps): Promise<TickReport> {
     report.expired.push(cs.id);
     if (d.messenger) {
       const hours = proposalTtlHours(cs.source);
-      const targets: [string, string | null][] = cs.source === "comment" && cs.proposal_refs ? Object.entries(cs.proposal_refs) : cs.chat_ref !== null ? [[cs.chat_ref, cs.message_ref]] : [];
-      for (const [chatRef, messageRef] of targets) {
+      for (const [chatRef, messageRef] of proposalTargets(cs)) {
         const { lang } = await langFor(d.store, cs.venue_id, chatRef);
         const preview = lang === "bg" ? cs.preview_bg : cs.preview_en;
         const line = tr(lang, `⌛ Изтекло: предложението не беше потвърдено в рамките на ${hours} часа.`, `⌛ Expired: the proposal was not confirmed within ${hours} hours.`);
