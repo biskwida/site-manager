@@ -14,6 +14,7 @@ import { formatDateTime } from "./time";
 import { COMMENT_POST_WINDOW_MS, pollVenueComments, purgeOldComments } from "./social/comments-poll";
 import { COMMENT_PROPOSAL_TTL_MS, commentsOfSet, proposalTargets, proposalTtlHours, proposeForComments } from "./social/comments-propose";
 import type { DraftFn } from "./social/comments-draft";
+import { runCommentDigests } from "./social/comments-digest";
 
 export interface TickDeps {
   store: Store;
@@ -46,6 +47,8 @@ export interface TickReport {
   comments_found?: number;
   /** Comment sets proposed this tick (mode "each"); absent without sync deps. */
   comments_proposed?: number;
+  /** Venue ids that got their daily comment digest this tick (global tick only). */
+  digests?: string[];
 }
 
 const HOUR = 3_600_000;
@@ -196,6 +199,16 @@ export async function runTick(d: TickDeps): Promise<TickReport> {
         report.comments_proposed += p.sets.length;
       } catch (e) {
         console.error(`[tick] comments for venue ${venue.id} failed:`, e instanceof Error ? e.name : "error");
+      }
+    }
+    // 10. Daily comment digests (venues in "digest" mode) at their local hour, once per local day. Global tick only: the
+    //     per-venue tick before an owner's message leaves it to the cron.
+    if (!d.venueId && d.comments && d.messenger) {
+      try {
+        const r = await runCommentDigests({ store: d.store, messenger: d.messenger, now: () => d.now, draft: d.comments.draft, log: d.sync.log }, { now: d.now });
+        report.digests = r.sent;
+      } catch (e) {
+        console.error("[tick] comment digests failed:", e instanceof Error ? e.name : "error");
       }
     }
     if (!d.venueId) {

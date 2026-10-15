@@ -58,6 +58,8 @@ const BG = {
   decidedByOther: (decision: "apply" | "cancel", channel: string) => (decision === "apply" ? `✅ Отговорено от друг собственик (${channel})` : `❌ Отказано от друг собственик (${channel})`),
   /** A late tap on a comment proposal that is already decided (by this or another owner). */
   alreadyDecided: "Вече решено.",
+  /** set_comment_mode summary; `label` is commentModeLabel (src/domain/comment-preview.ts). */
+  commentModeSummary: (label: string) => `Известия за коментари: ${label}`,
   expiredAfter: expiredBg,
   status: {
     proposed: "Чака решение.",
@@ -114,6 +116,7 @@ const EN: typeof BG = {
   commentLimitReached: (limit, used, resetsOn) => `This month's limit of ${limit} comment replies is reached (${used}/${limit}). New replies from ${dayMonth(resetsOn, MONTHS_EN)}.`,
   decidedByOther: (decision, channel) => (decision === "apply" ? `✅ Answered by another owner (${channel})` : `❌ Declined by another owner (${channel})`),
   alreadyDecided: "Already decided.",
+  commentModeSummary: (label) => `Comment notifications: ${label}`,
   expiredAfter: expiredEn,
   status: {
     proposed: "Waiting for a decision.",

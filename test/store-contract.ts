@@ -783,6 +783,18 @@ export function storeContract(name: string, make: () => Promise<Store>, storageH
       expect((await s.updateVenue(v.id, { comment_limit: null })).comment_limit).toBeNull();
     });
 
+    it("rejects a comment_digest_hour outside 0–23 on create and update, changing nothing (venues_comment_digest_hour_check)", async () => {
+      const s = await make();
+      await expect(s.createVenue({ slug: "tch1", name: "Test", comment_digest_hour: 24 })).rejects.toThrow(/comment_digest_hour/);
+      expect(await s.getVenueBySlug("tch1")).toBeNull();
+      const v = await s.createVenue({ slug: "tch2", name: "Test", comment_digest_hour: 0 });
+      expect(v.comment_digest_hour).toBe(0);
+      await expect(s.updateVenue(v.id, { comment_digest_hour: -1, comment_mode: "digest" })).rejects.toThrow(/comment_digest_hour/);
+      await expect(s.updateVenue(v.id, { comment_digest_hour: 24 })).rejects.toThrow(/comment_digest_hour/);
+      expect(await s.getVenue(v.id)).toMatchObject({ comment_digest_hour: 0, comment_mode: "each" });
+      expect((await s.updateVenue(v.id, { comment_digest_hour: 23 })).comment_digest_hour).toBe(23);
+    });
+
     it("upsertComments inserts new comment ids only and returns just the inserted rows", async () => {
       const s = await make();
       const v = await s.createVenue({ slug: "tc3", name: "Test" });

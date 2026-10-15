@@ -15,6 +15,11 @@ interface Invite {
   used_at: string | null;
 }
 
+/** Like venues_comment_digest_hour_check in supabase/schema.sql: a whole hour 0–23 (undefined = not given). */
+function checkDigestHour(h: number | undefined): void {
+  if (h !== undefined && !(Number.isInteger(h) && h >= 0 && h <= 23)) throw new Error(`comment_digest_hour must be a whole hour 0–23, got ${h}`);
+}
+
 export class InMemoryStore implements Store {
   sites = new Map<string, SiteState>();
   members = new Map<string, Member>(); // one venue per chat
@@ -41,6 +46,7 @@ export class InMemoryStore implements Store {
   }
 
   async createVenue(v: NewVenue): Promise<Venue> {
+    checkDigestHour(v.comment_digest_hour);
     const venue: Venue = {
       id: crypto.randomUUID(),
       slug: v.slug,
@@ -93,6 +99,7 @@ export class InMemoryStore implements Store {
   }
   async updateVenue(id: string, patch: VenuePatch): Promise<Venue> {
     const s = this.site(id);
+    checkDigestHour(patch.comment_digest_hour);
     if (patch.slug !== undefined && [...this.sites.values()].some((x) => x.venue.id !== id && x.venue.slug === patch.slug)) throw new Error(`slug ${patch.slug} already exists`);
     for (const [k, v] of Object.entries(patch)) if (v !== undefined) (s.venue as unknown as Record<string, unknown>)[k] = clone(v);
     return clone(s.venue);
