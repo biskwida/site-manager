@@ -29,6 +29,9 @@ export interface CommentView {
   /** The reply as posted (replied rows only). */
   reply_text: string | null;
   replied_at: string | null;
+  /** A proposed comment whose set was approved (or scheduled) and whose push is still on its way (a Meta outage, a retry):
+   *  the card shows "being posted" instead of Reply / Ignore, and the actions are refused (a second set would reply twice). */
+  posting: boolean;
 }
 export interface CommentsOverview {
   mode: CommentMode;
@@ -44,11 +47,11 @@ const ANSWERED: CommentStatus[] = ["replied", "ignored", "expired", "hidden", "d
 const ANSWERED_MAX = 20;
 const REPLY_MAX = 500;
 
-function view(c: SocialComment): CommentView {
+function view(c: SocialComment, posting = false): CommentView {
   return {
     id: c.id, network: c.network, author_name: c.author_name, text: c.text, post_caption: c.post_caption, post_permalink: c.post_permalink,
     created_at: c.created_at, status: c.status, draft_text: c.draft_text, draft_kind: c.draft_kind, change_set_id: c.change_set_id,
-    reply_text: c.status === "replied" ? c.draft_text : null, replied_at: c.replied_at,
+    reply_text: c.status === "replied" ? c.draft_text : null, replied_at: c.replied_at, posting,
   };
 }
 
@@ -67,8 +70,8 @@ export async function commentsOverview(store: Store, venue: Venue, now: Date): P
     digest_hour: venue.comment_digest_hour,
     limit: { used: limit.used, limit: limit.limit },
     needs_reconnect: { facebook: stale(fb), instagram: stale(ig) },
-    pending: pending.filter((c) => c.parent_id === null).map(view),
-    answered: answered.map(view),
+    pending: await Promise.all(pending.filter((c) => c.parent_id === null).map(async (c) => view(c, await isPosting(store, c)))),
+    answered: answered.map((c) => view(c)),
   };
 }
 
@@ -102,10 +105,26 @@ async function pendingSetOf(store: Store, c: SocialComment): Promise<ChangeSet |
   return cs && cs.source === "comment" && cs.status === "proposed" ? cs : null;
 }
 
+/**
+ * True while a proposed comment's set is decided but its reply or moderation has not gone out yet: the set is scheduled, or
+ * applied with a destination push still pending (retrying after a Meta outage or an unknown outcome). The comment stays
+ * `proposed` until the push reports, so without this check the dashboard would make a second set and reply twice. A push
+ * that gave up for good (failed) or finished leaves nothing in flight, and the comment may be answered again.
+ */
+async function isPosting(store: Store, c: SocialComment): Promise<boolean> {
+  if (c.status !== "proposed" || !c.change_set_id) return false;
+  const cs = await store.getChangeSet(c.change_set_id).catch(() => null);
+  if (!cs || cs.source !== "comment") return false;
+  if (cs.status === "scheduled") return true;
+  if (cs.status !== "applied") return false;
+  return (await store.listSyncs({ changeSetId: cs.id })).some((s) => s.status === "pending");
+}
+
 /** Why an action was refused: the card shows "limit" and "decided" in words, everything else as the generic failure line. */
 export type AdminCommentErrorCode = "not_found" | "answered" | "state" | "limit" | "decided" | "invalid" | "failed";
 type Result = { ok: boolean; status?: string; change_set_id?: string; error?: string; code?: AdminCommentErrorCode };
 const DECIDED_MEANWHILE: Result = { ok: false, code: "decided", error: "The proposal in the chat was decided meanwhile." };
+const BEING_POSTED: Result = { ok: false, code: "decided", error: "The approved reply is being posted; it shows as answered once it is out." };
 
 /** Sends each reachable owner its line; one failed send never stops the others or costs the dashboard's answer. */
 async function tellOwners(d: AdminDeps, venueId: string, now: Date, text: (lang: Lang) => Promise<string> | string): Promise<void> {
@@ -183,6 +202,7 @@ export async function adminCommentAction(d: AdminDeps, venue: Venue, a: AdminCom
     if (c.status === "ignored") return { ok: true, status: "ignored" };
     if (c.status !== "new" && c.status !== "proposed" && c.status !== "expired") return { ok: false, code: "state", error: `Comment is "${c.status}".` };
     const pending = await pendingSetOf(d.store, c);
+    if (!pending && (await isPosting(d.store, c))) return BEING_POSTED;
     let rest: CommentSetItem[] = [];
     if (pending) {
       const r = await releaseFromSet(cd, pending, c, "ignore", !limit.reached);
@@ -198,6 +218,7 @@ export async function adminCommentAction(d: AdminDeps, venue: Venue, a: AdminCom
   if (c.status === "own" || c.status === "nested" || c.status === "deleted") return { ok: false, code: "state", error: `Comment is "${c.status}".` };
   if (limit.reached) return { ok: false, code: "limit", error: copy("en").commentLimitReached(limit.limit ?? limit.used, limit.used, limit.resets_on) };
   const pending = await pendingSetOf(d.store, c);
+  if (!pending && (await isPosting(d.store, c))) return BEING_POSTED;
   let rest: CommentSetItem[] = [];
   if (pending) {
     // This reply takes one action of the limit: the rest is proposed again only when room is left after it.

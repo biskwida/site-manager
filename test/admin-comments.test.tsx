@@ -6,6 +6,7 @@ import { LangProvider } from "@/src/i18n";
 import { DICTS } from "@/src/i18n/dicts";
 import { adminAction, adminOverview } from "@/src/server/admin";
 import { adminCommentAction, commentsOverview, parseAdminCommentAction, type CommentsOverview } from "@/src/server/admin-comments";
+import { runPendingSyncs } from "@/src/destinations/sync";
 import { createCommentSet, type ProposeDeps } from "@/src/social/comments-propose";
 import { at, connectedVenue, MIN, T0 } from "./comments-helpers";
 
@@ -24,7 +25,7 @@ async function setup() {
   const d = { store: v.store, messenger: v.messenger, now: () => T0, baseUrl: "https://site.example" };
   const pd: ProposeDeps = { store: v.store, messenger: v.messenger, now: () => T0, draft: async () => ({ reply: "x", kind: "other", fallback: false }) };
   const replies = (parentId: string) => [...v.meta.comments.values()].filter((c) => c.parent_id === parentId && !c.deleted);
-  return { ...v, maria: rows[0], pesho: rows[1], old: rows[2], d, pd, replies };
+  return { ...v, maria: rows[0], pesho: rows[1], old: rows[2], d, pd, replies, sync: v.d };
 }
 
 describe("commentsOverview", () => {
@@ -67,6 +68,35 @@ describe("adminCommentAction", () => {
     expect(t.messenger.sent.at(-1)).toMatchObject({ chatRef: "tg:1001", text: "✅ Отговорено от таблото на maria.k: „Да, от вторник.“\nInstagram: отговорът е публикуван ✅", proactive: true });
     expect(await adminCommentAction(t.d, t.venue, { action: "reply_comment", comment_id: t.maria.id, reply_text: "again" })).toMatchObject({ ok: false, error: expect.stringMatching(/already answered/) });
     expect(await adminCommentAction(t.d, t.venue, { action: "reply_comment", comment_id: "nope", reply_text: "x" })).toMatchObject({ ok: false, error: "Comment not found." });
+  });
+  it("refuses a second reply (and an ignore) while the approved reply is still being posted; one reply once Meta recovers", async () => {
+    const t = await setup();
+    const { set } = await createCommentSet(t.pd, t.venue, [{ comment: t.maria, reply_text: "Да, имаме.", moderate: null }]);
+    t.meta.failOn = (c) => (c.method === "POST" && c.path === `/${t.maria.comment_id}/replies` ? { status: 500, code: 2, message: "temporarily unavailable", transient: true } : null);
+    expect(await t.store.applyChangeSet(set!.id, T0.toISOString())).toBe("applied"); // the owner's ✅ in the chat; Meta is down
+    expect(await t.store.getComment(t.maria.id)).toMatchObject({ status: "proposed", change_set_id: set!.id });
+    const o = await commentsOverview(t.store, await t.store.getVenue(t.venue.id), T0);
+    expect(o.pending.map((c) => [c.author_name, c.posting])).toEqual([["pesho", false], ["maria.k", true]]);
+    const setsBefore = (await t.store.listChangeSets(t.venue.id)).length;
+    expect(await adminCommentAction(t.d, t.venue, { action: "reply_comment", comment_id: t.maria.id, reply_text: "Да, от вторник." })).toMatchObject({ ok: false, code: "decided", error: expect.stringMatching(/being posted/) });
+    expect(await adminCommentAction(t.d, t.venue, { action: "ignore_comment", comment_id: t.maria.id })).toMatchObject({ ok: false, code: "decided" });
+    expect(await t.store.listChangeSets(t.venue.id)).toHaveLength(setsBefore);
+    expect(await t.store.getComment(t.maria.id)).toMatchObject({ status: "proposed", change_set_id: set!.id });
+    t.meta.failOn = null;
+    await runPendingSyncs(t.sync, { venueId: t.venue.id, now: at(2 * MIN) });
+    expect(t.replies(t.maria.comment_id).map((x) => x.text)).toEqual(["Да, имаме."]);
+    expect(await t.store.getComment(t.maria.id)).toMatchObject({ status: "replied" });
+  });
+  it("a reply whose push gave up for good is no longer posting: the dashboard may answer it again", async () => {
+    const t = await setup();
+    const { set } = await createCommentSet(t.pd, t.venue, [{ comment: t.maria, reply_text: "Да, имаме.", moderate: null }]);
+    t.meta.failOn = (c) => (c.method === "POST" && c.path === `/${t.maria.comment_id}/replies` ? { status: 500, code: 2, message: "temporarily unavailable", transient: true } : null);
+    await t.store.applyChangeSet(set!.id, T0.toISOString());
+    for (const row of await t.store.listSyncs({ changeSetId: set!.id })) await t.store.updateSync(row.id, { status: "failed" });
+    t.meta.failOn = null;
+    expect((await commentsOverview(t.store, await t.store.getVenue(t.venue.id), T0)).pending.find((c) => c.id === t.maria.id)?.posting).toBe(false);
+    expect(await adminCommentAction(t.d, t.venue, { action: "reply_comment", comment_id: t.maria.id, reply_text: "Да, от вторник." })).toMatchObject({ ok: true, status: "applied" });
+    expect(t.replies(t.maria.comment_id).map((x) => x.text)).toEqual(["Да, от вторник."]);
   });
   it("refuses past the comment limit", async () => {
     const t = await setup();
@@ -184,9 +214,9 @@ describe("adminCommentAction", () => {
 describe("CommentsCard", () => {
   const overview: CommentsOverview = {
     mode: "each", digest_hour: 9, limit: { used: 12, limit: 300 }, needs_reconnect: { facebook: true, instagram: false },
-    pending: [{ id: "c1", network: "instagram", author_name: "maria.k", text: "Имате ли безглутенови?", post_caption: "Днешното предложение", post_permalink: "https://www.instagram.com/p/C1/", created_at: T0.toISOString(), status: "new", draft_text: "Да, имаме.", draft_kind: "question", change_set_id: null, reply_text: null, replied_at: null },
-      { id: "c2", network: "facebook", author_name: "bot", text: "Buy followers", post_caption: "", post_permalink: null, created_at: T0.toISOString(), status: "proposed", draft_text: null, draft_kind: "spam", change_set_id: "cs-1", reply_text: null, replied_at: null }],
-    answered: [{ id: "c3", network: "instagram", author_name: "ivan", text: "Отлично", post_caption: "Стар пост", post_permalink: null, created_at: T0.toISOString(), status: "replied", draft_text: "Благодарим!", draft_kind: "praise", change_set_id: "cs-0", reply_text: "Благодарим!", replied_at: T0.toISOString() }],
+    pending: [{ id: "c1", network: "instagram", author_name: "maria.k", text: "Имате ли безглутенови?", post_caption: "Днешното предложение", post_permalink: "https://www.instagram.com/p/C1/", created_at: T0.toISOString(), status: "new", draft_text: "Да, имаме.", draft_kind: "question", change_set_id: null, reply_text: null, replied_at: null, posting: false },
+      { id: "c2", network: "facebook", author_name: "bot", text: "Buy followers", post_caption: "", post_permalink: null, created_at: T0.toISOString(), status: "proposed", draft_text: null, draft_kind: "spam", change_set_id: "cs-1", reply_text: null, replied_at: null, posting: false }],
+    answered: [{ id: "c3", network: "instagram", author_name: "ivan", text: "Отлично", post_caption: "Стар пост", post_permalink: null, created_at: T0.toISOString(), status: "replied", draft_text: "Благодарим!", draft_kind: "praise", change_set_id: "cs-0", reply_text: "Благодарим!", replied_at: T0.toISOString(), posting: false }],
   };
   const post = async () => ({ ok: true, data: null });
   const render = (lang: "bg" | "en", o: CommentsOverview | null) => renderToStaticMarkup(<LangProvider defaultLang={lang}><CommentsCard overview={o} post={post} tz="Europe/Sofia" /></LangProvider>);
@@ -210,6 +240,17 @@ describe("CommentsCard", () => {
     expect(html).toContain(DICTS.bg["admin.comments.status.replied"]);
     expect(html).toContain('href="https://www.instagram.com/p/C1/"');
     expect(html).toContain(`aria-label="${DICTS.bg["admin.comments.replyPlaceholder"]}"`);
+  });
+  it("a reply that is being posted shows that line instead of Reply and Ignore", () => {
+    const posting = { ...overview.pending[0], id: "c9", posting: true, status: "proposed" as const, change_set_id: "cs-9" };
+    for (const lang of ["bg", "en"] as const) {
+      const html = render(lang, { ...overview, pending: [posting] });
+      expect(html).toContain(DICTS[lang]["admin.comments.posting"]);
+      expect(html).not.toContain(`>${DICTS[lang]["admin.comments.reply"]}<`);
+      expect(html).not.toContain(`>${DICTS[lang]["admin.comments.ignore"]}<`);
+      expect(html).not.toContain("<textarea");
+    }
+    expect(render("bg", overview)).not.toContain(DICTS.bg["admin.comments.posting"]);
   });
   it("renders in English and shows the empty state without a connected network", () => {
     const en = render("en", overview);

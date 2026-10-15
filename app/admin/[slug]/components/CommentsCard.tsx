@@ -53,7 +53,9 @@ export function CommentsCard({ overview, post, tz }: { overview: CommentsOvervie
           )}
         </p>
       )}
-      {pending ? (
+      {pending && c.posting ? (
+        <p role="status" className="mt-3 text-sm font-semibold text-ink-soft">{t("admin.comments.posting")}</p>
+      ) : pending ? (
         <div className="mt-3">
           {(c.draft_kind === "spam" || c.draft_kind === "abuse") && <p className="mb-2 text-sm font-semibold text-amber">{t("admin.comments.spam")}</p>}
           <textarea value={draftOf(c)} onChange={(e) => setDrafts({ ...drafts, [c.id]: e.target.value })} rows={2} maxLength={500} placeholder={t("admin.comments.replyPlaceholder")} aria-label={t("admin.comments.replyPlaceholder")}
