@@ -2,8 +2,8 @@
 import { describe, expect, it } from "vitest";
 import { applyChange, invertChanges } from "@/src/domain/changes";
 import { renderPreview } from "@/src/domain/preview";
-import { socialPreviewLines } from "@/src/domain/social-preview";
-import { isExternalEntity, isWpEntity, SOCIAL_TARGETS, type Change } from "@/src/domain/types";
+import { previewPictures, socialPreviewLines } from "@/src/domain/social-preview";
+import { isExternalEntity, isWpEntity, SOCIAL_TARGETS, type Change, type SocialPostRow } from "@/src/domain/types";
 import { SupabaseStore } from "@/src/store/supabase";
 import { state, TZ } from "./fixtures";
 import { makeDemo } from "./helpers";
@@ -13,6 +13,10 @@ const post: Change = {
   before: null,
   after: { media_id: "m-1", image_url: "https://cdn.example/m-1.jpg", caption: "Днешното предложение: тиквена супа 🎃\n#кафе", targets: ["facebook_post", "facebook_story", "instagram_post"] },
 };
+
+/** A social_post row with the defaults of a plain photo; `targets` is the thing each test sets. */
+const socialRow = (o: Partial<SocialPostRow> = {}): SocialPostRow => ({ media_id: "m", image_url: "https://x/a.jpg", caption: "Hi", targets: [], ...o });
+const socialChange = (row: SocialPostRow): Change => ({ position: 0, op: "social_post", entity: "social_post", entity_id: row.media_id, before: null, after: { ...row } });
 
 describe("social_post in the change engine", () => {
   it("is an external entity (not a WordPress one) and applies as a no-op", () => {
@@ -57,17 +61,41 @@ describe("social_post in the change engine", () => {
 });
 
 describe("socialPreviewLines", () => {
-  it("lists the networks with their formats and quotes the caption on the next lines", () => {
+  it("lists the networks with their formats and quotes the caption on the next lines, then says the stories carry no text", () => {
     expect(socialPreviewLines(post, "bg")).toEqual([
       "• Публикация: Facebook (пост, история), Instagram (пост)",
       "  „Днешното предложение: тиквена супа 🎃",
       "  #кафе“",
+      "  (историите се публикуват без текст)",
     ]);
     expect(socialPreviewLines(post, "en")).toEqual([
       "• Post: Facebook (post, story), Instagram (post)",
       "  “Днешното предложение: тиквена супа 🎃",
       "  #кафе”",
+      "  (stories are published without text)",
     ]);
+  });
+  it("says stories show no text when a post and a story share a caption", () => {
+    const lines = socialPreviewLines(socialChange(socialRow({ targets: ["instagram_post", "instagram_story"], caption: "Нова торта" })), "bg");
+    expect(lines.at(-1)).toBe("  (историите се публикуват без текст)");
+    expect(socialPreviewLines(socialChange(socialRow({ targets: ["instagram_post", "instagram_story"], caption: "New cake" })), "en").at(-1)).toBe("  (stories are published without text)");
+  });
+  it("puts the stories line last, after the note about the padded Instagram photo", () => {
+    const mixed = socialChange(socialRow({ targets: ["instagram_post", "instagram_story"], caption: "New cake", ig_feed_ratio: "4:5" }));
+    expect(socialPreviewLines(mixed, "en")).toEqual([
+      "• Post: Instagram (post, story)",
+      "  “New cake”",
+      "  (for Instagram the photo is padded to 4:5)",
+      "  (stories are published without text)",
+    ]);
+  });
+  it("adds no stories line when the targets are only posts, or when there is no caption to leave out", () => {
+    expect(socialPreviewLines(socialChange(socialRow({ targets: ["facebook_post", "instagram_post"], caption: "Нова торта" })), "bg")).toEqual([
+      "• Публикация: Facebook (пост), Instagram (пост)",
+      "  „Нова торта“",
+    ]);
+    expect(socialPreviewLines(socialChange(socialRow({ targets: ["instagram_post", "instagram_story"], caption: "" })), "bg")).toEqual(["• Публикация: Instagram (пост, история)"]);
+    expect(socialPreviewLines(socialChange(socialRow({ targets: ["instagram_post", "instagram_story"], caption: " \n " })), "en")).toEqual(["• Post: Instagram (post, story)"]);
   });
   it("shows a story-only row as a story: no word \"post\", and no caption line even when one was written (stories show none)", () => {
     const story: Change = { ...post, after: { ...post.after!, caption: "", targets: ["instagram_story"] } };
@@ -84,6 +112,48 @@ describe("socialPreviewLines", () => {
   });
   it("is wired into renderPreview", () => {
     expect(renderPreview(state(), [post], "bg", TZ).split("\n")[0]).toBe("• Публикация: Facebook (пост, история), Instagram (пост)");
+  });
+});
+
+describe("previewPictures", () => {
+  it("one picture for Instagram and Facebook posts when they share it", () => {
+    expect(previewPictures(socialRow({ targets: ["facebook_post", "instagram_post"] }), "bg")).toEqual([{ url: "https://x/a.jpg", label: "Instagram + Facebook пост" }]);
+  });
+  it("the padded copy for the Instagram post, the original for Facebook, the story copy for stories", () => {
+    const row = socialRow({ targets: ["facebook_post", "instagram_post", "instagram_story", "facebook_story"], ig_feed_image_url: "https://x/p.jpg", ig_feed_ratio: "4:5", story_image_url: "https://x/s.jpg" });
+    expect(previewPictures(row, "en")).toEqual([
+      { url: "https://x/p.jpg", label: "Instagram post" },
+      { url: "https://x/a.jpg", label: "Facebook post" },
+      { url: "https://x/s.jpg", label: "Instagram + Facebook story" },
+    ]);
+  });
+  it("a story without its own copy shows the original", () => {
+    expect(previewPictures(socialRow({ targets: ["instagram_story"] }), "bg")).toEqual([{ url: "https://x/a.jpg", label: "Instagram история" }]);
+  });
+  it("a story never takes the Instagram feed copy: it is padded to 4:5 for the feed only", () => {
+    const row = socialRow({ targets: ["instagram_post", "instagram_story"], ig_feed_image_url: "https://x/p.jpg", ig_feed_ratio: "4:5" });
+    expect(previewPictures(row, "en")).toEqual([
+      { url: "https://x/p.jpg", label: "Instagram post" },
+      { url: "https://x/a.jpg", label: "Instagram story" },
+    ]);
+  });
+  it("names the one network a place belongs to, in both languages", () => {
+    expect(previewPictures(socialRow({ targets: ["facebook_post"] }), "en")).toEqual([{ url: "https://x/a.jpg", label: "Facebook post" }]);
+    expect(previewPictures(socialRow({ targets: ["facebook_story"], story_image_url: "https://x/s.jpg" }), "bg")).toEqual([{ url: "https://x/s.jpg", label: "Facebook история" }]);
+  });
+  it("lists posts before stories and Instagram before Facebook, whatever the order of the targets", () => {
+    const row = socialRow({ targets: ["facebook_story", "instagram_story", "facebook_post", "instagram_post"], ig_feed_image_url: "https://x/p.jpg", story_image_url: "https://x/s.jpg" });
+    expect(previewPictures(row, "bg").map((p) => p.label)).toEqual(["Instagram пост", "Facebook пост", "Instagram + Facebook история"]);
+  });
+  it("lists a post and a story that publish the same file once each, under their own format word", () => {
+    // A photo that is already 9:16 gets no story copy, and Facebook's post is the original too.
+    expect(previewPictures(socialRow({ targets: ["facebook_post", "facebook_story"] }), "en")).toEqual([
+      { url: "https://x/a.jpg", label: "Facebook post" },
+      { url: "https://x/a.jpg", label: "Facebook story" },
+    ]);
+  });
+  it("has no pictures for no targets", () => {
+    expect(previewPictures(socialRow(), "bg")).toEqual([]);
   });
 });
 
