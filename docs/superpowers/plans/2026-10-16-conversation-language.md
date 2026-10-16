@@ -24,7 +24,7 @@
 ## Global Constraints
 
 - Bulgarian: any Cyrillic letter (unchanged).
-- English: no Cyrillic and at least 2 different words from this list, matched whole and case-insensitively: the, a, an, is, are, was, be, to, for, of, and, or, in, on, at, with, from, it, this, that, my, our, we, i, you, please, can, could, would, will, make, add, remove, change, set, put, show, post, price, today, tomorrow, closed, open, sold, out, what, how, when, why. Anything else is `null` and keeps the current language (prices, emoji, dish names, Bulgarian written in Latin letters such as "kafeto e 4.20").
+- English: no Cyrillic and at least 2 different words from this list, matched whole and case-insensitively: the, an, is, was, to, for, of, and, or, in, on, at, with, from, it, this, that, my, our, we, you, please, can, could, would, will, make, add, remove, change, put, show, price, today, tomorrow, closed, open, sold, out, what, how, when, why. (Ruling 2026-10-16: a, i, be, are, post and set removed because Bulgarian typed in Latin letters uses them.) Anything else is `null` and keeps the current language (prices, emoji, dish names, Bulgarian written in Latin letters such as "kafeto e 4.20").
 - A detected language different from `member.lang` is saved (`setMemberLang`) before the run starts.
 - `/lang bg|en` still sets the language; the next message that shows the other language switches it again.
 - Speech-to-text: no forced language; Bulgarian or English from the transcriber's `language` field; Russian, Macedonian, Serbian, Ukrainian or Belarusian → transcribe again with `bg`; any other language → transcribe again with the stored language; no `language` field → `detectLang(text)`.
@@ -32,7 +32,7 @@
 ## Review Focus
 
 1. Mixed message "Flat white свърши": Cyrillic wins → Bulgarian. Test in Task 1.
-2. Bulgarian in Latin letters "pusni post v instagram" (one listed word): stays as it was. Test in Task 1.
+2. Bulgarian in Latin letters "pusni post i story v instagram" (no counted words after the ruling): stays as it was. Test in Task 1.
 3. Tick after a switch: the owner wrote English, the next reminder or comment proposal arrives in English. Test in Task 2.
 4. A photo without a caption or a "4.20" text: the language does not change. Test in Task 2.
 5. An English customer comment while the owner speaks Bulgarian: the wrapper is Bulgarian, the draft English. Test in Task 4.
