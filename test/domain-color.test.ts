@@ -1,6 +1,6 @@
 // test/domain-color.test.ts
 import { describe, expect, it } from "vitest";
-import { bestInkContrast, colorName, contrastRatio, INK_DARK, INK_LIGHT, inkFor, isReadableBackground, parseHex, relativeLuminance } from "@/src/domain/color";
+import { bestInkContrast, colorName, contrastRatio, INK_DARK, INK_LIGHT, inkFor, isReadableBackground, parseHex, relativeLuminance, storyBackground } from "@/src/domain/color";
 
 describe("domain/color", () => {
   it("parses #rrggbb and #rgb, case-insensitive, and nothing else", () => {
@@ -75,5 +75,26 @@ describe("domain/color", () => {
     expect(both("#e8b4b8")).toEqual(["розово", "pink"]);
     expect(both("#3b2f5c")).toEqual(["тъмнолилаво", "dark purple"]);
     expect(colorName("nope", "en")).toBe("");
+  });
+
+  it("storyBackground uses the theme background, else the accent mixed 80% to white", () => {
+    expect(storyBackground({ accent: "#3d6b4f", background: "#F4ECE0" })).toBe("#f4ece0");
+    expect(storyBackground({ accent: "#3d6b4f", background: "#050A0F" })).toBe("#050a0f"); // small channels keep their zero
+    expect(storyBackground({ accent: "#3d6b4f" })).toBe("#d8e1dc");
+    expect(storyBackground({ accent: "#3D6B4F", background: null })).toBe("#d8e1dc");
+  });
+
+  it("storyBackground rounds each channel of the mix and keeps white white", () => {
+    expect(storyBackground({ accent: "#010203" })).toBe("#cccccd"); // 204.2, 204.4, 204.6
+    expect(storyBackground({ accent: "#000000" })).toBe("#cccccc");
+    expect(storyBackground({ accent: "#ffffff" })).toBe("#ffffff");
+  });
+
+  it("storyBackground always returns #rrggbb: shorthand is expanded, a bad background is ignored, a bad accent gives white", () => {
+    expect(storyBackground({ accent: "#3d6b4f", background: "#fff" })).toBe("#ffffff");
+    expect(storyBackground({ accent: "#3d6b4f", background: "green" })).toBe("#d8e1dc");
+    expect(storyBackground({ accent: "#3d6b4f", background: "" })).toBe("#d8e1dc");
+    expect(storyBackground({ accent: "nope" })).toBe("#ffffff");
+    expect(storyBackground({ accent: "nope", background: "#1F3D2B" })).toBe("#1f3d2b");
   });
 });
