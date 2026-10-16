@@ -3,8 +3,9 @@ import { describe, expect, it } from "vitest";
 import { appendMemory } from "@/src/agent/memory";
 import { PHOTO_NO_CAPTION } from "@/src/agent/prompt";
 import type { BotDeps, RunRequest } from "@/src/bot/bot";
-import { handleInbound, normalizeCommand } from "@/src/bot/inbound";
+import { followLanguage, handleInbound, normalizeCommand } from "@/src/bot/inbound";
 import { planChanges } from "@/src/domain/changes";
+import type { InMemoryStore } from "@/src/store/memory";
 import { FakeMessenger, makeDemo } from "./helpers";
 
 const T0 = new Date("2026-10-09T09:00:00.000Z");
@@ -360,5 +361,211 @@ describe("handleInbound: /members and removed members", () => {
     // A stranger gets the very same answer.
     await handleInbound(d, { chatRef: "tg:1999", kind: "text", text: "Espresso is 9 now", langHint: "en" });
     expect(texts(messenger).at(-1)).toBe(texts(messenger).at(-2));
+  });
+});
+
+describe("handleInbound: the owner's last language is remembered", () => {
+  const photo = { download: async () => ({ bytes: new Uint8Array([9, 9]), contentType: "image/jpeg", name: "a.jpg" }) };
+  /** Records every setMemberLang call ("chat=lang") and still saves. */
+  function langSaves(store: InMemoryStore) {
+    const saves: string[] = [];
+    const save = store.setMemberLang.bind(store);
+    store.setMemberLang = async (venueId, chatRef, lang) => {
+      saves.push(`${chatRef}=${lang}`);
+      return save(venueId, chatRef, lang);
+    };
+    return saves;
+  }
+  const langOf = async (store: InMemoryStore, chatRef: string) => (await store.findMember(chatRef))?.lang;
+
+  it("a Bulgarian message saves bg for a member stored as en, and the run already has it", async () => {
+    const { d, runs, store, venue } = await setup();
+    await store.upsertMember({ venue_id: venue.id, chat_ref: "wa:359111", role: "owner", lang: "en" });
+    await handleInbound(d, { chatRef: "wa:359111", kind: "text", text: "Капучиното е 4,20" });
+    expect(await langOf(store, "wa:359111")).toBe("bg");
+    expect(runs[0].member.lang).toBe("bg");
+    // Each member has a language of their own: nobody else switched.
+    expect(await langOf(store, "tg:1001")).toBe("bg");
+    expect(await langOf(store, "tg:1002")).toBe("en");
+  });
+
+  it("an English message saves en for a member stored as bg, and the run already has it", async () => {
+    const { d, runs, store } = await setup();
+    await handleInbound(d, { chatRef: "tg:1001", kind: "text", text: "change the price to 4.20" });
+    expect(await langOf(store, "tg:1001")).toBe("en");
+    expect(runs[0].member.lang).toBe("en");
+  });
+
+  it("a price or an uncaptioned photo changes nothing, nor does a dish name or Bulgarian typed in Latin letters", async () => {
+    const { d, runs, messenger, store } = await setup();
+    const saves = langSaves(store);
+    for (const text of ["4.20", "Flat white 4.30", "ok 👍", "kafeto e 4.20"]) {
+      await handleInbound(d, { chatRef: "tg:1001", kind: "text", text }); // stored bg
+      await handleInbound(d, { chatRef: "tg:1002", kind: "text", text }); // stored en
+    }
+    await handleInbound(d, { chatRef: "tg:1001", kind: "photo", media: photo });
+    expect(saves).toEqual([]);
+    expect(await langOf(store, "tg:1001")).toBe("bg");
+    expect(await langOf(store, "tg:1002")).toBe("en");
+    expect(runs.map((r) => `${r.chatRef}=${r.member.lang}`)).toEqual(["tg:1001=bg", "tg:1002=en", "tg:1001=bg", "tg:1002=en", "tg:1001=bg", "tg:1002=en", "tg:1001=bg", "tg:1002=en"]);
+    expect(texts(messenger)).toEqual(["📷 Получих снимката. Какво да направя с нея? Напишете или изпратете гласово съобщение."]); // the photo is held, in the stored language
+  });
+
+  it("a voice note in Bulgarian saves bg and one in English saves en, and the heard line follows", async () => {
+    let said = "капучиното е 4,20";
+    const { d, runs, messenger, store, venue } = await setup({ transcribe: async () => said });
+    await store.upsertMember({ venue_id: venue.id, chat_ref: "wa:359111", role: "owner", lang: "en" });
+    const voice = { download: async () => ({ bytes: new Uint8Array([1]), contentType: "audio/mp4" }) };
+    await handleInbound(d, { chatRef: "wa:359111", kind: "voice", media: voice });
+    expect(await langOf(store, "wa:359111")).toBe("bg");
+    expect(runs[0]).toMatchObject({ source: "voice", text: "капучиното е 4,20" });
+    expect(runs[0].member.lang).toBe("bg");
+    expect(texts(messenger).at(-1)).toBe("🎤 Чух: „капучиното е 4,20“");
+    said = "please make the price 4.20";
+    await handleInbound(d, { chatRef: "wa:359111", kind: "voice", media: voice });
+    expect(await langOf(store, "wa:359111")).toBe("en");
+    expect(runs[1].member.lang).toBe("en");
+    expect(texts(messenger).at(-1)).toBe("🎤 Heard: “please make the price 4.20”");
+  });
+
+  it("a voice note that shows no language, or only a link, keeps the stored one", async () => {
+    let said = "4.20";
+    const { d, runs, store } = await setup({ transcribe: async () => said });
+    const saves = langSaves(store);
+    const voice = { download: async () => ({ bytes: new Uint8Array([1]), contentType: "audio/ogg" }) };
+    await handleInbound(d, { chatRef: "tg:1002", kind: "voice", media: voice });
+    said = "www.my-open-cafe.bg";
+    await handleInbound(d, { chatRef: "tg:1001", kind: "voice", media: voice });
+    expect(saves).toEqual([]);
+    expect(runs.map((r) => `${r.chatRef}=${r.member.lang}`)).toEqual(["tg:1002=en", "tg:1001=bg"]);
+  });
+
+  it("a photo caption saves its language like a message", async () => {
+    const { d, runs, store } = await setup();
+    await handleInbound(d, { chatRef: "tg:1001", kind: "photo", text: "make it a story please", media: photo });
+    expect(await langOf(store, "tg:1001")).toBe("en");
+    expect(runs[0]).toMatchObject({ source: "photo", text: "make it a story please" });
+    expect(runs[0].member.lang).toBe("en");
+    await handleInbound(d, { chatRef: "tg:1001", kind: "photo", text: "новата корица", media: photo });
+    expect(await langOf(store, "tg:1001")).toBe("bg");
+    expect(runs[1].member.lang).toBe("bg");
+    await handleInbound(d, { chatRef: "tg:1001", kind: "photo", text: "Flat white 4.30", media: photo });
+    expect(await langOf(store, "tg:1001")).toBe("bg"); // a caption that shows no language leaves it
+    expect(runs[2].member.lang).toBe("bg");
+  });
+
+  it("a failed photo download is reported in the language of the caption, which is saved", async () => {
+    const { d, runs, messenger, store } = await setup();
+    await handleInbound(d, { chatRef: "tg:1001", kind: "photo", text: "please add this to the menu", media: { download: async () => { throw new Error("download failed (HTTP 500)"); } } });
+    expect(texts(messenger)).toEqual(["I couldn't download the photo. Please try again."]);
+    expect(await langOf(store, "tg:1001")).toBe("en");
+    expect(runs).toHaveLength(0);
+  });
+
+  it("a link is not the owner's language: the words inside it never switch it", async () => {
+    const { d, runs, store } = await setup();
+    const saves = langSaves(store);
+    for (const text of ["https://my-open-cafe.bg/menu", "www.my-open-cafe.bg", "HTTPS://MY-OPEN-CAFE.BG/the-menu"]) await handleInbound(d, { chatRef: "tg:1001", kind: "text", text });
+    await handleInbound(d, { chatRef: "tg:1001", kind: "photo", text: "https://my-open-cafe.bg/menu", media: photo });
+    await handleInbound(d, { chatRef: "tg:1002", kind: "text", text: "https://кафе.bg/меню" }); // nor does a Cyrillic address make an English speaker Bulgarian
+    expect(saves).toEqual([]);
+    expect(await langOf(store, "tg:1001")).toBe("bg");
+    expect(await langOf(store, "tg:1002")).toBe("en");
+    expect(runs.map((r) => r.member.lang)).toEqual(["bg", "bg", "bg", "bg", "en"]);
+  });
+
+  it("the words around a link still show the language", async () => {
+    const { d, runs, store } = await setup();
+    await handleInbound(d, { chatRef: "tg:1001", kind: "text", text: "please change the price on https://my-open-cafe.bg/menu" });
+    expect(await langOf(store, "tg:1001")).toBe("en");
+    expect(runs[0].member.lang).toBe("en");
+    await handleInbound(d, { chatRef: "tg:1001", kind: "text", text: "виж www.my-open-cafe.bg" });
+    expect(await langOf(store, "tg:1001")).toBe("bg");
+  });
+
+  it("answers a stranger who sends only a link in the default language, and one who writes English in English", async () => {
+    const { d, messenger } = await setup();
+    await handleInbound(d, { chatRef: "fb:700", kind: "text", text: "https://my-open-cafe.bg/menu" });
+    expect(texts(messenger).at(-1)).toBe("Този бот управлява сайта на конкретно заведение. Изпратете кода, който получихте от нас.");
+    await handleInbound(d, { chatRef: "fb:700", kind: "text", text: "hello, my cafe is on https://my-open-cafe.bg/menu" });
+    expect(texts(messenger).at(-1)).toBe("This bot manages one venue's website. Send the code you received from us.");
+  });
+
+  it("/connect carries a link and a code, not a language: it saves nothing and answers in the stored language", async () => {
+    const { d, messenger, store } = await setup({
+      connect: async () => ({ ok: true, site: { name: "My Open Café" } as never, destination: { config: { site_url: "https://my-open-cafe.bg" } } as never }),
+    });
+    const saves = langSaves(store);
+    await handleInbound(d, { chatRef: "tg:1001", kind: "text", text: "/connect https://my-open-cafe.bg ABCD1234" });
+    expect(saves).toEqual([]);
+    expect(await langOf(store, "tg:1001")).toBe("bg");
+    expect(texts(messenger).at(-1)).toMatch(/^✅ Свързах WordPress сайта „My Open Café“/); // not English because of "my" and "open" in the address
+    await handleInbound(d, { chatRef: "tg:1002", kind: "text", text: "/connect https://кафе.bg/меню ABCD1234" });
+    expect(saves).toEqual([]);
+    expect(await langOf(store, "tg:1002")).toBe("en"); // staff: refused, in their own language
+    expect(texts(messenger).at(-1)).toBe("Only the owner can connect the site.");
+  });
+
+  it("/lang still sets the language, and the next message that shows the other one switches it again", async () => {
+    const { d, messenger, runs, store } = await setup();
+    await handleInbound(d, { chatRef: "tg:1001", kind: "text", text: "/lang en" });
+    expect(await langOf(store, "tg:1001")).toBe("en");
+    expect(texts(messenger).at(-1)).toBe("Language set to English.");
+    await handleInbound(d, { chatRef: "tg:1001", kind: "text", text: "Капучиното е 4,20" });
+    expect(await langOf(store, "tg:1001")).toBe("bg");
+    expect(runs[0].member.lang).toBe("bg");
+  });
+
+  it("still starts the run, in the language just written, when saving the language fails", async () => {
+    const { d, runs, store } = await setup();
+    const errs: string[] = [];
+    const orig = console.error;
+    console.error = (...a: unknown[]) => { errs.push(a.join(" ")); };
+    try {
+      store.setMemberLang = async () => { throw new Error("db down"); };
+      await handleInbound(d, { chatRef: "tg:1001", kind: "text", text: "change the price to 4.20" });
+    } finally { console.error = orig; }
+    expect(runs).toHaveLength(1);
+    expect(runs[0]).toMatchObject({ text: "change the price to 4.20" });
+    expect(runs[0].member.lang).toBe("en");
+    expect(errs.some((e) => e.includes("db down"))).toBe(true);
+  });
+});
+
+describe("followLanguage", () => {
+  it("returns the very same member, without touching the store, when nothing is detected or the language is the same", async () => {
+    const { d, store } = await setup();
+    const member = (await store.findMember("tg:1001"))!; // bg
+    let calls = 0;
+    store.setMemberLang = async () => { calls++; };
+    expect(await followLanguage(d, member, null)).toBe(member);
+    expect(await followLanguage(d, member, "bg")).toBe(member);
+    expect(calls).toBe(0);
+  });
+
+  it("saves a different language and returns the member with it, leaving the one it was given alone", async () => {
+    const { d, store } = await setup();
+    const member = (await store.findMember("tg:1001"))!;
+    const next = await followLanguage(d, member, "en");
+    expect(next).toEqual({ ...member, lang: "en" });
+    expect(member.lang).toBe("bg");
+    expect((await store.findMember("tg:1001"))?.lang).toBe("en");
+    expect((await followLanguage(d, next, "bg")).lang).toBe("bg");
+    expect((await store.findMember("tg:1001"))?.lang).toBe("bg");
+  });
+
+  it("does not lose the message when the save fails: it logs and returns the member with the language just written", async () => {
+    const { d, store } = await setup();
+    const member = (await store.findMember("tg:1001"))!;
+    store.setMemberLang = async () => { throw new Error("db down"); };
+    const errs: string[] = [];
+    const orig = console.error;
+    console.error = (...a: unknown[]) => { errs.push(a.join(" ")); };
+    let next: Awaited<ReturnType<typeof followLanguage>>;
+    try {
+      next = await followLanguage(d, member, "en");
+    } finally { console.error = orig; }
+    expect(next).toEqual({ ...member, lang: "en" });
+    expect(errs.some((e) => e.includes("db down") && e.includes("tg:"))).toBe(true);
   });
 });

@@ -130,11 +130,11 @@ describe("bot", () => {
     expect(api.calls.some((c) => c.method === "sendChatAction")).toBe(true);
     expect(api.texts()).toEqual([]);
   });
-  it("a Cyrillic message from an English-speaking member runs the turn in Bulgarian", async () => {
+  it("a Cyrillic message from an English-speaking member runs the turn in Bulgarian and is remembered", async () => {
     const { bot, runs, store } = await setup();
     await bot.handleUpdate(textUpdate(1002, "Баницата свърши"));
     expect(runs[0].member.lang).toBe("bg");
-    expect((await store.findMember("tg:1002"))?.lang).toBe("en");
+    expect((await store.findMember("tg:1002"))?.lang).toBe("bg");
   });
   it("a Latin message keeps the stored language", async () => {
     const { bot, runs } = await setup();
