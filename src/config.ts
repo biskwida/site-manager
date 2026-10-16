@@ -112,7 +112,7 @@ export function loadConfig(env: Env = process.env, opts: { lenient?: boolean } =
   if (whatsappToken && !whatsappPhoneNumberId) throw new Error("WHATSAPP_PHONE_NUMBER_ID is required with WHATSAPP_TOKEN");
   return {
     anthropicApiKey: need("ANTHROPIC_API_KEY"),
-    agentModel: optional("AGENT_MODEL") ?? "claude-opus-5-5",
+    agentModel: optional("AGENT_MODEL") ?? "claude-haiku-5-5",
     agentEffort: effort,
     commentDraftModel: optional("COMMENT_DRAFT_MODEL") ?? "claude-haiku-5-5",
     telegramToken: need("TELEGRAM_BOT_TOKEN"),

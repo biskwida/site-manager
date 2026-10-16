@@ -120,7 +120,7 @@ npm run env:set -- ANTHROPIC_API_KEY   # asks for the value with echo off, write
 | Key | Where to get it | Required |
 |---|---|---|
 | `ANTHROPIC_API_KEY` | console.anthropic.com → API keys | Yes (the agent; the wizard's menu reading and "Write for me" use it too) |
-| `AGENT_MODEL` | Default `claude-opus-5-5` | No |
+| `AGENT_MODEL` | Default `claude-haiku-5-5` | No |
 | `AGENT_EFFORT` | `low`, `medium` (default) or `high`; image, bulk and scheduling turns use `high` automatically | No |
 | `TELEGRAM_BOT_TOKEN` | @BotFather in Telegram → `/newbot` | Yes |
 | `TELEGRAM_WEBHOOK_SECRET` | Any random string: `openssl rand -hex 32` | Yes |
