@@ -1,11 +1,23 @@
-// test/comments-poll.test.ts — polling comments of the posts Site Manager published: cadence, filtering, errors, purge, tick step 9.
+// test/comments-poll.test.ts — polling comments of the posts Site Manager published and of the account's own recent media:
+// cadence, filtering, reconnects, errors, purge, tick step 9.
 import { describe, expect, it } from "vitest";
 import type { Change } from "@/src/domain/types";
 import { publishedTargets } from "@/src/destinations/social-common";
-import { COMMENT_POLL_EVERY_MS, COMMENT_POST_WINDOW_MS, COMMENT_RETENTION_MS, COMMENT_ROW_RETENTION_MS, pollVenueComments, purgeOldComments } from "@/src/social/comments-poll";
+import { COMMENT_POLL_EVERY_MS, COMMENT_POST_WINDOW_MS, COMMENT_RETENTION_MS, COMMENT_ROW_RETENTION_MS, mergeTargets, pollVenueComments, purgeOldComments } from "@/src/social/comments-poll";
 import { commentLimitState } from "@/src/social/comments-propose";
 import { runTick } from "@/src/tick";
-import { at, connectedVenue, DAY, HOUR, MIN, T0 } from "./comments-helpers";
+import { encryptSecrets } from "@/src/destinations/secrets";
+import type { ReplyDraft } from "@/src/social/comments-draft";
+import { at, connectedVenue, DAY, HOUR, KEY, MIN, T0, type Connected } from "./comments-helpers";
+
+/** Disconnect + connect again (every venue does it once for the comment scopes): the old row's sync rows, the post history, go with it. */
+async function reconnect(v: Connected, kind: "facebook" | "instagram"): Promise<void> {
+  const old = (await v.store.getDestination(v.venue.id, kind))!;
+  await v.store.deleteDestination(old.id);
+  if (kind === "facebook") await v.store.upsertDestination({ venue_id: v.venue.id, kind, config: { page_id: v.page.id, page_name: v.page.name, connected_at: T0.toISOString(), comments: true }, secrets: encryptSecrets({ page_token: v.page.access_token }, KEY) });
+  else await v.store.upsertDestination({ venue_id: v.venue.id, kind, config: { ig_user_id: v.ig.user_id, username: v.ig.username, connected_at: T0.toISOString(), token_refreshed_at: T0.toISOString(), comments: true }, secrets: encryptSecrets({ token: v.ig.token }, KEY) });
+}
+const reads = (v: Connected, ref: string) => v.meta.calls.filter((c) => c.method === "GET" && c.path === `/${ref}/comments`).length;
 
 describe("publishedTargets", () => {
   it("lists feed posts (not stories) of the last 14 days with the caption, one per Meta id, newest first", async () => {
@@ -216,5 +228,111 @@ describe("pollVenueComments", () => {
     expect((await v.store.listComments(v.venue.id)).find((c) => c.comment_id === "k-old")).toMatchObject({ text: "" }); // the global tick purges
     const off = await runTick({ store: v.store, messenger: v.messenger, now: at(2 * MIN) });
     expect(off.comments_found).toBeUndefined(); // no sync deps: no polling
+  });
+});
+
+describe("pollVenueComments on the account's own recent posts", () => {
+  it("after a reconnect (the post history is gone) still reads and proposes comments on the account's posts, ours and manual ones", async () => {
+    const v = await connectedVenue();
+    const ours = await v.publishPost(["facebook_post", "instagram_post"], "Днешното предложение", at(-DAY));
+    const manualIg = v.meta.addInstagramMedia(v.ig.user_id, { caption: "Качено от телефона", timestamp: at(-3 * DAY) });
+    const manualFb = v.meta.addFacebookPost(v.page.id, { message: "Пост от Meta Business Suite", created: at(-2 * DAY) });
+    await reconnect(v, "instagram");
+    await reconnect(v, "facebook");
+    expect(await publishedTargets(v.store, v.venue.id, at(-COMMENT_POST_WINDOW_MS).toISOString())).toEqual([]);
+    const c1 = v.meta.addInstagramComment(ours.igMediaId!, { text: "Колко струва?", from_id: "1784", username: "maria.k", created: at(-10 * MIN) });
+    const c2 = v.meta.addInstagramComment(manualIg.id, { text: "Супер!", from_id: "1785", username: "pesho", created: at(-9 * MIN) });
+    const c3 = v.meta.addFacebookComment(ours.fbPostId!, { message: "Работите ли в неделя?", from_id: "77", from_name: "Ivan Petrov", created: at(-8 * MIN) });
+    const c4 = v.meta.addFacebookComment(manualFb.post_id, { message: "Браво!", from_id: "78", from_name: "Мария", created: at(-7 * MIN) });
+    const draft = async (): Promise<ReplyDraft> => ({ reply: "Благодарим!", kind: "praise", fallback: false });
+    const r = await runTick({ store: v.store, messenger: v.messenger, now: T0, sync: v.d, comments: { draft } });
+    expect(r.comments_found).toBe(4);
+    expect(r.comments_proposed).toBeGreaterThan(0);
+    expect(v.messenger.sent.filter((m) => m.setId).length).toBeGreaterThan(0);
+    const stored = await v.store.listComments(v.venue.id);
+    const byId = new Map(stored.map((c) => [c.comment_id, c]));
+    expect(byId.get(c1.id)).toMatchObject({ post_ref: ours.igMediaId, post_caption: "Днешното предложение", post_permalink: expect.stringMatching(/^https:\/\/www\.instagram\.com\/p\//) });
+    expect(byId.get(c2.id)).toMatchObject({ post_ref: manualIg.id, post_caption: "Качено от телефона", post_permalink: manualIg.permalink });
+    expect(byId.get(c3.id)).toMatchObject({ post_ref: ours.fbPostId, post_caption: "Днешното предложение" });
+    expect(byId.get(c4.id)).toMatchObject({ post_ref: manualFb.post_id, post_caption: "Пост от Meta Business Suite", post_permalink: expect.stringMatching(/^https:\/\/www\.facebook\.com\//) });
+    expect(stored.map((c) => c.status)).toEqual(["proposed", "proposed", "proposed", "proposed"]);
+    expect(v.logs.join("\n")).not.toContain("Качено от телефона");
+  });
+
+  it("skips stories and posts older than 14 days; the Facebook list asks with since = the window start", async () => {
+    const v = await connectedVenue();
+    const story = v.meta.addInstagramMedia(v.ig.user_id, { timestamp: at(-HOUR), story: true });
+    const oldIg = v.meta.addInstagramMedia(v.ig.user_id, { caption: "old", timestamp: at(-15 * DAY) });
+    const freshIg = v.meta.addInstagramMedia(v.ig.user_id, { caption: "fresh", timestamp: at(-13 * DAY) });
+    const oldFb = v.meta.addFacebookPost(v.page.id, { message: "old", created: at(-15 * DAY) });
+    const freshFb = v.meta.addFacebookPost(v.page.id, { message: "fresh", created: at(-13 * DAY) });
+    v.meta.addInstagramComment(story.id, { text: "on a story", created: at(-MIN) });
+    v.meta.addInstagramComment(oldIg.id, { text: "on an old media", created: at(-MIN) });
+    v.meta.addInstagramComment(freshIg.id, { text: "ig fresh", created: at(-MIN) });
+    v.meta.addFacebookComment(oldFb.post_id, { message: "on an old post", created: at(-MIN) });
+    v.meta.addFacebookComment(freshFb.post_id, { message: "fb fresh", created: at(-2 * MIN) });
+    const r = await pollVenueComments(v.d, v.venue, T0);
+    expect(r.errors).toEqual([]);
+    expect(r.inserted.map((c) => c.text)).toEqual(["ig fresh", "fb fresh"]);
+    for (const ref of [story.id, oldIg.id, oldFb.post_id]) expect(reads(v, ref)).toBe(0);
+    const list = v.meta.calls.find((c) => c.path === `/${v.page.id}/posts`)!;
+    expect(new URL(list.url).searchParams.get("since")).toBe(String(Math.floor((T0.getTime() - COMMENT_POST_WINDOW_MS) / 1000)));
+  });
+
+  it("a post that is both ours and listed is read once, with our caption; the list is one more call per network", async () => {
+    const v = await connectedVenue();
+    const ours = await v.publishPost(["facebook_post", "instagram_post"], "Нашият пост", at(-2 * HOUR));
+    v.meta.addInstagramComment(ours.igMediaId!, { text: "ig", created: at(-MIN) });
+    v.meta.addFacebookComment(ours.fbPostId!, { message: "fb", created: at(-MIN) });
+    const before = v.meta.calls.length;
+    const r = await pollVenueComments(v.d, v.venue, T0);
+    expect(r.inserted.map((c) => [c.text, c.post_caption])).toEqual([["ig", "Нашият пост"], ["fb", "Нашият пост"]]);
+    expect(reads(v, ours.igMediaId!)).toBe(1);
+    expect(reads(v, ours.fbPostId!)).toBe(1);
+    const made = v.meta.calls.slice(before);
+    expect(made.map((c) => `${c.host === "graph.instagram.com" ? "ig" : "fb"} ${c.path}`)).toEqual([
+      `ig /${v.ig.user_id}/media`,
+      `ig /${ours.igMediaId}/comments`,
+      `fb /${v.page.id}/posts`,
+      `fb /${ours.fbPostId}/comments`,
+    ]);
+  });
+
+  it("mergeTargets keeps ours first, adds the listed ones once, and fills a caption or permalink ours lacks", () => {
+    const ours = (post_ref: string, caption: string, permalink: string | null) => ({ network: "instagram" as const, target: "instagram_post" as const, post_ref, change_set_id: "cs", caption, permalink, published_at: T0.toISOString() });
+    const listed = (post_ref: string, caption: string) => ({ post_ref, caption, permalink: `https://www.instagram.com/p/${post_ref}/`, published_at: T0.toISOString() });
+    expect(mergeTargets([ours("a", "наш", "https://x/a"), ours("b", "", null)], [listed("c", "ръчен"), listed("a", "друг"), listed("b", "от Meta"), listed("c", "dup")])).toEqual([
+      { post_ref: "a", caption: "наш", permalink: "https://x/a" },
+      { post_ref: "b", caption: "от Meta", permalink: "https://www.instagram.com/p/b/" },
+      { post_ref: "c", caption: "ръчен", permalink: "https://www.instagram.com/p/c/" },
+    ]);
+  });
+
+  it("a failing list (not a token or permission error) is logged and falls back to the published posts", async () => {
+    const v = await connectedVenue();
+    const ours = await v.publishPost(["facebook_post", "instagram_post"], "Нашият пост", at(-2 * HOUR));
+    const manual = v.meta.addInstagramMedia(v.ig.user_id, { caption: "manual", timestamp: at(-HOUR) });
+    v.meta.addInstagramComment(ours.igMediaId!, { text: "ig", created: at(-MIN) });
+    v.meta.addInstagramComment(manual.id, { text: "manual", created: at(-MIN) });
+    v.meta.addFacebookComment(ours.fbPostId!, { message: "fb", created: at(-MIN) });
+    v.meta.failOn = (c) =>
+      c.path === `/${v.ig.user_id}/media` && c.method === "GET" ? { status: 400, code: 100, message: "Tried accessing nonexisting field (media_product_type)" }
+      : c.path === `/${v.page.id}/posts` ? { status: 500, code: 2, message: "Service temporarily unavailable", transient: true }
+      : null;
+    const r = await pollVenueComments(v.d, v.venue, T0);
+    expect(r.errors).toEqual([]);
+    expect(r.polled).toEqual(["instagram", "facebook"]);
+    expect(r.inserted.map((c) => c.text)).toEqual(["ig", "fb"]);
+    expect(reads(v, manual.id)).toBe(0);
+    expect(v.logs.some((l) => /\[comments\] instagram post list for venue .* failed: meta_100/.test(l))).toBe(true);
+    expect(v.logs.some((l) => /\[comments\] facebook post list for venue .* failed: meta_2/.test(l))).toBe(true);
+  });
+
+  it("a token error on the list marks the destination error like any read", async () => {
+    const v = await connectedVenue({ facebook: false });
+    v.meta.revoke(v.ig.token);
+    const r = await pollVenueComments(v.d, v.venue, T0);
+    expect(r.errors).toEqual([{ network: "instagram", code: "sm_meta_token" }]);
+    expect((await v.store.getDestination(v.venue.id, "instagram"))?.status).toBe("error");
   });
 });

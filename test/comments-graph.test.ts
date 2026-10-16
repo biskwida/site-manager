@@ -1,7 +1,7 @@
 // test/comments-graph.test.ts — reading and writing comments on both networks: real payload shapes, then the fake Meta server.
 import { describe, expect, it } from "vitest";
 import { FB_GRAPH, GraphClient, IG_GRAPH, MetaApiError } from "@/src/destinations/meta-graph";
-import { COMMENTS_PER_CALL, deleteReply, fetchFacebookComments, fetchInstagramComments, moderateFacebook, moderateInstagram, replyFacebook, replyInstagram } from "@/src/social/comments-graph";
+import { ACCOUNT_POSTS_PER_CALL, COMMENTS_PER_CALL, deleteReply, fetchFacebookComments, fetchInstagramComments, listFacebookPosts, listInstagramMedia, moderateFacebook, moderateInstagram, replyFacebook, replyInstagram } from "@/src/social/comments-graph";
 import { FakeMeta } from "./fake-meta";
 
 /** Answers every call with `body`; records the requests. */
@@ -83,6 +83,81 @@ describe("fetchFacebookComments", () => {
     await fetchFacebookComments(new GraphClient(FB_GRAPH, "t", f), "123", "not a date");
     expect(calls[0].url).not.toContain("NaN");
     expect(new URL(calls[0].url).searchParams.has("since")).toBe(false);
+  });
+});
+
+describe("listInstagramMedia", () => {
+  it("asks /{ig-user}/media for one page of 25 and keeps feed media since the given time (not stories, not rows without id or time)", async () => {
+    const { f, calls } = scripted({
+      data: [
+        { id: "m-story", caption: "", permalink: "https://www.instagram.com/stories/agala.cafe/1/", timestamp: "2026-10-15T08:00:00+0000", media_product_type: "STORY" },
+        { id: "m-new", caption: "Тиквена супа", permalink: "https://www.instagram.com/p/Cnew/", timestamp: "2026-10-14T08:00:00+0000", media_product_type: "FEED" },
+        { id: "m-reel", permalink: "https://www.instagram.com/reel/Creel/", timestamp: "2026-10-10T08:00:00+0000", media_product_type: "REELS" },
+        { id: "m-notime", caption: "?", media_product_type: "FEED" },
+        { caption: "no id", timestamp: "2026-10-12T08:00:00+0000", media_product_type: "FEED" },
+        { id: "m-old", caption: "Старо", permalink: "https://www.instagram.com/p/Cold/", timestamp: "2026-09-30T08:00:00+0000", media_product_type: "FEED" },
+      ],
+      paging: { cursors: { after: "x" }, next: "https://graph.instagram.com/next" },
+    });
+    const out = await listInstagramMedia(new GraphClient(IG_GRAPH, "IGTOKEN", f), "1784", "2026-10-01T09:00:00.000Z");
+    expect(calls).toHaveLength(1); // one page only
+    const url = new URL(calls[0].url);
+    expect(url.pathname).toBe("/v25.0/1784/media");
+    expect(url.searchParams.get("fields")).toBe("id,caption,permalink,timestamp,media_product_type");
+    expect(url.searchParams.get("limit")).toBe(String(ACCOUNT_POSTS_PER_CALL));
+    expect(calls[0].url).not.toContain("IGTOKEN");
+    expect(out).toEqual([
+      { post_ref: "m-new", caption: "Тиквена супа", permalink: "https://www.instagram.com/p/Cnew/", published_at: "2026-10-14T08:00:00.000Z" },
+      { post_ref: "m-reel", caption: "", permalink: "https://www.instagram.com/reel/Creel/", published_at: "2026-10-10T08:00:00.000Z" },
+    ]);
+    expect(ACCOUNT_POSTS_PER_CALL).toBe(25);
+  });
+  it("passes Meta errors through as MetaApiError", async () => {
+    const { f } = scripted({ error: { message: "Invalid OAuth access token.", code: 190 } }, 400);
+    await expect(listInstagramMedia(new GraphClient(IG_GRAPH, "t", f), "1", "2026-10-01T00:00:00.000Z")).rejects.toMatchObject({ name: "MetaApiError", code: "sm_meta_token" });
+  });
+});
+
+describe("listFacebookPosts", () => {
+  it("asks /{page}/posts since the given time (unix seconds) for one page of 25, the message as caption", async () => {
+    const { f, calls } = scripted({
+      data: [
+        { id: "123_1", message: "Днес: баница", permalink_url: "https://www.facebook.com/123/posts/1", created_time: "2026-10-15T07:00:00+0000" },
+        { id: "123_2", permalink_url: "https://www.facebook.com/123/posts/2", created_time: "2026-10-13T07:00:00+0000" },
+        { id: "123_3", message: "no time" },
+        { id: "123_4", message: "older than since", created_time: "2026-09-01T07:00:00+0000" },
+      ],
+    });
+    const out = await listFacebookPosts(new GraphClient(FB_GRAPH, "PAGETOKEN", f), "123", "2026-10-01T09:00:00.000Z");
+    expect(calls).toHaveLength(1);
+    const url = new URL(calls[0].url);
+    expect(url.pathname).toBe("/v25.0/123/posts");
+    expect(url.searchParams.get("fields")).toBe("id,message,permalink_url,created_time");
+    expect(url.searchParams.get("since")).toBe(String(Math.floor(Date.parse("2026-10-01T09:00:00.000Z") / 1000)));
+    expect(url.searchParams.get("limit")).toBe("25");
+    expect(out).toEqual([
+      { post_ref: "123_1", caption: "Днес: баница", permalink: "https://www.facebook.com/123/posts/1", published_at: "2026-10-15T07:00:00.000Z" },
+      { post_ref: "123_2", caption: "", permalink: "https://www.facebook.com/123/posts/2", published_at: "2026-10-13T07:00:00.000Z" },
+    ]);
+  });
+  it("lists the fake's feed posts (not stories, not deleted) newest first, and its Instagram feed media", async () => {
+    const meta = new FakeMeta();
+    const page = meta.addPage("Кафе");
+    const ig = meta.addInstagramUser("kafe");
+    const a = meta.addFacebookPost(page.id, { message: "стар", created: new Date("2026-10-02T09:00:00.000Z") });
+    const b = meta.addFacebookPost(page.id, { message: "нов", created: new Date("2026-10-14T09:00:00.000Z") });
+    const gone = meta.addFacebookPost(page.id, { message: "изтрит", created: new Date("2026-10-14T10:00:00.000Z") });
+    gone.deleted = true;
+    meta.addFacebookPost(page.id, { message: "", created: new Date("2026-10-14T11:00:00.000Z"), story: true });
+    meta.addFacebookPost(page.id, { message: "твърде стар", created: new Date("2026-09-01T09:00:00.000Z") });
+    const fb = await listFacebookPosts(new GraphClient(FB_GRAPH, page.access_token, meta.fetch), page.id, "2026-10-01T09:00:00.000Z");
+    expect(fb.map((p) => [p.post_ref, p.caption])).toEqual([[b.post_id, "нов"], [a.post_id, "стар"]]);
+    expect(fb[0].permalink).toMatch(/^https:\/\/www\.facebook\.com\//);
+    const m = meta.addInstagramMedia(ig.user_id, { caption: "ръчно", timestamp: new Date("2026-10-14T09:00:00.000Z") });
+    meta.addInstagramMedia(ig.user_id, { timestamp: new Date("2026-10-14T10:00:00.000Z"), story: true });
+    const media = await listInstagramMedia(new GraphClient(IG_GRAPH, ig.token, meta.fetch), ig.user_id, "2026-10-01T09:00:00.000Z");
+    expect(media).toEqual([{ post_ref: m.id, caption: "ръчно", permalink: m.permalink, published_at: "2026-10-14T09:00:00.000Z" }]);
+    await expect(listFacebookPosts(new GraphClient(FB_GRAPH, "wrong", meta.fetch), page.id, "2026-10-01T09:00:00.000Z")).rejects.toMatchObject({ code: "sm_meta_token" });
   });
 });
 

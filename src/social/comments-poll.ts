@@ -1,7 +1,8 @@
 // src/social/comments-poll.ts
-// Server-only. Reads the comments under the posts Site Manager published in the last 14 days (destination_syncs results),
-// stores the ones not seen before (social_comments) and marks the venue's own comments and nested replies so they are never
-// proposed. Per venue at most every 15 minutes (last_comment_poll_at in the destination config); v1 polls, webhooks come in
+// Server-only. Reads the comments under the venue's posts of the last 14 days: the ones Site Manager published
+// (destination_syncs results) and the account's own recent posts listed from Meta (one more call per network: a reconnect drops
+// the sync rows, and owners also post by hand). Stores the comments not seen before (social_comments) and marks the venue's own
+// comments and nested replies so they are never proposed. Per venue at most every 15 minutes (last_comment_poll_at in the destination config); v1 polls, webhooks come in
 // phase 2 (docs/CHANNELS.md). Instagram tokens are refreshed by tick step 8 (refreshInstagramTokens), which runs before this.
 // Logs carry venue ids, counts and error codes only: never comment text, never tokens.
 import { FB_GRAPH, GraphClient, IG_GRAPH, MetaApiError } from "../destinations/meta-graph";
@@ -11,7 +12,7 @@ import { CONNECTION_CODES, type SyncDeps } from "../destinations/sync";
 import { formatSyncError } from "../destinations/wp-errors";
 import type { CommentNetwork, Venue } from "../domain/types";
 import type { DestinationPatch, DestinationWithSecrets, NewSocialComment, SocialComment, Store } from "../store/types";
-import { fetchFacebookComments, fetchInstagramComments, type IncomingComment } from "./comments-graph";
+import { fetchFacebookComments, fetchInstagramComments, listFacebookPosts, listInstagramMedia, type AccountPost, type IncomingComment } from "./comments-graph";
 
 export const COMMENT_POLL_EVERY_MS = 15 * 60_000;
 export const COMMENT_POST_WINDOW_MS = 14 * 24 * 3_600_000;
@@ -41,13 +42,35 @@ function isDue(dest: DestinationWithSecrets, now: Date): boolean {
   return !Number.isFinite(last) || now.getTime() - last >= COMMENT_POLL_EVERY_MS;
 }
 
-function toRow(c: IncomingComment, t: PublishedTarget, ownId: string, now: Date): NewSocialComment {
+/** A post whose comments are read: what toRow needs of a published target or of a listed account post. */
+type CommentTarget = Pick<PublishedTarget, "post_ref" | "caption" | "permalink">;
+
+/**
+ * Our published posts first (their caption comes from the change set), then the listed posts not among them, one per post_ref.
+ * A listed post fills in what ours lacks (a caption when the change set is gone).
+ */
+export function mergeTargets(published: readonly PublishedTarget[], listed: readonly AccountPost[]): CommentTarget[] {
+  const byRef = new Map(listed.map((p) => [p.post_ref, p]));
+  const out: CommentTarget[] = published.map((t) => {
+    const l = byRef.get(t.post_ref);
+    return { post_ref: t.post_ref, caption: t.caption || l?.caption || "", permalink: t.permalink ?? l?.permalink ?? null };
+  });
+  const seen = new Set(out.map((t) => t.post_ref));
+  for (const p of listed) {
+    if (seen.has(p.post_ref)) continue;
+    seen.add(p.post_ref);
+    out.push({ post_ref: p.post_ref, caption: p.caption, permalink: p.permalink });
+  }
+  return out;
+}
+
+function toRow(c: IncomingComment, t: CommentTarget, ownId: string, now: Date): NewSocialComment {
   // An author without an id (a private Facebook profile) is a customer: an empty id never matches the venue's own.
   const status = c.parent_id !== null ? "nested" : c.author_id !== "" && c.author_id === ownId ? "own" : "new";
   return { network: c.network, post_ref: c.post_ref, comment_id: c.comment_id, parent_id: c.parent_id, author_id: c.author_id, author_name: c.author_name, text: c.text, created_at: c.created_at, seen_at: now.toISOString(), status, post_caption: t.caption, post_permalink: t.permalink };
 }
 
-async function readNetwork(d: SyncDeps, dest: DestinationWithSecrets, network: CommentNetwork, targets: PublishedTarget[], now: Date): Promise<NewSocialComment[]> {
+async function readNetwork(d: SyncDeps, dest: DestinationWithSecrets, network: CommentNetwork, published: PublishedTarget[], now: Date): Promise<NewSocialComment[]> {
   const secrets = decryptSecrets(dest.secrets, d.secretKey as Buffer);
   const token = (network === "instagram" ? secrets.token : secrets.page_token) ?? "";
   const ownId = String((network === "instagram" ? dest.config.ig_user_id : dest.config.page_id) ?? "");
@@ -56,6 +79,15 @@ async function readNetwork(d: SyncDeps, dest: DestinationWithSecrets, network: C
   const last = Date.parse(String(dest.config.last_comment_poll_at ?? ""));
   const since = Number.isFinite(last) ? new Date(last - SINCE_MARGIN_MS).toISOString() : undefined;
   const oldest = now.getTime() - COMMENT_RETENTION_MS;
+  const windowStart = new Date(now.getTime() - COMMENT_POST_WINDOW_MS).toISOString();
+  let listed: AccountPost[] = [];
+  try {
+    listed = network === "instagram" ? await listInstagramMedia(client, ownId, windowStart) : await listFacebookPosts(client, ownId, windowStart);
+  } catch (e) {
+    if (e instanceof MetaApiError && CONNECTION_CODES.has(e.code)) throw e; // token/permission: the destination is marked
+    log(d, `[comments] ${network} post list for venue ${dest.venue_id} failed: ${codeOf(e)}`); // read the posts we published
+  }
+  const targets = mergeTargets(published, listed);
   const rows: NewSocialComment[] = [];
   for (const t of targets) {
     let comments: IncomingComment[];
@@ -103,7 +135,7 @@ export async function pollVenueComments(d: SyncDeps, venue: Venue, now: Date): P
     try {
       targets ??= await publishedTargets(d.store, venue.id, new Date(now.getTime() - COMMENT_POST_WINDOW_MS).toISOString());
       const mine = targets.filter((t) => t.network === network);
-      const rows = mine.length ? await readNetwork(d, dest, network, mine, now) : [];
+      const rows = await readNetwork(d, dest, network, mine, now);
       const inserted = await d.store.upsertComments(venue.id, rows);
       report.inserted.push(...inserted);
       report.polled.push(network);

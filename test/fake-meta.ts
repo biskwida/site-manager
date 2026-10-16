@@ -2,13 +2,15 @@
 // In-memory stand-in for the Meta endpoints social posting uses, served through `fetch`:
 // - graph.facebook.com/v25.0: OAuth code/long-lived exchange, /me (app-scoped id), /me/accounts, /{page}/photos, /{page}/photo_stories,
 //   GET /{post}?fields=permalink_url, DELETE /{post} (feed posts only: a story DELETE fails with 100/33 like Meta),
-//   GET /{page}/published_posts, GET /{page}/stories (what a retry checks before posting again)
+//   GET /{page}/published_posts, GET /{page}/stories (what a retry checks before posting again), GET /{page}/posts (feed posts, since)
 // - graph.instagram.com/v25.0: /me, /{ig}/media (containers with status polling), /{ig}/media_publish, GET /{media}?fields=permalink,
+//   GET /{ig}/media (the account's media, newest first, media_product_type FEED/STORY),
 //   /access_token (ig_exchange_token), /refresh_access_token (ig_refresh_token)
 // - comments (comment replies): Facebook GET /{post}/comments (filter=toplevel, since, limit), POST /{comment}/comments,
 //   GET /{comment}/comments (its replies), POST /{comment} {is_hidden}, DELETE /{comment}; Instagram GET /{media}/comments
 //   (top-level with a replies edge), GET /{comment}/replies, POST /{comment}/replies (top-level only), POST /{comment} {hide},
-//   DELETE /{comment}. Seed with addFacebookComment/addInstagramComment.
+//   DELETE /{comment}. Seed with addFacebookComment/addInstagramComment; posts made outside Site Manager with
+//   addFacebookPost/addInstagramMedia.
 // - api.instagram.com/oauth/access_token (form POST): the short-lived Instagram token
 // Tokens are read from the bearer header or an access_token query parameter, exactly like Graph.
 import { randomBytes } from "node:crypto";
@@ -17,7 +19,7 @@ export interface FakePage { id: string; name: string; access_token: string; task
 export interface FakeIgUser { user_id: string; username: string; account_type: "BUSINESS" | "MEDIA_CREATOR" | "PERSONAL"; token: string }
 export interface FakeFbPost { post_id: string; page_id: string; kind: "photo" | "story"; photo_id: string; url: string; caption: string; deleted: boolean; created_time: string }
 export interface FakeContainer { id: string; user_id: string; image_url: string; caption: string; media_type: "IMAGE" | "STORIES"; polls: number; published: boolean; media_id: string | null }
-export interface FakeIgMedia { id: string; user_id: string; image_url: string; caption: string; media_type: "IMAGE" | "STORIES"; permalink: string }
+export interface FakeIgMedia { id: string; user_id: string; image_url: string; caption: string; media_type: "IMAGE" | "STORIES"; permalink: string; timestamp: string }
 export interface FakeFailure { status: number; code: number; message: string; transient?: boolean; subcode?: number }
 export interface FakeCall { method: string; host: string; path: string; url: string; body: Record<string, unknown> | null; auth: boolean }
 /** A comment under a Facebook post or Instagram media (comment replies, 2026-10-15). owner_id = the Page id / Instagram user id whose token may act on it. */
@@ -51,6 +53,22 @@ export class FakeMeta {
     const c: FakeComment = { id: `${postId}_${num()}`, network: "facebook", post_ref: postId, owner_id: post.page_id, parent_id: o.parent_id ?? null, from_id: o.from_id ?? num(), from_name: o.from_name ?? "Customer", text: o.message, created_time: this.stampAt(o.created), hidden: false, deleted: false };
     this.comments.set(c.id, c);
     return c;
+  }
+  /** A Facebook post the Page made outside Site Manager (Meta Business Suite, the app): a feed photo, or a story. */
+  addFacebookPost(pageId: string, o: { message?: string; created?: Date; story?: boolean } = {}): FakeFbPost {
+    if (!this.pages.has(pageId)) throw new Error(`no page ${pageId}`);
+    const p: FakeFbPost = { post_id: o.story ? num() : `${pageId}_${num()}`, page_id: pageId, kind: o.story ? "story" : "photo", photo_id: num(), url: "https://scontent.example/manual.jpg", caption: o.message ?? "", deleted: false, created_time: this.stampAt(o.created) };
+    this.posts.set(p.post_id, p);
+    return p;
+  }
+  /** An Instagram media the account posted outside Site Manager (the Instagram app): a feed image, or a story. */
+  addInstagramMedia(userId: string, o: { caption?: string; timestamp?: Date; story?: boolean } = {}): FakeIgMedia {
+    const u = this.igUsers.get(userId);
+    if (!u) throw new Error(`no instagram user ${userId}`);
+    const id = num();
+    const m: FakeIgMedia = { id, user_id: userId, image_url: "https://scontent.example/manual.jpg", caption: o.caption ?? "", media_type: o.story ? "STORIES" : "IMAGE", permalink: o.story ? `https://www.instagram.com/stories/${u.username}/${id}/` : `https://www.instagram.com/p/C${id}/`, timestamp: this.stampAt(o.timestamp) };
+    this.igMedia.set(id, m);
+    return m;
   }
   addInstagramComment(mediaId: string, o: { text: string; from_id?: string; username?: string; parent_id?: string; created?: Date }): FakeComment {
     const m = this.igMedia.get(mediaId);
@@ -153,6 +171,9 @@ export class FakeMeta {
   }
   private stampAt(d: Date = this.now()): string {
     return d.toISOString().replace(/\.\d{3}Z$/, "+0000");
+  }
+  private ms(stamp: string): number {
+    return Date.parse(stamp.replace(/([+-]\d\d)(\d\d)$/, "$1:$2"));
   }
 
   /** Facebook: `{ id, message, from, created_time, parent }`; Instagram: `{ id, text, timestamp, username, from, replies }`. Deleted comments are never listed. */
@@ -266,6 +287,17 @@ export class FakeMeta {
       }
       return graphError(400, 100, "Unsupported request");
     }
+    if (parts.length === 2 && method === "GET" && parts[1] === "posts") {
+      // The Page's feed posts (no stories, nothing deleted), newest first; since = unix seconds.
+      const page = this.pages.get(parts[0]);
+      if (!page || this.pageForToken(token)?.id !== page.id) return graphError(400, 190, "Invalid OAuth access token.");
+      const since = q.get("since") ? Number(q.get("since")) * 1000 : null;
+      const rows = [...this.posts.values()]
+        .filter((p) => p.page_id === page.id && p.kind === "photo" && !p.deleted && (since === null || this.ms(p.created_time) >= since))
+        .sort((a, b) => b.created_time.localeCompare(a.created_time))
+        .slice(0, Number(q.get("limit") ?? 25));
+      return Response.json({ data: rows.map((p) => ({ id: p.post_id, ...(p.caption ? { message: p.caption } : {}), permalink_url: `https://www.facebook.com/${p.page_id}/posts/${p.post_id.split("_")[1]}`, created_time: p.created_time })) });
+    }
     if (parts.length === 2 && method === "GET" && (parts[1] === "published_posts" || parts[1] === "stories")) {
       const page = this.pages.get(parts[0]);
       if (!page || this.pageForToken(token)?.id !== page.id) return graphError(400, 190, "Invalid OAuth access token.");
@@ -358,6 +390,12 @@ export class FakeMeta {
       }
       return graphError(400, 100, "Unsupported request");
     }
+    if (method === "GET" && parts.length === 2 && parts[1] === "media") {
+      // The account's media, newest first; stories carry media_product_type STORY. Meta leaves out an empty caption.
+      if (parts[0] !== user.user_id) return graphError(400, 190, "Invalid OAuth access token.");
+      const rows = [...this.igMedia.values()].filter((m) => m.user_id === user.user_id).sort((a, b) => b.timestamp.localeCompare(a.timestamp)).slice(0, Number(q.get("limit") ?? 25));
+      return Response.json({ data: rows.map((m) => ({ id: m.id, ...(m.caption ? { caption: m.caption } : {}), permalink: m.permalink, timestamp: m.timestamp, media_type: "IMAGE", media_product_type: m.media_type === "STORIES" ? "STORY" : "FEED" })) });
+    }
     if (method === "POST" && parts.length === 2 && parts[0] === user.user_id) {
       if (parts[1] === "media") {
         const imageUrl = String(body?.image_url ?? "");
@@ -373,7 +411,7 @@ export class FakeMeta {
         const id = num();
         c.media_id = id;
         const permalink = c.media_type === "STORIES" ? `https://www.instagram.com/stories/${user.username}/${id}/` : `https://www.instagram.com/p/C${id}/`;
-        this.igMedia.set(id, { id, user_id: user.user_id, image_url: c.image_url, caption: c.caption, media_type: c.media_type, permalink });
+        this.igMedia.set(id, { id, user_id: user.user_id, image_url: c.image_url, caption: c.caption, media_type: c.media_type, permalink, timestamp: this.stamp() });
         return Response.json(this.publishWithoutId ? { success: true } : { id });
       }
     }

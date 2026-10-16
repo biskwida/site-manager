@@ -4,10 +4,17 @@
 // Facts verified 2026-10-14/15: Instagram lists at most 50 comments per call, newest first, no time filter, replies ride under
 // their parent (`replies` edge); Facebook takes filter=toplevel, order=reverse_chronological and since (unix seconds).
 // Instagram can reply to top-level comments only; both return the new comment id; DELETE /{id} removes our own reply.
+// The account's own recent posts (2026-10-15, so a reconnect, which drops the sync rows, or a post made outside Site Manager
+// still gets its comments read): Instagram GET /{ig-user}/media (no time filter, stories marked media_product_type STORY),
+// Facebook GET /{page}/posts (feed posts by the Page, since in unix seconds). One page of 25 each.
 import { GraphClient, MetaApiError, metaTime } from "../destinations/meta-graph";
 import type { CommentNetwork, ModerateAction } from "../domain/types";
 
 export const COMMENTS_PER_CALL = 50;
+/** One page of the account's posts per poll: more than a venue posts in the 14-day window. */
+export const ACCOUNT_POSTS_PER_CALL = 25;
+const IG_MEDIA_FIELDS = encodeURIComponent("id,caption,permalink,timestamp,media_product_type");
+const FB_POST_FIELDS = encodeURIComponent("id,message,permalink_url,created_time");
 const IG_FIELDS = encodeURIComponent("id,text,timestamp,username,from,parent_id,replies{id,text,timestamp,username,from}");
 const FB_FIELDS = encodeURIComponent("id,message,from,created_time,parent");
 
@@ -70,6 +77,48 @@ export async function fetchFacebookComments(client: GraphClient, postId: string,
     const from = (raw.from ?? {}) as Raw;
     const parent = (raw.parent ?? null) as Raw | null;
     out.push({ network: "facebook", post_ref: postId, comment_id: id, parent_id: parent ? str(parent.id) || null : null, author_id: str(from.id), author_name: str(from.name), text: str(raw.message), created_at });
+  }
+  return out;
+}
+
+/** A post or media of the venue's own account, whoever published it (Site Manager or the owner by hand). */
+export interface AccountPost {
+  post_ref: string;
+  caption: string;
+  permalink: string | null;
+  /** ISO. */
+  published_at: string;
+}
+
+function accountPost(id: unknown, caption: unknown, permalink: unknown, time: unknown, since: number): AccountPost | null {
+  const post_ref = str(id);
+  const published_at = isoOf(time);
+  if (!post_ref || !published_at || Date.parse(published_at) < since) return null;
+  return { post_ref, caption: str(caption), permalink: str(permalink) || null, published_at };
+}
+
+/** The account's media published at or after `sinceIso`, newest first, without stories (they take no comments). One page. */
+export async function listInstagramMedia(client: GraphClient, igUserId: string, sinceIso: string): Promise<AccountPost[]> {
+  const since = Date.parse(sinceIso);
+  const r = await client.get<{ data?: unknown }>(`/${enc(igUserId)}/media?fields=${IG_MEDIA_FIELDS}&limit=${ACCOUNT_POSTS_PER_CALL}`);
+  const out: AccountPost[] = [];
+  for (const raw of rows(r.data)) {
+    if (raw.media_product_type === "STORY") continue;
+    const p = accountPost(raw.id, raw.caption, raw.permalink, raw.timestamp, since);
+    if (p) out.push(p);
+  }
+  return out;
+}
+
+/** The Page's feed posts created at or after `sinceIso`, newest first (the message as caption). One page. */
+export async function listFacebookPosts(client: GraphClient, pageId: string, sinceIso: string): Promise<AccountPost[]> {
+  const since = Date.parse(sinceIso);
+  const sinceParam = Number.isFinite(since) ? `&since=${Math.floor(since / 1000)}` : "";
+  const r = await client.get<{ data?: unknown }>(`/${enc(pageId)}/posts?fields=${FB_POST_FIELDS}${sinceParam}&limit=${ACCOUNT_POSTS_PER_CALL}`);
+  const out: AccountPost[] = [];
+  for (const raw of rows(r.data)) {
+    const p = accountPost(raw.id, raw.message, raw.permalink_url, raw.created_time, since);
+    if (p) out.push(p);
   }
   return out;
 }
