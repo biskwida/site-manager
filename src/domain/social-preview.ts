@@ -41,26 +41,36 @@ export function socialPreviewLines(c: Change, lang: Lang): string[] {
   return lines;
 }
 
-/** The file one place publishes: the Instagram post its padded copy, the Facebook post the original, a story its 9:16 copy; the original when there is no copy. */
-function publishedUrl(row: SocialPostRow, network: "facebook" | "instagram", format: "post" | "story"): string {
-  if (format === "story") return row.story_image_url ?? row.image_url;
-  return network === "instagram" ? (row.ig_feed_image_url ?? row.image_url) : row.image_url;
+/** The file one place publishes: the Instagram post its padded copy, the Facebook post the original, a story (either network) its 9:16 copy; the original when there is no copy. */
+export function publishedUrl(row: SocialPostRow, target: SocialTarget): string {
+  switch (target) {
+    case "instagram_post":
+      return row.ig_feed_image_url ?? row.image_url;
+    case "facebook_post":
+      return row.image_url;
+    case "instagram_story":
+    case "facebook_story":
+      return row.story_image_url ?? row.image_url;
+  }
 }
 
 /**
- * The pictures the owner approves, labelled "Instagram + Facebook post": one per file, so places that publish the same file
- * share one picture and name both networks. Posts come before stories, Instagram before Facebook. Pure; the caller sends them.
+ * The pictures the owner approves: one per published file, in the order its first place appears (posts before stories, Instagram
+ * before Facebook). A file used by several places is listed once with all their labels: the networks of one format join with " + "
+ * ("Instagram + Facebook post"), the formats with ", " ("Facebook post, Facebook story"). Pure; the caller sends them.
  */
 export function previewPictures(row: SocialPostRow, lang: Lang): { url: string; label: string }[] {
-  const pictures: { url: string; label: string }[] = [];
+  // file -> format -> network names, each in the order the places are met.
+  const files = new Map<string, Map<"post" | "story", string[]>>();
   for (const format of ["post", "story"] as const) {
-    const networksByUrl = new Map<string, string[]>();
     for (const network of ["instagram", "facebook"] as const) {
-      if (!row.targets.includes(`${network}_${format}` as SocialTarget)) continue;
-      const url = publishedUrl(row, network, format);
-      networksByUrl.set(url, [...(networksByUrl.get(url) ?? []), NETWORK_NAMES[network]]);
+      const target = `${network}_${format}` as SocialTarget;
+      if (!row.targets.includes(target)) continue;
+      const url = publishedUrl(row, target);
+      const formats = files.get(url) ?? new Map<"post" | "story", string[]>();
+      formats.set(format, [...(formats.get(format) ?? []), NETWORK_NAMES[network]]);
+      files.set(url, formats);
     }
-    for (const [url, names] of networksByUrl) pictures.push({ url, label: `${names.join(" + ")} ${FORMAT[format][lang]}` });
   }
-  return pictures;
+  return [...files].map(([url, formats]) => ({ url, label: [...formats].map(([format, names]) => `${names.join(" + ")} ${FORMAT[format][lang]}`).join(", ") }));
 }

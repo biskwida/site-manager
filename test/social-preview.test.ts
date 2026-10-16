@@ -2,7 +2,7 @@
 import { describe, expect, it } from "vitest";
 import { applyChange, invertChanges } from "@/src/domain/changes";
 import { renderPreview } from "@/src/domain/preview";
-import { previewPictures, socialPreviewLines } from "@/src/domain/social-preview";
+import { previewPictures, publishedUrl, socialPreviewLines } from "@/src/domain/social-preview";
 import { isExternalEntity, isWpEntity, SOCIAL_TARGETS, type Change, type SocialPostRow } from "@/src/domain/types";
 import { SupabaseStore } from "@/src/store/supabase";
 import { state, TZ } from "./fixtures";
@@ -115,6 +115,29 @@ describe("socialPreviewLines", () => {
   });
 });
 
+describe("publishedUrl", () => {
+  const original = socialRow();
+  const feedCopyOnly = socialRow({ ig_feed_image_url: "https://x/p.jpg", ig_feed_ratio: "4:5" });
+  const bothCopies = socialRow({ ig_feed_image_url: "https://x/p.jpg", ig_feed_ratio: "4:5", story_image_url: "https://x/s.jpg" });
+  it("the Instagram post publishes its padded copy when there is one, else the original", () => {
+    expect(publishedUrl(feedCopyOnly, "instagram_post")).toBe("https://x/p.jpg");
+    expect(publishedUrl(bothCopies, "instagram_post")).toBe("https://x/p.jpg");
+    expect(publishedUrl(original, "instagram_post")).toBe("https://x/a.jpg");
+  });
+  it("the Facebook post always publishes the original, whatever copies exist", () => {
+    expect(publishedUrl(original, "facebook_post")).toBe("https://x/a.jpg");
+    expect(publishedUrl(feedCopyOnly, "facebook_post")).toBe("https://x/a.jpg");
+    expect(publishedUrl(bothCopies, "facebook_post")).toBe("https://x/a.jpg");
+  });
+  it("a story, on either network, publishes the story copy when there is one, else the original (never the Instagram feed copy)", () => {
+    for (const target of ["instagram_story", "facebook_story"] as const) {
+      expect(publishedUrl(bothCopies, target)).toBe("https://x/s.jpg");
+      expect(publishedUrl(feedCopyOnly, target)).toBe("https://x/a.jpg");
+      expect(publishedUrl(original, target)).toBe("https://x/a.jpg");
+    }
+  });
+});
+
 describe("previewPictures", () => {
   it("one picture for Instagram and Facebook posts when they share it", () => {
     expect(previewPictures(socialRow({ targets: ["facebook_post", "instagram_post"] }), "bg")).toEqual([{ url: "https://x/a.jpg", label: "Instagram + Facebook пост" }]);
@@ -145,12 +168,30 @@ describe("previewPictures", () => {
     const row = socialRow({ targets: ["facebook_story", "instagram_story", "facebook_post", "instagram_post"], ig_feed_image_url: "https://x/p.jpg", story_image_url: "https://x/s.jpg" });
     expect(previewPictures(row, "bg").map((p) => p.label)).toEqual(["Instagram пост", "Facebook пост", "Instagram + Facebook история"]);
   });
-  it("lists a post and a story that publish the same file once each, under their own format word", () => {
+  it("lists a file that a post and a story both publish once, with both labels", () => {
     // A photo that is already 9:16 gets no story copy, and Facebook's post is the original too.
-    expect(previewPictures(socialRow({ targets: ["facebook_post", "facebook_story"] }), "en")).toEqual([
-      { url: "https://x/a.jpg", label: "Facebook post" },
-      { url: "https://x/a.jpg", label: "Facebook story" },
+    const row = socialRow({ targets: ["facebook_post", "facebook_story"] });
+    expect(previewPictures(row, "en")).toEqual([{ url: "https://x/a.jpg", label: "Facebook post, Facebook story" }]);
+    expect(previewPictures(row, "bg")).toEqual([{ url: "https://x/a.jpg", label: "Facebook пост, Facebook история" }]);
+  });
+  it("merges by file across networks and formats: a 9:16 photo's Facebook post and Instagram story are one file, the padded Instagram post is another", () => {
+    const row = socialRow({ targets: ["instagram_story", "facebook_post", "instagram_post"], ig_feed_image_url: "https://x/p.jpg", ig_feed_ratio: "4:5" });
+    expect(previewPictures(row, "en")).toEqual([
+      { url: "https://x/p.jpg", label: "Instagram post" },
+      { url: "https://x/a.jpg", label: "Facebook post, Instagram story" },
     ]);
+  });
+  it("one picture for all four places when they publish the same file: networks join with +, the two formats with a comma", () => {
+    const row = socialRow({ targets: ["facebook_story", "instagram_story", "facebook_post", "instagram_post"] });
+    expect(previewPictures(row, "en")).toEqual([{ url: "https://x/a.jpg", label: "Instagram + Facebook post, Instagram + Facebook story" }]);
+    expect(previewPictures(row, "bg")).toEqual([{ url: "https://x/a.jpg", label: "Instagram + Facebook пост, Instagram + Facebook история" }]);
+  });
+  it("never lists the same file twice, whichever copies exist", () => {
+    const every: SocialPostRow["targets"] = ["facebook_story", "instagram_story", "facebook_post", "instagram_post"];
+    for (const copies of [{}, { ig_feed_image_url: "https://x/p.jpg" }, { story_image_url: "https://x/s.jpg" }, { ig_feed_image_url: "https://x/p.jpg", story_image_url: "https://x/s.jpg" }]) {
+      const urls = previewPictures(socialRow({ targets: every, ...copies }), "en").map((p) => p.url);
+      expect(new Set(urls).size).toBe(urls.length);
+    }
   });
   it("has no pictures for no targets", () => {
     expect(previewPictures(socialRow(), "bg")).toEqual([]);
