@@ -49,6 +49,8 @@ export interface AgentDeps {
   notes?: string[];
   /** Ids of the change sets this turn created (filled by the tools). One owner message may hold several tasks, so its own proposals never block each other. */
   turnSets?: Set<string>;
+  /** URLs of the pictures sent to the owner's chat in this turn (make_visual's, social_post's), so social_post does not send one again. run.ts starts an empty set each turn. */
+  sentPhotos?: Set<string>;
 }
 
 /** The store as the tools see it: every change set they create is recorded in `created`. Other methods pass through, bound to the real store. */
@@ -128,7 +130,7 @@ const NEXT_STEP: Record<ChangeSet["status"], string> = {
 
 export function makeTools(deps: AgentDeps) {
   const turnSets = deps.turnSets ?? new Set<string>();
-  const d: AgentDeps = { ...deps, turnSets, store: recordingStore(deps.store, turnSets) };
+  const d: AgentDeps = { ...deps, turnSets, sentPhotos: deps.sentPhotos ?? new Set<string>(), store: recordingStore(deps.store, turnSets) };
   // Tools run one at a time per turn, even if the runner calls several at once.
   let queue: Promise<unknown> = Promise.resolve();
   const attempt = (fn: () => Promise<unknown>): Promise<string> => {

@@ -1,7 +1,7 @@
 // src/agent/visual-tools.ts
 // The make_visual tool: turns a photo the owner sent into a finished Instagram picture (post 4:5 and/or story 9:16) and
 // sends it to the chat. Nothing is published here: the agent then proposes social_post with the new picture, so the
-// owner sees the picture with ✅ / ✏️ / ❌ under it (src/agent/social-tools.ts).
+// owner sees the picture with ✅ / ✏️ / ❌ under it (src/agent/social-tools.ts), which does not send it a second time.
 import { betaZodTool } from "@anthropic-ai/sdk/helpers/beta/zod";
 import { z } from "zod";
 import { BACKDROPS } from "../visual/palette";
@@ -34,7 +34,8 @@ export function visualTools(d: AgentDeps, k: ToolKit) {
         if (line && Array.from(line).length > NAME_MAX) throw new Error(`The extra line must be at most ${NAME_MAX} characters; shorten it.`);
         const formats = input.formats.length ? [...new Set(input.formats)] : (["post"] as const);
         const r = await visual({ venueId: d.venueId, mediaId: input.media_id, dish, price: input.price?.trim() || null, line, colour: input.colour?.trim() || null, formats: [...formats] });
-        for (const p of r.pictures) await d.messenger.sendPhoto(d.chatRef, p.url);
+        // Each picture that reaches the chat is recorded, so the social_post that follows in this turn does not send it again.
+        for (const p of r.pictures) if ((await d.messenger.sendPhoto(d.chatRef, p.url)) !== null) d.sentPhotos?.add(p.url);
         d.notes?.push(`visual from photo ${input.media_id}: ${r.pictures.map((p) => `${p.format} ${p.media_id}`).join(", ")} (backdrop ${r.backdrop}${r.kind === "photo" ? ", photo in a card: no clean cut-out" : ""})`);
         const social = d.social;
         const next = social && (social.instagram || social.facebook)

@@ -1,18 +1,23 @@
 // src/agent/social-tools.ts
 // The social_post tool: proposes publishing a photo the owner sent to the venue's Facebook Page and/or Instagram account.
+// Before the ✅ / ✏️ / ❌ buttons the owner gets the exact picture for each place, labelled (previewPictures); the Instagram feed
+// copy and the 9:16 story copy are made here, so what is approved is what is published.
 // Nothing is published until the owner taps ✅ (src/destinations/store-hook.ts → facebook.ts / instagram.ts).
 import { betaZodTool } from "@anthropic-ai/sdk/helpers/beta/zod";
 import { z } from "zod";
+import { storyBackground } from "../domain/color";
+import { previewPictures } from "../domain/social-preview";
 import { SOCIAL_TARGETS, type Change, type SocialPostRow, type SocialTarget } from "../domain/types";
 import type { Store } from "../store/types";
-import { igFeedImage } from "./social-image";
+import { igFeedImage, storyImage } from "./social-image";
 import { proposalText, type AgentDeps, type ToolKit } from "./tools";
 
 export const IG_CAPTION_MAX = 2200;
 export const IG_HASHTAGS_MAX = 30;
 export const IG_MENTIONS_MAX = 20;
-/** Instagram's image size limit; the photo is read once at proposal time to check its shape. */
+/** Instagram's image size limit; the photo is read once at proposal time to check its shape and make the story picture. */
 const MAX_PHOTO_BYTES = 8 * 1024 * 1024;
+const UNREADABLE = "Could not read this photo as an image; ask the owner to send it again as a regular photo.";
 
 async function readPhoto(f: typeof fetch, url: string): Promise<Uint8Array | null> {
   try {
@@ -75,25 +80,46 @@ export function socialTools(d: AgentDeps, k: ToolKit) {
         }
         await k.ensureWithinLimit();
         await k.ensureNoPending();
+        const s = await k.site();
         const row: SocialPostRow = { media_id: m.id, image_url: m.public_url, caption, targets };
-        if (targets.includes("instagram_post")) {
-          // Instagram's feed takes 4:5..1.91:1 only: pad a taller or wider photo now, so the preview says so and the push only publishes.
+        const stories = targets.some((t) => t.endsWith("_story"));
+        if (targets.includes("instagram_post") || stories) {
+          // Read once: the Instagram feed shape and the story picture both come from these bytes.
           const bytes = await readPhoto(d.fetch ?? fetch, m.public_url);
-          if (!bytes) throw new Error("Could not read the photo to check its shape for Instagram; try again in a moment.");
-          const shape = await igFeedImage(bytes);
-          if (shape.kind === "unreadable") throw new Error("Could not read this photo as an image; ask the owner to send it again as a regular photo.");
-          if (shape.kind === "unavailable") throw new Error(`Instagram feed posts must be between 4:5 (portrait) and 1.91:1 (landscape); this photo is outside that and cannot be padded on this server. Ask the owner for a less ${shape.ratio === "4:5" ? "tall" : "wide"} photo, or post it as a story or to Facebook only.`);
-          if (shape.kind === "padded") {
-            const copy = await d.store.saveMedia(d.venueId, shape.bytes, "image/jpeg");
-            if (!/^https:\/\//.test(copy.public_url)) throw new Error("The padded copy for Instagram has no public https address (offline storage).");
-            row.ig_feed_image_url = copy.public_url;
-            row.ig_feed_ratio = shape.ratio;
+          if (!bytes) throw new Error("Could not read the photo to prepare it for posting; try again in a moment.");
+          if (targets.includes("instagram_post")) {
+            // Instagram's feed takes 4:5..1.91:1 only: pad a taller or wider photo now, so the preview says so and the push only publishes.
+            const shape = await igFeedImage(bytes);
+            if (shape.kind === "unreadable") throw new Error(UNREADABLE);
+            if (shape.kind === "unavailable") throw new Error(`Instagram feed posts must be between 4:5 (portrait) and 1.91:1 (landscape); this photo is outside that and cannot be padded on this server. Ask the owner for a less ${shape.ratio === "4:5" ? "tall" : "wide"} photo, or post it as a story or to Facebook only.`);
+            if (shape.kind === "padded") {
+              const copy = await d.store.saveMedia(d.venueId, shape.bytes, "image/jpeg");
+              if (!/^https:\/\//.test(copy.public_url)) throw new Error("The padded copy for Instagram has no public https address (offline storage).");
+              row.ig_feed_image_url = copy.public_url;
+              row.ig_feed_ratio = shape.ratio;
+            }
+          }
+          if (stories) {
+            // Stories are 9:16: the whole photo on the café's colour. A photo that already is 9:16 is used as it is, and so is any
+            // photo on a server without sharp (stories published the original before there was a copy).
+            const story = await storyImage(bytes, storyBackground(s.venue.theme));
+            if (story.kind === "unreadable") throw new Error(UNREADABLE);
+            if (story.kind === "made") {
+              const copy = await d.store.saveMedia(d.venueId, story.bytes, "image/jpeg");
+              if (!/^https:\/\//.test(copy.public_url)) throw new Error("The 9:16 story copy has no public https address (offline storage).");
+              row.story_image_url = copy.public_url;
+            }
           }
         }
         const change: Change = { position: 0, op: "social_post", entity: "social_post", entity_id: m.id, before: null, after: row as unknown as Change["after"] };
-        const s = await k.site();
         const p = k.previews(s, [change]);
         const cs = await d.store.createChangeSet({ venue_id: d.venueId, chat_ref: d.chatRef, summary_bg: input.summary_bg, summary_en: input.summary_en, ...p, source: d.source ?? "text", status: "proposed", changes: [change] });
+        // The exact picture for each place, labelled, above the buttons. One already in the chat from this turn (make_visual's) is not
+        // sent again; one that cannot be sent (Meta's 24-hour window, a network error) never holds back the proposal.
+        const sent = d.sentPhotos ?? new Set<string>();
+        for (const pic of previewPictures(row, k.lang)) {
+          if (!sent.has(pic.url) && (await d.messenger.sendPhoto(d.chatRef, pic.url, pic.label)) !== null) sent.add(pic.url);
+        }
         const messageRef = await d.messenger.sendProposal(d.chatRef, proposalText(k.mine(p), k.lang, null, s.venue.tz), cs.id, k.lang);
         if (messageRef !== null) await d.store.updateChangeSet(cs.id, { message_ref: messageRef });
         return { change_set_id: cs.id, status: "proposed", preview: k.mine(p), next: "The owner decides with the buttons. Reply with at most one short sentence, or nothing." };
