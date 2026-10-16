@@ -1,8 +1,26 @@
 import type { Category, Item, Lang, Weekday } from "./types";
 
-/** "bg" when the text has any Cyrillic letter; null otherwise (Latin text keeps the member's stored language). */
+/** Plain English words; two different ones in a text without Cyrillic show English. */
+const ENGLISH_WORDS: ReadonlySet<string> = new Set([
+  "the", "a", "an", "is", "are", "was", "be", "to", "for", "of", "and", "or", "in", "on", "at", "with", "from", "it", "this", "that",
+  "my", "our", "we", "i", "you", "please", "can", "could", "would", "will",
+  "make", "add", "remove", "change", "set", "put", "show", "post", "price", "today", "tomorrow", "closed", "open", "sold", "out",
+  "what", "how", "when", "why",
+]);
+
+/**
+ * The language a message shows: "bg" when it has any Cyrillic letter; "en" when it has none and at least two different plain
+ * English words (ENGLISH_WORDS, whole words, any case); null otherwise, so a price, an emoji, a dish name or Bulgarian written
+ * in Latin letters ("kafeto e 4.20") keeps the member's stored language.
+ */
 export function detectLang(text: string): Lang | null {
-  return /\p{Script=Cyrillic}/u.test(text) ? "bg" : null;
+  if (/\p{Script=Cyrillic}/u.test(text)) return "bg";
+  const seen = new Set<string>();
+  for (const word of text.toLowerCase().match(/[a-z']+/g) ?? []) {
+    if (ENGLISH_WORDS.has(word)) seen.add(word);
+    if (seen.size >= 2) return "en";
+  }
+  return null;
 }
 
 export function tr(lang: Lang, bg: string, en: string): string {
