@@ -48,6 +48,16 @@ describe("make_visual", () => {
     expect(notes.join(" ")).toContain("story vis-story-1-1");
   });
 
+  it("labels each picture with its format in the owner's language", async () => {
+    const bg = await setup();
+    await call(bg.tools, "make_visual", { media_id: bg.photo.id, dish: "Флат уайт", formats: ["post", "story"] });
+    expect(bg.messenger.photos.map((p) => [p.url, p.caption])).toEqual([["https://media.example/post.jpg", "Пост"], ["https://media.example/story.jpg", "История"]]);
+    const en = await setup();
+    const english = makeTools({ ...en.deps, member: { ...en.deps.member, lang: "en" } });
+    await call(english, "make_visual", { media_id: en.photo.id, dish: "Flat white", formats: ["post", "story"] });
+    expect(en.messenger.photos.map((p) => [p.url, p.caption])).toEqual([["https://media.example/post.jpg", "Post"], ["https://media.example/story.jpg", "Story"]]);
+  });
+
   it("records every picture it sends in sentPhotos", async () => {
     const sentPhotos = new Set<string>();
     const { tools, photo } = await setup({ sentPhotos });

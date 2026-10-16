@@ -211,14 +211,14 @@ describe("runTurn", () => {
     const first = fakeClient([{ tool: "make_visual", input: { media_id: photo.id, dish: "Флат уайт", formats: ["post"] } }, { tool: "social_post", input: post }], { stop_reason: "end_turn", text: "" });
     await runTurn(withPictures, { text: "направи пост и го пусни във Facebook", source: "text" }, { model: "m", effort: "medium" }, first.client);
     expect(first.toolResults.map((r) => JSON.parse(r).error)).toEqual([undefined, undefined]);
-    expect(messenger.photos.map((p) => [p.url, p.caption])).toEqual([[url, undefined]]); // make_visual's; social_post did not send it again
+    expect(messenger.photos.map((p) => [p.url, p.caption])).toEqual([[url, "Пост"]]); // make_visual's; social_post did not send it again
     const proposal = messenger.sent.find((s) => s.setId)!;
     await store.updateChangeSet(proposal.setId!, { status: "cancelled" });
     // The next message is a new turn: its proposal shows the picture again, even when the deps still carry an earlier turn's set.
     const second = fakeClient([{ tool: "social_post", input: post }], { stop_reason: "end_turn", text: "" });
     await runTurn({ ...withPictures, sentPhotos: new Set([url]) }, { text: "пусни го пак", source: "text" }, { model: "m", effort: "medium" }, second.client);
     expect(JSON.parse(second.toolResults[0]).status).toBe("proposed");
-    expect(messenger.photos.map((p) => [p.url, p.caption])).toEqual([[url, undefined], [url, "Facebook пост"]]);
+    expect(messenger.photos.map((p) => [p.url, p.caption])).toEqual([[url, "Пост"], [url, "Facebook пост"]]);
   });
   it("passes correctionFor from memory into the tools", async () => {
     const { deps, store, venue, items } = await setup();

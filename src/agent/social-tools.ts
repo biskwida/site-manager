@@ -116,9 +116,9 @@ export function socialTools(d: AgentDeps, k: ToolKit) {
         const cs = await d.store.createChangeSet({ venue_id: d.venueId, chat_ref: d.chatRef, summary_bg: input.summary_bg, summary_en: input.summary_en, ...p, source: d.source ?? "text", status: "proposed", changes: [change] });
         // The exact picture for each place, labelled, above the buttons. One already in the chat from this turn (make_visual's) is not
         // sent again; one that cannot be sent (Meta's 24-hour window, a network error) never holds back the proposal.
-        const sent = d.sentPhotos ?? new Set<string>();
+        d.sentPhotos ??= new Set<string>();
         for (const pic of previewPictures(row, k.lang)) {
-          if (!sent.has(pic.url) && (await d.messenger.sendPhoto(d.chatRef, pic.url, pic.label)) !== null) sent.add(pic.url);
+          if (!d.sentPhotos.has(pic.url) && (await d.messenger.sendPhoto(d.chatRef, pic.url, pic.label)) !== null) d.sentPhotos.add(pic.url);
         }
         const messageRef = await d.messenger.sendProposal(d.chatRef, proposalText(k.mine(p), k.lang, null, s.venue.tz), cs.id, k.lang);
         if (messageRef !== null) await d.store.updateChangeSet(cs.id, { message_ref: messageRef });

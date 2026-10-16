@@ -41,7 +41,7 @@ export interface AgentDeps {
   wordpress?: WordPressClient | null;
   /** Networks connected for posting (registers social_post when either is true). */
   social?: { facebook: boolean; instagram: boolean } | null;
-  /** Outbound HTTP for reading the owner's photo (social_post checks its shape for Instagram); default the global fetch. */
+  /** Outbound HTTP for reading the owner's photo (social_post reads it for Instagram's 4:5..1.91:1 check and to make the 9:16 story picture); default the global fetch. */
   fetch?: typeof fetch;
   /** The picture service (photo → Instagram picture); registers make_visual when present. */
   visual?: VisualClient | null;

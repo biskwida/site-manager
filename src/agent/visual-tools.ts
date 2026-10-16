@@ -5,9 +5,12 @@
 import { betaZodTool } from "@anthropic-ai/sdk/helpers/beta/zod";
 import { z } from "zod";
 import { BACKDROPS } from "../visual/palette";
+import type { Format } from "../visual/template";
 import type { AgentDeps, ToolKit } from "./tools";
 
 const NAME_MAX = 40;
+/** The caption of each picture in the chat: its format, in the owner's language. */
+const FORMAT_LABEL: Record<Format, { bg: string; en: string }> = { post: { bg: "Пост", en: "Post" }, story: { bg: "История", en: "Story" } };
 
 export const MakeVisualSchema = z.object({
   media_id: z.string().describe("The media_id of the owner's photo (not of an earlier picture: always start from the photo)."),
@@ -34,8 +37,11 @@ export function visualTools(d: AgentDeps, k: ToolKit) {
         if (line && Array.from(line).length > NAME_MAX) throw new Error(`The extra line must be at most ${NAME_MAX} characters; shorten it.`);
         const formats = input.formats.length ? [...new Set(input.formats)] : (["post"] as const);
         const r = await visual({ venueId: d.venueId, mediaId: input.media_id, dish, price: input.price?.trim() || null, line, colour: input.colour?.trim() || null, formats: [...formats] });
-        // Each picture that reaches the chat is recorded, so the social_post that follows in this turn does not send it again.
-        for (const p of r.pictures) if ((await d.messenger.sendPhoto(d.chatRef, p.url)) !== null) d.sentPhotos?.add(p.url);
+        // Each picture carries its format as its label, and each one that reaches the chat is recorded, so the social_post that
+        // follows in this turn does not send it again.
+        for (const p of r.pictures) {
+          if ((await d.messenger.sendPhoto(d.chatRef, p.url, FORMAT_LABEL[p.format][k.lang])) !== null) (d.sentPhotos ??= new Set<string>()).add(p.url);
+        }
         d.notes?.push(`visual from photo ${input.media_id}: ${r.pictures.map((p) => `${p.format} ${p.media_id}`).join(", ")} (backdrop ${r.backdrop}${r.kind === "photo" ? ", photo in a card: no clean cut-out" : ""})`);
         const social = d.social;
         const next = social && (social.instagram || social.facebook)

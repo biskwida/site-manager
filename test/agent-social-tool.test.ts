@@ -297,8 +297,8 @@ describe("the exact pictures before the buttons", () => {
     const post = await call(tools, "social_post", input(pictures[0].media_id, { targets: ["instagram_post", "facebook_post"] }));
     const story = await call(tools, "social_post", input(pictures[1].media_id, { caption: "", targets: ["instagram_story", "facebook_story"] }));
     expect([post.status, story.status]).toEqual(["proposed", "proposed"]);
-    // Both pictures publish as they are (4:5 and 9:16), so the chat shows each once: make_visual's, without a label.
-    expect(messenger.photos.map((p) => [p.url, p.caption])).toEqual(pictures.map((p) => [p.url, undefined]));
+    // Both pictures publish as they are (4:5 and 9:16), so the chat shows each once: make_visual's, labelled with its format.
+    expect(messenger.photos.map((p) => [p.url, p.caption])).toEqual([[pictures[0].url, "Пост"], [pictures[1].url, "История"]]);
     expect(messenger.sent.filter((s) => s.setId)).toHaveLength(2);
   });
 
