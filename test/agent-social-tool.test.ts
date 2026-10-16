@@ -186,7 +186,7 @@ describe("Instagram feed aspect ratio", () => {
     const m = await sharp(bytes).metadata();
     return [m.width, m.height];
   };
-  it("pads a tall photo to 4:5 with an edge colour, stores it, and the Instagram feed post uses it (Facebook keeps the original)", async () => {
+  it("pads a tall photo to 4:5 with an edge colour, stores it, and the Instagram feed post uses it (Facebook keeps the original, the story its 9:16 copy)", async () => {
     const { tools, store, venue, files, meta } = await setup();
     const tall = await store.saveMedia(venue.id, await jpeg(600, 1200, { r: 20, g: 120, b: 200 }), "image/jpeg");
     const r = await call(tools, "social_post", input(tall.id, { targets: ["facebook_post", "instagram_post", "instagram_story"] }));
@@ -204,7 +204,10 @@ describe("Instagram feed aspect ratio", () => {
     expect(r.preview).toContain("за Instagram снимката е допълнена до формат 4:5");
     await handleDecision({ store, messenger: new FakeMessenger(), now: () => T0 }, "tg:1001", "apply", cs.id);
     const containers = [...meta.containers.values()];
-    expect(containers.map((c) => [c.media_type, c.image_url])).toEqual([["IMAGE", row.ig_feed_image_url], ["STORIES", tall.public_url]]);
+    // The story is not the 4:5 feed copy and not the original: it publishes the 9:16 copy the owner saw.
+    expect(row.story_image_url).toMatch(/^https:\/\/media\.example\/storage\/.+\.jpg$/);
+    expect([tall.public_url, row.ig_feed_image_url]).not.toContain(row.story_image_url);
+    expect(containers.map((c) => [c.media_type, c.image_url])).toEqual([["IMAGE", row.ig_feed_image_url], ["STORIES", row.story_image_url]]);
     expect([...meta.posts.values()][0].url).toBe(tall.public_url);
   });
   it("pads a wide photo to 1.91:1", async () => {

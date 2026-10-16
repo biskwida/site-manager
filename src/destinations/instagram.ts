@@ -5,6 +5,7 @@
 // status first (PUBLISHED: done, FINISHED: publish the same creation_id, EXPIRED/gone: a new container). Instagram media cannot be
 // deleted through the API: an undo publishes nothing and returns the links so the owner deletes them by hand. Tokens older than
 // 30 days are refreshed (here before publishing, and by the tick); a refresh failure never stops a publish.
+import { publishedUrl } from "../domain/social-preview";
 import type { SocialPostRow } from "../domain/types";
 import { pushCommentChanges } from "./comment-push";
 import { socialFailure } from "./facebook";
@@ -140,8 +141,8 @@ export const instagramAdapter: DestinationAdapter = {
             if (!s || s.code === "EXPIRED") container = undefined; // never published: a new container is safe
           }
           if (!container) {
-            // The feed post uses the padded copy when the proposal made one (aspect ratio); the story keeps the original.
-            const imageUrl = target === "instagram_post" ? (row.ig_feed_image_url ?? row.image_url) : row.image_url;
+            // The file the owner saw in the proposal (publishedUrl, shared with the preview): the feed post its padded copy, the story Claudia's 9:16 copy.
+            const imageUrl = publishedUrl(row, target);
             const body = target === "instagram_post" ? { image_url: imageUrl, ...(row.caption ? { caption: row.caption } : {}) } : { image_url: imageUrl, media_type: "STORIES" };
             container = String((await ig.post<{ id: string }>(`/${igId}/media`, body)).id);
             entries.set(key, { target, media_id: c.entity_id, state: "attempted", id: null, permalink: null, container, attempted_at: ctx.now.toISOString() });

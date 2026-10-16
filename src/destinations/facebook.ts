@@ -4,6 +4,7 @@
 // that finds an attempted target first looks for it among the Page's recent posts/stories and only posts again when it is not
 // there (when the Page cannot be checked, it fails without retry and asks the owner to look). Undo deletes the feed post; a story
 // cannot be deleted through the API and disappears on its own within 24 hours, so undo only says so.
+import { publishedUrl } from "../domain/social-preview";
 import type { SocialPostRow, SocialTarget } from "../domain/types";
 import { pushCommentChanges } from "./comment-push";
 import { FB_GRAPH, GraphClient, MetaApiError, metaTime } from "./meta-graph";
@@ -127,15 +128,17 @@ async function publish(
   mark: (e: SocialPublished) => Promise<void>,
 ): Promise<string> {
   const attempted = (extra: Partial<SocialPublished> = {}): SocialPublished => ({ target, media_id: mediaId, state: "attempted", id: null, permalink: null, attempted_at: now.toISOString(), ...extra });
+  // The file the owner saw in the proposal (publishedUrl, shared with the preview): the post the original, the story Claudia's 9:16 copy.
+  const url = publishedUrl(row, target);
   if (target === "facebook_post") {
     await mark(attempted());
-    const r = await fb.post<{ id?: string; post_id?: string }>(`/${pageId}/photos`, { url: row.image_url, ...(row.caption ? { caption: row.caption } : {}), published: true });
+    const r = await fb.post<{ id?: string; post_id?: string }>(`/${pageId}/photos`, { url, ...(row.caption ? { caption: row.caption } : {}), published: true });
     const id = r.post_id ?? r.id;
     if (!id) throw new MetaApiError(0, "sm_fb_unknown", "Facebook did not say whether the post went out.", { retry: true });
     return String(id);
   }
   // A story: the unpublished photo from an earlier attempt is reused; uploading it twice would be harmless but wasteful.
-  const photoId = prev?.photo_id ?? (await fb.post<{ id: string }>(`/${pageId}/photos`, { url: row.image_url, published: false })).id;
+  const photoId = prev?.photo_id ?? (await fb.post<{ id: string }>(`/${pageId}/photos`, { url, published: false })).id;
   await mark(attempted({ photo_id: String(photoId) }));
   const r = await fb.post<{ post_id?: string }>(`/${pageId}/photo_stories`, { photo_id: photoId });
   if (!r.post_id) throw new MetaApiError(0, "sm_fb_unknown", "Facebook did not say whether the story went out.", { retry: true });
