@@ -2,11 +2,12 @@
 import { describe, expect, it } from "vitest";
 import { appendMemory } from "@/src/agent/memory";
 import { PHOTO_NO_CAPTION } from "@/src/agent/prompt";
-import type { BotDeps, RunRequest } from "@/src/bot/bot";
+import { createBot, telegramLang, type BotDeps, type RunRequest } from "@/src/bot/bot";
 import { followLanguage, handleInbound, normalizeCommand } from "@/src/bot/inbound";
 import { planChanges } from "@/src/domain/changes";
 import type { InMemoryStore } from "@/src/store/memory";
 import { FakeMessenger, makeDemo } from "./helpers";
+import { BOT_INFO, textUpdate } from "./tg";
 
 const T0 = new Date("2026-10-09T09:00:00.000Z");
 async function setup(over: Partial<BotDeps> = {}) {
@@ -364,19 +365,20 @@ describe("handleInbound: /members and removed members", () => {
   });
 });
 
+/** Records every setMemberLang call ("chat=lang") and still saves. */
+function langSaves(store: InMemoryStore) {
+  const saves: string[] = [];
+  const save = store.setMemberLang.bind(store);
+  store.setMemberLang = async (venueId, chatRef, lang) => {
+    saves.push(`${chatRef}=${lang}`);
+    return save(venueId, chatRef, lang);
+  };
+  return saves;
+}
+const langOf = async (store: InMemoryStore, chatRef: string) => (await store.findMember(chatRef))?.lang;
+
 describe("handleInbound: the owner's last language is remembered", () => {
   const photo = { download: async () => ({ bytes: new Uint8Array([9, 9]), contentType: "image/jpeg", name: "a.jpg" }) };
-  /** Records every setMemberLang call ("chat=lang") and still saves. */
-  function langSaves(store: InMemoryStore) {
-    const saves: string[] = [];
-    const save = store.setMemberLang.bind(store);
-    store.setMemberLang = async (venueId, chatRef, lang) => {
-      saves.push(`${chatRef}=${lang}`);
-      return save(venueId, chatRef, lang);
-    };
-    return saves;
-  }
-  const langOf = async (store: InMemoryStore, chatRef: string) => (await store.findMember(chatRef))?.lang;
 
   it("a Bulgarian message saves bg for a member stored as en, and the run already has it", async () => {
     const { d, runs, store, venue } = await setup();
@@ -567,5 +569,181 @@ describe("followLanguage", () => {
     } finally { console.error = orig; }
     expect(next).toEqual({ ...member, lang: "en" });
     expect(errs.some((e) => e.includes("db down") && e.includes("tg:"))).toBe(true);
+  });
+});
+
+describe("handleInbound: any conversation language", () => {
+  const photo = { download: async () => ({ bytes: new Uint8Array([9, 9]), contentType: "image/jpeg", name: "a.jpg" }) };
+  const voice = { download: async () => ({ bytes: new Uint8Array([1]), contentType: "audio/ogg" }) };
+  /** A language classifier that answers `answer` (or throws it) and records what it was asked. */
+  function classifier(answer: string | null | Error) {
+    const asked: string[] = [];
+    const classifyLang = async (text: string) => {
+      asked.push(text);
+      if (answer instanceof Error) throw answer;
+      return answer;
+    };
+    return { asked, classifyLang };
+  }
+
+  it("member bg; Ich möchte den Preis ändern with a classifier returning de → saved de, and the run has it", async () => {
+    const { asked, classifyLang } = classifier("de");
+    const { d, runs, store } = await setup({ classifyLang });
+    await handleInbound(d, { chatRef: "tg:1001", kind: "text", text: "Ich möchte den Preis ändern" });
+    expect(asked).toEqual(["Ich möchte den Preis ändern"]);
+    expect(await langOf(store, "tg:1001")).toBe("de");
+    expect(runs[0].member.lang).toBe("de");
+  });
+
+  it("Flat white 4.30 → classifier not called; nor for a price, two Latin words, a bare link, or what the script or the English words place", async () => {
+    const { asked, classifyLang } = classifier("de");
+    const { d, runs, store } = await setup({ classifyLang });
+    for (const text of ["Flat white 4.30", "4.20", "kafeto e 4.20", "https://my-open-cafe.bg/menu/today/specials"]) await handleInbound(d, { chatRef: "tg:1001", kind: "text", text });
+    expect(await langOf(store, "tg:1001")).toBe("bg");
+    for (const [text, lang] of [["change the price to 4.20", "en"], ["Это кофе", "ru"], ["Ο καφές είναι 4,20", "el"], ["Капучиното е 4,20", "bg"]]) {
+      await handleInbound(d, { chatRef: "tg:1001", kind: "text", text });
+      expect(await langOf(store, "tg:1001")).toBe(lang);
+    }
+    expect(asked).toEqual([]);
+    expect(runs.map((r) => r.member.lang)).toEqual(["bg", "bg", "bg", "bg", "en", "ru", "el", "bg"]);
+  });
+
+  it("asks the classifier about the words around a link, never the link", async () => {
+    const { asked, classifyLang } = classifier("de");
+    const { d, store } = await setup({ classifyLang });
+    await handleInbound(d, { chatRef: "tg:1001", kind: "text", text: "Neue Preise auf https://my-open-cafe.bg/menu ab heute" });
+    expect(asked).toHaveLength(1);
+    expect(asked[0]).not.toContain("my-open-cafe");
+    expect(asked[0]).toMatch(/Neue Preise auf\s+ab heute/);
+    expect(await langOf(store, "tg:1001")).toBe("de");
+  });
+
+  it("Bulgarian typed in Latin letters stays Bulgarian when the classifier says bg", async () => {
+    const { asked, classifyLang } = classifier("bg");
+    const { d, runs, store } = await setup({ classifyLang });
+    const saves = langSaves(store);
+    await handleInbound(d, { chatRef: "tg:1001", kind: "text", text: "kafeto e gotovo i banicata svarshi" });
+    expect(asked).toHaveLength(1);
+    expect(saves).toEqual([]);
+    expect(runs[0].member.lang).toBe("bg");
+  });
+
+  it("a classifier that knows nothing or fails keeps the stored language and never loses the message", async () => {
+    const errs: string[] = [];
+    const orig = console.error;
+    console.error = (...a: unknown[]) => { errs.push(a.join(" ")); };
+    try {
+      for (const answer of [null, new Error("Ich möchte den Preis ändern: model down")]) {
+        const { classifyLang } = classifier(answer);
+        const { d, runs, store } = await setup({ classifyLang });
+        const saves = langSaves(store);
+        await handleInbound(d, { chatRef: "tg:1002", kind: "text", text: "Ich möchte den Preis ändern" }); // stored en
+        expect(saves).toEqual([]);
+        expect(runs).toHaveLength(1);
+        expect(runs[0].member.lang).toBe("en");
+      }
+    } finally { console.error = orig; }
+    expect(errs.join("\n")).not.toContain("möchte"); // a failure is logged without the owner's words
+  });
+
+  it("a photo caption goes to the classifier like a message", async () => {
+    const { asked, classifyLang } = classifier("de");
+    const { d, runs, store } = await setup({ classifyLang });
+    await handleInbound(d, { chatRef: "tg:1001", kind: "photo", text: "Das ist das neue Titelbild", media: photo });
+    expect(asked).toEqual(["Das ist das neue Titelbild"]);
+    expect(await langOf(store, "tg:1001")).toBe("de");
+    expect(runs[0]).toMatchObject({ source: "photo", text: "Das ist das neue Titelbild" });
+    expect(runs[0].member.lang).toBe("de");
+  });
+
+  it("a voice transcript, a stranger's message and /connect never go to the classifier", async () => {
+    const { asked, classifyLang } = classifier("de");
+    const { d, messenger, store } = await setup({ classifyLang, transcribe: async () => "Ich möchte den Preis ändern" });
+    await handleInbound(d, { chatRef: "tg:1001", kind: "voice", media: voice });
+    await handleInbound(d, { chatRef: "fb:7770", kind: "text", text: "Ich möchte den Preis ändern" });
+    await handleInbound(d, { chatRef: "tg:1001", kind: "text", text: "/connect https://mein-cafe.example Ich bin der Besitzer" });
+    expect(asked).toEqual([]);
+    expect(await langOf(store, "tg:1001")).toBe("bg");
+    expect(texts(messenger)).toContain("This bot manages one venue's website. Send the code you received from us.");
+  });
+
+  it("a member stored in a language without hand-written texts gets them in English for now", async () => {
+    const { d, messenger, store, venue } = await setup();
+    await store.upsertMember({ venue_id: venue.id, chat_ref: "wa:491511", role: "owner", lang: "de" });
+    await handleInbound(d, { chatRef: "wa:491511", kind: "photo", media: photo });
+    expect(texts(messenger).at(-1)).toBe("📷 Got the photo. What should I do with it? Type it or send a voice note.");
+    await handleInbound(d, { chatRef: "wa:491511", kind: "text", text: "help" });
+    expect(texts(messenger).at(-1)).toMatch(/^Tell me what to change/);
+    expect(await langOf(store, "wa:491511")).toBe("de"); // "help" is one word: it shows no language
+  });
+
+  it("a member stored en sends помощ on WhatsApp → saved bg and the help reply is Bulgarian", async () => {
+    const { asked, classifyLang } = classifier("de");
+    const { d, messenger, runs, store, venue } = await setup({ classifyLang });
+    await store.upsertMember({ venue_id: venue.id, chat_ref: "wa:359222", role: "owner", lang: "en" });
+    await handleInbound(d, { chatRef: "wa:359222", kind: "text", text: "помощ" });
+    expect(await langOf(store, "wa:359222")).toBe("bg");
+    expect(texts(messenger).at(-1)).toMatch(/^Пишете какво искате да промените/);
+    expect(texts(messenger).at(-1)).toContain("Думи-команди");
+    // "help" and "menu" are one word each: no language shown, nothing asked of the classifier.
+    await handleInbound(d, { chatRef: "wa:359222", kind: "text", text: "help" });
+    await handleInbound(d, { chatRef: "wa:359222", kind: "text", text: "Menu" });
+    expect(await langOf(store, "wa:359222")).toBe("bg");
+    expect(texts(messenger).at(-2)).toMatch(/^Пишете какво искате да промените/);
+    expect(texts(messenger).at(-1)).toMatch(/^Сайтът: https:\/\/site\.example\/agala\nМеню: /);
+    expect(asked).toEqual([]);
+    expect(runs).toHaveLength(0);
+  });
+
+  it("a language command word sets the language it names, and only that one", async () => {
+    const { d, messenger, store, venue } = await setup();
+    await store.upsertMember({ venue_id: venue.id, chat_ref: "wa:359223", role: "owner", lang: "en" });
+    const saves = langSaves(store);
+    await handleInbound(d, { chatRef: "wa:359223", kind: "text", text: "език en" }); // a Bulgarian word, but it names English
+    expect(saves).toEqual(["wa:359223=en"]);
+    expect(texts(messenger).at(-1)).toBe("Language set to English.");
+  });
+
+  it("a Meta stranger is answered by the letters they write, never the classifier, and links in that language", async () => {
+    const { asked, classifyLang } = classifier("de");
+    const { d, messenger, store, venue } = await setup({ classifyLang });
+    await handleInbound(d, { chatRef: "fb:8800", kind: "text", text: "Это наше кафе?" });
+    expect(texts(messenger).at(-1)).toBe("This bot manages one venue's website. Send the code you received from us."); // Russian has no hand-written texts
+    await handleInbound(d, { chatRef: "fb:8800", kind: "text", text: "Здравейте" });
+    expect(texts(messenger).at(-1)).toBe("Този бот управлява сайта на конкретно заведение. Изпратете кода, който получихте от нас.");
+    const code = await store.createInvite(venue.id, "owner", "2026-10-10T00:00:00.000Z");
+    await handleInbound(d, { chatRef: "fb:8800", kind: "text", text: "Это наше кафе", referralCode: code });
+    expect(await store.findMember("fb:8800")).toMatchObject({ role: "owner", lang: "ru" });
+    expect(texts(messenger).at(-1)).toMatch(/^You are linked as the owner/);
+    expect(asked).toEqual([]);
+  });
+
+  it("followLanguage saves any language code", async () => {
+    const { d, store } = await setup();
+    const member = (await store.findMember("tg:1001"))!;
+    expect(await followLanguage(d, member, "de")).toEqual({ ...member, lang: "de" });
+    expect(await langOf(store, "tg:1001")).toBe("de");
+  });
+});
+
+describe("Telegram's language_code", () => {
+  it("telegramLang keeps the code's two-letter language, lower case; English when it has none", () => {
+    expect(telegramLang("pt-BR")).toBe("pt");
+    expect(telegramLang("pt-br")).toBe("pt");
+    expect(telegramLang("zh-hans")).toBe("zh");
+    expect(telegramLang("EN")).toBe("en");
+    expect(telegramLang("bg")).toBe("bg");
+    for (const none of [undefined, "", "  ", "x", "fil"]) expect(telegramLang(none)).toBe("en"); // "fil" (Filipino) has no two-letter code: not "fi"
+  });
+
+  it("linking with Telegram language_code pt-BR → member lang pt, welcomed in English for now", async () => {
+    const { d, messenger, store, venue } = await setup({ botInfo: BOT_INFO });
+    const bot = createBot(d);
+    const code = await store.createInvite(venue.id, "owner", "2026-10-10T00:00:00.000Z");
+    await bot.handleUpdate(textUpdate(4000, `/start ${code}`, "pt-BR"));
+    expect(await store.findMember("tg:4000")).toMatchObject({ role: "owner", lang: "pt" });
+    expect(texts(messenger)[0]).toMatch(/^You are linked as the owner/);
+    await bot.handleUpdate(textUpdate(4001, "/start", "ru"));
+    expect(texts(messenger)[1]).toBe("This bot manages one venue's website. Send /start <code> with the code you received from us.");
   });
 });

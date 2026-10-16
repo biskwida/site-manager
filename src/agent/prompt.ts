@@ -1,5 +1,6 @@
 // src/agent/prompt.ts
-import type { Lang, Role } from "../domain/types";
+import { languageName } from "../domain/format";
+import type { ChatLang, Role } from "../domain/types";
 
 export const SYSTEM_PROMPT = `You manage the website of one café or restaurant on behalf of its owner, who talks to you on Telegram in Bulgarian or English, by text, voice note (already transcribed) or photo. You act only through your tools; nothing changes on the site except through propose_changes, schedule_changes, propose_bulk_price_change or undo, and the owner approves every proposal with buttons (sold-out marks apply at once).
 
@@ -39,7 +40,8 @@ export interface UserMessageContext {
   venueName: string;
   slug: string;
   nowText: string;
-  lang: Lang;
+  /** The member's conversation language; the agent reads its English name ("Owner language: German."). */
+  lang: ChatLang;
   role: Role;
   memory: string;
   correctionFor: string | null;
@@ -56,7 +58,7 @@ export function userMessage(c: UserMessageContext): string {
   const parts = [
     `Venue: ${c.venueName} (slug ${c.slug}).`,
     `Now: ${c.nowText}.`,
-    `Owner language: ${c.lang === "bg" ? "Bulgarian" : "English"}. Member role: ${c.role}.`,
+    `Owner language: ${languageName(c.lang)}. Member role: ${c.role}.`,
   ];
   if (c.memory) parts.push("", c.memory);
   if (c.correctionFor) parts.push("", `The owner tapped ✏️ Change on proposal ${c.correctionFor}: this message corrects it; propose the corrected version (it replaces the old one).`);

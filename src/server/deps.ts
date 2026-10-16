@@ -10,6 +10,7 @@ import { makeRef, type Channel } from "../channels/ref";
 import { ChannelRouter } from "../channels/router";
 import { WhatsAppMessenger } from "../channels/whatsapp/send";
 import { createBot, type BotDeps, type RunRequest } from "../bot/bot";
+import { makeLangClassifier } from "../bot/lang-classify";
 import { downloadTelegramFile } from "../bot/media";
 import { TelegramMessenger, type Messenger } from "../bot/messenger";
 import { makeTranscriber, type Transcriber } from "../bot/voice";
@@ -141,6 +142,8 @@ export async function makeServerDeps(o: DepsOptions): Promise<ServerDeps> {
     now: () => new Date(),
     startRun: (r) => o.defer(() => handleRun(r)),
     transcribe,
+    // Without an API key the owner's Latin-script words go by the English word list only.
+    classifyLang: anthropic ? makeLangClassifier(anthropic, config.langClassifyModel) : null,
     download: (filePath) => downloadTelegramFile(config.telegramToken, filePath),
     connect: sync ? (venueId, siteUrl, code) => connectWordPress({ store: s, secretKey: destinationSecretKey, allowLocal: isMemory }, venueId, siteUrl, code) : undefined,
     // Without a deployer the hosted /<slug> is the site: nothing to publish, so no hook (and no "publishing" line).

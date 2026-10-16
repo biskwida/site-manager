@@ -3,11 +3,12 @@ import { Bot, type Context } from "grammy";
 import type { UserFromGetMe } from "grammy/types";
 import type { ImageInput } from "../agent/run";
 import { makeRef } from "../channels/ref";
-import type { Member } from "../domain/types";
+import { isChatLang, type ChatLang, type Member } from "../domain/types";
 import type { ConnectResult } from "../destinations/connect";
 import type { Store } from "../store/types";
 import { copy, langFromCode } from "./copy";
 import { handleInbound, type InboundMedia } from "./inbound";
+import type { LangClassifier } from "./lang-classify";
 import type { Messenger } from "./messenger";
 import type { Transcriber } from "./voice";
 
@@ -33,6 +34,8 @@ export interface BotDeps {
   startRun: (r: RunRequest) => void;
   /** null when STT is not configured. */
   transcribe: Transcriber | null;
+  /** Names the language of the owner's Latin-script words when their letters cannot (src/bot/lang-classify.ts); absent or null = never asked. */
+  classifyLang?: LangClassifier | null;
   /** Downloads a Telegram file by file_path; the URL (with the bot token) stays inside. */
   download: (filePath: string) => Promise<{ bytes: Uint8Array; contentType: string }>;
   /** Tests pass this to skip getMe. */
@@ -45,11 +48,17 @@ export interface BotDeps {
 
 export { adminUrl, INVITE_TTL_MS, publicUrl } from "./links";
 
+/** Telegram's language_code ("pt-BR", "zh-hans", "en") as a conversation language: its two-letter language, lower case ("pt"); English when it has none ("fil" has no two-letter code). */
+export function telegramLang(code?: string): ChatLang {
+  const lang = (code ?? "").trim().toLowerCase().split(/[-_]/)[0];
+  return isChatLang(lang) ? lang : "en";
+}
+
 export function createBot(d: BotDeps): Bot {
   const bot = new Bot(d.token, d.botInfo ? { botInfo: d.botInfo } : undefined);
   // Translates Bot API updates into InboundMessage; every behaviour lives in handleInbound.
   const ref = (ctx: Context) => makeRef("tg", ctx.chat!.id);
-  const hint = (ctx: Context) => langFromCode(ctx.from?.language_code);
+  const hint = (ctx: Context) => telegramLang(ctx.from?.language_code);
   const tgMedia = (ctx: Context, fileId: string): InboundMedia => ({
     download: async () => {
       const file = await ctx.api.getFile(fileId);

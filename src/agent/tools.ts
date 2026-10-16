@@ -6,7 +6,7 @@ import type { WordPressClient } from "../destinations/wordpress-client";
 import { allergenName, allergenWarnings, suggestAllergens } from "../domain/allergens";
 import { invertChanges, isIso, planChanges, type PlanContext } from "../domain/changes";
 import { isSoldOut, visibleItems } from "../domain/effective";
-import { categoryName, tr } from "../domain/format";
+import { baseLang, categoryName, tr } from "../domain/format";
 import { closingToday, nextOpening, todayStatus } from "../domain/hours";
 import { renderPreview } from "../domain/preview";
 import { bulkPrices } from "../domain/pricing";
@@ -143,7 +143,8 @@ export function makeTools(deps: AgentDeps) {
     return run;
   };
 
-  const lang = d.member.lang;
+  // Previews, buttons and fixed texts come in Bulgarian or English; another conversation language starts from English.
+  const lang = baseLang(d.member.lang);
   const site = () => d.store.getSite(d.venueId);
   const ctx = (): PlanContext => ({ newId: () => crypto.randomUUID(), now: d.now().toISOString() });
   const previews = (s: SiteState, changes: ReturnType<typeof planChanges>) => ({

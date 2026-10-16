@@ -36,4 +36,10 @@ describe("supabase row mappers", () => {
     expect(legacyColumns(null, null)).toEqual({ chat_id: null, tg_message_id: null });
     expect(toMember({ venue_id: "v", chat_ref: "fb:9", tg_chat_id: null, role: "owner", lang: "en", last_seen_at: "2026-10-09T09:00:00Z", created_at: "2026-10-09T09:00:00Z" })).toMatchObject({ chat_ref: "fb:9", last_seen_at: "2026-10-09T09:00:00.000Z" });
   });
+  it("reads a member's conversation language as stored, and Bulgarian for anything that is not a language code", () => {
+    const row = (lang: unknown) => ({ venue_id: "v", chat_ref: "fb:9", role: "owner", lang, last_seen_at: null, created_at: "2026-10-09T09:00:00Z" });
+    expect(toMember(row("de")).lang).toBe("de");
+    expect(toMember(row("en")).lang).toBe("en");
+    for (const bad of [null, undefined, "", "DE", "pt-br"]) expect(toMember(row(bad)).lang).toBe("bg");
+  });
 });

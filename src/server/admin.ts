@@ -3,6 +3,7 @@ import { limitReachedLine, usageLine } from "../bot/limit";
 import type { Messenger } from "../bot/messenger";
 import { invertChanges } from "../domain/changes";
 import { isSoldOut } from "../domain/effective";
+import { baseLang } from "../domain/format";
 import { renderPreview } from "../domain/preview";
 import { TEMPLATE_IDS, type ChangeSet, type DeployInfo, type TemplateId, type Venue, type VenueStatus } from "../domain/types";
 import type { Deployer, DeployInput, DomainInstructions } from "../deploy/types";
@@ -105,7 +106,7 @@ export interface AdminDeps {
 async function concludeOnChannel(d: AdminDeps, cs: ChangeSet, mark: { bg: string; en: string }) {
   if (cs.chat_ref === null) return;
   const member = await d.store.findMember(cs.chat_ref);
-  const lang = member?.lang ?? "bg";
+  const lang = baseLang(member?.lang ?? "bg");
   const preview = lang === "bg" ? cs.preview_bg : cs.preview_en;
   const line = lang === "bg" ? mark.bg : mark.en;
   await d.messenger.conclude(cs.chat_ref, cs.message_ref, `${preview}\n\n${line}`, line, { proactive: true });
@@ -135,7 +136,10 @@ export async function adminAction(d: AdminDeps, venue: Venue, action: AdminActio
       source: "undo", status: "proposed", undoes_id: cs.id, changes,
     });
     await d.store.applyChangeSet(undo.id, nowIso);
-    if (cs.chat_ref !== null) await d.messenger.send(cs.chat_ref, (await d.store.findMember(cs.chat_ref))?.lang === "en" ? `↩️ Reverted from the dashboard: ${cs.summary_en}` : `↩️ Отменено от таблото: ${cs.summary_bg}`, { proactive: true });
+    if (cs.chat_ref !== null) {
+      const lang = baseLang((await d.store.findMember(cs.chat_ref))?.lang ?? "bg");
+      await d.messenger.send(cs.chat_ref, lang === "en" ? `↩️ Reverted from the dashboard: ${cs.summary_en}` : `↩️ Отменено от таблото: ${cs.summary_bg}`, { proactive: true });
+    }
     return { ok: true, status: "applied", change_set_id: undo.id };
   }
   if (action === "cancel") {

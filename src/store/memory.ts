@@ -1,8 +1,8 @@
 // src/store/memory.ts
 import { applyChanges } from "../domain/changes";
 import { COMMENT_LIMIT_DEFAULT, countsTowardLimit } from "../domain/limits";
-import type { Category, ChangeSet, Conversation, DeployInfo, DeployStatus, Item, Lang, Media, Member, Role, SiteState, SiteTextKey, Venue, VenueStatus } from "../domain/types";
-import { DEFAULT_HOURS, extensionFor, newInviteCode, newToken, PUBLISH_CLAIM_TTL_MS, type ChangeSetPatch, type ExpiredTimer, type NewCategory, type NewChangeSet, type NewItem, type NewVenue, type Store, type VenuePatch, type Destination, type DestinationKind, type DestinationPatch, type DestinationSync, type DestinationWithSecrets, type NewDestination, type NewSync, type SyncPatch, type ListSyncsOpts, type ApplyResult, checkLimitValue, CONFIG_KEY_RE, newConfirmationCode, type DataDeletionRequest, type DeletionProvider, type ListCommentsOpts, type NewSocialComment, type SocialComment, type SocialCommentPatch, COMMENT_REDACTED, redactCommentRow } from "./types";
+import type { Category, ChangeSet, ChatLang, Conversation, DeployInfo, DeployStatus, Item, Media, Member, Role, SiteState, SiteTextKey, Venue, VenueStatus } from "../domain/types";
+import { DEFAULT_HOURS, extensionFor, newInviteCode, newToken, PUBLISH_CLAIM_TTL_MS, type ChangeSetPatch, type ExpiredTimer, type NewCategory, type NewChangeSet, type NewItem, type NewVenue, type Store, type VenuePatch, type Destination, type DestinationKind, type DestinationPatch, type DestinationSync, type DestinationWithSecrets, type NewDestination, type NewSync, type SyncPatch, type ListSyncsOpts, type ApplyResult, checkLimitValue, checkMemberLang, CONFIG_KEY_RE, newConfirmationCode, type DataDeletionRequest, type DeletionProvider, type ListCommentsOpts, type NewSocialComment, type SocialComment, type SocialCommentPatch, COMMENT_REDACTED, redactCommentRow } from "./types";
 import { limitBlocks } from "./usage";
 
 const clone = <T>(v: T): T => structuredClone(v);
@@ -216,12 +216,14 @@ export class InMemoryStore implements Store {
     return [...this.members.values()].filter((m) => m.venue_id === venueId).sort((a, b) => a.created_at.localeCompare(b.created_at)).map(clone);
   }
   async upsertMember(m: Omit<Member, "created_at" | "last_seen_at"> & { last_seen_at?: string | null }) {
+    checkMemberLang(m.lang);
     const prev = this.members.get(m.chat_ref);
     const row: Member = { ...m, last_seen_at: m.last_seen_at ?? prev?.last_seen_at ?? null, created_at: prev?.created_at ?? this.clock() };
     this.members.set(m.chat_ref, row);
     return clone(row);
   }
-  async setMemberLang(venueId: string, chatRef: string, lang: Lang) {
+  async setMemberLang(venueId: string, chatRef: string, lang: ChatLang) {
+    checkMemberLang(lang);
     const m = this.members.get(chatRef);
     if (!m || m.venue_id !== venueId) throw new Error(`member ${chatRef} not found`);
     m.lang = lang;
@@ -241,7 +243,8 @@ export class InMemoryStore implements Store {
     open.sort((a, b) => b.expires_at.localeCompare(a.expires_at));
     return open[0]?.code ?? null;
   }
-  async redeemInvite(code: string, chatRef: string, lang: Lang, now: string) {
+  async redeemInvite(code: string, chatRef: string, lang: ChatLang, now: string) {
+    checkMemberLang(lang); // before the code is used up
     const inv = this.invites.get(code);
     if (!inv || inv.used_at !== null || Date.parse(inv.expires_at) <= Date.parse(now)) return null;
     inv.used_at = now;

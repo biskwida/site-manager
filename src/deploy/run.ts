@@ -3,6 +3,7 @@
 import { copy } from "../bot/copy";
 import type { Messenger } from "../bot/messenger";
 import { maskRef } from "../channels/ref";
+import { baseLang } from "../domain/format";
 import type { DeployInfo, Lang, Venue } from "../domain/types";
 import type { Store } from "../store/types";
 import type { Deployer, DeployInput, DeployStatusResult } from "./types";
@@ -165,7 +166,7 @@ async function notify(d: PollDeps, venue: Venue, text: (lang: Lang) => string): 
   for (const m of await d.store.listMembers(venue.id)) {
     if (m.role !== "owner") continue;
     try {
-      await d.messenger.send(m.chat_ref, text(m.lang), { proactive: true });
+      await d.messenger.send(m.chat_ref, text(baseLang(m.lang)), { proactive: true });
     } catch (e) {
       console.error(`[deploy] notify ${venue.slug} chat ${maskRef(m.chat_ref)} failed:`, short(e));
     }

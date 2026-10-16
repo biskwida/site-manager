@@ -8,6 +8,13 @@ export interface Config {
   agentEffort: Effort;
   /** Small model for comment reply drafts (COMMENT_DRAFT_MODEL); one short call per comment. */
   commentDraftModel: string;
+  /**
+   * Small model that names the language of an owner's Latin-script message the English word list cannot place
+   * (LANG_CLASSIFY_MODEL, src/bot/lang-classify.ts): one five-token call with thinking off, which claude-haiku-5-5 accepts.
+   */
+  langClassifyModel: string;
+  /** Small model that translates Claudia's fixed texts into a conversation language other than Bulgarian or English (TRANSLATE_MODEL), cached per text in the translations table. */
+  translateModel: string;
   telegramToken: string;
   telegramWebhookSecret: string;
   /** Any OpenAI-compatible transcription endpoint; Groq free tier by default. */
@@ -115,6 +122,8 @@ export function loadConfig(env: Env = process.env, opts: { lenient?: boolean } =
     agentModel: optional("AGENT_MODEL") ?? "claude-opus-5-5",
     agentEffort: effort,
     commentDraftModel: optional("COMMENT_DRAFT_MODEL") ?? "claude-haiku-5-5",
+    langClassifyModel: optional("LANG_CLASSIFY_MODEL") ?? "claude-haiku-5-5",
+    translateModel: optional("TRANSLATE_MODEL") ?? "claude-haiku-5-5",
     telegramToken: need("TELEGRAM_BOT_TOKEN"),
     telegramWebhookSecret: need("TELEGRAM_WEBHOOK_SECRET"),
     sttApiKey: optional("STT_API_KEY"),

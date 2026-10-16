@@ -39,6 +39,18 @@ describe("admin", () => {
     expect(after.log.map((x) => x.status)).toEqual(["applied", "cancelled", "rejected", "reverted"]);
     expect(after.log[0]).toMatchObject({ source: "undo", undoes_id: p1.id });
   });
+  it("tells a member who chats in a language without hand-written texts about dashboard decisions in English, not Bulgarian", async () => {
+    const { store, venue, items } = await makeDemo();
+    await store.setMemberLang(venue.id, "tg:1001", "de");
+    const messenger = new FakeMessenger();
+    const d = { store, messenger, now: () => T0, baseUrl: "https://site.example" };
+    const site = await store.getSite(venue.id);
+    const cs = await store.createChangeSet({ venue_id: venue.id, chat_ref: "tg:1001", summary_bg: "Капучино 3,20", summary_en: "Cappuccino 3.20", preview_bg: "Преглед", preview_en: "Preview", source: "text", status: "proposed", message_ref: "42", changes: planChanges(site, [{ op: "set_price", item_id: items.Cappuccino.id, price_eur: 3.2 }], { newId: () => "n", now: T0.toISOString() }) });
+    expect((await adminAction(d, venue, "apply", cs.id)).ok).toBe(true);
+    expect(messenger.concluded[0].full).toMatch(/^Preview\n\n✅ Applied from the dashboard\./);
+    expect((await adminAction(d, venue, "undo", cs.id)).ok).toBe(true);
+    expect(messenger.sent.at(-1)?.text).toBe("↩️ Reverted from the dashboard: Cappuccino 3.20");
+  });
   it("lists sold-out items with return times", async () => {
     const { store, venue, items } = await makeDemo();
     const site = await store.getSite(venue.id);

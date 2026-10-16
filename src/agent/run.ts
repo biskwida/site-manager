@@ -1,7 +1,7 @@
 // src/agent/run.ts
 import Anthropic from "@anthropic-ai/sdk";
 import type { Effort } from "../config";
-import { tr } from "../domain/format";
+import { baseLang, tr } from "../domain/format";
 import type { ChangeSource } from "../domain/types";
 import { copy } from "../bot/copy";
 import { startProgress } from "../bot/progress";
@@ -43,11 +43,12 @@ export async function runTurn(deps: AgentDeps, input: TurnInput, cfg: AgentConfi
   const now = deps.now();
   const venue = await deps.store.getVenue(deps.venueId);
   const memory = await loadMemory(deps.store, deps.venueId, deps.chatRef, now, input.mediaId);
-  const lang = deps.member.lang;
+  // The agent is told the owner's own language; the fixed texts below start from Bulgarian or English (baseLang).
+  const lang = baseLang(deps.member.lang);
   const held = memory.waiting;
   const correctionComments = memory.correctionFor ? await correctionCommentsOf(deps, memory.correctionFor) : undefined;
   const text = userMessage({
-    venueName: venue.name, slug: venue.slug, nowText: nowText(now, venue.tz), lang, role: deps.member.role,
+    venueName: venue.name, slug: venue.slug, nowText: nowText(now, venue.tz), lang: deps.member.lang, role: deps.member.role,
     memory: memory.text, correctionFor: memory.correctionFor, correctionComments, mediaId: input.mediaId, heldMediaIds: held, text: input.text, source: input.source,
   });
   const content = [

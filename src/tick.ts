@@ -5,7 +5,7 @@ import { refreshInstagramTokens } from "./destinations/instagram";
 import { pollDeployments } from "./deploy/run";
 import type { Deployer } from "./deploy/types";
 import { planChange } from "./domain/changes";
-import { itemName, tr } from "./domain/format";
+import { baseLang, itemName, tr } from "./domain/format";
 import type { Lang, Venue } from "./domain/types";
 import type { ApplyResult, ExpiredTimer, Store } from "./store/types";
 import { limitReachedLine, usageLine } from "./bot/limit";
@@ -60,7 +60,7 @@ export const DRAFT_TTL_MS = 48 * HOUR;
 async function langFor(store: Store, venueId: string, chatRef: string | null): Promise<{ lang: Lang; tz: string }> {
   const venue = await store.getVenue(venueId);
   const member = chatRef === null ? null : await store.findMember(chatRef);
-  return { lang: member?.lang ?? venue.default_lang, tz: venue.tz };
+  return { lang: member ? baseLang(member.lang) : venue.default_lang, tz: venue.tz };
 }
 
 /** Applies due scheduled sets, writes auto sets for elapsed timers, reminds about upcoming sets, expires stale proposals. */

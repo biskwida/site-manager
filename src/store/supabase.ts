@@ -1,11 +1,11 @@
 // src/store/supabase.ts
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import { COMMENT_LIMIT_DEFAULT, countsTowardLimit } from "../domain/limits";
-import { isExternalEntity, type CommentMode, type SocialEntity, type WpEntity } from "../domain/types";
-import type { Announcement, BusinessType, Category, Change, ChangeSet, Conversation, DeployInfo, DeployStatus, Holiday, InstagramImport, Item, Lang, Media, Member, Role, SiteState, SiteText, SiteTextKey, TemplateId, Venue, VenueStatus } from "../domain/types";
+import { isChatLang, isExternalEntity, type CommentMode, type SocialEntity, type WpEntity } from "../domain/types";
+import type { Announcement, BusinessType, Category, Change, ChangeSet, ChatLang, Conversation, DeployInfo, DeployStatus, Holiday, InstagramImport, Item, Lang, Media, Member, Role, SiteState, SiteText, SiteTextKey, TemplateId, Venue, VenueStatus } from "../domain/types";
 import type { WizardDraft } from "../wizard/schema";
 import { legacyTelegramId } from "../channels/ref";
-import { DEFAULT_HOURS, extensionFor, newInviteCode, newToken, PUBLISH_CLAIM_TTL_MS, type ChangeSetPatch, type ExpiredTimer, type NewCategory, type NewChangeSet, type NewItem, type NewVenue, type Store, type VenuePatch, type Destination, type DestinationKind, type DestinationPatch, type DestinationSync, type DestinationWithSecrets, type NewDestination, type NewSync, type SyncPatch, type SyncStatus, type ListSyncsOpts, type ApplyResult, checkLimitValue, CONFIG_KEY_RE, newConfirmationCode, type DataDeletionRequest, type DeletionProvider, type DeletionStatus, type CommentStatus, type ListCommentsOpts, type NewSocialComment, type SocialComment, type SocialCommentPatch, COMMENT_REDACTED, redactCommentRow } from "./types";
+import { DEFAULT_HOURS, extensionFor, newInviteCode, newToken, PUBLISH_CLAIM_TTL_MS, type ChangeSetPatch, type ExpiredTimer, type NewCategory, type NewChangeSet, type NewItem, type NewVenue, type Store, type VenuePatch, type Destination, type DestinationKind, type DestinationPatch, type DestinationSync, type DestinationWithSecrets, type NewDestination, type NewSync, type SyncPatch, type SyncStatus, type ListSyncsOpts, type ApplyResult, checkLimitValue, checkMemberLang, CONFIG_KEY_RE, newConfirmationCode, type DataDeletionRequest, type DeletionProvider, type DeletionStatus, type CommentStatus, type ListCommentsOpts, type NewSocialComment, type SocialComment, type SocialCommentPatch, COMMENT_REDACTED, redactCommentRow } from "./types";
 import { limitBlocks } from "./usage";
 
 type Row = Record<string, unknown>;
@@ -92,7 +92,7 @@ export function toSiteText(r: Row): SiteText {
   return { venue_id: r.venue_id as string, key: r.key as SiteTextKey, text_bg: str(r.text_bg), text_en: str(r.text_en) };
 }
 export function toMember(r: Row): Member {
-  return { venue_id: r.venue_id as string, chat_ref: str(r.chat_ref), role: r.role as Role, lang: (r.lang as Lang) ?? "bg", last_seen_at: isoOrNull(r.last_seen_at), created_at: iso(r.created_at) };
+  return { venue_id: r.venue_id as string, chat_ref: str(r.chat_ref), role: r.role as Role, lang: isChatLang(r.lang) ? r.lang : "bg", last_seen_at: isoOrNull(r.last_seen_at), created_at: iso(r.created_at) };
 }
 export function toChange(r: Row): Change {
   return { position: num(r.position), op: r.op as Change["op"], entity: r.entity as Change["entity"], entity_id: str(r.entity_id), before: (r.before as Row | null) ?? null, after: (r.after as Row | null) ?? null };
@@ -304,13 +304,15 @@ export class SupabaseStore implements Store {
     return (await must(this.db.from("venue_members").select("*").eq("venue_id", venueId).order("created_at"), "listMembers")).map(toMember);
   }
   async upsertMember(m: Omit<Member, "created_at" | "last_seen_at"> & { last_seen_at?: string | null }) {
+    checkMemberLang(m.lang);
     // One venue per chat: drop any previous link first (the unique index on chat_ref would reject it).
     const { error } = await this.db.from("venue_members").delete().eq("chat_ref", m.chat_ref).neq("venue_id", m.venue_id);
     if (error) throw new Error(`upsertMember unlink: ${error.message}`);
     const row = { venue_id: m.venue_id, chat_ref: m.chat_ref, role: m.role, lang: m.lang, ...(m.last_seen_at !== undefined ? { last_seen_at: m.last_seen_at } : {}), tg_chat_id: legacyTelegramId(m.chat_ref) }; // legacy: remove in phase 2
     return toMember(await must(this.db.from("venue_members").upsert(row, { onConflict: "venue_id,chat_ref" }).select("*").single(), "upsertMember"));
   }
-  async setMemberLang(venueId: string, chatRef: string, lang: Lang) {
+  async setMemberLang(venueId: string, chatRef: string, lang: ChatLang) {
+    checkMemberLang(lang);
     await mustRows(this.db.from("venue_members").update({ lang }).eq("venue_id", venueId).eq("chat_ref", chatRef).select("chat_ref"), "setMemberLang");
   }
   async touchMember(chatRef: string, nowIso: string) {
@@ -328,7 +330,8 @@ export class SupabaseStore implements Store {
     if (error) throw new Error(`findOpenInvite: ${error.message}`);
     return data ? (data.code as string) : null;
   }
-  async redeemInvite(code: string, chatRef: string, lang: Lang, now: string) {
+  async redeemInvite(code: string, chatRef: string, lang: ChatLang, now: string) {
+    checkMemberLang(lang); // before the code is used up
     const rows = await must(
       this.db.from("venue_invites").update({ used_at: now }).eq("code", code).is("used_at", null).gt("expires_at", now).select("*"),
       "redeemInvite",

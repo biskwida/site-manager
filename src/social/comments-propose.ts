@@ -13,7 +13,7 @@ import type { Messenger } from "../bot/messenger";
 import { channelOf, isMetaChannel, maskRef } from "../channels/ref";
 import { PROACTIVE_WINDOW_MS } from "../channels/router";
 import { excerpt } from "../domain/comment-preview";
-import { quote, tr } from "../domain/format";
+import { baseLang, quote, tr } from "../domain/format";
 import { renderPreview } from "../domain/preview";
 import { NETWORK_NAMES, type Change, type ChangeSet, type ChangeSource, type Lang, type Member, type ModerateAction, type SocialModerateRow, type SocialReplyRow, type Venue } from "../domain/types";
 import type { CommentStatus, SocialComment, Store } from "../store/types";
@@ -206,7 +206,7 @@ export async function concludeCommentOwners(d: Pick<CommentSetDeps, "store" | "m
   for (const [chatRef, messageRef] of proposalTargets(cs)) {
     if (chatRef === o.except) continue;
     try {
-      const lang = (await d.store.findMember(chatRef))?.lang ?? "bg";
+      const lang = baseLang((await d.store.findMember(chatRef))?.lang ?? "bg");
       const l = line(lang);
       await d.messenger.conclude(chatRef, messageRef, `${lang === "bg" ? cs.preview_bg : cs.preview_en}\n\n${l}`, l, { proactive: true });
     } catch (e) {
@@ -251,7 +251,8 @@ export async function createCommentSet(d: CommentSetDeps, venue: Venue, items: C
   });
   const refs: Record<string, string> = {};
   for (const m of ordered) {
-    const ref = await d.messenger.sendProposal(m.chat_ref, commentProposalText(items, m.lang, { batch: o.batch }), cs.id, m.lang);
+    const lang = baseLang(m.lang);
+    const ref = await d.messenger.sendProposal(m.chat_ref, commentProposalText(items, lang, { batch: o.batch }), cs.id, lang);
     if (ref !== null) refs[m.chat_ref] = ref;
   }
   if (!o.silent && Object.keys(refs).length === 0) {
@@ -294,7 +295,7 @@ export async function proposeForComments(d: ProposeDeps, venue: Venue, comments:
   if (limit.reached) {
     if (o.mode === "batch") {
       const { reachable } = await reachableOwners(d.store, venue.id, now);
-      for (const m of reachable) await d.messenger.send(m.chat_ref, copy(m.lang).commentLimitReached(limit.limit ?? limit.used, limit.used, limit.resets_on), { proactive: true });
+      for (const m of reachable) await d.messenger.send(m.chat_ref, copy(baseLang(m.lang)).commentLimitReached(limit.limit ?? limit.used, limit.used, limit.resets_on), { proactive: true });
     }
     log(d, `[comments] venue ${venue.id}: comment limit reached (${limit.used}/${limit.limit}), ${fresh.length} comment(s) not proposed`);
     return { sets: [], deferred: 0, limited: true };

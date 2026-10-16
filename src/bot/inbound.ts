@@ -4,8 +4,8 @@ import { followsAgentReply, holdPhoto } from "../agent/memory";
 import { PHOTO_NO_CAPTION } from "../agent/prompt";
 import type { ImageInput } from "../agent/run";
 import { channelOf, isMetaChannel, maskRef, type Channel } from "../channels/ref";
-import { detectLang } from "../domain/format";
-import type { Lang, Member } from "../domain/types";
+import { baseLang, countLatinWords, detectScriptLang } from "../domain/format";
+import type { ChatLang, Member } from "../domain/types";
 import { handleDecision, parseCallback } from "./approvals";
 import type { BotDeps } from "./bot";
 import { copy } from "./copy";
@@ -22,8 +22,8 @@ export interface InboundMessage {
   kind: "text" | "voice" | "photo" | "button";
   /** Body, caption, or button data ("cs:apply:<id>"). */
   text?: string;
-  /** Telegram language_code; absent on Meta. */
-  langHint?: Lang;
+  /** Telegram's language_code as a conversation language ("pt-BR" → "pt", bot.ts); absent on Meta. */
+  langHint?: ChatLang;
   media?: InboundMedia;
   /** The message a button belongs to / the inbound id (WhatsApp typing). */
   messageRef?: string;
@@ -37,8 +37,25 @@ const CODE = /^[A-Z0-9-]{8,}$/;
 /** Addresses a message carries. They are not the owner's language: "https://my-open-cafe.bg" would count "my" and "open" as English. */
 const LINKS = /https?:\/\/\S+|www\.\S+/gi;
 const withoutLinks = (text: string) => text.replace(LINKS, " ");
-/** The language a message shows (detectLang), not counting its links; null when it shows none. */
-const languageOf = (text: string): Lang | null => detectLang(withoutLinks(text));
+/** The language a text shows by its letters (detectScriptLang), not counting its links; null when it shows none. */
+const scriptLangOf = (text: string): ChatLang | null => detectScriptLang(withoutLinks(text));
+
+/**
+ * The language of the owner's own words (a message, a photo caption, a command word), not counting links: by its letters, else,
+ * for Latin text of three words or more, the classifier's answer (one small-model call, src/bot/lang-classify.ts). null when
+ * neither tells, and the stored language stays. A failing classifier costs the switch, never the message.
+ */
+async function languageOf(d: BotDeps, text: string): Promise<ChatLang | null> {
+  const prose = withoutLinks(text).trim();
+  const lang = detectScriptLang(prose);
+  if (lang !== null || !d.classifyLang || countLatinWords(prose) < 3) return lang;
+  try {
+    return await d.classifyLang(prose);
+  } catch (e) {
+    console.error(`[bot] language classifier failed: ${e instanceof Error ? e.name : "error"}`); // never the owner's words
+    return null;
+  }
+}
 const COMMANDS = new Set(["lang", "help", "menu", "undo", "connect", "members"]);
 /** Command words for Meta channels, where there is no command menu. No word for undo: a plain "отмени" may be meant for a proposal, not the last applied change; "/undo" or asking the agent ("върни последната промяна") still works. */
 const WORDS: [RegExp, string][] = [
@@ -96,16 +113,17 @@ export async function handleInbound(d: BotDeps, m: InboundMessage): Promise<void
   // A linked member who reopens the deep link and writes something is talking to the agent; the stale referral is ignored.
   const referral = m.referralCode !== undefined && !(member && text) ? m.referralCode : undefined;
   const code = referral !== undefined ? referral.trim().toUpperCase() : m.kind === "text" ? startCode(text, member !== null) : null;
-  // Telegram tells us the language; on Meta, Cyrillic means Bulgarian and other prose English. A code, a link or nothing says nothing: Bulgarian.
+  // Telegram tells us the language (any: "pt"); on Meta the letters do (never the classifier: this may be a stranger) and other
+  // prose is English. A code, a link or nothing says nothing: Bulgarian.
   const prose = withoutLinks(text);
-  const uiLang: Lang = m.langHint ?? detectLang(prose) ?? (code === null && /\p{L}/u.test(prose) ? "en" : "bg");
+  const uiLang: ChatLang = m.langHint ?? detectScriptLang(prose) ?? (code === null && /\p{L}/u.test(prose) ? "en" : "bg");
   if (code !== null) {
     // A code is tried first, even from a linked chat: the owner may be setting up another venue (the demo phone, a second
     // café). redeemInvite moves the chat to the code's venue. Only without a usable code does a linked chat get welcome-back.
     const linked = code ? await d.store.redeemInvite(code, m.chatRef, uiLang, now.toISOString()) : null;
     if (!linked) {
       if (member) await welcomeBack(d, member);
-      else await say(code ? copy(uiLang).badCode : copy(uiLang).noAccess(channel));
+      else await say(code ? copy(baseLang(uiLang)).badCode : copy(baseLang(uiLang)).noAccess(channel));
       return;
     }
     // An owner tapping a staff code for their own venue must not demote themselves (the code is still used up).
@@ -120,7 +138,7 @@ export async function handleInbound(d: BotDeps, m: InboundMessage): Promise<void
   if (!member) {
     const cmd = m.kind === "text" ? normalizeCommand(text, channel) : null;
     if (cmd && !COMMANDS.has(splitCommand(cmd).name)) return; // unknown command: silent, as before
-    await say(copy(uiLang).noAccess(channel));
+    await say(copy(baseLang(uiLang)).noAccess(channel));
     return;
   }
 
@@ -131,11 +149,14 @@ export async function handleInbound(d: BotDeps, m: InboundMessage): Promise<void
     }
     const cmd = normalizeCommand(text, channel);
     if (cmd) {
-      await runCommand(d, member, channel, cmd);
+      // A command word ("помощ", "menu") is the owner's words and shows a language like any message. A slash command shows none
+      // (/connect's arguments are a link and a code), and a language word ("език en") sets the language it names.
+      const commandWord = !text.startsWith("/") && splitCommand(cmd).name !== "lang";
+      await runCommand(d, commandWord ? await followLanguage(d, member, await languageOf(d, text)) : member, channel, cmd);
       return;
     }
     // The owner's language, saved before the run so that what Claudia sends on its own later follows it.
-    const speaker = await followLanguage(d, member, languageOf(text));
+    const speaker = await followLanguage(d, member, await languageOf(d, text));
     // Start first: a failed acknowledgement must not lose the message.
     d.startRun({ venueId: member.venue_id, chatRef: member.chat_ref, member: speaker, text, source: "text", replyTo: m.messageRef });
     await d.messenger.typing(m.chatRef, m.messageRef);
@@ -164,7 +185,7 @@ async function touch(d: BotDeps, chatRef: string, now: Date) {
  * costs no store call. Best-effort like touch(): a failed save is logged and never loses the message, the turn still runs in the
  * language just written.
  */
-export async function followLanguage(d: BotDeps, member: Member, detected: Lang | null): Promise<Member> {
+export async function followLanguage(d: BotDeps, member: Member, detected: ChatLang | null): Promise<Member> {
   if (detected === null || detected === member.lang) return member;
   try {
     await d.store.setMemberLang(member.venue_id, member.chat_ref, detected);
@@ -177,7 +198,7 @@ export async function followLanguage(d: BotDeps, member: Member, detected: Lang 
 /** `previous` is the chat's membership before the redeem (null for a new chat). */
 async function welcome(d: BotDeps, member: Member, previous: Member | null) {
   const venue = await d.store.getVenue(member.venue_id);
-  const c = copy(member.lang);
+  const c = copy(baseLang(member.lang));
   if (previous && previous.venue_id !== member.venue_id) await d.messenger.send(member.chat_ref, c.switched(venue.name));
   // An own site (built and hosted elsewhere, reads our feed) is the site the owner and staff know.
   const site = venue.site_url || publicUrl(d.baseUrl, venue.slug);
@@ -199,14 +220,15 @@ async function welcome(d: BotDeps, member: Member, previous: Member | null) {
 
 async function welcomeBack(d: BotDeps, member: Member) {
   const venue = await d.store.getVenue(member.venue_id);
-  const c = copy(member.lang);
+  const c = copy(baseLang(member.lang));
   if (member.role === "owner") await d.messenger.send(member.chat_ref, c.welcomeBack(venue.name, adminUrl(d.baseUrl, venue.slug, await d.store.getAdminToken(venue.id))));
   else await d.messenger.send(member.chat_ref, c.welcomeStaff(venue.name, publicUrl(d.baseUrl, venue.slug)));
 }
 
 async function runCommand(d: BotDeps, member: Member, channel: Channel, cmd: string) {
   const { name, arg } = splitCommand(cmd);
-  const c = copy(member.lang);
+  const lang = baseLang(member.lang);
+  const c = copy(lang);
   switch (name) {
     case "lang": {
       const l = (arg.split(/\s+/)[0] ?? "").toLowerCase();
@@ -245,7 +267,7 @@ async function runCommand(d: BotDeps, member: Member, channel: Channel, cmd: str
         return;
       }
       const r = await d.connect(member.venue_id, siteUrl, code);
-      await d.messenger.send(member.chat_ref, r.ok ? c.connectOk(r.site.name, String(r.destination.config.site_url)) : c.connectFailed(member.lang === "bg" ? r.reason.bg : r.reason.en));
+      await d.messenger.send(member.chat_ref, r.ok ? c.connectOk(r.site.name, String(r.destination.config.site_url)) : c.connectFailed(lang === "bg" ? r.reason.bg : r.reason.en));
       return;
     }
     case "members": {
@@ -256,7 +278,7 @@ async function runCommand(d: BotDeps, member: Member, channel: Channel, cmd: str
       }
       const venue = await d.store.getVenue(member.venue_id);
       const [members, invites] = await Promise.all([d.store.listMembers(venue.id), d.store.listInvites(venue.id, d.now().toISOString())]);
-      await d.messenger.send(member.chat_ref, c.members(venue.name, memberViews(members, member.lang, venue.tz, member.chat_ref), openInviteViews(invites, member.lang, venue.tz)));
+      await d.messenger.send(member.chat_ref, c.members(venue.name, memberViews(members, lang, venue.tz, member.chat_ref), openInviteViews(invites, lang, venue.tz)));
       return;
     }
     case "undo":
@@ -271,8 +293,8 @@ async function runCommand(d: BotDeps, member: Member, channel: Channel, cmd: str
 async function handlePhoto(d: BotDeps, stored: Member, m: InboundMessage) {
   const caption = (m.text ?? "").trim();
   // The caption is the owner's words: its language is saved first, so even the download error below comes in it. No caption, no change.
-  const member = await followLanguage(d, stored, languageOf(caption));
-  const c = copy(member.lang);
+  const member = await followLanguage(d, stored, await languageOf(d, caption));
+  const c = copy(baseLang(member.lang));
   let bytes: Uint8Array;
   let media_type: ImageInput["media_type"] | null;
   try {
@@ -310,7 +332,7 @@ async function handlePhoto(d: BotDeps, stored: Member, m: InboundMessage) {
 }
 
 async function handleVoice(d: BotDeps, member: Member, m: InboundMessage) {
-  const c = copy(member.lang);
+  const c = copy(baseLang(member.lang));
   if (!d.transcribe) {
     await d.messenger.send(member.chat_ref, c.voiceUnavailable);
     return;
@@ -319,7 +341,7 @@ async function handleVoice(d: BotDeps, member: Member, m: InboundMessage) {
   try {
     if (!m.media) throw new Error("no media");
     const dl = await m.media.download();
-    text = (await d.transcribe(dl.bytes, member.lang, audioContentType(dl.contentType, dl.name))).trim();
+    text = (await d.transcribe(dl.bytes, baseLang(member.lang), audioContentType(dl.contentType, dl.name))).trim();
   } catch (e) {
     console.error(`[bot] voice failed: ${e instanceof Error ? e.message : String(e)}`);
     await d.messenger.send(member.chat_ref, c.voiceFailed);
@@ -329,7 +351,8 @@ async function handleVoice(d: BotDeps, member: Member, m: InboundMessage) {
     await d.messenger.send(member.chat_ref, c.voiceFailed);
     return;
   }
-  const speaker = await followLanguage(d, member, languageOf(text));
+  // A transcript is read by its letters only; it never goes to the classifier.
+  const speaker = await followLanguage(d, member, scriptLangOf(text));
   d.startRun({ venueId: member.venue_id, chatRef: member.chat_ref, member: speaker, text, source: "voice", replyTo: m.messageRef });
-  await d.messenger.send(member.chat_ref, copy(speaker.lang).heard(text));
+  await d.messenger.send(member.chat_ref, copy(baseLang(speaker.lang)).heard(text));
 }

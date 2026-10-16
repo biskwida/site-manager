@@ -27,6 +27,17 @@ describe("makeServerDeps (memory mode)", () => {
     expect(injected.anthropic).toBe(client);
   });
 
+  it("wires the language classifier to the shared Anthropic client and LANG_CLASSIFY_MODEL; no client, no classifier", async () => {
+    const calls: Record<string, unknown>[] = [];
+    const client = { beta: { messages: { create: async (p: Record<string, unknown>) => (calls.push(p), { stop_reason: "end_turn", content: [{ type: "text", text: "de" }] }) } } } as unknown as Anthropic;
+    const deps = await makeServerDeps({ defer: (fn) => void fn(), env: { SITE_MANAGER_STORE: "memory", LANG_CLASSIFY_MODEL: "claude-haiku-test" }, log: () => {}, client });
+    expect(await deps.botDeps.classifyLang?.("Ich möchte den Preis ändern")).toBe("de");
+    expect(calls).toHaveLength(1);
+    expect(calls[0]).toMatchObject({ model: "claude-haiku-test", max_tokens: 5 });
+    const offline = await makeServerDeps({ defer: (fn) => void fn(), env: { SITE_MANAGER_STORE: "memory" }, log: () => {} });
+    expect(offline.botDeps.classifyLang ?? null).toBeNull();
+  });
+
   it("uses the fake deployer in memory mode (even with a Vercel token) and deploys a live venue on demand", async () => {
     const jobs: Promise<void>[] = [];
     const logs: string[] = [];

@@ -1,5 +1,16 @@
+/** The site's two languages, and the two that have hand-written bot texts (src/bot/copy.ts). */
 export type Lang = "bg" | "en";
 export const LANGS: readonly Lang[] = ["bg", "en"];
+
+/**
+ * The language a member chats in: a lower-case ISO 639-1 code ("bg", "en", "de", "el", …), the language of their last message
+ * that showed one. Texts with a Bulgarian and an English version use baseLang(chat) (src/domain/format.ts).
+ */
+export type ChatLang = string;
+/** venue_members.lang has the same check (supabase/schema.sql). */
+export function isChatLang(s: unknown): s is ChatLang {
+  return typeof s === "string" && /^[a-z]{2}$/.test(s);
+}
 
 import type { WizardDraft } from "../wizard/schema";
 
@@ -299,7 +310,7 @@ export interface Member {
   /** "<channel>:<id>", see src/channels/ref.ts. */
   chat_ref: string;
   role: Role;
-  lang: Lang;
+  lang: ChatLang;
   /** Last inbound message from this member; Meta channels may only be messaged proactively within 24 h of it. */
   last_seen_at: string | null;
   created_at: string;
