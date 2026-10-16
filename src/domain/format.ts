@@ -1,10 +1,13 @@
 import type { Category, Item, Lang, Weekday } from "./types";
 
-/** Plain English words; two different ones in a text without Cyrillic show English. */
+/**
+ * Plain English words; two different ones in a text without Cyrillic show English. Not on the list on purpose: a, i, be, are, post
+ * and set, because Bulgarian typed in Latin letters uses them too (а, и, бе, аре, пост, сет: "pusni post i story v instagram").
+ */
 const ENGLISH_WORDS: ReadonlySet<string> = new Set([
-  "the", "a", "an", "is", "are", "was", "be", "to", "for", "of", "and", "or", "in", "on", "at", "with", "from", "it", "this", "that",
-  "my", "our", "we", "i", "you", "please", "can", "could", "would", "will",
-  "make", "add", "remove", "change", "set", "put", "show", "post", "price", "today", "tomorrow", "closed", "open", "sold", "out",
+  "the", "an", "is", "was", "to", "for", "of", "and", "or", "in", "on", "at", "with", "from", "it", "this", "that",
+  "my", "our", "we", "you", "please", "can", "could", "would", "will",
+  "make", "add", "remove", "change", "put", "show", "price", "today", "tomorrow", "closed", "open", "sold", "out",
   "what", "how", "when", "why",
 ]);
 

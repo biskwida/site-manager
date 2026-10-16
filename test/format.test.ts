@@ -24,7 +24,7 @@ describe("detectLang", () => {
   });
 
   it("needs two different listed words: one word, or the same word again, is not enough", () => {
-    expect(detectLang("post")).toBeNull();
+    expect(detectLang("open")).toBeNull();
     expect(detectLang("Please")).toBeNull();
     expect(detectLang("the the the")).toBeNull();
     expect(detectLang("the price")).toBe("en");
@@ -39,13 +39,33 @@ describe("detectLang", () => {
 
   it("counts every word of the list", () => {
     const listed = [
-      "the", "a", "an", "is", "are", "was", "be", "to", "for", "of", "and", "or", "in", "on", "at", "with", "from", "it", "this", "that",
-      "my", "our", "we", "i", "you", "please", "can", "could", "would", "will",
-      "make", "add", "remove", "change", "set", "put", "show", "post", "price", "today", "tomorrow", "closed", "open", "sold", "out",
+      "the", "an", "is", "was", "to", "for", "of", "and", "or", "in", "on", "at", "with", "from", "it", "this", "that",
+      "my", "our", "we", "you", "please", "can", "could", "would", "will",
+      "make", "add", "remove", "change", "put", "show", "price", "today", "tomorrow", "closed", "open", "sold", "out",
       "what", "how", "when", "why",
     ];
-    expect(listed).toHaveLength(49);
+    expect(listed).toHaveLength(43);
     const missed = listed.filter((word) => detectLang(`${word} ${word === "the" ? "please" : "the"}`) !== "en");
     expect(missed).toEqual([]);
+  });
+
+  // Bulgarian typed in Latin letters uses these six too (а, и, бе, аре, пост, сет), so they are not on the list.
+  it.each(["a", "i", "be", "are", "post", "set"])("the word %s does not count towards English", (word) => {
+    expect(detectLang(`the ${word}`)).toBeNull();
+  });
+
+  it.each([
+    "pusni post i story v instagram",
+    "napravi story, a ne post",
+    "promeni cenata na kafeto na 4.20 i pusni post",
+    "dobavi set za dvama i post",
+    "are be, ne e taka",
+  ])("Bulgarian typed in Latin letters stays null: %s", (text) => expect(detectLang(text)).toBeNull());
+
+  it("still finds English that does not lean on those words", () => {
+    expect(detectLang("are you open today")).toBe("en"); // you + open + today
+    expect(detectLang("post it on instagram")).toBe("en"); // it + on
+    expect(detectLang("make it a story")).toBe("en"); // make + it
+    expect(detectLang("make a story")).toBeNull(); // "a" is not a second word
   });
 });
