@@ -99,62 +99,126 @@ In `test/tick.test.ts`: `it("a reminder after the owner switched to English is i
 
 ---
 
-### Task 3: Voice notes are transcribed in the language spoken
+## Amendment (owner, 16 October 2026): every language, for chat and posts
+
+The owner asked "fix it for all languages" and chose **chat and posts** (the website stays Bulgarian + English). Tasks 1–2 stand. The old Tasks 3–4 are replaced by Tasks 3–6 below.
+
+**What changes:**
+- The owner's conversation language can be any language (ISO 639-1 code), not just bg/en: replies, proposals, buttons, statuses, reminders and digests come in it.
+- Bulgarian and English keep their hand-written texts. Every other language gets Claudia's fixed texts translated by a small model, once, then reused from a database cache.
+- Dish names, quoted text, captions, customer comments and drafts addressed to customers are never translated.
+- Captions default to the owner's language; picture text too, when the picture fonts cover its script (Latin and Cyrillic); otherwise the picture text is English and the caption is in the owner's language.
+- Replies to customer comments are drafted in the commenter's language, whatever it is.
+
+### Amended Global Constraints
+
+- `ChatLang` = a lower-case ISO 639-1 code (`/^[a-z]{2}$/`). `Member.lang` becomes `ChatLang`; `Lang` ("bg" | "en") stays for site content and the hand-written copy. `baseLang(chat: ChatLang): Lang` = "bg" for "bg", otherwise "en".
+- Database: `venue_members.lang` check widens from `in ('bg','en')` to `~ '^[a-z]{2}$'` (migration `supabase/migrations/2026-10-16-chat-lang.sql`, schema.sql updated); new table `translations (lang text, source_hash text, text text, created_at timestamptz, primary key (lang, source_hash))`, server-only (RLS on, no policies), in the same migration.
+- Detection order for text: (1) Cyrillic: letters ы э ё → "ru"; і ї є ґ → "uk"; ў → "be"; ѓ ќ ѕ → "mk"; ћ ђ → "sr"; ј љ њ џ without ѓ/ќ/ѕ → "sr"; otherwise "bg". (2) Other scripts: Greek → "el"; Arabic → "ar"; Hebrew → "he"; Hiragana or Katakana → "ja"; Hangul → "ko"; Han only → "zh"; Thai → "th"; Georgian → "ka"; Armenian → "hy"; Devanagari → "hi". (3) Latin: the Task 1 English rule. (4) Latin text with at least 3 words that the English rule left null: one call to the classifier model; its answer is used only when it is a valid code. Links are removed first (Task 2 ruling).
+- Telegram's `language_code` at linking may be any language: normalised to its first two letters, lower case ("pt-br" → "pt").
+- Models: `TRANSLATE_MODEL` and `LANG_CLASSIFY_MODEL` env, default `claude-haiku-5-5`.
+- Never translated: text inside keep markers `⟦…⟧` (the markers are removed before sending, for every language); agent free-text replies (sent with `verbatim: true`, already in the owner's language).
+- A failed translation or classification never blocks a message: send the base-language text; keep the current language.
+
+### Task 3: Any conversation language (type, database, detection)
 
 **Files:**
-- Modify: `src/bot/voice.ts`
-- Modify: `src/bot/inbound.ts` (the voice path uses the returned language)
-- Modify: the fake transcribers in `test/inbound.test.ts` (and any other test that builds one) to the new `{ text, lang }` result
-- Test: `test/voice.test.ts`, `test/inbound.test.ts`
+- Modify: `src/domain/types.ts` (`ChatLang`, `Member.lang`), `src/domain/format.ts` (`baseLang`, `languageName`, `detectScriptLang`), `src/bot/inbound.ts` (detection pipeline, linking hint), `src/bot/bot.ts` (hint normalisation), `src/agent/prompt.ts` ("Owner language" line), `src/server/deps.ts` (classifier wiring), `src/config.ts`
+- Create: `src/bot/lang-classify.ts`, `supabase/migrations/2026-10-16-chat-lang.sql`
+- Modify: `supabase/schema.sql`, both stores where `lang` is validated
+- Test: `test/format.test.ts`, `test/inbound.test.ts`, `test/lang-classify.test.ts`, `test/prompt.test.ts`
 
 **Interfaces:**
-- Produces: `type Transcriber = (bytes: Uint8Array, fallback: Lang, contentType?: string) => Promise<{ text: string; lang: Lang | null }>`.
-- Produces: `sttLang(language: string | undefined): Lang | "bg-family" | "other" | null` in `src/bot/voice.ts` ("bulgarian"/"bg" → bg; "english"/"en" → en; russian, macedonian, serbian, ukrainian, belarusian or their codes → "bg-family"; any other → "other"; missing → null).
+- Produces: `type ChatLang = string` (validated by `isChatLang(s): s is ChatLang`), `baseLang(chat: ChatLang): Lang`, `languageName(code: ChatLang): string` (English name via `Intl.DisplayNames(["en"], { type: "language" })`, the code itself when unknown), `detectScriptLang(text: string): ChatLang | null` (steps 1–3 of the detection order), `makeLangClassifier(client, model): (text: string) => Promise<ChatLang | null>`.
+- Changes: `followLanguage(d, member, detected: ChatLang | null)` (from Task 2).
 
-- [ ] **Step 1: Write the failing tests**
+- [ ] **Step 1: Failing tests**
 
 ```ts
-it("asks without a language and reads it back", async () => { /* fake client: first call has no language and response_format "verbose_json"; returns { text, language: "bulgarian" } → { text, lang: "bg" } */ });
-it("transcribes again in Bulgarian when Russian is detected", async () => { /* first { language: "russian" } → second call language "bg" → lang "bg" */ });
-it("uses the fallback for any other language", async () => { /* { language: "german" } → second call language = fallback */ });
-it("without a language field it detects from the text", async () => { /* { text: "make it a story please" } → lang "en" */ });
-it.each([["Bulgarian", "bg"], ["en", "en"], ["mk", "bg-family"], ["german", "other"], [undefined, null]])("sttLang(%s)", (s, r) => expect(sttLang(s)).toBe(r));
-// test/inbound.test.ts
-it("a voice note uses the language the transcriber heard", async () => { /* member "bg", transcriber { text: "make it a story please", lang: "en" } → member saved "en" */ });
+it.each([["Капучиното е 4,20", "bg"], ["Это кофе", "ru"], ["Ще піду", "uk"], ["Кафето е ѓубре", "mk"], ["Ђе је кафа", "sr"], ["Ο καφές", "el"], ["コーヒー", "ja"], ["커피", "ko"], ["咖啡", "zh"], ["change the price to 4.20", "en"], ["Flat white 4.30", null]])("detectScriptLang(%s)", (t, l) => expect(detectScriptLang(t)).toBe(l));
+it("baseLang", () => { expect(baseLang("bg")).toBe("bg"); expect(baseLang("de")).toBe("en"); });
+it("languageName", () => { expect(languageName("de")).toBe("German"); expect(languageName("el")).toBe("Greek"); });
+// lang-classify: fake client returns "de" → "de"; "unknown" or "xx1" → null; a thrown error → null
+// inbound: member "bg"; "Ich möchte den Preis ändern" with a classifier returning "de" → saved "de"; "Flat white 4.30" → classifier not called
+// inbound: linking with Telegram language_code "pt-BR" → member lang "pt"
+// prompt: Owner language line reads "Owner language: German." for "de"
 ```
 
-- [ ] **Step 2: Run** `npx vitest run test/voice.test.ts test/inbound.test.ts` — expected: FAIL.
-- [ ] **Step 3: Implement** in `makeTranscriber` (widen the `SttClient` type for `response_format` and the optional `language` field); the inbound voice path uses `detected = r.lang ?? detectLang(r.text)`.
-- [ ] **Step 4: Run** `npx vitest run` — expected: PASS.
-- [ ] **Step 5: Commit** `git commit -m "Voice: no forced language; Bulgarian or English read back from the transcriber"`
+- [ ] **Step 2: Run** `npx vitest run test/format.test.ts test/inbound.test.ts test/lang-classify.test.ts test/prompt.test.ts` — expected FAIL.
+- [ ] **Step 3: Implement.** Widen `Member.lang`; let `npx tsc --noEmit -p .` list every place a `ChatLang` reaches a `Lang` parameter and pass `baseLang(...)` there (copy tables, `tr`, previews, buttons). Migration: drop the old check, add the new one; create `translations` (used by Task 5). The classifier prompt: "Which language is this message written in? Reply with only its ISO 639-1 code, or unknown." with `max_tokens` 5.
+- [ ] **Step 4: Run** the full suite, tsc, lint — expected PASS.
+- [ ] **Step 5: Commit** `git commit -m "Language: any conversation language, detected by script, English words or a small classifier"`
 
----
+### Task 4: Voice notes in any language
 
-### Task 4: Previews, captions and pictures in one language
+**Files:** Modify `src/bot/voice.ts`, `src/bot/inbound.ts`; Test `test/voice.test.ts`, `test/inbound.test.ts` (fake transcribers move to the new result shape)
+
+**Interfaces:**
+- Produces: `type Transcriber = (bytes: Uint8Array, fallback: Lang, contentType?: string) => Promise<{ text: string; lang: ChatLang | null }>`; `whisperLang(name: string | undefined): ChatLang | null` (Whisper language names or codes → ISO 639-1; "bulgarian" → "bg", "german" → "de", "greek" → "el"; unknown → null).
+
+- [ ] **Step 1: Failing tests**
+
+```ts
+it("asks without a language and maps the language it heard", async () => { /* no `language` param, response_format "verbose_json"; { language: "german" } → { lang: "de" } and no second call */ });
+it("Russian-labelled speech with no Russian-only letters is transcribed again as Bulgarian", async () => { /* { language: "russian", text: "кафето е готово" } → second call language "bg" → lang "bg" */ });
+it("Russian speech with ы stays Russian", async () => { /* { language: "russian", text: "мы открыты" } → lang "ru", one call */ });
+it("no language field → detect from the text", async () => { /* { text: "make it a story please" } → "en" */ });
+// inbound: transcriber { text: "Ich möchte…", lang: "de" } → member saved "de"
+```
+
+- [ ] **Step 2–4:** run `npx vitest run test/voice.test.ts test/inbound.test.ts`, implement (the Cyrillic family check reuses `detectScriptLang` on the transcript), run the full suite.
+- [ ] **Step 5: Commit** `git commit -m "Voice: transcribed in the language spoken, any language"`
+
+### Task 5: Translation of Claudia's fixed texts
 
 **Files:**
-- Modify: `src/domain/preview.ts` (new item, holiday, announcement, texts)
-- Modify: `src/agent/social-tools.ts` (caption description), `src/agent/visual-tools.ts` (price and line descriptions), `src/agent/prompt.ts` (rule 4 and a new language rule)
-- Test: `test/preview.test.ts`, `test/prompt.test.ts` (or the file that checks rule numbering), `test/comments-draft.test.ts`
+- Create: `src/bot/translate.ts` (translator + `withTranslation` messenger wrapper)
+- Modify: `src/bot/messenger.ts` (`SendOpts.verbatim?: boolean`), `src/server/deps.ts` (wrap the `ChannelRouter`), `src/store/types.ts` + `memory.ts` + `supabase.ts` (`getTranslation(lang, hash)`, `putTranslation(lang, hash, text)`), `src/domain/format.ts` (`keep(text)`; `quote`, `itemName`, `categoryName` return kept text), `src/agent/run.ts` (the agent's final reply is sent with `verbatim: true`), `src/social/comment-preview.ts` or wherever the customer comment and the draft are quoted (wrap both in `keep`)
+- Test: `test/translate.test.ts`, `test/store-contract.ts`, `test/run.test.ts` (or the agent run test file)
 
 **Interfaces:**
-- Produces: preview lines without the other language; one note line per change set that writes both languages: bg "(английският вариант за сайта е написан автоматично)", en "(the Bulgarian version for the site was written automatically)".
+- Produces: `keep(text: string): string` (`⟦text⟧`), `unkeep(text: string): string` (removes the markers), `makeTranslator(client, model, store): (text: string, to: ChatLang) => Promise<string>` (hash = sha256 of the text; cache read before the model; cache write after; on any error returns the input), `withTranslation(inner: Messenger, d: { store: Store; translate: Translator }): Messenger`.
+- Behaviour: for a member whose `lang` is "bg" or "en", or `opts.verbatim`, the wrapper only removes keep markers; otherwise it translates the text (and photo captions, proposal text, button labels, `conclude` and `edit` texts) into the member's language, then removes the markers. Unknown chat ref → no translation.
 
-- [ ] **Step 1: Write the failing tests**
+- [ ] **Step 1: Failing tests**
 
 ```ts
-it("a new dish previews in Bulgarian only", () => {
-  const text = previewText(siteWith(...), [addItem({ name_bg: "Капучино", name_en: "Cappuccino", desc_bg: "Двойно еспресо", desc_en: "Double espresso" })], "bg");
-  expect(text).not.toMatch(/Cappuccino|Double espresso|EN:/);
-  expect(text).toContain("(английският вариант за сайта е написан автоматично)");
-});
-it("a holiday and an announcement preview in English only", () => { /* lang "en" → no Cyrillic in the text; the English note line once */ });
-it("the prompt tells the agent to write only in the owner language", () => { expect(SYSTEM_PROMPT).toMatch(/never mix in the other language/i); });
-it("the social_post caption defaults to the owner language", () => { expect(SocialPostSchema.shape.caption.description).toMatch(/owner'?s current language/i); });
-it("a customer comment in English: the proposal wrapper is Bulgarian, the draft English", async () => { /* owner lang bg, comment "Do you have oat milk?" → wrapper lines Cyrillic, draft Latin */ });
+it("a German member gets translated text with kept parts unchanged", async () => { /* translate fake maps "Price ⟦Cappuccino⟧ → €4.20" to "Preis ⟦Cappuccino⟧ → €4.20"; sent text "Preis Cappuccino → €4.20" */ });
+it("a Bulgarian member gets the text untouched, markers removed", async () => {});
+it("verbatim replies are not translated", async () => {});
+it("the cache answers the second time without the model", async () => { /* model called once for two identical sends */ });
+it("a failing model sends the English text", async () => {});
+it("proposal buttons are translated for a German member", async () => {});
 ```
 
-- [ ] **Step 2: Run** `npx vitest run test/preview.test.ts test/prompt.test.ts test/comments-draft.test.ts` — expected: FAIL.
-- [ ] **Step 3: Implement.** In `preview.ts`, drop the `/ ${other}` halves and the other-language description line; append the note line once when any change writes both languages. In the tool descriptions, caption and picture text "in the owner's current language (the Owner language line) unless the owner asks for another language or gives the text". In `prompt.ts`, add after the existing rules: "Language: write every reply, question and caption in the Owner language; never mix in the other language, except quoting the owner, quoting a customer, or a reply drafted for a customer in the customer's language." Keep rule numbers continuous.
-- [ ] **Step 4: Run** `npx vitest run && npx tsc --noEmit -p . && npm run -s lint` — expected: all pass.
-- [ ] **Step 5: Commit** `git commit -m "Previews, captions and pictures speak the owner's language only"`
+- [ ] **Step 2–4:** run `npx vitest run test/translate.test.ts`, implement, run the full suite (existing tests that compare exact sent text must still pass: markers are always removed).
+- [ ] **Step 5: Commit** `git commit -m "Translation: Claudia's fixed texts in any language, cached; names and quotes kept"`
+
+### Task 6: Previews, captions, pictures and comment replies
+
+(Old Task 4, extended.)
+
+**Files:** Modify `src/domain/preview.ts`, `src/agent/social-tools.ts` (caption description), `src/agent/visual-tools.ts` (dish/line/price descriptions), `src/agent/prompt.ts` (language rule), `src/social/comments-draft.ts` (`commentLang` returns `ChatLang` via `detectScriptLang` and the classifier for Latin text; drafts in that language); Test `test/preview.test.ts`, `test/prompt.test.ts`, `test/comments-draft.test.ts`
+
+- [ ] **Step 1: Failing tests**
+
+```ts
+it("a new dish previews in Bulgarian only", () => { /* no "Cappuccino", "Double espresso" or "EN:"; contains "(английският вариант за сайта е написан автоматично)" */ });
+it("a holiday and an announcement preview in English only", () => { /* no Cyrillic; the English note "(the Bulgarian version for the site was written automatically)" once */ });
+it("the prompt tells the agent to write only in the owner language", () => { expect(SYSTEM_PROMPT).toMatch(/never mix in another language/i); });
+it("captions default to the owner language", () => { expect(SocialPostSchema.shape.caption.description).toMatch(/owner'?s current language/i); });
+it("picture text falls back to English for scripts the picture fonts lack", () => { expect(MakeVisualSchema.shape.dish.description).toMatch(/Latin or Cyrillic/); });
+it("a German comment gets a German draft", async () => { /* commentLang("Habt ihr Hafermilch?") with a classifier returning "de" → "de" */ });
+it("an English comment while the owner speaks Bulgarian: wrapper Bulgarian, draft English", async () => {});
+```
+
+- [ ] **Step 2–4:** run `npx vitest run test/preview.test.ts test/prompt.test.ts test/comments-draft.test.ts`, implement (previews: drop the `/ ${other}` halves and the other-language description line; append the note once when a change writes both site languages; prompt rule: "Language: write every reply, question and caption in the Owner language; never mix in another language, except quoting the owner, quoting a customer, or a reply drafted for a customer in the customer's language. Picture text is in the Owner language when it uses Latin or Cyrillic letters, otherwise English."), run the full suite, tsc, lint.
+- [ ] **Step 5: Commit** `git commit -m "Previews, captions, pictures and comment replies in the right language"`
+
+### Amended Review Focus
+
+1. A Bulgarian owner whose Telegram is set to English writes Bulgarian: everything switches to Bulgarian, including the next reminder (Task 2 test).
+2. Bulgarian typed in Latin letters: no switch; the classifier may answer "bg" (fine) — test with a fake classifier answering "bg" (Task 3).
+3. A German owner: the proposal arrives in German with the dish name unchanged and the caption unchanged (Task 5 test).
+4. The translation model is down: the English text is sent (Task 5 test).
+5. A Russian-labelled Bulgarian voice note: transcribed as Bulgarian (Task 4 test).
