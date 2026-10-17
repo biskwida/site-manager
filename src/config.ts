@@ -125,6 +125,9 @@ export function loadConfig(env: Env = process.env, opts: { lenient?: boolean } =
   if ((metaPageToken || whatsappToken) && (!metaAppSecret || !metaVerifyToken)) throw new Error("META_APP_SECRET and META_VERIFY_TOKEN are required when META_PAGE_TOKEN or WHATSAPP_TOKEN is set");
   const whatsappPhoneNumberId = optional("WHATSAPP_PHONE_NUMBER_ID");
   if (whatsappToken && !whatsappPhoneNumberId) throw new Error("WHATSAPP_PHONE_NUMBER_ID is required with WHATSAPP_TOKEN");
+  // Without a scheme the admin link is a bare domain that the translation layer would not recognise as a link (src/bot/translate.ts).
+  const publicBaseUrl = need("PUBLIC_BASE_URL");
+  if (publicBaseUrl && !opts.lenient && !/^https?:\/\//i.test(publicBaseUrl)) throw new Error("PUBLIC_BASE_URL must start with http:// or https://");
   return {
     anthropicApiKey: need("ANTHROPIC_API_KEY"),
     agentModel: optional("AGENT_MODEL") ?? "claude-opus-5-5",
@@ -140,7 +143,7 @@ export function loadConfig(env: Env = process.env, opts: { lenient?: boolean } =
     supabaseUrl: need("NEXT_PUBLIC_SUPABASE_URL"),
     supabaseAnonKey: need("NEXT_PUBLIC_SUPABASE_ANON_KEY"),
     supabaseServiceKey: need("SUPABASE_SERVICE_ROLE_KEY"),
-    publicBaseUrl: (need("PUBLIC_BASE_URL") || "http://localhost:3000").replace(/\/+$/, ""),
+    publicBaseUrl: (publicBaseUrl || "http://localhost:3000").replace(/\/+$/, ""),
     tickSecret: need("TICK_SECRET"),
     demoVenueSlug: optional("DEMO_VENUE_SLUG") ?? "agala",
     vercelToken: optional("VERCEL_TOKEN"),

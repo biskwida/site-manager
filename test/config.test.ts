@@ -30,6 +30,11 @@ describe("loadConfig", () => {
   it("rejects a bad effort", () => {
     expect(() => loadConfig({ ...full, AGENT_EFFORT: "max" })).toThrow(/AGENT_EFFORT/);
   });
+  it("refuses a PUBLIC_BASE_URL without http:// or https://", () => {
+    for (const bad of ["site.example", "//site.example", "ftp://site.example", "localhost:3000"]) expect(() => loadConfig({ ...full, PUBLIC_BASE_URL: bad })).toThrow(/PUBLIC_BASE_URL must start with http:\/\/ or https:\/\//);
+    expect(loadConfig({ ...full, PUBLIC_BASE_URL: "http://localhost:3000/" }).publicBaseUrl).toBe("http://localhost:3000");
+    expect(loadConfig({}, { lenient: true }).publicBaseUrl).toBe("http://localhost:3000");
+  });
   it("fills missing keys with empty strings when lenient", () => {
     const c = loadConfig({}, { lenient: true });
     expect(c.telegramToken).toBe("");

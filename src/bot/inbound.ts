@@ -27,6 +27,8 @@ export interface InboundMessage {
   media?: InboundMedia;
   /** The message a button belongs to / the inbound id (WhatsApp typing). */
   messageRef?: string;
+  /** A Telegram message forwarded from elsewhere (`forward_origin`): not the owner's words, so it never switches the language. Meta and WhatsApp have no such flag in our adapters. */
+  forwarded?: boolean;
   /** m.me / ig.me ?ref=, wa.me ?text= */
   referralCode?: string;
   /** Platform message id, for dedupe. */
@@ -130,10 +132,11 @@ export async function handleInbound(d: BotDeps, m: InboundMessage): Promise<void
   // A linked member who reopens the deep link and writes something is talking to the agent; the stale referral is ignored.
   const referral = m.referralCode !== undefined && !(member && text) ? m.referralCode : undefined;
   const code = referral !== undefined ? referral.trim().toUpperCase() : m.kind === "text" ? startCode(text, member !== null) : null;
+  // A linked sender keeps the language they chat in (a second venue's code must not reset it to the Telegram UI language). Otherwise
   // Telegram tells us the language (any: "pt"); on Meta the letters do (never the classifier: this may be a stranger) and other
   // prose is English. A code, a link or nothing says nothing: Bulgarian.
   const prose = withoutLinks(text);
-  const uiLang: ChatLang = m.langHint ?? detectScriptLang(prose) ?? (code === null && /\p{L}/u.test(prose) ? "en" : "bg");
+  const uiLang: ChatLang = member?.lang ?? m.langHint ?? detectScriptLang(prose) ?? (code === null && /\p{L}/u.test(prose) ? "en" : "bg");
   if (code !== null) {
     // A code is tried first, even from a linked chat: the owner may be setting up another venue (the demo phone, a second
     // café). redeemInvite moves the chat to the code's venue. Only without a usable code does a linked chat get welcome-back.
@@ -169,11 +172,11 @@ export async function handleInbound(d: BotDeps, m: InboundMessage): Promise<void
       // A command word ("помощ", "menu") is the owner's words and shows a language like any message. A slash command shows none
       // (/connect's arguments are a link and a code), and a language word ("език en") sets the language it names.
       const commandWord = !text.startsWith("/") && splitCommand(cmd).name !== "lang";
-      await runCommand(d, commandWord ? await followLanguage(d, member, await languageOf(d, text, member.lang)) : member, channel, cmd);
+      await runCommand(d, commandWord ? await followWords(d, member, text, m) : member, channel, cmd);
       return;
     }
     // The owner's language, saved before the run so that what Claudia sends on its own later follows it.
-    const speaker = await followLanguage(d, member, await languageOf(d, text, member.lang));
+    const speaker = await followWords(d, member, text, m);
     // Start first: a failed acknowledgement must not lose the message.
     d.startRun({ venueId: member.venue_id, chatRef: member.chat_ref, member: speaker, text, source: "text", replyTo: m.messageRef });
     await d.messenger.typing(m.chatRef, m.messageRef);
@@ -210,6 +213,11 @@ export async function followLanguage(d: BotDeps, member: Member, detected: ChatL
     console.error(`[bot] setMemberLang failed for ${maskRef(member.chat_ref)}: ${e instanceof Error ? e.message : String(e)}`);
   }
   return { ...member, lang: detected };
+}
+
+/** followLanguage for the words of an inbound message, except a forwarded one: the owner did not write those, so it says nothing about their language (and the classifier is not asked). */
+async function followWords(d: BotDeps, member: Member, text: string, m: InboundMessage): Promise<Member> {
+  return m.forwarded ? member : followLanguage(d, member, await languageOf(d, text, member.lang));
 }
 
 /** `previous` is the chat's membership before the redeem (null for a new chat). The venue's name is kept: a translation leaves it as written. */
@@ -284,7 +292,7 @@ async function runCommand(d: BotDeps, member: Member, channel: Channel, cmd: str
         return;
       }
       const r = await d.connect(member.venue_id, siteUrl, code);
-      await d.messenger.send(member.chat_ref, r.ok ? c.connectOk(keep(r.site.name), String(r.destination.config.site_url)) : c.connectFailed(lang === "bg" ? r.reason.bg : r.reason.en));
+      await d.messenger.send(member.chat_ref, r.ok ? c.connectOk(keep(String(r.site.name ?? "")), String(r.destination.config.site_url)) : c.connectFailed(lang === "bg" ? r.reason.bg : r.reason.en));
       return;
     }
     case "members": {
@@ -310,7 +318,7 @@ async function runCommand(d: BotDeps, member: Member, channel: Channel, cmd: str
 async function handlePhoto(d: BotDeps, stored: Member, m: InboundMessage) {
   const caption = (m.text ?? "").trim();
   // The caption is the owner's words: its language is saved first, so even the download error below comes in it. No caption, no change.
-  const member = await followLanguage(d, stored, await languageOf(d, caption, stored.lang));
+  const member = await followWords(d, stored, caption, m);
   const c = copy(baseLang(member.lang));
   let bytes: Uint8Array;
   let media_type: ImageInput["media_type"] | null;
