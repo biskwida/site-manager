@@ -37,8 +37,6 @@ const CODE = /^[A-Z0-9-]{8,}$/;
 /** Addresses a message carries. They are not the owner's language: "https://my-open-cafe.bg" would count "my" and "open" as English. */
 const LINKS = /https?:\/\/\S+|www\.\S+/gi;
 const withoutLinks = (text: string) => text.replace(LINKS, " ");
-/** The language a member's text shows by its letters (detectScriptLang with their stored language), not counting its links. */
-const scriptLangOf = (text: string, current: ChatLang): ChatLang | null => detectScriptLang(withoutLinks(text), current);
 /** Words a text needs before the classifier is asked about it; shorter text (a dish name, "ok", "make it a story") goes by its letters. */
 const CLASSIFY_MIN_WORDS = 4;
 /** The classifier gets at most this many characters of a message: enough to name its language. */
@@ -357,10 +355,14 @@ async function handleVoice(d: BotDeps, member: Member, m: InboundMessage) {
     return;
   }
   let text: string;
+  let spoken: ChatLang | null;
   try {
     if (!m.media) throw new Error("no media");
     const dl = await m.media.download();
-    text = (await d.transcribe(dl.bytes, baseLang(member.lang), audioContentType(dl.contentType, dl.name))).trim();
+    // The stored language goes in as it is: the transcriber only uses it to place Cyrillic that has no letter of its own, and never forces it on the speech.
+    const said = await d.transcribe(dl.bytes, member.lang, audioContentType(dl.contentType, dl.name));
+    text = said.text.trim();
+    spoken = said.lang;
   } catch (e) {
     console.error(`[bot] voice failed: ${e instanceof Error ? e.message : String(e)}`);
     await d.messenger.send(member.chat_ref, c.voiceFailed);
@@ -370,8 +372,8 @@ async function handleVoice(d: BotDeps, member: Member, m: InboundMessage) {
     await d.messenger.send(member.chat_ref, c.voiceFailed);
     return;
   }
-  // A transcript is read by its letters only; it never goes to the classifier.
-  const speaker = await followLanguage(d, member, scriptLangOf(text, member.lang));
+  // The language is the transcriber's: Whisper's label checked against the transcript's letters. A transcript never goes to the classifier.
+  const speaker = await followLanguage(d, member, spoken);
   d.startRun({ venueId: member.venue_id, chatRef: member.chat_ref, member: speaker, text, source: "voice", replyTo: m.messageRef });
   await d.messenger.send(member.chat_ref, copy(baseLang(speaker.lang)).heard(text));
 }

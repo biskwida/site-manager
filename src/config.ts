@@ -22,6 +22,11 @@ export interface Config {
   /** Any OpenAI-compatible transcription endpoint; Groq free tier by default. */
   sttApiKey: string | null;
   sttBaseUrl: string;
+  /**
+   * A Whisper model that answers verbose_json with the language it heard (whisper-large-v3, whisper-large-v3-turbo or whisper-1): the
+   * owner may speak any language and that label tells which (src/bot/voice.ts). OpenAI's gpt-4o transcribe models answer json only and
+   * are not supported: every voice note would fail.
+   */
   sttModel: string;
   supabaseUrl: string;
   supabaseAnonKey: string;

@@ -44,13 +44,13 @@ describe("voice", () => {
     expect(api.texts()[0]).toBe("Гласовите съобщения не са включени на този сървър. Моля, напишете го.");
   });
   it("echoes what it heard and starts a voice run", async () => {
-    const { bot, api, runs } = await setup({ transcribe: async (_b, lang) => `heard in ${lang}` });
+    const { bot, api, runs } = await setup({ transcribe: async (_b, stored) => ({ text: `heard in ${stored}`, lang: null }) }); // the member's stored language, as it is
     await bot.handleUpdate(voiceUpdate(1001));
     expect(runs[0]).toMatchObject({ source: "voice", text: "heard in bg" });
     expect(api.texts()[0]).toBe("🎤 Чух: „heard in bg“");
   });
   it("runs the turn in Bulgarian when an English-speaking member speaks Bulgarian, and remembers it", async () => {
-    const { bot, api, runs, store } = await setup({ transcribe: async () => "Баницата свърши" });
+    const { bot, api, runs, store } = await setup({ transcribe: async () => ({ text: "Баницата свърши", lang: "bg" }) });
     await bot.handleUpdate(voiceUpdate(1002, "en"));
     expect(runs[0]).toMatchObject({ source: "voice", text: "Баницата свърши" });
     expect(runs[0].member.lang).toBe("bg");

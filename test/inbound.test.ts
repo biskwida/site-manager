@@ -6,6 +6,7 @@ import { PHOTO_NO_CAPTION } from "@/src/agent/prompt";
 import { createBot, telegramLang, type BotDeps, type RunRequest } from "@/src/bot/bot";
 import { followLanguage, handleInbound, normalizeCommand } from "@/src/bot/inbound";
 import { makeLangClassifier } from "@/src/bot/lang-classify";
+import { makeTranscriber } from "@/src/bot/voice";
 import { planChanges } from "@/src/domain/changes";
 import type { InMemoryStore } from "@/src/store/memory";
 import { FakeMessenger, makeDemo } from "./helpers";
@@ -208,7 +209,7 @@ describe("handleInbound", () => {
   });
   it("transcribes voice with the media's content type", async () => {
     const seen: string[] = [];
-    const { d, runs, messenger } = await setup({ transcribe: async (_b, _l, ct) => { seen.push(ct ?? ""); return "Капучиното става три и двайсет"; } });
+    const { d, runs, messenger } = await setup({ transcribe: async (_b, _s, ct) => { seen.push(ct ?? ""); return { text: "Капучиното става три и двайсет", lang: "bg" }; } });
     await handleInbound(d, { chatRef: "tg:1001", kind: "voice", messageRef: "wamid.7", media: { download: async () => ({ bytes: new Uint8Array([1]), contentType: "audio/mp4" }) } });
     expect(seen).toEqual(["audio/mp4"]);
     expect(runs[0]).toMatchObject({ source: "voice", text: "Капучиното става три и двайсет", replyTo: "wamid.7" });
@@ -216,7 +217,7 @@ describe("handleInbound", () => {
   });
   it("guesses the voice type from the file name when the download's content type is uninformative", async () => {
     const seen: string[] = [];
-    const { d } = await setup({ transcribe: async (_b, _l, ct) => { seen.push(ct ?? ""); return "x"; } });
+    const { d } = await setup({ transcribe: async (_b, _s, ct) => { seen.push(ct ?? ""); return { text: "x", lang: null }; } });
     await handleInbound(d, { chatRef: "fb:1", kind: "voice", media: { download: async () => ({ bytes: new Uint8Array([1]), contentType: "application/octet-stream", name: "audioclip.mp4" }) } });
     expect(seen).toEqual([]); // fb:1 is not a member: nothing transcribed
     await handleInbound(d, { chatRef: "tg:1001", kind: "voice", media: { download: async () => ({ bytes: new Uint8Array([1]), contentType: "application/octet-stream", name: "audioclip.mp4" }) } });
@@ -415,8 +416,8 @@ describe("handleInbound: the owner's last language is remembered", () => {
     expect(texts(messenger)).toEqual(["📷 Получих снимката. Какво да направя с нея? Напишете или изпратете гласово съобщение."]); // the photo is held, in the stored language
   });
 
-  it("a voice note in Bulgarian saves bg and one in English saves en, and the heard line follows", async () => {
-    let said = "капучиното е 4,20";
+  it("a voice note the transcriber heard in Bulgarian saves bg and one heard in English saves en, and the heard line follows", async () => {
+    let said: { text: string; lang: string | null } = { text: "капучиното е 4,20", lang: "bg" };
     const { d, runs, messenger, store, venue } = await setup({ transcribe: async () => said });
     await store.upsertMember({ venue_id: venue.id, chat_ref: "wa:359111", role: "owner", lang: "en" });
     const voice = { download: async () => ({ bytes: new Uint8Array([1]), contentType: "audio/mp4" }) };
@@ -425,16 +426,16 @@ describe("handleInbound: the owner's last language is remembered", () => {
     expect(runs[0]).toMatchObject({ source: "voice", text: "капучиното е 4,20" });
     expect(runs[0].member.lang).toBe("bg");
     expect(texts(messenger).at(-1)).toBe("🎤 Чух: „капучиното е 4,20“");
-    said = "please make the price 4.20";
+    said = { text: "please make the price 4.20", lang: "en" };
     await handleInbound(d, { chatRef: "wa:359111", kind: "voice", media: voice });
     expect(await langOf(store, "wa:359111")).toBe("en");
     expect(runs[1].member.lang).toBe("en");
     expect(texts(messenger).at(-1)).toBe("🎤 Heard: “please make the price 4.20”");
   });
 
-  it("a voice note that shows no language, or only a link, keeps the stored one", async () => {
+  it("a voice note the transcriber reports no language for keeps the stored one", async () => {
     let said = "4.20";
-    const { d, runs, store } = await setup({ transcribe: async () => said });
+    const { d, runs, store } = await setup({ transcribe: async () => ({ text: said, lang: null }) });
     const saves = langSaves(store);
     const voice = { download: async () => ({ bytes: new Uint8Array([1]), contentType: "audio/ogg" }) };
     await handleInbound(d, { chatRef: "tg:1002", kind: "voice", media: voice });
@@ -587,6 +588,12 @@ describe("handleInbound: any conversation language", () => {
     };
     return { asked, classifyLang };
   }
+  /** The real transcriber over a Whisper-style client that answers in turn and records its requests: the language it reports is the one the label and the letters give. */
+  function whisper(...answers: { text: string; language?: string }[]) {
+    const asked: Record<string, unknown>[] = [];
+    const client = { audio: { transcriptions: { create: async (p: Record<string, unknown>) => { asked.push(p); return answers[Math.min(asked.length, answers.length) - 1]; } } } };
+    return { asked, transcribe: makeTranscriber({ apiKey: "k", baseUrl: "https://stt.example/v1", model: "whisper-large-v3" }, () => client as never) };
+  }
 
   it("member bg; Ich möchte den Preis ändern with a classifier returning de → saved de, and the run has it", async () => {
     const { asked, classifyLang } = classifier("de");
@@ -662,15 +669,71 @@ describe("handleInbound: any conversation language", () => {
   });
 
   it("a voice note and a photo caption in Cyrillic without a marker letter keep a Russian speaker's language too", async () => {
-    const { d, runs, messenger, store, venue } = await setup({ transcribe: async () => "добавь пиццу в меню" });
+    const { asked, transcribe } = whisper({ language: "russian", text: "добавь пиццу в меню" });
+    const { d, runs, messenger, store, venue } = await setup({ transcribe });
     await store.upsertMember({ venue_id: venue.id, chat_ref: "wa:3596", role: "owner", lang: "ru" });
     const saves = langSaves(store);
     await handleInbound(d, { chatRef: "wa:3596", kind: "voice", media: voice });
+    expect(asked).toHaveLength(1); // Whisper heard Russian, the letters do not argue, the speaker is stored as Russian: no second pass as Bulgarian
     expect(runs[0]).toMatchObject({ source: "voice", text: "добавь пиццу в меню" });
     expect(runs[0].member.lang).toBe("ru");
     expect(texts(messenger).at(-1)).toBe("🎤 Heard: “добавь пиццу в меню”"); // Russian has no hand-written texts: English for now
     await handleInbound(d, { chatRef: "wa:3596", kind: "photo", text: "новое фото для меню", media: photo });
     expect(runs[1].member.lang).toBe("ru");
+    expect(saves).toEqual([]);
+  });
+
+  it("a voice note the transcriber heard in German saves de, the run has it, and the heard line is English for now", async () => {
+    const { d, runs, messenger, store } = await setup({ transcribe: async () => ({ text: "Ich möchte den Preis ändern", lang: "de" }) });
+    await handleInbound(d, { chatRef: "tg:1001", kind: "voice", media: voice }); // stored bg
+    expect(await langOf(store, "tg:1001")).toBe("de");
+    expect(runs[0]).toMatchObject({ source: "voice", text: "Ich möchte den Preis ändern" });
+    expect(runs[0].member.lang).toBe("de");
+    expect(texts(messenger).at(-1)).toBe("🎤 Heard: “Ich möchte den Preis ändern”"); // no hand-written German texts yet
+  });
+
+  it("the transcriber is told the member's stored language itself, not its Bulgarian or English reduction", async () => {
+    const seen: string[] = [];
+    const { d, store, venue } = await setup({ transcribe: async (_b, stored) => { seen.push(stored); return { text: "x", lang: null }; } });
+    await store.upsertMember({ venue_id: venue.id, chat_ref: "wa:491511", role: "owner", lang: "de" });
+    for (const chatRef of ["wa:491511", "tg:1001", "tg:1002"]) await handleInbound(d, { chatRef, kind: "voice", media: voice });
+    expect(seen).toEqual(["de", "bg", "en"]);
+  });
+
+  it("a voice note Whisper labels Russian but whose words have no Russian-only letter is Bulgarian: transcribed again, saved bg", async () => {
+    const { asked, transcribe } = whisper({ language: "russian", text: "кафето е готово" }, { language: "bulgarian", text: "Кафето е готово." });
+    const { d, runs, messenger, store, venue } = await setup({ transcribe });
+    await store.upsertMember({ venue_id: venue.id, chat_ref: "wa:359333", role: "owner", lang: "en" });
+    await handleInbound(d, { chatRef: "wa:359333", kind: "voice", media: voice });
+    expect(asked.map((a) => a.language)).toEqual([undefined, "bg"]);
+    expect(await langOf(store, "wa:359333")).toBe("bg");
+    expect(runs[0]).toMatchObject({ source: "voice", text: "Кафето е готово." }); // the second transcript, not the Russian-mode one
+    expect(runs[0].member.lang).toBe("bg");
+    expect(texts(messenger).at(-1)).toBe("🎤 Чух: „Кафето е готово.“");
+  });
+
+  it("a transcriber that fails is the usual voice-failed line, in the stored language, and changes no language", async () => {
+    const errs: string[] = [];
+    const orig = console.error;
+    console.error = (...a: unknown[]) => { errs.push(a.join(" ")); };
+    try {
+      const { d, runs, messenger, store } = await setup({ transcribe: async () => { throw new Error("HTTP 500"); } });
+      const saves = langSaves(store);
+      await handleInbound(d, { chatRef: "tg:1001", kind: "voice", media: voice });
+      await handleInbound(d, { chatRef: "tg:1002", kind: "voice", media: voice });
+      expect(texts(messenger)).toEqual(["Не успях да разпозная записа. Опитайте отново или го напишете.", "I couldn't transcribe that. Try again or type it."]);
+      expect(runs).toHaveLength(0);
+      expect(saves).toEqual([]);
+    } finally { console.error = orig; }
+    expect(errs).toEqual(["[bot] voice failed: HTTP 500", "[bot] voice failed: HTTP 500"]);
+  });
+
+  it("a voice note that comes back empty is the usual voice-failed line and changes no language", async () => {
+    const { d, runs, messenger, store } = await setup({ transcribe: async () => ({ text: "  ", lang: "de" }) });
+    const saves = langSaves(store);
+    await handleInbound(d, { chatRef: "tg:1001", kind: "voice", media: voice });
+    expect(texts(messenger)).toEqual(["Не успях да разпозная записа. Опитайте отново или го напишете."]);
+    expect(runs).toHaveLength(0);
     expect(saves).toEqual([]);
   });
 
@@ -853,7 +916,7 @@ describe("handleInbound: any conversation language", () => {
 
   it("a voice transcript, a stranger's message and /connect never go to the classifier", async () => {
     const { asked, classifyLang } = classifier("de");
-    const { d, messenger, store } = await setup({ classifyLang, transcribe: async () => "Ich möchte den Preis ändern" });
+    const { d, messenger, store } = await setup({ classifyLang, transcribe: async () => ({ text: "Ich möchte den Preis ändern", lang: null }) });
     await handleInbound(d, { chatRef: "tg:1001", kind: "voice", media: voice });
     await handleInbound(d, { chatRef: "fb:7770", kind: "text", text: "Ich möchte den Preis ändern" });
     await handleInbound(d, { chatRef: "tg:1001", kind: "text", text: "/connect https://mein-cafe.example Ich bin der Besitzer" });
