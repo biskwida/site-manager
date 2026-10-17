@@ -76,9 +76,29 @@ const BULGARIAN_FAMILY: ReadonlySet<ChatLang> = new Set(["ru", "uk", "be", "mk",
 interface SttClient {
   audio: {
     transcriptions: {
-      create(p: { file: File; model: string; response_format: "verbose_json"; language?: string }, options?: { timeout?: number; maxRetries?: number }): Promise<{ text: string; language?: string }>;
+      create(
+        p: { file: File; model: string; response_format: "verbose_json"; language?: string },
+        options?: { timeout?: number; maxRetries?: number },
+      ): Promise<{ text: string; language?: string; segments?: { no_speech_prob?: number }[] }>;
     };
   };
+}
+
+/** Whisper's own limit (its no_speech_threshold) for a segment it takes for silence. */
+const NO_SPEECH = 0.6;
+/**
+ * The lowest no_speech_prob when every segment of a verbose_json answer is probably silence (0.6 or more), otherwise null. With no
+ * segments, an empty list, or a segment without the number (not every OpenAI-compatible server sends it) there is no way to tell: null.
+ */
+function silenceOf(segments: { no_speech_prob?: number }[] | undefined): number | null {
+  if (!Array.isArray(segments) || segments.length === 0) return null;
+  let lowest = Infinity;
+  for (const segment of segments) {
+    const p = segment?.no_speech_prob;
+    if (typeof p !== "number" || !(p >= NO_SPEECH)) return null;
+    lowest = Math.min(lowest, p);
+  }
+  return lowest;
 }
 
 /** The owner is waiting for the first transcript, and the SDK's own limit is ten minutes with two retries: 30 s and one retry. */
@@ -101,8 +121,12 @@ const defaultFactory = (cfg: { apiKey: string; baseURL: string }): SttClient => 
  * - Stored inside it: the first transcript stands, no second request. The label is their language when the letters also show one of
  *   the family (ј љ њ џ are Macedonian letters too, so the label picks), otherwise no language: no switch.
  *
- * An empty first transcript (silence) is returned as it is, with no language and no second request: handleVoice answers it with the
- * voice-failed line. Each request has a time limit (FIRST_REQUEST, SECOND_REQUEST).
+ * Silence is no transcript: an empty first transcript, and one that Whisper made up over a clip with no speech in it (it often invents
+ * a stock phrase: "Thank you for watching.", "ご視聴ありがとうございました", "Субтитры сделал DimaTorzok"), which is taken for silence
+ * when verbose_json has segments and every one has no_speech_prob 0.6 or more. It is returned as { text: "", lang: null } with no
+ * second request, and handleVoice answers it with the voice-failed line, so no language is saved and nothing reaches the agent.
+ * Without segments, or with a segment that lacks the number, there is no such filter. Each request has a time limit (FIRST_REQUEST,
+ * SECOND_REQUEST).
  */
 export function makeTranscriber(cfg: { apiKey: string; baseUrl: string; model: string }, factory: (c: { apiKey: string; baseURL: string }) => SttClient = defaultFactory): Transcriber {
   const client = factory({ apiKey: cfg.apiKey, baseURL: cfg.baseUrl });
@@ -112,6 +136,11 @@ export function makeTranscriber(cfg: { apiKey: string; baseUrl: string; model: s
     const first = await client.audio.transcriptions.create({ file, model: cfg.model, response_format: "verbose_json" }, FIRST_REQUEST);
     const text = (first.text ?? "").trim();
     if (!text) return { text, lang: null };
+    const silence = silenceOf(first.segments);
+    if (silence !== null) {
+      console.log(`[bot] voice note taken for silence: every segment has no_speech_prob ${silence.toFixed(2)} or more`); // the transcript is never in it
+      return { text: "", lang: null };
+    }
     const heard = whisperLang(first.language);
     if (!heard) return { text, lang: detectScriptLang(text, stored) };
     if (!BULGARIAN_FAMILY.has(heard)) return { text, lang: heard };

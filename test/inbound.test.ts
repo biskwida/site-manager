@@ -589,7 +589,7 @@ describe("handleInbound: any conversation language", () => {
     return { asked, classifyLang };
   }
   /** The real transcriber over a Whisper-style client that answers in turn and records its requests: the language it reports is the one the label and the letters give. */
-  function whisper(...answers: { text: string; language?: string }[]) {
+  function whisper(...answers: { text: string; language?: string; segments?: { no_speech_prob?: number }[] }[]) {
     const asked: Record<string, unknown>[] = [];
     const client = { audio: { transcriptions: { create: async (p: Record<string, unknown>) => { asked.push(p); return answers[Math.min(asked.length, answers.length) - 1]; } } } };
     return { asked, transcribe: makeTranscriber({ apiKey: "k", baseUrl: "https://stt.example/v1", model: "whisper-large-v3" }, () => client as never) };
@@ -820,6 +820,24 @@ describe("handleInbound: any conversation language", () => {
     expect(texts(messenger)).toEqual(["Не успях да разпозная записа. Опитайте отново или го напишете."]);
     expect(runs).toHaveLength(0);
     expect(saves).toEqual([]);
+  });
+
+  it("a silent clip Whisper fills with a stock phrase (here Japanese thanks for watching) is the usual voice-failed line: no run, no language saved", async () => {
+    const { asked, transcribe } = whisper({ language: "japanese", text: "ご視聴ありがとうございました", segments: [{ no_speech_prob: 0.95 }] });
+    const { d, runs, messenger, store } = await setup({ transcribe });
+    const saves = langSaves(store);
+    const logs: string[] = [];
+    const orig = console.log;
+    console.log = (...a: unknown[]) => { logs.push(a.join(" ")); };
+    try {
+      await handleInbound(d, { chatRef: "tg:1001", kind: "voice", media: voice }); // stored bg
+    } finally { console.log = orig; }
+    expect(asked).toHaveLength(1);
+    expect(texts(messenger)).toEqual(["Не успях да разпозная записа. Опитайте отново или го напишете."]);
+    expect(runs).toHaveLength(0); // nothing reaches the agent as an instruction
+    expect(saves).toEqual([]);
+    expect(await langOf(store, "tg:1001")).toBe("bg");
+    expect(logs.join("\n")).not.toContain("視聴");
   });
 
   describe("marker-less Cyrillic of four words or more from a member who is not stored as bg goes to the classifier", () => {

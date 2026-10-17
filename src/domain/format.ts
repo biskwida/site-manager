@@ -122,11 +122,13 @@ export function countLatinWords(text: string): number {
 const LETTER_RUN = /\p{L}[\p{L}\p{M}]*(?:['’]\p{L}[\p{L}\p{M}]*)*/gu;
 let wordSegmenter: Intl.Segmenter | undefined;
 /**
- * Words in letters of any script ("Flat white свърши днес" is four); numbers and emoji do not count. A run of letters is one word, as in
- * every script written with spaces. In one written without them (Chinese, Japanese, Thai, Lao, Khmer, Burmese) a whole sentence is one
- * run, so each run is cut into the words Intl.Segmenter finds in it, counting the segments that have a letter. The segmenter runs on
- * the runs and not on the whole text because it joins letters around a ".", ":", "_" or digits ("Mr.Smith", "x2y3" are one segment to
- * it), which would change what a spaced script counts.
+ * Words in letters of any script ("Flat white свърши днес" is four); numbers and emoji do not count. A run of letters is one word, which
+ * is all there is to text in Latin, Cyrillic, Greek, Arabic, Hebrew, Devanagari and the like, or in Hangul alone: those count as they
+ * always did. Chinese, Japanese, Thai, Lao, Khmer and Burmese are written without spaces, so a whole sentence is one run; each run is cut
+ * into the words Intl.Segmenter finds in it, counting the segments that have a letter. The same cut falls where Hangul touches letters
+ * of another script with no space ("삼성Galaxy" is two words, it was one), so counts rise only there and in those scripts. The segmenter
+ * runs on the runs and not on the whole text because it joins letters around a ".", ":", "_" or digits ("Mr.Smith", "x2y3" are one
+ * segment to it), which would change what text in the other scripts counts.
  */
 export function countWords(text: string): number {
   wordSegmenter ??= new Intl.Segmenter("en", { granularity: "word" }); // "en": the root rules, whatever locale the server runs in

@@ -2,7 +2,7 @@
 import { describe, expect, it } from "vitest";
 import { audioContentType, audioFileName, makeTranscriber, whisperLang } from "@/src/bot/voice";
 
-type Heard = { text: string; language?: string };
+type Heard = { text: string; language?: string; segments?: { no_speech_prob?: number }[] };
 const CFG = { apiKey: "k", baseUrl: "https://api.groq.com/openai/v1", model: "whisper-large-v3" };
 
 /** A transcription client that records every request and its options and answers them in turn (the last answer repeats; an Error is thrown). */
@@ -177,6 +177,65 @@ describe("makeTranscriber", () => {
       const { calls, transcribe } = fakeStt({ language: "russian", text: "кафето е готово" }, { language: "bulgarian", text: "  " });
       expect(await transcribe(bytes, "en")).toEqual({ text: "кафето е готово", lang: "bg" });
       expect(calls).toHaveLength(2);
+    });
+  });
+
+  describe("silence: a stock phrase Whisper invents over a clip with no speech in it", () => {
+    const THANKS = "Thank you for watching.";
+    /** Runs `fn` with console.log collected (the transcriber logs when it takes a note for silence) and returns its result and the lines. */
+    async function collecting<T>(fn: () => Promise<T>): Promise<{ result: T; lines: string[] }> {
+      const lines: string[] = [];
+      const orig = console.log;
+      console.log = (...a: unknown[]) => { lines.push(a.join(" ")); };
+      try {
+        return { result: await fn(), lines };
+      } finally { console.log = orig; }
+    }
+
+    it("a transcript whose every segment is probably silence is none: no text, no language, no second request", async () => {
+      const { calls, transcribe } = fakeStt({ language: "english", text: THANKS, segments: [{ no_speech_prob: 0.92 }] });
+      const { result } = await collecting(() => transcribe(bytes, "bg"));
+      expect(result).toEqual({ text: "", lang: null });
+      expect(calls).toHaveLength(1);
+    });
+
+    it("one segment with speech in it keeps the transcript", async () => {
+      const { calls, transcribe } = fakeStt({ language: "english", text: THANKS, segments: [{ no_speech_prob: 0.92 }, { no_speech_prob: 0.1 }] });
+      const { result, lines } = await collecting(() => transcribe(bytes, "bg"));
+      expect(result).toEqual({ text: THANKS, lang: "en" });
+      expect(calls).toHaveLength(1);
+      expect(lines).toEqual([]);
+    });
+
+    it("no segments, no segments in it, or a segment without no_speech_prob: not every server sends them, so there is no filter", async () => {
+      for (const segments of [undefined, [], [{}], [{ no_speech_prob: 0.95 }, {}], [{ no_speech_prob: 0.95 }, { no_speech_prob: undefined }]]) {
+        const { transcribe } = fakeStt({ language: "english", text: THANKS, segments });
+        expect(await transcribe(bytes, "bg"), JSON.stringify(segments)).toEqual({ text: THANKS, lang: "en" });
+      }
+    });
+
+    it("0.6 and above is silence (Whisper's own no_speech_threshold), below it is speech", async () => {
+      for (const [prob, silence] of [[0.6, true], [0.59, false], [1, true], [0, false]] as const) {
+        const { transcribe } = fakeStt({ language: "english", text: THANKS, segments: [{ no_speech_prob: prob }] });
+        const { result } = await collecting(() => transcribe(bytes, "bg"));
+        expect(result, String(prob)).toEqual(silence ? { text: "", lang: null } : { text: THANKS, lang: "en" });
+      }
+    });
+
+    it("a label in the Bulgarian family over silence makes no second request, and moves nobody", async () => {
+      const { calls, transcribe } = fakeStt({ language: "russian", text: "Субтитры сделал DimaTorzok", segments: [{ no_speech_prob: 0.8 }, { no_speech_prob: 0.9 }] });
+      const { result } = await collecting(() => transcribe(bytes, "bg")); // stored outside the family: without the filter this asks again as Bulgarian
+      expect(result).toEqual({ text: "", lang: null });
+      expect(calls).toHaveLength(1);
+    });
+
+    it("logs that it took the note for silence and how sure the model was, never the words", async () => {
+      const { transcribe } = fakeStt({ language: "english", text: THANKS, segments: [{ no_speech_prob: 0.92 }, { no_speech_prob: 0.97 }] });
+      const { lines } = await collecting(() => transcribe(bytes, "bg"));
+      expect(lines).toHaveLength(1);
+      expect(lines[0]).toMatch(/^\[bot\] .*silence/);
+      expect(lines[0]).toContain("0.92");
+      expect(lines[0]).not.toMatch(/thank|watching/i);
     });
   });
 

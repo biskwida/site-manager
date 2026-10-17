@@ -203,7 +203,9 @@ describe("isMarkerlessCyrillic and countWords", () => {
     expect(countWords("4.20 😀 谢谢")).toBe(countWords("谢谢")); // numbers and emoji are still not words
     expect(countWords("我想'价格")).toBe(countWords("我想 价格")); // an apostrophe between letters, which the segmenter splits off, is not a word either
   });
-  it("countWords counts every spaced script exactly as it did, as runs of letters, whatever is glued to them", () => {
+  it("countWords counts Latin, Cyrillic, Greek, Arabic, Hebrew, Devanagari and Hangul-only text exactly as it did, whatever punctuation or digits are glued to the letters", () => {
+    // Not covered: the scripts written without spaces, and Hangul touching letters of another script with no space, which the
+    // segmenter cuts there ("삼성Galaxy" is two words, it was one). Pure Hangul counts as before.
     const before = (text: string) => text.match(/\p{L}[\p{L}\p{M}]*(?:['’]\p{L}[\p{L}\p{M}]*)*/gu)?.length ?? 0;
     const texts = [
       "Flat white свърши днес", "Капучиното става три и двайсет", "Баницата свърши днес 4,20 👍", "don't stop", "don’t do it now", "l'homme est là", "Ich möchte den Preis ändern",
