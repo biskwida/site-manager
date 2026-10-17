@@ -73,7 +73,7 @@ it("storyBackground uses the theme background, else the accent mixed 80% to whit
 
 - [ ] **Step 2: Run** `npx vitest run test/social-image-story.test.ts test/domain-color.test.ts` — expected: FAIL (`storyImage` / `storyBackground` not exported).
 
-- [ ] **Step 3: Implement `storyImage` in `src/agent/social-image.ts`** with the file's existing `loadSharp()`: `.rotate()`, read size, `ok` when within 1% of 9/16, else `.resize(1080, 1920, { fit: "contain", background })`, `.jpeg({ quality: 88, mozjpeg: true })`; sharp missing → `unavailable`; decode error → `unreadable`. **Implement `storyBackground` in `src/domain/color.ts`** with the existing `parseHex`.
+- [ ] **Step 3: Implement `storyImage` in `src/agent/social-image.ts`** with the file's existing `loadSharp()`: `.rotate()`, read size, `ok` when within 1% of 9/16, else `.resize(1080, 1920, { fit: "contain", background })`, `.jpeg({ quality: 90 })` (baseline, the feed copy's settings; final-review ruling); sharp missing → `unavailable`; decode error → `unreadable`. **Implement `storyBackground` in `src/domain/color.ts`** with the existing `parseHex`.
 
 - [ ] **Step 4: Run** the same command — expected: PASS.
 
@@ -158,7 +158,7 @@ And in `test/agent-visual-tool.test.ts`: `it("records every picture it sends in 
 
 - [ ] **Step 2: Run** `npx vitest run test/agent-social-tool.test.ts test/agent-visual-tool.test.ts` — expected: FAIL.
 
-- [ ] **Step 3: Implement.** In `social_post`: read the photo once when any Instagram post or any story is targeted (reuse the existing `readPhoto` bytes); for story targets call `storyImage(bytes, storyBackground(site.venue.theme))`; `made` → `saveMedia(venueId, bytes, "image/jpeg")` (https required, same check as the padded copy) → `row.story_image_url`; `unavailable` → keep the original (no refusal; stories published the original before this change); `unreadable` → the existing "Could not read this photo" error. After `createChangeSet` and before `sendProposal`: for each `previewPictures(row, k.lang)` entry whose URL is not in `d.sentPhotos`, `await d.messenger.sendPhoto(d.chatRef, url, label)` and add the URL. In make_visual: add each sent URL to `d.sentPhotos`.
+- [ ] **Step 3: Implement.** In `social_post`: read the photo once when any Instagram post or any story is targeted (reuse the existing `readPhoto` bytes); for story targets call `storyImage(bytes, storyBackground(site.venue.theme))`; `made` → `saveMedia(venueId, bytes, "image/jpeg")` (https required, same check as the padded copy) → `row.story_image_url`; `unavailable` → keep the original (no refusal; stories published the original before this change); `unreadable` → the existing "Could not read this photo" error. After `createChangeSet` and before `sendProposal`: for each `previewPictures(row, k.lang)` entry whose URL is not in `d.sentPhotos`, `await d.messenger.sendPhoto(d.chatRef, url, label)`; social_post never adds to the set, so each proposal shows all its own pictures (final-review ruling). In make_visual: add each sent URL to `d.sentPhotos`.
 
 - [ ] **Step 4: Run** the same command, then the whole suite `npx vitest run` — expected: PASS.
 
