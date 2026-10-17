@@ -63,7 +63,11 @@ async function cachedCutout(d: VisualDeps, venueId: string, media: Media, origin
   const cached = await d.store.findMediaByPath(cachePath);
   if (cached) cut = await d.read(cached.public_url);
   if (!cut) {
-    cut = await d.cutout(original).catch(() => null);
+    cut = await d.cutout(original).catch((e: unknown) => {
+      // A model crash still reads as "nothing cut out", but it is logged: the error's class only, never its message or the photo.
+      console.error(`[visual] cutout failed: ${e instanceof Error ? e.name : "error"}`);
+      return null;
+    });
     if (cut) await d.store.saveMedia(venueId, cut, "image/png", { name: `cutouts/v2/${media.id}.png` });
   }
   return cut;
