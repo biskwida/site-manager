@@ -2,6 +2,7 @@
 import sharp from "sharp";
 import { describe, expect, it } from "vitest";
 import { keepMainObject } from "@/src/visual/main-object";
+import { renderMenuPhoto } from "@/src/visual/menu-photo";
 
 type Shape = (x: number, y: number) => number | null; // the alpha at a pixel, or null when the shape does not cover it
 
@@ -24,6 +25,18 @@ async function make(size: number, shapes: Shape[]): Promise<{ png: Uint8Array }>
   }
   const png = new Uint8Array(await sharp(raw, { raw: { width: size, height: size, channels: 4 } }).png().toBuffer());
   return { png };
+}
+
+/** The columns and rows of a rendered menu photo where the (orange) object is solid: blue well below white. */
+async function objectBounds(jpeg: Uint8Array) {
+  const { data, info } = await sharp(jpeg).raw().toBuffer({ resolveWithObject: true });
+  let x0 = info.width, y0 = info.height, x1 = -1, y1 = -1;
+  for (let y = 0; y < info.height; y++)
+    for (let x = 0; x < info.width; x++)
+      if (data[(y * info.width + x) * info.channels + 2] < 150) {
+        x0 = Math.min(x0, x); x1 = Math.max(x1, x); y0 = Math.min(y0, y); y1 = Math.max(y1, y);
+      }
+  return { w: x1 - x0 + 1, h: y1 - y0 + 1, cx: (x0 + x1) / 2, cy: (y0 + y1) / 2 };
 }
 
 async function alphaAt(png: Uint8Array): Promise<(x: number, y: number) => number> {
@@ -63,12 +76,25 @@ describe("keepMainObject", () => {
     const out = await keepMainObject(png);
     const a = await alphaAt(out.png);
     expect(a(300, 300)).toBe(255);
-    expect(a(30, 30)).toBe(10); // faint pixels stay as they are
+    expect(a(30, 30)).toBe(0); // a faint patch away from the object is cleared
     expect(out.coverage).toBeGreaterThan(0.06);
     expect(out.coverage).toBeLessThan(0.08);
     // On its own a faint patch is no object at all.
     const faintOnly = await make(400, [square(10, 10, 50, 10)]);
     expect((await keepMainObject(faintOnly.png)).coverage).toBe(0);
+  });
+
+  it("drops a fragment's faint rim too, so the cup stays centred and full size", async () => {
+    // The reviewer's case: a cup r=150 at (600,500) on 1000x1000 and a 60x60 table corner on the left edge with a 2-px alpha-12 rim.
+    const cup = circle(600, 500, 150);
+    const corner: Shape = (x, y) => (x < 60 && y >= 470 && y < 530 ? 255 : null);
+    const rim: Shape = (x, y) => (x < 62 && y >= 468 && y < 532 ? 12 : null);
+    const alone = await objectBounds(await renderMenuPhoto((await keepMainObject((await make(1000, [cup])).png)).png));
+    const withCorner = await objectBounds(await renderMenuPhoto((await keepMainObject((await make(1000, [cup, corner, rim])).png)).png));
+    expect(Math.abs(withCorner.w - alone.w)).toBeLessThanOrEqual(2);
+    expect(Math.abs(withCorner.h - alone.h)).toBeLessThanOrEqual(2);
+    expect(Math.abs(withCorner.cx - 599.5)).toBeLessThanOrEqual(2);
+    expect(Math.abs(withCorner.cy - 599.5)).toBeLessThanOrEqual(2);
   });
 
   it("reports coverage", async () => {

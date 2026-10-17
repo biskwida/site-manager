@@ -58,19 +58,21 @@ export async function keepMainObject(png: Uint8Array): Promise<{ png: Uint8Array
     areas.push(area);
   }
 
-  const largest = Math.max(0, ...areas);
+  let largest = 0;
+  for (const area of areas) if (area > largest) largest = area;
   const kept = new Uint8Array(areas.length);
   for (let l = 1; l < areas.length; l++) if (areas[l] === largest || areas[l] >= SIMILAR * largest) kept[l] = 1;
 
-  // Back at full size: an object pixel stays only when the mask cell it falls in belongs to a kept piece. Faint pixels (alpha <= 16) stay as they are.
+  // Back at full size: a pixel stays only when the mask cell it falls in belongs to a kept piece. Everything else becomes
+  // transparent, faint pixels too: a dropped fragment's soft rim (alpha 9-16) would otherwise stretch the trim and push the
+  // dish off centre. Faint pixels inside kept cells stay: they are the object's own soft edge.
   let covered = 0;
   for (let y = 0; y < h; y++) {
     const row = rowOf[y] * mw;
     for (let x = 0; x < w; x++) {
       const i = (y * w + x) * 4 + 3;
-      if (data[i] <= ON) continue;
-      if (kept[labels[row + colOf[x]]]) covered++;
-      else data[i] = 0;
+      if (!kept[labels[row + colOf[x]]]) data[i] = 0;
+      else if (data[i] > ON) covered++;
     }
   }
   const out = await sharp(data, { raw: { width: w, height: h, channels: 4 } }).png().toBuffer();
