@@ -75,6 +75,41 @@ describe("tool descriptions: the language of captions and picture text", () => {
     }
     expect(MakeVisualSchema.shape.dish.description).toContain("at most 40 characters"); // what was there is kept
     expect(MakeVisualSchema.shape.line.description).toContain("at most 40 characters");
-    expect(MakeVisualSchema.shape.price.description).toContain("From the owner, else from get_menu for that item, else omit.");
+    expect(MakeVisualSchema.shape.price.description).toContain("Omit when you pass item_id; else the owner's price (also a promotion price for a menu dish, with no item_id), else omit — never estimate.");
+  });
+});
+
+describe("SYSTEM_PROMPT: website photos", () => {
+  it("rule 13: item_id for a menu dish, the owner's own price (no item_id) when they state a different one", () => {
+    expect(SYSTEM_PROMPT).toContain("item_id when the dish is on the menu");
+    expect(SYSTEM_PROMPT).toContain("when the owner states a different price for the picture (a promotion, \"за 3,50 днес\"), their price in price and no item_id");
+    expect(MakeVisualSchema.shape.item_id.description).toContain("Omit it when the owner states a different price");
+  });
+
+  it("sends website photo requests to make_menu_photo, never make_visual", () => {
+    expect(SYSTEM_PROMPT).toMatch(/make_menu_photo/);
+    expect(SYSTEM_PROMPT).toMatch(/never make_visual for a website/i);
+    expect(SYSTEM_PROMPT).toMatch(/make_visual is only for Instagram\/Facebook posts and stories/);
+    expect(SYSTEM_PROMPT).toContain("If the result has a note, tell it to the owner in one short line in the Owner language.");
+    expect(SYSTEM_PROMPT).toContain("make_visual's card never goes on the website: that is make_menu_photo (rule 16).");
+    expect(SYSTEM_PROMPT).toContain("never put make_visual's card on the site");
+  });
+
+  it("tells the agent to pass on the note's colour word as it is", () => {
+    expect(SYSTEM_PROMPT).toContain("The note already names the backdrop colour in plain words: tell it as it is.");
+    expect(SYSTEM_PROMPT).not.toContain("nearest plain colour word");
+  });
+
+  it("redoes a menu photo from the original photo when the owner asks for a change", () => {
+    expect(SYSTEM_PROMPT).toContain("A change to a proposed menu photo (\"направи го като другите\", \"по-голямо\", \"бял фон\"): cancel_change_set the waiting proposal (unless the owner tapped ✏️, rule 7), call make_menu_photo again from the ORIGINAL photo (its media_id is in the conversation as \"menu photo from photo …\"), then propose set_item_image again.");
+  });
+
+  it("keeps a photo sent as it is on set_item_image, pointing at the casual-speech rule", () => {
+    expect(SYSTEM_PROMPT).toMatch(/goes straight to set_item_image \(rule 2\)/);
+  });
+
+  it("numbers the rules continuously", () => {
+    const nums = [...SYSTEM_PROMPT.matchAll(/^(\d+)\. /gm)].map((m) => Number(m[1]));
+    expect(nums).toEqual(nums.map((_, i) => i + 1));
   });
 });

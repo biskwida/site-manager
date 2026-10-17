@@ -1,6 +1,6 @@
 // test/visual-service.test.ts
 import sharp from "sharp";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { makeVisual, type VisualDeps } from "@/src/visual/service";
 import type { PictureProps } from "@/src/visual/template";
 import { makeDemo } from "./helpers";
@@ -43,18 +43,42 @@ describe("makeVisual", () => {
       ["story", venue.name, "Флат уайт", "4,30 €", "Със сърце", "cutout"],
     ]);
     expect(rendered[0].image).toMatch(/^data:image\/png;base64,/);
-    expect(await store.findMediaByPath(`${venue.id}/cutouts/${photo.id}.png`)).not.toBeNull();
+    expect(await store.findMediaByPath(`${venue.id}/cutouts/v3/${photo.id}.png`)).not.toBeNull();
     // A second picture from the same photo (a colour change) reuses the cut-out.
     const again = await makeVisual(deps, { venueId: venue.id, mediaId: photo.id, dish: "Флат уайт", colour: "peach", formats: ["post"] });
     expect(again.backdrop).toBe("peach");
     expect(cutoutCount()).toBe(1);
   });
 
+  for (const old of ["", "v2/"]) {
+    it(`does not reuse a cut-out cached at the old path cutouts/${old} (fragments, or a fragment's faint rim)`, async () => {
+      const { deps, photo, venue, store, cutoutCount } = await setup();
+      const stale = await store.saveMedia(venue.id, new Uint8Array([9, 9, 9]), "image/png", { name: `cutouts/${old}${photo.id}.png` });
+      expect(stale.storage_path).toBe(`${venue.id}/cutouts/${old}${photo.id}.png`);
+      await makeVisual(deps, { venueId: venue.id, mediaId: photo.id, dish: "x", formats: ["post"] });
+      expect(cutoutCount()).toBe(1);
+      expect(await store.findMediaByPath(`${venue.id}/cutouts/v3/${photo.id}.png`)).not.toBeNull();
+    });
+  }
+
   it("falls back to the photo in a card when the cut-out finds nothing", async () => {
     const { deps, photo, venue, rendered } = await setup({ cutout: async () => null });
     const r = await makeVisual(deps, { venueId: venue.id, mediaId: photo.id, dish: "Flat white", formats: ["post"] });
     expect(r.kind).toBe("photo");
     expect(rendered[0].kind).toBe("photo");
+  });
+
+  it("logs the error's class (never its message or the photo) when the cut-out model crashes, and falls back", async () => {
+    const logs: string[] = [];
+    const spy = vi.spyOn(console, "error").mockImplementation((...a: unknown[]) => void logs.push(a.map(String).join(" ")));
+    try {
+      const { deps, photo, venue } = await setup({ cutout: async () => { throw new RangeError("secret owner detail"); } });
+      const r = await makeVisual(deps, { venueId: venue.id, mediaId: photo.id, dish: "Flat white", formats: ["post"] });
+      expect(r.kind).toBe("photo");
+      expect(logs).toEqual(["[visual] cutout failed: RangeError"]);
+    } finally {
+      spy.mockRestore();
+    }
   });
 
   it("refuses a photo from another venue or one it cannot read", async () => {

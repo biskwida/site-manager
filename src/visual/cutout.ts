@@ -1,9 +1,11 @@
 // src/visual/cutout.ts
 // Server-only, and imported only by app/api/visual/route.ts: the model and its runtime are large, so no other function
 // bundles them (see next.config.ts). Removes the background locally (no paid API) with the "small" model, which on our
-// test photos cuts as cleanly as "medium" at half the size, then trims the transparent margins.
+// test photos cuts as cleanly as "medium" at half the size, then keeps only the main object (a piece of the table can survive the
+// model), already cropped to it, so no separate trim or second PNG encode is needed.
 import path from "node:path";
 import { removeBackground } from "@imgly/background-removal-node";
+import { keepMainObject } from "./main-object";
 
 const PUBLIC_PATH = `file://${path.join(process.cwd(), "node_modules/@imgly/background-removal-node/dist")}/`;
 
@@ -17,11 +19,8 @@ function typeOf(bytes: Uint8Array): string {
 export async function cutout(bytes: Uint8Array): Promise<Uint8Array | null> {
   const blob = new Blob([bytes as BlobPart], { type: typeOf(bytes) });
   const out = await removeBackground(blob, { model: "small", publicPath: PUBLIC_PATH, output: { format: "image/png", quality: 1 } });
-  const png = Buffer.from(await out.arrayBuffer());
-  const sharp = (await import("sharp")).default;
-  const { channels } = await sharp(png).stats();
-  const alpha = channels[3];
+  const main = await keepMainObject(new Uint8Array(await out.arrayBuffer()));
   // Under 3% of the picture kept: nothing worth cutting out (a plain table, a blurry shot).
-  if (!alpha || alpha.mean < 0.03 * 255) return null;
-  return new Uint8Array(await sharp(png).trim({ threshold: 8 }).png().toBuffer());
+  if (main.coverage < 0.03) return null;
+  return main.png;
 }

@@ -3,6 +3,9 @@
 // as venue media. Pure orchestration: the cut-out model, the renderer and file reading are injected, so this runs in tests
 // without the model and in the /api/visual route with it.
 import type { Store } from "../store/types";
+import type { Media } from "../domain/types";
+import { houseStyleReport } from "./house-style";
+import { renderMenuPhoto } from "./menu-photo";
 import { colours, pickBackdrop, BACKDROPS, type Backdrop } from "./palette";
 import type { Format, PictureProps } from "./template";
 
@@ -50,21 +53,34 @@ function sniffType(bytes: Uint8Array): string {
   return "image/jpeg";
 }
 
+/**
+ * The cut-out is cached per photo, so a colour or text change does not run the model again. "v3" = main object only, with
+ * a dropped fragment's faint rim cleared too: cut-outs saved before that (cutouts/ kept stray fragments, cutouts/v2/ their
+ * soft rims, which pushed the dish off centre) are never reused.
+ */
+async function cachedCutout(d: VisualDeps, venueId: string, media: Media, original: Uint8Array): Promise<Uint8Array | null> {
+  const cachePath = `${venueId}/cutouts/v3/${media.id}.png`;
+  let cut: Uint8Array | null = null;
+  const cached = await d.store.findMediaByPath(cachePath);
+  if (cached) cut = await d.read(cached.public_url);
+  if (!cut) {
+    cut = await d.cutout(original).catch((e: unknown) => {
+      // A model crash still reads as "nothing cut out", but it is logged: the error's class only, never its message or the photo.
+      console.error(`[visual] cutout failed: ${e instanceof Error ? e.name : "error"}`);
+      return null;
+    });
+    if (cut) await d.store.saveMedia(venueId, cut, "image/png", { name: `cutouts/v3/${media.id}.png` });
+  }
+  return cut;
+}
+
 export async function makeVisual(d: VisualDeps, req: VisualRequest): Promise<VisualResult> {
   const media = await d.store.getMedia(req.mediaId);
   if (!media || media.venue_id !== req.venueId) throw new Error(`media_id "${req.mediaId}" not found for this venue.`);
   const original = await d.read(media.public_url);
   if (!original) throw new Error("Could not read the photo; try again in a moment.");
 
-  // The cut-out is cached per photo, so a colour or text change does not run the model again.
-  const cachePath = `${req.venueId}/cutouts/${media.id}.png`;
-  let cut: Uint8Array | null = null;
-  const cached = await d.store.findMediaByPath(cachePath);
-  if (cached) cut = await d.read(cached.public_url);
-  if (!cut) {
-    cut = await d.cutout(original).catch(() => null);
-    if (cut) await d.store.saveMedia(req.venueId, cut, "image/png", { name: `cutouts/${media.id}.png` });
-  }
+  const cut = await cachedCutout(d, req.venueId, media, original);
   const kind: VisualResult["kind"] = cut ? "cutout" : "photo";
   const image = cut ? dataUrl(cut, "image/png") : dataUrl(original, sniffType(original));
 
@@ -85,4 +101,51 @@ export async function makeVisual(d: VisualDeps, req: VisualRequest): Promise<Vis
     pictures.push({ format, media_id: saved.id, url: saved.public_url });
   }
   return { kind, backdrop: (BACKDROPS as readonly string[]).includes(backdrop) ? (backdrop as Backdrop) : backdrop, pictures };
+}
+
+export interface MenuPhotoRequest {
+  venueId: string;
+  /** The owner's photo of the item. */
+  mediaId: string;
+  /** The menu item the photo is for: its current photo (an earlier menu photo, say) is left out of the "match" vote. */
+  itemId?: string;
+  /** "match" = the backdrop and object size most of the venue's item photos share (white when they have none); "white" (default) = plain white. */
+  style?: "match" | "white";
+}
+
+export type MenuPhotoResult =
+  | { media_id: string; url: string; style: { background: string; matched: number; of: number } | "white"; reason?: "no_photos" | "unreadable" | "too_few" | "mixed" }
+  | { error: "no_object" };
+
+const MAX_STYLE_PHOTOS = 30;
+/** Each item-photo read for "match" gets this long (the route's read allows 15 s), and the whole sample 20 s, inside the route's 60 s. */
+const STYLE_READ_MS = 5_000;
+const STYLE_BUDGET_MS = 20_000;
+
+/** The venue's other item photos, as reads that start when called: each distinct photo once, never the one being processed or the given item's own, at most 30. */
+async function itemPhotoReads(d: VisualDeps, venueId: string, exceptMediaId: string, exceptItemId?: string): Promise<(() => Promise<Uint8Array | null>)[]> {
+  const site = await d.store.getSite(venueId);
+  const urls = new Map(site.media.map((m) => [m.id, m.public_url]));
+  const ids = new Set<string>();
+  for (const item of site.items) if (item.id !== exceptItemId && item.image_media_id && item.image_media_id !== exceptMediaId && urls.has(item.image_media_id)) ids.add(item.image_media_id);
+  return [...ids].slice(0, MAX_STYLE_PHOTOS).map((id) => () => d.read(urls.get(id)!));
+}
+
+/** The plain website photo: the object alone, centred on white or on the menu's own backdrop. `{ error: "no_object" }` when nothing could be cut out (nothing is saved then). */
+export async function makeMenuPhoto(d: VisualDeps, req: MenuPhotoRequest): Promise<MenuPhotoResult> {
+  const media = await d.store.getMedia(req.mediaId);
+  if (!media || media.venue_id !== req.venueId) throw new Error(`media_id "${req.mediaId}" not found for this venue.`);
+  const original = await d.read(media.public_url);
+  if (!original) throw new Error("Could not read the photo; try again in a moment.");
+  const cut = await cachedCutout(d, req.venueId, media, original);
+  if (!cut) return { error: "no_object" };
+  // "match" looks at the menu only after the cut-out worked, so a refused photo costs no extra reads.
+  const found = req.style === "match" ? await houseStyleReport(await itemPhotoReads(d, req.venueId, media.id, req.itemId), { readTimeoutMs: STYLE_READ_MS, budgetMs: STYLE_BUDGET_MS }) : null;
+  const house = found?.style ?? null;
+  // Never progressive: the same JPEG settings as Claudia's other proven copies, which every channel and site accepts.
+  const jpeg = await renderMenuPhoto(cut, house ? { background: house.background, fill: house.fill } : {});
+  const saved = await d.store.saveMedia(req.venueId, jpeg, "image/jpeg");
+  const base = { media_id: saved.id, url: saved.public_url };
+  if (house) return { ...base, style: { background: house.background, matched: house.matched, of: house.of } };
+  return found ? { ...base, style: "white", reason: found.attempted === 0 ? "no_photos" : found.of < 2 ? (found.of < found.attempted ? "unreadable" : "too_few") : "mixed" } : { ...base, style: "white" };
 }
