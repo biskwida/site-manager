@@ -5,6 +5,7 @@ import type { AgentDeps } from "@/src/agent/tools";
 import { pickEffort, runTurn } from "@/src/agent/run";
 import { appendMemory, holdPhoto, loadMemory } from "@/src/agent/memory";
 import { PHOTO_NO_CAPTION } from "@/src/agent/prompt";
+import type { VisualClient } from "@/src/visual/client";
 import { FakeMessenger, makeDemo } from "./helpers";
 
 const T0 = new Date("2026-10-09T09:00:00.000Z");
@@ -192,6 +193,32 @@ describe("runTurn", () => {
     const boom = { beta: { messages: { toolRunner() { throw new Error("network down"); } } } } as unknown as Anthropic;
     expect(await runTurn(deps, { text: "x", source: "text" }, { model: "m", effort: "medium" }, boom)).toBe("error");
     expect(messenger.sent[1].text).toBe("Възникна грешка. Опитайте отново след малко.");
+  });
+  it("sends a picture once per turn: social_post skips the one make_visual just sent, and the next turn starts afresh", async () => {
+    const { deps, messenger, store, venue } = await setup();
+    const https = (url: string) => url.replace("memory://media/", "https://media.example/");
+    const getMedia = store.getMedia.bind(store);
+    store.getMedia = async (id: string) => {
+      const m = await getMedia(id);
+      return m && { ...m, public_url: https(m.public_url) };
+    };
+    const photo = await store.saveMedia(venue.id, new Uint8Array([1]), "image/jpeg");
+    const picture = await store.saveMedia(venue.id, new Uint8Array([2]), "image/jpeg");
+    const url = https(picture.public_url);
+    const visual: VisualClient = async () => ({ kind: "cutout", backdrop: "teal", pictures: [{ format: "post", media_id: picture.id, url }] });
+    const withPictures: AgentDeps = { ...deps, social: { facebook: true, instagram: false }, visual };
+    const post = { summary_bg: "Публикация: флат уайт", summary_en: "Post: flat white", media_id: picture.id, caption: "Флат уайт", targets: ["facebook_post"] };
+    const first = fakeClient([{ tool: "make_visual", input: { media_id: photo.id, dish: "Флат уайт", formats: ["post"] } }, { tool: "social_post", input: post }], { stop_reason: "end_turn", text: "" });
+    await runTurn(withPictures, { text: "направи пост и го пусни във Facebook", source: "text" }, { model: "m", effort: "medium" }, first.client);
+    expect(first.toolResults.map((r) => JSON.parse(r).error)).toEqual([undefined, undefined]);
+    expect(messenger.photos.map((p) => [p.url, p.caption])).toEqual([[url, "Пост"]]); // make_visual's; social_post did not send it again
+    const proposal = messenger.sent.find((s) => s.setId)!;
+    await store.updateChangeSet(proposal.setId!, { status: "cancelled" });
+    // The next message is a new turn: its proposal shows the picture again, even when the deps still carry an earlier turn's set.
+    const second = fakeClient([{ tool: "social_post", input: post }], { stop_reason: "end_turn", text: "" });
+    await runTurn({ ...withPictures, sentPhotos: new Set([url]) }, { text: "пусни го пак", source: "text" }, { model: "m", effort: "medium" }, second.client);
+    expect(JSON.parse(second.toolResults[0]).status).toBe("proposed");
+    expect(messenger.photos.map((p) => [p.url, p.caption])).toEqual([[url, "Пост"], [url, "Facebook пост"]]);
   });
   it("passes correctionFor from memory into the tools", async () => {
     const { deps, store, venue, items } = await setup();

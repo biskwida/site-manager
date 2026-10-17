@@ -1,11 +1,14 @@
 // test/agent-social-tool.test.ts
 import sharp from "sharp";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { SYSTEM_PROMPT } from "@/src/agent/prompt";
 import { makeTools, type AgentDeps } from "@/src/agent/tools";
 import { handleDecision } from "@/src/bot/approvals";
+import type { Messenger } from "@/src/bot/messenger";
 import { encryptSecrets, parseSecretKey } from "@/src/destinations/secrets";
 import { withDestinationSync } from "@/src/destinations/store-hook";
+import type { SocialPostRow } from "@/src/domain/types";
+import type { VisualClient } from "@/src/visual/client";
 import { SocialPostSchema, socialConnections } from "@/src/agent/social-tools";
 import { FakeMeta } from "./fake-meta";
 import { FakeMessenger, makeDemo } from "./helpers";
@@ -183,7 +186,7 @@ describe("Instagram feed aspect ratio", () => {
     const m = await sharp(bytes).metadata();
     return [m.width, m.height];
   };
-  it("pads a tall photo to 4:5 with an edge colour, stores it, and the Instagram feed post uses it (Facebook keeps the original)", async () => {
+  it("pads a tall photo to 4:5 with an edge colour, stores it, and the Instagram feed post uses it (Facebook keeps the original, the story its 9:16 copy)", async () => {
     const { tools, store, venue, files, meta } = await setup();
     const tall = await store.saveMedia(venue.id, await jpeg(600, 1200, { r: 20, g: 120, b: 200 }), "image/jpeg");
     const r = await call(tools, "social_post", input(tall.id, { targets: ["facebook_post", "instagram_post", "instagram_story"] }));
@@ -201,7 +204,10 @@ describe("Instagram feed aspect ratio", () => {
     expect(r.preview).toContain("за Instagram снимката е допълнена до формат 4:5");
     await handleDecision({ store, messenger: new FakeMessenger(), now: () => T0 }, "tg:1001", "apply", cs.id);
     const containers = [...meta.containers.values()];
-    expect(containers.map((c) => [c.media_type, c.image_url])).toEqual([["IMAGE", row.ig_feed_image_url], ["STORIES", tall.public_url]]);
+    // The story is not the 4:5 feed copy and not the original: it publishes the 9:16 copy the owner saw.
+    expect(row.story_image_url).toMatch(/^https:\/\/media\.example\/storage\/.+\.jpg$/);
+    expect([tall.public_url, row.ig_feed_image_url]).not.toContain(row.story_image_url);
+    expect(containers.map((c) => [c.media_type, c.image_url])).toEqual([["IMAGE", row.ig_feed_image_url], ["STORIES", row.story_image_url]]);
     expect([...meta.posts.values()][0].url).toBe(tall.public_url);
   });
   it("pads a wide photo to 1.91:1", async () => {
@@ -221,6 +227,203 @@ describe("Instagram feed aspect ratio", () => {
     const t1 = await tallFb.store.saveMedia(tallFb.venue.id, await jpeg(600, 1200), "image/jpeg");
     const r2 = await call(tallFb.tools, "social_post", input(t1.id, { targets: ["facebook_post", "instagram_story"] }));
     expect((await tallFb.store.getChangeSet(r2.change_set_id as string)).changes[0].after).not.toHaveProperty("ig_feed_image_url");
+  });
+});
+
+describe("the exact pictures before the buttons", () => {
+  const rowOf = async (store: { getChangeSet: (id: string) => Promise<{ changes: { after: unknown }[] }> }, id: string) =>
+    (await store.getChangeSet(id)).changes[0].after as SocialPostRow;
+
+  it("sends each picture with its label before the proposal", async () => {
+    const { deps, store, venue, messenger, files } = await setup();
+    await store.updateVenue(venue.id, { theme: { accent: "#3d6b4f" } });
+    const photo = await store.saveMedia(venue.id, await jpeg(900, 1200), "image/jpeg");
+    let reads = 0;
+    const counting = (async (url: RequestInfo | URL, init?: RequestInit) => {
+      reads++;
+      return deps.fetch!(url, init);
+    }) as typeof fetch;
+    const tools = makeTools({ ...deps, fetch: counting });
+    const r = await call(tools, "social_post", input(photo.id, { targets: ["instagram_post", "instagram_story"] }));
+    expect(r.status).toBe("proposed");
+    const photos = messenger.photos;
+    expect(photos.map((p) => p.caption)).toEqual(["Instagram пост", "Instagram история"]);
+    const proposal = messenger.sent.find((s) => s.setId)!;
+    expect(Math.max(...photos.map((p) => Number(p.messageRef)))).toBeLessThan(Number(proposal.messageRef));
+    const row = await rowOf(store, proposal.setId!);
+    expect(row.story_image_url).toMatch(/^https:\/\//);
+    // The files that will be published: the 4:5 padded copy for the post, Claudia's 9:16 copy for the story. The photo was read once.
+    expect(photos.map((p) => [p.chatRef, p.url])).toEqual([["tg:1001", row.ig_feed_image_url], ["tg:1001", row.story_image_url]]);
+    expect(reads).toBe(1);
+    const story = files.get(row.story_image_url!)!;
+    const m = await sharp(story).metadata();
+    expect([m.width, m.height, m.format]).toEqual([1080, 1920, "jpeg"]);
+    // The bar above the photo is the café's colour: the accent #3d6b4f mixed 80% toward white is #d8e1dc.
+    const { data } = await sharp(story).extract({ left: 540, top: 10, width: 1, height: 1 }).raw().toBuffer({ resolveWithObject: true });
+    expect(Math.max(Math.abs(data[0] - 0xd8), Math.abs(data[1] - 0xe1), Math.abs(data[2] - 0xdc))).toBeLessThan(6);
+  });
+
+  it("makes the 9:16 copy for a Facebook story too", async () => {
+    const { tools, store, venue, messenger } = await setup();
+    const photo = await store.saveMedia(venue.id, await jpeg(900, 1200), "image/jpeg");
+    const r = await call(tools, "social_post", input(photo.id, { caption: "", targets: ["facebook_story"] }));
+    expect(r.status).toBe("proposed");
+    const row = await rowOf(store, r.change_set_id as string);
+    expect(row.story_image_url).toMatch(/^https:\/\/media\.example\/storage\/.+\.jpg$/);
+    expect(messenger.photos.map((p) => [p.url, p.caption])).toEqual([[row.story_image_url, "Facebook история"]]);
+  });
+
+  it("does not resend a picture make_visual sent in this turn", async () => {
+    const sentPhotos = new Set<string>();
+    const { tools, store, venue, messenger } = await setup({ sentPhotos });
+    // A 4:5 picture (make_visual's post size): the Instagram post publishes it as it is, and it is already in the chat.
+    const picture = await store.saveMedia(venue.id, await jpeg(1080, 1350), "image/jpeg");
+    sentPhotos.add(picture.public_url);
+    const r = await call(tools, "social_post", input(picture.id, { targets: ["instagram_post", "instagram_story"] }));
+    expect(r.status).toBe("proposed");
+    const row = await rowOf(store, r.change_set_id as string);
+    expect(row.ig_feed_image_url).toBeUndefined();
+    expect(row.story_image_url).toMatch(/^https:\/\//);
+    expect(messenger.photos.map((p) => [p.url, p.caption])).toEqual([[row.story_image_url, "Instagram история"]]);
+    expect([...sentPhotos]).toEqual([picture.public_url]); // social_post only reads the set: its own sends are not recorded
+  });
+
+  it("shows every proposal of a turn its own pictures, even when an earlier proposal in the turn sent the same file", async () => {
+    const { tools, store, venue, messenger } = await setup();
+    // A 4:5 photo: the Facebook post and the Instagram post both publish the original, so both proposals show the same file.
+    const photo = await store.saveMedia(venue.id, await jpeg(1080, 1350), "image/jpeg");
+    const facebook = await call(tools, "social_post", input(photo.id, { targets: ["facebook_post"] }));
+    const instagram = await call(tools, "social_post", input(photo.id, { targets: ["instagram_post"] }));
+    expect([facebook.status, instagram.status]).toEqual(["proposed", "proposed"]);
+    expect(messenger.photos.map((p) => [p.url, p.caption])).toEqual([[photo.public_url, "Facebook пост"], [photo.public_url, "Instagram пост"]]);
+    // each picture is the message just above its own proposal
+    expect(messenger.sent.map((s) => s.setId)).toEqual([facebook.change_set_id, instagram.change_set_id]);
+    expect(messenger.sent.map((s) => Number(s.messageRef) - 1)).toEqual(messenger.photos.map((p) => Number(p.messageRef)));
+  });
+
+  it("make_visual's post and story, then their social_posts in the same turn: no picture is sent twice", async () => {
+    const pictures: { format: "post" | "story"; media_id: string; url: string }[] = [];
+    const visual: VisualClient = async () => ({ kind: "cutout", backdrop: "teal", pictures });
+    const { tools, store, venue, messenger, photo } = await setup({ visual }); // no sentPhotos given: one set of tools is one turn
+    for (const [format, width, height] of [["post", 1080, 1350], ["story", 1080, 1920]] as const) {
+      const m = await store.saveMedia(venue.id, await jpeg(width, height), "image/jpeg");
+      pictures.push({ format, media_id: m.id, url: m.public_url });
+    }
+    await call(tools, "make_visual", { media_id: photo.id, dish: "Флат уайт", formats: ["post", "story"] });
+    const post = await call(tools, "social_post", input(pictures[0].media_id, { targets: ["instagram_post", "facebook_post"] }));
+    const story = await call(tools, "social_post", input(pictures[1].media_id, { caption: "", targets: ["instagram_story", "facebook_story"] }));
+    expect([post.status, story.status]).toEqual(["proposed", "proposed"]);
+    // Both pictures publish as they are (4:5 and 9:16), so the chat shows each once: make_visual's, labelled with its format.
+    expect(messenger.photos.map((p) => [p.url, p.caption])).toEqual([[pictures[0].url, "Пост"], [pictures[1].url, "История"]]);
+    expect(messenger.sent.filter((s) => s.setId)).toHaveLength(2);
+  });
+
+  it("still proposes when a picture cannot be sent", async () => {
+    const { tools, store, venue, messenger } = await setup();
+    const tried: string[] = [];
+    // Meta's 24-hour window closed, a network error: sendPhoto answers null.
+    (messenger as Messenger).sendPhoto = async (_chatRef, url) => {
+      tried.push(url);
+      return null;
+    };
+    const photo = await store.saveMedia(venue.id, await jpeg(900, 1200), "image/jpeg");
+    const r = await call(tools, "social_post", input(photo.id, { targets: ["instagram_post", "instagram_story"] }));
+    expect(r.status).toBe("proposed");
+    expect(tried).toHaveLength(2);
+    const proposal = messenger.sent.find((s) => s.setId)!;
+    expect(proposal.setId).toBe(r.change_set_id);
+    expect((await store.getChangeSet(r.change_set_id as string)).message_ref).toBe(proposal.messageRef);
+  });
+
+  it("posts to stories without a copy when the photo is already 9:16", async () => {
+    const story = await setup();
+    const tall = await story.store.saveMedia(story.venue.id, await jpeg(1080, 1920), "image/jpeg");
+    const r = await call(story.tools, "social_post", input(tall.id, { caption: "", targets: ["instagram_story"] }));
+    expect(r.status).toBe("proposed");
+    const row = await rowOf(story.store, r.change_set_id as string);
+    expect(row.story_image_url).toBeUndefined();
+    expect(story.messenger.photos.map((p) => [p.url, p.caption])).toEqual([[tall.public_url, "Instagram история"]]);
+    // A Facebook post and story of that photo publish the same file: one picture, labelled with both places.
+    const both = await setup();
+    const same = await both.store.saveMedia(both.venue.id, await jpeg(1080, 1920), "image/jpeg");
+    const r2 = await call(both.tools, "social_post", input(same.id, { targets: ["facebook_post", "facebook_story"] }));
+    expect((await rowOf(both.store, r2.change_set_id as string)).story_image_url).toBeUndefined();
+    expect(both.messenger.photos.map((p) => [p.url, p.caption])).toEqual([[same.public_url, "Facebook пост, Facebook история"]]);
+  });
+
+  it("keeps the original for stories when this server cannot make the copy", async () => {
+    vi.resetModules();
+    vi.doMock("sharp", () => {
+      throw new Error("Could not load the sharp module");
+    });
+    try {
+      const { makeTools: withoutSharp } = await import("@/src/agent/tools");
+      const { deps, store, venue, messenger } = await setup();
+      const photo = await store.saveMedia(venue.id, await jpeg(900, 1200), "image/jpeg");
+      const r = await call(withoutSharp(deps), "social_post", input(photo.id, { caption: "", targets: ["instagram_story"] }));
+      expect(r.status).toBe("proposed");
+      expect((await rowOf(store, r.change_set_id as string)).story_image_url).toBeUndefined();
+      expect(messenger.photos.map((p) => [p.url, p.caption])).toEqual([[photo.public_url, "Instagram история"]]);
+    } finally {
+      vi.doUnmock("sharp");
+      vi.resetModules();
+    }
+  });
+
+  it("refuses a story photo it cannot read, before proposing or sending anything", async () => {
+    const { tools, store, venue, messenger, files } = await setup();
+    const broken = await store.saveMedia(venue.id, new Uint8Array([0xff, 0xd8, 0xff, 0xe0, 1, 2, 3]), "image/jpeg");
+    expect((await call(tools, "social_post", input(broken.id, { caption: "", targets: ["instagram_story"] }))).error).toMatch(/Could not read this photo as an image/);
+    const gone = await store.saveMedia(venue.id, await jpeg(900, 1200), "image/jpeg");
+    files.delete(gone.public_url);
+    expect((await call(tools, "social_post", input(gone.id, { caption: "", targets: ["facebook_story"] }))).error).toMatch(/Could not read the photo.*try again/);
+    expect(await store.listChangeSets(venue.id)).toEqual([]);
+    expect(messenger.photos).toEqual([]);
+  });
+
+  it("tells a photo over 8 MB apart from one it could not read: a retry cannot help the first", async () => {
+    const { tools, store, venue, messenger } = await setup();
+    const huge = await store.saveMedia(venue.id, new Uint8Array(8 * 1024 * 1024 + 1), "image/jpeg");
+    const tooLarge = "This photo is larger than 8 MB, Instagram's limit; ask the owner to send it again as a regular photo (not as a file) or a smaller one.";
+    expect((await call(tools, "social_post", input(huge.id, { targets: ["instagram_post"] }))).error).toBe(tooLarge);
+    expect(await store.listChangeSets(venue.id)).toEqual([]);
+    expect(messenger.photos).toEqual([]);
+    // Exactly 8 MB is within the limit: it is read, and fails only as the non-image it is.
+    const limit = await store.saveMedia(venue.id, new Uint8Array(8 * 1024 * 1024), "image/jpeg");
+    expect((await call(tools, "social_post", input(limit.id, { targets: ["instagram_post"] }))).error).toMatch(/Could not read this photo as an image/);
+  });
+
+  it("refuses a story copy that storage gives no public https address", async () => {
+    const { tools, store, venue, messenger } = await setup();
+    const photo = await store.saveMedia(venue.id, await jpeg(900, 1200), "image/jpeg");
+    const save = store.saveMedia.bind(store);
+    store.saveMedia = async (venueId: string, bytes: Uint8Array, type: string) => ({ ...(await save(venueId, bytes, type)), public_url: "memory://media/copy.jpg" });
+    expect((await call(tools, "social_post", input(photo.id, { caption: "", targets: ["instagram_story"] }))).error).toMatch(/story copy has no public https address/);
+    expect(messenger.photos).toEqual([]);
+  });
+
+  it("sends no picture when the proposal cannot be saved", async () => {
+    const { tools, store, venue, messenger } = await setup();
+    const photo = await store.saveMedia(venue.id, await jpeg(900, 1200), "image/jpeg");
+    store.createChangeSet = async () => {
+      throw new Error("database unavailable");
+    };
+    expect((await call(tools, "social_post", input(photo.id, { targets: ["instagram_post", "instagram_story"] }))).error).toBe("database unavailable");
+    expect(messenger.photos).toEqual([]);
+  });
+
+  it("undoing a social post sends no pictures", async () => {
+    const { tools, deps, store, venue, messenger } = await setup();
+    const photo = await store.saveMedia(venue.id, await jpeg(900, 1200), "image/jpeg");
+    const r = await call(tools, "social_post", input(photo.id, { targets: ["facebook_post", "instagram_post", "instagram_story"] }));
+    expect(messenger.photos.map((p) => p.caption)).toEqual(["Instagram пост", "Facebook пост", "Instagram история"]);
+    await handleDecision({ store, messenger: new FakeMessenger(), now: () => T0 }, "tg:1001", "apply", r.change_set_id as string);
+    expect((await store.getChangeSet(r.change_set_id as string)).status).toBe("applied");
+    // A later message asks to undo it: the undo proposal (after = null) shows no pictures.
+    const u = await call(makeTools(deps), "undo", { change_set_id: r.change_set_id });
+    expect(u.status).toBe("proposed");
+    expect(messenger.sent.at(-1)).toMatchObject({ setId: u.change_set_id });
+    expect(messenger.photos).toHaveLength(3);
   });
 });
 

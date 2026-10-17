@@ -2,6 +2,7 @@
 import { describe, expect, it } from "vitest";
 import { makeTools, type AgentDeps } from "@/src/agent/tools";
 import { SYSTEM_PROMPT } from "@/src/agent/prompt";
+import type { Messenger } from "@/src/bot/messenger";
 import type { VisualClient } from "@/src/visual/client";
 import type { VisualRequest } from "@/src/visual/service";
 import { FakeMessenger, makeDemo } from "./helpers";
@@ -45,6 +46,28 @@ describe("make_visual", () => {
     expect(notes.join(" ")).toContain(`from photo ${photo.id}`);
     expect(notes.join(" ")).toContain("post vis-post-1-0");
     expect(notes.join(" ")).toContain("story vis-story-1-1");
+  });
+
+  it("labels each picture with its format in the owner's language", async () => {
+    const bg = await setup();
+    await call(bg.tools, "make_visual", { media_id: bg.photo.id, dish: "Флат уайт", formats: ["post", "story"] });
+    expect(bg.messenger.photos.map((p) => [p.url, p.caption])).toEqual([["https://media.example/post.jpg", "Пост"], ["https://media.example/story.jpg", "История"]]);
+    const en = await setup();
+    const english = makeTools({ ...en.deps, member: { ...en.deps.member, lang: "en" } });
+    await call(english, "make_visual", { media_id: en.photo.id, dish: "Flat white", formats: ["post", "story"] });
+    expect(en.messenger.photos.map((p) => [p.url, p.caption])).toEqual([["https://media.example/post.jpg", "Post"], ["https://media.example/story.jpg", "Story"]]);
+  });
+
+  it("records every picture it sends in sentPhotos", async () => {
+    const sentPhotos = new Set<string>();
+    const { tools, photo } = await setup({ sentPhotos });
+    await call(tools, "make_visual", { media_id: photo.id, dish: "Флат уайт", formats: ["post", "story"] });
+    expect([...sentPhotos]).toEqual(["https://media.example/post.jpg", "https://media.example/story.jpg"]);
+    // A picture that did not reach the chat is not recorded, so social_post sends it with its label.
+    const failing = await setup({ sentPhotos: new Set() });
+    (failing.messenger as Messenger).sendPhoto = async (_chatRef, url) => (url.endsWith("/story.jpg") ? null : "1");
+    await call(failing.tools, "make_visual", { media_id: failing.photo.id, dish: "Флат уайт", formats: ["post", "story"] });
+    expect([...failing.deps.sentPhotos!]).toEqual(["https://media.example/post.jpg"]);
   });
 
   it("without Instagram or Facebook still makes the picture and says how to connect", async () => {

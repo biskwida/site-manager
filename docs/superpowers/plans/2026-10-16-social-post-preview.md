@@ -43,7 +43,7 @@
 **Files:**
 - Modify: `src/agent/social-image.ts`
 - Modify: `src/domain/color.ts`
-- Test: `test/social-image-story.test.ts` (create), `test/color.test.ts` (extend; create if absent)
+- Test: `test/social-image-story.test.ts` (create), `test/domain-color.test.ts` (extend)
 
 **Interfaces:**
 - Produces: `storyImage(bytes: Uint8Array, background: string): Promise<StoryImage>` where `type StoryImage = { kind: "ok" } | { kind: "made"; bytes: Uint8Array } | { kind: "unavailable" } | { kind: "unreadable" }` (`ok` = already 9:16, use the photo as it is; `unavailable` = sharp could not load).
@@ -71,9 +71,9 @@ it("storyBackground uses the theme background, else the accent mixed 80% to whit
 });
 ```
 
-- [ ] **Step 2: Run** `npx vitest run test/social-image-story.test.ts test/color.test.ts` — expected: FAIL (`storyImage` / `storyBackground` not exported).
+- [ ] **Step 2: Run** `npx vitest run test/social-image-story.test.ts test/domain-color.test.ts` — expected: FAIL (`storyImage` / `storyBackground` not exported).
 
-- [ ] **Step 3: Implement `storyImage` in `src/agent/social-image.ts`** with the file's existing `loadSharp()`: `.rotate()`, read size, `ok` when within 1% of 9/16, else `.resize(1080, 1920, { fit: "contain", background })`, `.jpeg({ quality: 88, mozjpeg: true })`; sharp missing → `unavailable`; decode error → `unreadable`. **Implement `storyBackground` in `src/domain/color.ts`** with the existing `parseHex`.
+- [ ] **Step 3: Implement `storyImage` in `src/agent/social-image.ts`** with the file's existing `loadSharp()`: `.rotate()`, read size, `ok` when within 1% of 9/16, else `.resize(1080, 1920, { fit: "contain", background })`, `.jpeg({ quality: 90 })` (baseline, the feed copy's settings; final-review ruling); sharp missing → `unavailable`; decode error → `unreadable`. **Implement `storyBackground` in `src/domain/color.ts`** with the existing `parseHex`.
 
 - [ ] **Step 4: Run** the same command — expected: PASS.
 
@@ -115,7 +115,7 @@ it("says stories show no text when a post and a story share a caption", () => {
 
 - [ ] **Step 2: Run** `npx vitest run test/social-preview.test.ts` — expected: FAIL.
 
-- [ ] **Step 3: Implement** the field and `previewPictures` (group targets by the URL each publishes: `instagram_post` → `ig_feed_image_url ?? image_url`, `facebook_post` → `image_url`, `*_story` → `story_image_url ?? image_url`; label = networks joined with " + " in Instagram, Facebook order, then the format word from the file's existing `FORMAT` table; posts before stories). Exact labels: bg "пост"/"история", en "post"/"story"; the English story line reads "Instagram + Facebook story". Add the stories line (bg "(историите се публикуват без текст)", en "(stories are published without text)") to `socialPreviewLines` when the targets mix posts and stories and the caption is not empty.
+- [ ] **Step 3: Implement** the field and `previewPictures` (one picture per published file: `instagram_post` publishes `ig_feed_image_url ?? image_url`, `facebook_post` `image_url`, `*_story` `story_image_url ?? image_url`; the places that publish the same URL merge into one picture whose label joins the labels of its formats with ", ", where a format's label is its networks joined with " + " in Instagram, Facebook order, then the format word from the file's existing `FORMAT` table; posts before stories, pictures in the order their file first appears). Exact labels: bg "пост"/"история", en "post"/"story"; the English story line reads "Instagram + Facebook story", and a file that a post and a story both publish reads "Facebook post, Facebook story". Add the stories line (bg "(историите се публикуват без текст)", en "(stories are published without text)") to `socialPreviewLines` when the targets mix posts and stories and the caption is not empty.
 
 - [ ] **Step 4: Run** — expected: PASS.
 
@@ -158,7 +158,7 @@ And in `test/agent-visual-tool.test.ts`: `it("records every picture it sends in 
 
 - [ ] **Step 2: Run** `npx vitest run test/agent-social-tool.test.ts test/agent-visual-tool.test.ts` — expected: FAIL.
 
-- [ ] **Step 3: Implement.** In `social_post`: read the photo once when any Instagram post or any story is targeted (reuse the existing `readPhoto` bytes); for story targets call `storyImage(bytes, storyBackground(site.venue.theme))`; `made` → `saveMedia(venueId, bytes, "image/jpeg")` (https required, same check as the padded copy) → `row.story_image_url`; `unavailable` → keep the original (no refusal; stories published the original before this change); `unreadable` → the existing "Could not read this photo" error. After `createChangeSet` and before `sendProposal`: for each `previewPictures(row, k.lang)` entry whose URL is not in `d.sentPhotos`, `await d.messenger.sendPhoto(d.chatRef, url, label)` and add the URL. In make_visual: add each sent URL to `d.sentPhotos`.
+- [ ] **Step 3: Implement.** In `social_post`: read the photo once when any Instagram post or any story is targeted (reuse the existing `readPhoto` bytes); for story targets call `storyImage(bytes, storyBackground(site.venue.theme))`; `made` → `saveMedia(venueId, bytes, "image/jpeg")` (https required, same check as the padded copy) → `row.story_image_url`; `unavailable` → keep the original (no refusal; stories published the original before this change); `unreadable` → the existing "Could not read this photo" error. After `createChangeSet` and before `sendProposal`: for each `previewPictures(row, k.lang)` entry whose URL is not in `d.sentPhotos`, `await d.messenger.sendPhoto(d.chatRef, url, label)`; social_post never adds to the set, so each proposal shows all its own pictures (final-review ruling). In make_visual: add each sent URL to `d.sentPhotos`.
 
 - [ ] **Step 4: Run** the same command, then the whole suite `npx vitest run` — expected: PASS.
 
@@ -186,7 +186,7 @@ it("an older row without a story copy publishes the original", async () => { /* 
 
 - [ ] **Step 2: Run** `npx vitest run test/destinations-social.test.ts` — expected: FAIL on the first two.
 
-- [ ] **Step 3: Implement** `row.story_image_url ?? row.image_url` for both story paths; feed posts unchanged.
+- [ ] **Step 3: Implement** both destinations publish `publishedUrl(row, target)` (src/domain/social-preview.ts), the rule the preview uses: the story copy for stories, the padded copy for the Instagram feed, else the original (Task 2 ruling).
 
 - [ ] **Step 4: Run** `npx vitest run && npx tsc --noEmit -p . && npm run -s lint` — expected: all pass, no errors.
 

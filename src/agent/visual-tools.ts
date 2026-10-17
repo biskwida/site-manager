@@ -1,13 +1,18 @@
 // src/agent/visual-tools.ts
 // The make_visual tool: turns a photo the owner sent into a finished Instagram picture (post 4:5 and/or story 9:16) and
 // sends it to the chat. Nothing is published here: the agent then proposes social_post with the new picture, so the
-// owner sees the picture with ✅ / ✏️ / ❌ under it (src/agent/social-tools.ts).
+// owner sees the picture with ✅ / ✏️ / ❌ under it (src/agent/social-tools.ts), which does not send it a second time.
 import { betaZodTool } from "@anthropic-ai/sdk/helpers/beta/zod";
 import { z } from "zod";
+import { FORMAT } from "../domain/social-preview";
+import type { Lang } from "../domain/types";
 import { BACKDROPS } from "../visual/palette";
-import type { AgentDeps, ToolKit } from "./tools";
+import type { Format } from "../visual/template";
+import type { ToolDeps, ToolKit } from "./tools";
 
 const NAME_MAX = 40;
+/** The caption of each picture in the chat: its format word (the table social_post's labels use), capitalised, in the owner's language. */
+const formatCaption = (format: Format, lang: Lang): string => FORMAT[format][lang].replace(/^./, (c) => c.toUpperCase());
 
 export const MakeVisualSchema = z.object({
   media_id: z.string().describe("The media_id of the owner's photo (not of an earlier picture: always start from the photo)."),
@@ -18,7 +23,7 @@ export const MakeVisualSchema = z.object({
   formats: z.array(z.enum(["post", "story"])).describe('"post" (feed, 4:5) and/or "story" (9:16). "и като стори", "и стори" → both; "само стори" → ["story"]; otherwise ["post"].'),
 });
 
-export function visualTools(d: AgentDeps, k: ToolKit) {
+export function visualTools(d: ToolDeps, k: ToolKit) {
   const visual = d.visual;
   if (!visual) return [];
   const make = betaZodTool({
@@ -34,7 +39,11 @@ export function visualTools(d: AgentDeps, k: ToolKit) {
         if (line && Array.from(line).length > NAME_MAX) throw new Error(`The extra line must be at most ${NAME_MAX} characters; shorten it.`);
         const formats = input.formats.length ? [...new Set(input.formats)] : (["post"] as const);
         const r = await visual({ venueId: d.venueId, mediaId: input.media_id, dish, price: input.price?.trim() || null, line, colour: input.colour?.trim() || null, formats: [...formats] });
-        for (const p of r.pictures) await d.messenger.sendPhoto(d.chatRef, p.url);
+        // Each picture carries its format as its label, and each one that reaches the chat is recorded, so the social_post that
+        // follows in this turn does not send it again.
+        for (const p of r.pictures) {
+          if ((await d.messenger.sendPhoto(d.chatRef, p.url, formatCaption(p.format, k.lang))) !== null) d.sentPhotos.add(p.url);
+        }
         d.notes?.push(`visual from photo ${input.media_id}: ${r.pictures.map((p) => `${p.format} ${p.media_id}`).join(", ")} (backdrop ${r.backdrop}${r.kind === "photo" ? ", photo in a card: no clean cut-out" : ""})`);
         const social = d.social;
         const next = social && (social.instagram || social.facebook)

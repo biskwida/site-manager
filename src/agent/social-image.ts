@@ -3,6 +3,8 @@
 // (never cropped) to the nearest limit with a background colour sampled from the edges it extends, and re-encoded as JPEG.
 // Uses sharp (installed with Next.js for image optimisation); when it cannot load, the shape is read from the JPEG header and an
 // out-of-range photo is reported as "cannot pad here" so the tool can refuse it clearly.
+// Stories are 9:16 JPEGs: storyImage puts the whole photo, upright and uncropped, on a 1080×1920 canvas of the café's colour (a
+// photo that already is 9:16 needs no copy).
 import type sharpType from "sharp";
 
 export const IG_MIN_RATIO = 4 / 5;
@@ -88,4 +90,41 @@ export async function igFeedImage(bytes: Uint8Array): Promise<IgFeedImage> {
   const background = mean(base.data, w, pixels);
   const padded = await sharp(base.data, { raw: { width: w, height: h, channels: 3 } }).extend({ ...pad, background }).jpeg({ quality: 90 }).toBuffer();
   return { kind: "padded", bytes: new Uint8Array(padded), ratio, ...out };
+}
+
+const STORY_WIDTH = 1080;
+const STORY_HEIGHT = 1920;
+const STORY_RATIO = 9 / 16;
+/** A photo whose shape is within this share of 9:16 is used as it is. */
+const STORY_TOLERANCE = 0.01;
+
+export type StoryImage =
+  | { kind: "ok" }
+  | { kind: "made"; bytes: Uint8Array }
+  | { kind: "unavailable" }
+  | { kind: "unreadable" };
+
+/**
+ * What the Instagram story needs for this photo: nothing when it already is 9:16 (within 1%, as the owner sees it, EXIF orientation
+ * applied), otherwise a 1080×1920 JPEG with the whole photo, upright and never cropped, centred on `background` (#rrggbb).
+ * Without sharp: "unavailable".
+ */
+export async function storyImage(bytes: Uint8Array, background: string): Promise<StoryImage> {
+  const sharp = await loadSharp();
+  if (!sharp) return { kind: "unavailable" };
+  try {
+    const { width, height, orientation } = await sharp(bytes).metadata();
+    // EXIF orientations 5 to 8 turn the photo a quarter, so it is shown height × width.
+    const [w, h] = [5, 6, 7, 8].includes(orientation ?? 0) ? [height, width] : [width, height];
+    if (Math.abs(w / h - STORY_RATIO) <= STORY_RATIO * STORY_TOLERANCE) return { kind: "ok" };
+    const story = await sharp(bytes)
+      .pipelineColourspace("srgb") // else a one-channel greyscale photo turns the background grey as well
+      .rotate()
+      .resize(STORY_WIDTH, STORY_HEIGHT, { fit: "contain", background })
+      .jpeg({ quality: 90 }) // the feed copy's settings (baseline): that encoding is proven live on Instagram
+      .toBuffer();
+    return { kind: "made", bytes: new Uint8Array(story) };
+  } catch {
+    return { kind: "unreadable" };
+  }
 }
