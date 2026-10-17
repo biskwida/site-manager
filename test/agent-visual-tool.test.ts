@@ -103,6 +103,41 @@ describe("make_visual", () => {
   });
 });
 
+describe("make_visual price from the menu", () => {
+  /** A menu item at exactly 4 €, so the price on the card cannot be a guess. */
+  async function withItem(lang: "bg" | "en") {
+    const s = await setup();
+    const item = await s.store.insertItem({ venue_id: s.venue.id, category_id: s.categories["Coffee"]?.id ?? Object.values(s.categories)[0].id, name_bg: "Капучино", name_en: "Cappuccino", desc_bg: "", desc_en: "", price_eur: 4, allergens: [], position: 99 });
+    const tools = lang === "bg" ? s.tools : makeTools({ ...s.deps, member: { ...s.deps.member, lang: "en" } });
+    return { ...s, item, tools };
+  }
+
+  it("prints the menu price for a menu item, in the owner's format", async () => {
+    const { tools, photo, item, requests } = await withItem("bg");
+    await call(tools, "make_visual", { media_id: photo.id, dish: "Капучино", item_id: item.id, price: "3,20 €", formats: ["post"] });
+    expect(requests[0].price).toBe("4,00 €");
+  });
+
+  it("an English owner gets €4.00", async () => {
+    const { tools, photo, item, requests } = await withItem("en");
+    await call(tools, "make_visual", { media_id: photo.id, dish: "Cappuccino", item_id: item.id, price: "3,20 €", formats: ["post"] });
+    expect(requests[0].price).toBe("€4.00");
+  });
+
+  it("without item_id the model's price is used as before", async () => {
+    const { tools, photo, requests } = await withItem("bg");
+    await call(tools, "make_visual", { media_id: photo.id, dish: "Капучино", price: "3,20 €", formats: ["post"] });
+    expect(requests[0].price).toBe("3,20 €");
+  });
+
+  it("an unknown item_id is an error and nothing is made", async () => {
+    const { tools, photo, requests, messenger } = await withItem("bg");
+    expect((await call(tools, "make_visual", { media_id: photo.id, dish: "Капучино", item_id: "nope", formats: ["post"] })).error).toBe("item_id not found; use an id from get_menu.");
+    expect(requests).toHaveLength(0);
+    expect(messenger.photos).toHaveLength(0);
+  });
+});
+
 const NO_OBJECT = "Could not separate the object from this photo; ask the owner for a photo of the item alone on a plain surface, taken straight on.";
 
 async function setupMenu(result: MenuPhotoResult | Error = { media_id: "menu-1", url: "https://media.example/menu.jpg", style: "white" }, over: Partial<AgentDeps> = {}) {

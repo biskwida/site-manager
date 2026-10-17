@@ -4,6 +4,7 @@
 // owner sees the picture with ✅ / ✏️ / ❌ under it (src/agent/social-tools.ts), which does not send it a second time.
 import { betaZodTool } from "@anthropic-ai/sdk/helpers/beta/zod";
 import { z } from "zod";
+import { formatPrice } from "../domain/format";
 import { FORMAT } from "../domain/social-preview";
 import type { Lang } from "../domain/types";
 import { BACKDROPS } from "../visual/palette";
@@ -29,7 +30,8 @@ const PICTURE_LANGUAGE =
 export const MakeVisualSchema = z.object({
   media_id: z.string().describe("The media_id of the owner's photo (not of an earlier picture: always start from the photo)."),
   dish: z.string().describe(`The name on the picture, as the owner said it, at most ${NAME_MAX} characters. ${PICTURE_LANGUAGE}`),
-  price: z.string().optional().describe(`The price as printed on the picture, in the picture's language ("4,30 €" for Bulgarian, "€4.30" for English). From the owner, else from get_menu for that item, else omit. ${PICTURE_LANGUAGE}`),
+  item_id: z.string().optional().describe("The menu item when the dish is on the menu; the price then comes from the menu. Id from get_menu."),
+  price: z.string().optional().describe(`The price as printed on the picture, in the picture's language ("4,30 €" for Bulgarian, "€4.30" for English). Omit when you pass item_id; else the owner's price, else omit — never estimate. ${PICTURE_LANGUAGE}`),
   line: z.string().optional().describe(`An optional short line under the price ("Със сърце", "Ново", "Само днес"), at most ${NAME_MAX} characters. ${PICTURE_LANGUAGE}`),
   colour: z.string().optional().describe(`Backdrop: one of ${BACKDROPS.join(", ")}, or a #rrggbb colour. Omit to let the picture pick one that suits the photo. Words: тюркоаз/синьо-зелено → teal, праскова → peach, крем/бежово → cream, зелено → sage, розово → rose, синьо → sky, жълто → butter, тъмно/черно → dark.`),
   formats: z.array(z.enum(["post", "story"])).describe('"post" (feed, 4:5) and/or "story" (9:16). "и като стори", "и стори" → both; "само стори" → ["story"]; otherwise ["post"].'),
@@ -70,7 +72,14 @@ export function visualTools(d: ToolDeps, k: ToolKit) {
         if (!dish || Array.from(dish).length > NAME_MAX) throw new Error(`The name on the picture must be 1–${NAME_MAX} characters; shorten it.`);
         if (line && Array.from(line).length > NAME_MAX) throw new Error(`The extra line must be at most ${NAME_MAX} characters; shorten it.`);
         const formats = input.formats.length ? [...new Set(input.formats)] : (["post"] as const);
-        const r = await visual({ venueId: d.venueId, mediaId: input.media_id, dish, price: input.price?.trim() || null, line, colour: input.colour?.trim() || null, formats: [...formats] });
+        // A menu item's price is the menu's, printed by the code in the picture's language: whatever the model passed as `price` is ignored.
+        let price = input.price?.trim() || null;
+        if (input.item_id !== undefined) {
+          const item = (await k.site()).items.find((i) => i.id === input.item_id);
+          if (!item) throw new Error("item_id not found; use an id from get_menu.");
+          price = formatPrice(item.price_eur, k.lang);
+        }
+        const r = await visual({ venueId: d.venueId, mediaId: input.media_id, dish, price, line, colour: input.colour?.trim() || null, formats: [...formats] });
         // Each picture carries its format as its label, and each one that reaches the chat is recorded, so the social_post that
         // follows in this turn does not send it again.
         for (const p of r.pictures) {

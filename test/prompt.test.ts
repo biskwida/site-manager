@@ -75,7 +75,7 @@ describe("tool descriptions: the language of captions and picture text", () => {
     }
     expect(MakeVisualSchema.shape.dish.description).toContain("at most 40 characters"); // what was there is kept
     expect(MakeVisualSchema.shape.line.description).toContain("at most 40 characters");
-    expect(MakeVisualSchema.shape.price.description).toContain("From the owner, else from get_menu for that item, else omit.");
+    expect(MakeVisualSchema.shape.price.description).toContain("Omit when you pass item_id; else the owner's price, else omit — never estimate.");
   });
 });
 
