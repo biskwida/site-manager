@@ -1,6 +1,6 @@
 // test/agent-visual-tool.test.ts
 import { describe, expect, it } from "vitest";
-import { MakeMenuPhotoSchema } from "@/src/agent/visual-tools";
+import { colourWord, MakeMenuPhotoSchema } from "@/src/agent/visual-tools";
 import { makeTools, type AgentDeps } from "@/src/agent/tools";
 import { SYSTEM_PROMPT } from "@/src/agent/prompt";
 import type { Messenger } from "@/src/bot/messenger";
@@ -201,7 +201,7 @@ describe("make_menu_photo", () => {
   });
 
   const notes: [string, MenuPhotoResult, RegExp | null][] = [
-    ["matched", { media_id: "m", url: "https://media.example/m.jpg", style: { background: "#f3eadb", matched: 3, of: 4 } }, /^Used the backdrop #f3eadb that 3 of your 4 menu photos share\.$/],
+    ["matched", { media_id: "m", url: "https://media.example/m.jpg", style: { background: "#f4efe6", matched: 3, of: 4 } }, /^Used the cream backdrop that 3 of your 4 menu photos share\.$/],
     ["no_photos", { media_id: "m", url: "https://media.example/m.jpg", style: "white", reason: "no_photos" }, /^Your other items have no photos, so I used white\.$/],
     ["too_few", { media_id: "m", url: "https://media.example/m.jpg", style: "white", reason: "too_few" }, /^Only one other item has a photo, so I used white\.$/],
     ["unreadable", { media_id: "m", url: "https://media.example/m.jpg", style: "white", reason: "unreadable" }, /^I couldn't read your other menu photos, so I used white\.$/],
@@ -216,6 +216,23 @@ describe("make_menu_photo", () => {
       else expect(r.note).toBeUndefined();
     });
   }
+
+  it("names the backdrop with the nearest plain colour word, decided in code", () => {
+    expect(colourWord("#f4efe6")).toBe("cream");
+    expect(colourWord("#ffffff")).toBe("white");
+    expect(colourWord("#e9e9e9")).toBe("light grey");
+    expect(colourWord("#e8dcc4")).toBe("beige");
+    expect(colourWord("#f6d0d4")).toBe("pink");
+    expect(colourWord("#cfe1f5")).toBe("light blue");
+    expect(colourWord("#222222")).toBe("dark");
+    expect(colourWord("#8f8f8c")).toBe("grey");
+  });
+
+  it("never puts the hex in the matched note", async () => {
+    const m = await setupMenu({ media_id: "m", url: "https://media.example/m.jpg", style: { background: "#f4efe6", matched: 3, of: 4 } });
+    const r = await call(m.tools, "make_menu_photo", { media_id: m.photo.id, item_id: m.item.id, style: "match" });
+    expect(String(r.note)).not.toMatch(/#/);
+  });
 
   it("refuses an unknown item before asking the service", async () => {
     const m = await setupMenu();

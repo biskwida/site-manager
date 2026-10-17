@@ -7,6 +7,7 @@ import { z } from "zod";
 import { formatPrice } from "../domain/format";
 import { FORMAT } from "../domain/social-preview";
 import type { Lang } from "../domain/types";
+import { deltaE76, rgbToLab } from "../visual/lab";
 import { BACKDROPS } from "../visual/palette";
 import type { MenuPhotoResult } from "../visual/service";
 import type { Format } from "../visual/template";
@@ -45,9 +46,34 @@ export const MakeMenuPhotoSchema = z.object({
 
 const NO_OBJECT = "Could not separate the object from this photo; ask the owner for a photo of the item alone on a plain surface, taken straight on.";
 
+/** Plain colour words and their swatches: rule 11's hexes for white, cream, beige and light grey, the picture backdrops' for the rest. */
+const COLOUR_WORDS: [string, string][] = [
+  ["white", "#fbfaf7"],
+  ["cream", "#f3eadb"],
+  ["beige", "#e8dcc4"],
+  ["light grey", "#ececea"],
+  ["grey", "#9b9b98"],
+  ["pink", "#f6d0d4"],
+  ["peach", "#f9d2b4"],
+  ["sage", "#d6e4cf"],
+  ["light blue", "#cfe1f5"],
+  ["butter yellow", "#f6e7a8"],
+  ["dark", "#2a2522"],
+];
+const rgbOf = (hex: string): [number, number, number] => [1, 3, 5].map((i) => parseInt(hex.slice(i, i + 2), 16)) as [number, number, number];
+const SWATCHES = COLOUR_WORDS.map(([word, hex]) => ({ word, lab: rgbToLab(...rgbOf(hex)) }));
+
+/** The plain word for a #rrggbb colour, the nearest swatch by CIE76: the owner recognises "cream", not "#f4efe6". */
+export function colourWord(hex: string): string {
+  const lab = rgbToLab(...rgbOf(hex));
+  let best = SWATCHES[0];
+  for (const s of SWATCHES) if (deltaE76(lab, s.lab) < deltaE76(lab, best.lab)) best = s;
+  return best.word;
+}
+
 /** The one line the agent tells the owner about the backdrop that was used; null for plain white that was asked for. */
 function menuPhotoNote(r: Extract<MenuPhotoResult, { media_id: string }>): string | null {
-  if (r.style !== "white") return `Used the backdrop ${r.style.background} that ${r.style.matched} of your ${r.style.of} menu photos share.`;
+  if (r.style !== "white") return `Used the ${colourWord(r.style.background)} backdrop that ${r.style.matched} of your ${r.style.of} menu photos share.`;
   switch (r.reason) {
     case "no_photos": return "Your other items have no photos, so I used white.";
     case "too_few": return "Only one other item has a photo, so I used white.";

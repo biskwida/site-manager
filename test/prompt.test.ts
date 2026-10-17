@@ -95,8 +95,13 @@ describe("SYSTEM_PROMPT: website photos", () => {
     expect(SYSTEM_PROMPT).toContain("never put make_visual's card on the site");
   });
 
-  it("tells the agent to name the backdrop colour in plain words and never show the hex", () => {
-    expect(SYSTEM_PROMPT).toContain("Name the backdrop colour in that line with the nearest plain colour word (cream, white, light grey, beige, pink, light blue, using rule 11's words), and never show the hex code.");
+  it("tells the agent to pass on the note's colour word as it is", () => {
+    expect(SYSTEM_PROMPT).toContain("The note already names the backdrop colour in plain words: tell it as it is.");
+    expect(SYSTEM_PROMPT).not.toContain("nearest plain colour word");
+  });
+
+  it("redoes a menu photo from the original photo when the owner asks for a change", () => {
+    expect(SYSTEM_PROMPT).toContain("A change to a proposed menu photo (\"направи го като другите\", \"по-голямо\", \"бял фон\"): cancel_change_set the waiting proposal (unless the owner tapped ✏️, rule 7), call make_menu_photo again from the ORIGINAL photo (its media_id is in the conversation as \"menu photo from photo …\"), then propose set_item_image again.");
   });
 
   it("keeps a photo sent as it is on set_item_image, pointing at the casual-speech rule", () => {
