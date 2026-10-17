@@ -66,6 +66,17 @@ describe("renderMenuPhoto", () => {
   });
 });
 
+describe("renderMenuPhoto bounding box", () => {
+  it("centres an object that touches the top-left corner by its own bounding box", async () => {
+    const corner = await sharp({ create: { width: 400, height: 400, channels: 4, background: { r: 0, g: 0, b: 0, alpha: 0 } } }).composite([{ input: Buffer.from(await redBox(100, 60)), left: 0, top: 0 }]).png().toBuffer();
+    const b = await redBounds(await renderMenuPhoto(new Uint8Array(corner)));
+    expect(b.w).toBeGreaterThanOrEqual(198);
+    expect(b.w).toBeLessThanOrEqual(200);
+    expect(Math.abs(b.cx - 599.5)).toBeLessThanOrEqual(2);
+    expect(Math.abs(b.cy - 599.5)).toBeLessThanOrEqual(2);
+  });
+});
+
 async function setup(over: Partial<VisualDeps> = {}) {
   const demo = await makeDemo();
   const photo = await demo.store.saveMedia(demo.venue.id, await redBox(40, 40), "image/png");
@@ -179,6 +190,23 @@ describe("makeMenuPhoto style", () => {
     expect(r).toMatchObject({ style: "white", reason: "no_photos" });
     const [pr, pg, pb] = await pixel(await bytesOf(s, (r as { media_id: string }).media_id), 5, 5);
     expect([pr, pg, pb].every((v) => v >= 250)).toBe(true);
+  });
+  it("says unreadable when item photos exist but fewer than 2 can be read", async () => {
+    const s = await withItemPhotos(["#f4efe6", "#f4efe6", "#f4efe6"]);
+    const photoUrl = (await s.store.getMedia(s.photo.id))!.public_url;
+    const onlyOwn: VisualDeps = { ...s.deps, read: async (u) => (u === photoUrl || u.includes("/cutouts/") ? s.deps.read(u) : null) };
+    expect(await makeMenuPhoto(onlyOwn, { venueId: s.venue.id, mediaId: s.photo.id, style: "match" })).toMatchObject({ style: "white", reason: "unreadable" });
+  });
+  it("does not let the item's current cream menu photo vote when it is re-run on the original", async () => {
+    const s = await withItemPhotos(["#222222", "#c8e6d0"]);
+    const category = Object.values(s.categories)[0];
+    const cream = await s.store.saveMedia(s.venue.id, await venuePhoto("#f4efe6"), "image/png");
+    const item = await s.store.insertItem({ venue_id: s.venue.id, category_id: category.id, name_bg: "Я", name_en: "Y", desc_bg: "", desc_en: "", price_eur: 3, allergens: [], position: 300, image_media_id: cream.id });
+    const cream2 = await s.store.saveMedia(s.venue.id, await venuePhoto("#f4efe6"), "image/png");
+    await s.store.insertItem({ venue_id: s.venue.id, category_id: category.id, name_bg: "Я2", name_en: "Y2", desc_bg: "", desc_en: "", price_eur: 3, allergens: [], position: 301, image_media_id: cream2.id });
+    // Without itemId both cream photos vote (2 of 4); with it the item's own cream photo is left out (matched 1 is not a group).
+    expect(await makeMenuPhoto(s.deps, { venueId: s.venue.id, mediaId: s.photo.id, style: "match" })).toMatchObject({ style: { matched: 2, of: 4 } });
+    expect(await makeMenuPhoto(s.deps, { venueId: s.venue.id, mediaId: s.photo.id, style: "match", itemId: item.id })).toMatchObject({ style: "white", reason: "mixed" });
   });
   it("falls back to white as mixed when the backdrops disagree", async () => {
     const s = await withItemPhotos(["#ffffff", "#222222", "#c8e6d0"]);

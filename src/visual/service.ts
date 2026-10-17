@@ -102,22 +102,24 @@ export interface MenuPhotoRequest {
   venueId: string;
   /** The owner's photo of the item. */
   mediaId: string;
+  /** The menu item the photo is for: its current photo (an earlier menu photo, say) is left out of the "match" vote. */
+  itemId?: string;
   /** "match" = the backdrop and object size most of the venue's item photos share (white when they have none); "white" (default) = plain white. */
   style?: "match" | "white";
 }
 
 export type MenuPhotoResult =
-  | { media_id: string; url: string; style: { background: string; matched: number; of: number } | "white"; reason?: "no_photos" | "mixed" }
+  | { media_id: string; url: string; style: { background: string; matched: number; of: number } | "white"; reason?: "no_photos" | "unreadable" | "mixed" }
   | { error: "no_object" };
 
 const MAX_STYLE_PHOTOS = 30;
 
-/** The venue's other item photos, as reads that start when called: each distinct photo once, never the one being processed, at most 30. */
-async function itemPhotoReads(d: VisualDeps, venueId: string, exceptMediaId: string): Promise<(() => Promise<Uint8Array | null>)[]> {
+/** The venue's other item photos, as reads that start when called: each distinct photo once, never the one being processed or the given item's own, at most 30. */
+async function itemPhotoReads(d: VisualDeps, venueId: string, exceptMediaId: string, exceptItemId?: string): Promise<(() => Promise<Uint8Array | null>)[]> {
   const site = await d.store.getSite(venueId);
   const urls = new Map(site.media.map((m) => [m.id, m.public_url]));
   const ids = new Set<string>();
-  for (const item of site.items) if (item.image_media_id && item.image_media_id !== exceptMediaId && urls.has(item.image_media_id)) ids.add(item.image_media_id);
+  for (const item of site.items) if (item.id !== exceptItemId && item.image_media_id && item.image_media_id !== exceptMediaId && urls.has(item.image_media_id)) ids.add(item.image_media_id);
   return [...ids].slice(0, MAX_STYLE_PHOTOS).map((id) => () => d.read(urls.get(id)!));
 }
 
@@ -130,12 +132,12 @@ export async function makeMenuPhoto(d: VisualDeps, req: MenuPhotoRequest): Promi
   const cut = await cachedCutout(d, req.venueId, media, original);
   if (!cut) return { error: "no_object" };
   // "match" looks at the menu only after the cut-out worked, so a refused photo costs no extra reads.
-  const found = req.style === "match" ? await houseStyleReport(await itemPhotoReads(d, req.venueId, media.id)) : null;
+  const found = req.style === "match" ? await houseStyleReport(await itemPhotoReads(d, req.venueId, media.id, req.itemId)) : null;
   const house = found?.style ?? null;
   // Never progressive: the same JPEG settings as Claudia's other proven copies, which every channel and site accepts.
   const jpeg = await renderMenuPhoto(cut, house ? { background: house.background, fill: house.fill } : {});
   const saved = await d.store.saveMedia(req.venueId, jpeg, "image/jpeg");
   const base = { media_id: saved.id, url: saved.public_url };
   if (house) return { ...base, style: { background: house.background, matched: house.matched, of: house.of } };
-  return found ? { ...base, style: "white", reason: found.of < 2 ? "no_photos" : "mixed" } : { ...base, style: "white" };
+  return found ? { ...base, style: "white", reason: found.attempted === 0 ? "no_photos" : found.of < 2 ? "unreadable" : "mixed" } : { ...base, style: "white" };
 }

@@ -14,7 +14,7 @@ const Body = z.object({
   formats: z.array(z.enum(["post", "story"])).min(1).max(4),
 });
 
-const MenuBody = z.object({ kind: z.literal("menu"), venueId: z.string().min(1), mediaId: z.string().min(1), style: z.enum(["match", "white"]).default("white") });
+const MenuBody = z.object({ kind: z.literal("menu"), venueId: z.string().min(1), mediaId: z.string().min(1), itemId: z.string().min(1).optional(), style: z.enum(["match", "white"]).default("white") });
 
 function sameSecret(given: string | null, secret: string): boolean {
   if (!given || !secret) return false;

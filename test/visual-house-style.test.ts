@@ -63,6 +63,22 @@ describe("houseStyle", () => {
     expect(r.of).toBe(3);
     expect(r.style).toMatchObject({ matched: 3, of: 3 });
   });
+  it("breaks a tie between equal groups by source index, not by which read finishes first", async () => {
+    const a = await photo("#f4efe6");
+    const b = await photo("#c8e6d0");
+    const late = (bytes: Uint8Array, ms: number) => async () => {
+      await new Promise((r) => setTimeout(r, ms));
+      return bytes;
+    };
+    const r = await houseStyleReport([late(a, 40), late(a, 40), late(b, 1), late(b, 1)]);
+    expect(r.style).toMatchObject({ matched: 2 });
+    expect(r.style!.background).toMatch(/^#f[45]/);
+  });
+  it("reports how many reads it attempted", async () => {
+    const r = await houseStyleReport([async () => null, async () => null, new Uint8Array([1])]);
+    expect(r).toMatchObject({ style: null, of: 0, attempted: 3 });
+    expect(await houseStyleReport([])).toMatchObject({ of: 0, attempted: 0 });
+  });
   it("reads 6 at a time", async () => {
     const good = await photo("#f4efe6");
     let live = 0;

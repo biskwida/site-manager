@@ -81,28 +81,29 @@ async function analyse(bytes: Uint8Array): Promise<Analysed> {
 }
 
 /** Reads and analyses the photos a few at a time; a photo that cannot be read or decoded is skipped, and no new read starts after the budget. */
-async function readAll(sources: PhotoSource[], o: { concurrency: number; budgetMs: number }): Promise<Analysed[]> {
+async function readAll(sources: PhotoSource[], o: { concurrency: number; budgetMs: number }): Promise<{ read: Analysed[]; attempted: number }> {
   const started = Date.now();
-  const out: Analysed[] = [];
+  const slots: (Analysed | undefined)[] = []; // by source index, so the outcome does not depend on which read finishes first
   let next = 0;
   const worker = async () => {
     while (next < sources.length && Date.now() - started < o.budgetMs) {
-      const src = sources[next++];
+      const index = next++;
+      const src = sources[index];
       try {
         const bytes = typeof src === "function" ? await src() : src;
-        if (bytes) out.push(await analyse(bytes));
+        if (bytes) slots[index] = await analyse(bytes);
       } catch {
         // unreadable or undecodable: leave it out
       }
     }
   };
   await Promise.all(Array.from({ length: Math.min(o.concurrency, sources.length) }, worker));
-  return out;
+  return { read: slots.filter((a): a is Analysed => a !== undefined), attempted: next };
 }
 
-/** The style plus how many photos were read, so the caller can tell "no photos" from "mixed backdrops". */
-export async function houseStyleReport(sources: PhotoSource[], o: { concurrency?: number; budgetMs?: number } = {}): Promise<{ style: HouseStyle | null; of: number }> {
-  const read = await readAll(sources, { concurrency: o.concurrency ?? 6, budgetMs: o.budgetMs ?? 20_000 });
+/** The style, how many photos were read (`of`) and how many reads were started (`attempted`), so the caller can tell "no photos" from "unreadable" from "mixed backdrops". */
+export async function houseStyleReport(sources: PhotoSource[], o: { concurrency?: number; budgetMs?: number } = {}): Promise<{ style: HouseStyle | null; of: number; attempted: number }> {
+  const { read, attempted } = await readAll(sources, { concurrency: o.concurrency ?? 6, budgetMs: o.budgetMs ?? 20_000 });
   const of = read.length;
   const plain = read.filter((a): a is Analysed & { rgb: [number, number, number] } => a.rgb !== null);
   const labs: Lab[] = plain.map((a) => rgbToLab(...a.rgb));
@@ -112,9 +113,9 @@ export async function houseStyleReport(sources: PhotoSource[], o: { concurrency?
     const group = plain.map((_, j) => j).filter((j) => deltaE76(labs[i], labs[j]) <= SAME_DE);
     if (group.length > best.length) best = group;
   }
-  if (best.length < 2 || best.length * 2 < of) return { style: null, of };
+  if (best.length < 2 || best.length * 2 < of) return { style: null, of, attempted };
   const background = hex([0, 1, 2].map((c) => median(best.map((j) => plain[j].rgb[c]))));
-  return { style: { background, fill: median(best.map((j) => plain[j].fill)), matched: best.length, of }, of };
+  return { style: { background, fill: median(best.map((j) => plain[j].fill)), matched: best.length, of }, of, attempted };
 }
 
 /** The shared backdrop and object size of the venue's item photos, or null when there are too few photos or their backdrops disagree. */

@@ -60,6 +60,7 @@ describe("/api/visual kind menu", () => {
     expect((await handler(post({ kind: "menu", venueId: venue.id, mediaId: photo.id }, "Bearer nope"))).status).toBe(401);
     expect((await handler(post({ kind: "menu", venueId: venue.id }))).status).toBe(400);
     expect((await handler(post({ kind: "menu", venueId: venue.id, mediaId: photo.id, style: "blue" }))).status).toBe(400);
+    expect((await handler(post({ kind: "menu", venueId: venue.id, mediaId: photo.id, itemId: 5 }))).status).toBe(400);
     const ok = await handler(post({ kind: "menu", venueId: venue.id, mediaId: photo.id }));
     expect(ok.status).toBe(200);
     const body = await ok.json();
@@ -82,7 +83,7 @@ describe("/api/visual kind menu", () => {
       return handler(new Request(String(url), init));
     }) as typeof fetch;
     const client = httpVisualClient({ baseUrl: "https://app.example", secret: "S3CRET", fetch: f });
-    const r = await client.menuPhoto!({ venueId: venue.id, mediaId: photo.id, style: "match" });
+    const r = await client.menuPhoto!({ venueId: venue.id, mediaId: photo.id, style: "match", itemId: "it-1" });
     expect("error" in r).toBe(false);
     expect(r).toMatchObject({ style: "white", reason: "no_photos" });
     await expect(client.menuPhoto!({ venueId: venue.id, mediaId: "nope" })).rejects.toThrow(/not found for this venue/);

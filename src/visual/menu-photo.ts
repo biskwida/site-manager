@@ -18,8 +18,8 @@ export interface MenuPhotoStyle {
 export async function renderMenuPhoto(cutoutPng: Uint8Array, style: MenuPhotoStyle = {}): Promise<Uint8Array> {
   const boxW = style.fill ? Math.round(style.fill * SIDE) : BOX_W;
   const sharp = (await import("sharp")).default;
-  // The model's cut-out is usually trimmed already; trimming again is harmless, and a fully uniform image (nothing to trim) is kept as is.
-  const trimmed = await sharp(cutoutPng).trim({ threshold: 8 }).png().toBuffer().catch(() => Buffer.from(cutoutPng));
+  // Trim by the alpha channel: the default trim takes its background from the top-left pixel, so an object touching that corner would not be trimmed.
+  const trimmed = await sharp(cutoutPng).trim({ background: { r: 0, g: 0, b: 0, alpha: 0 }, threshold: 8 }).png().toBuffer();
   const { width, height } = await sharp(trimmed).metadata();
   const w = width ?? 1;
   const h = height ?? 1;
