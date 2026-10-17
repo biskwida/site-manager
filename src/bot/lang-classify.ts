@@ -11,7 +11,7 @@ import { errorSummary } from "../wizard/tool-schema";
 export type LangClassifier = (text: string) => Promise<ChatLang | null>;
 
 const QUESTION =
-  "Which language is this message written in? Reply with only its ISO 639-1 code, or unknown. If the message is only a dish or product name, a brand, or a list of names, reply unknown.";
+  "Which language is this message written in? Reply with only its ISO 639-1 code, or unknown. If the message is only a dish or product name, a brand, or a list of names, reply unknown. Bulgarian written in Latin letters (shliokavitsa) is bg.";
 /** The owner is waiting for the turn to start: a slow answer is no answer. */
 const REQUEST_OPTIONS = { timeout: 3000, maxRetries: 0 };
 

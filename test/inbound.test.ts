@@ -682,6 +682,17 @@ describe("handleInbound: any conversation language", () => {
     expect(await langOf(store, "tg:1001")).toBe("de");
   });
 
+  it("a 4+ word Latin-typed Bulgarian message the classifier calls bg keeps a Bulgarian speaker and sets bg for anyone else", async () => {
+    const { asked, classifyLang } = classifier("bg");
+    const { d, runs, store } = await setup({ classifyLang });
+    const saves = langSaves(store);
+    await handleInbound(d, { chatRef: "tg:1001", kind: "text", text: "pusni post i story v instagram dnes" }); // stored bg
+    await handleInbound(d, { chatRef: "tg:1002", kind: "text", text: "pusni post i story v instagram dnes" }); // stored en
+    expect(asked).toEqual(["pusni post i story v instagram dnes", "pusni post i story v instagram dnes"]);
+    expect(saves).toEqual(["tg:1002=bg"]);
+    expect(runs.map((r) => r.member.lang)).toEqual(["bg", "bg"]);
+  });
+
   it("Bulgarian typed in Latin letters stays Bulgarian when the classifier says bg", async () => {
     const { asked, classifyLang } = classifier("bg");
     const { d, runs, store } = await setup({ classifyLang });

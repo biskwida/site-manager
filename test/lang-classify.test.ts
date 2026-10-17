@@ -36,7 +36,7 @@ describe("makeLangClassifier", () => {
       model: "claude-haiku-5-5",
       max_tokens: 5,
       thinking: { type: "disabled" },
-      system: "Which language is this message written in? Reply with only its ISO 639-1 code, or unknown. If the message is only a dish or product name, a brand, or a list of names, reply unknown.",
+      system: "Which language is this message written in? Reply with only its ISO 639-1 code, or unknown. If the message is only a dish or product name, a brand, or a list of names, reply unknown. Bulgarian written in Latin letters (shliokavitsa) is bg.",
       messages: [{ role: "user", content: [{ type: "text", text: MESSAGE }] }],
     });
   });
@@ -51,6 +51,12 @@ describe("makeLangClassifier", () => {
     const { client, calls } = fakeClient(answer("unknown"));
     expect(await makeLangClassifier(client, "m")("Pizza Quattro Formaggi Margherita")).toBeNull();
     expect(calls[0].system).toContain("If the message is only a dish or product name, a brand, or a list of names, reply unknown.");
+  });
+
+  it("tells the model that Bulgarian written in Latin letters is bg", async () => {
+    const { client, calls } = fakeClient(answer("bg"));
+    expect(await makeLangClassifier(client, "m")("pusni post i story v instagram dnes")).toBe("bg");
+    expect(calls[0].system).toContain("Bulgarian written in Latin letters (shliokavitsa) is bg.");
   });
 
   it("a timeout is a failure: null, logged without the message", async () => {
