@@ -16,7 +16,7 @@ async function setup() {
     average: async () => ({ r: 170, g: 110, b: 60 }),
   };
   const handler = (req: Request) => handleVisualRequest(req, { secret: "S3CRET", visual });
-  return { ...demo, photo, handler };
+  return { ...demo, photo, handler, visual };
 }
 const post = (body: unknown, auth = "Bearer S3CRET") => new Request("https://x/api/visual", { method: "POST", headers: { authorization: auth, "content-type": "application/json" }, body: JSON.stringify(body) });
 
@@ -44,5 +44,44 @@ describe("/api/visual", () => {
     const client = httpVisualClient({ baseUrl: "https://app.example", secret: "S3CRET", fetch: f });
     expect((await client({ venueId: venue.id, mediaId: photo.id, dish: "x", formats: ["story"] })).pictures).toHaveLength(1);
     await expect(client({ venueId: venue.id, mediaId: "nope", dish: "x", formats: ["post"] })).rejects.toThrow(/not found for this venue/);
+  });
+});
+
+describe("/api/visual kind menu", () => {
+  const redBox = async () => new Uint8Array(await (await import("sharp")).default({ create: { width: 60, height: 40, channels: 4, background: { r: 200, g: 20, b: 20, alpha: 1 } } }).png().toBuffer());
+  async function menuSetup() {
+    const s = await setup();
+    const cut = await redBox();
+    const visual: VisualDeps = { ...s.visual, cutout: async () => cut };
+    return { ...s, handler: (req: Request) => handleVisualRequest(req, { secret: "S3CRET", visual }) };
+  }
+  it("serves kind menu with the same secret check", async () => {
+    const { handler, venue, photo } = await menuSetup();
+    expect((await handler(post({ kind: "menu", venueId: venue.id, mediaId: photo.id }, "Bearer nope"))).status).toBe(401);
+    expect((await handler(post({ kind: "menu", venueId: venue.id }))).status).toBe(400);
+    const ok = await handler(post({ kind: "menu", venueId: venue.id, mediaId: photo.id }));
+    expect(ok.status).toBe(200);
+    const body = await ok.json();
+    expect(body.url).toMatch(/\.jpg$/);
+    expect((await handler(post({ kind: "menu", venueId: venue.id, mediaId: "nope" }))).status).toBe(422);
+  });
+  it("answers no_object with 200 when nothing can be cut out", async () => {
+    const s = await setup();
+    const handler = (req: Request) => handleVisualRequest(req, { secret: "S3CRET", visual: { ...s.visual, cutout: async () => null } });
+    const res = await handler(post({ kind: "menu", venueId: s.venue.id, mediaId: s.photo.id }));
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ error: "no_object" });
+  });
+  it("is reached by the HTTP client's menuPhoto with the secret", async () => {
+    const { handler, venue, photo } = await menuSetup();
+    const f = (async (url: RequestInfo | URL, init?: RequestInit) => {
+      expect(String(url)).toBe("https://app.example/api/visual");
+      expect(new Headers(init?.headers).get("authorization")).toBe("Bearer S3CRET");
+      return handler(new Request(String(url), init));
+    }) as typeof fetch;
+    const client = httpVisualClient({ baseUrl: "https://app.example", secret: "S3CRET", fetch: f });
+    const r = await client.menuPhoto!({ venueId: venue.id, mediaId: photo.id });
+    expect("error" in r).toBe(false);
+    await expect(client.menuPhoto!({ venueId: venue.id, mediaId: "nope" })).rejects.toThrow(/not found for this venue/);
   });
 });

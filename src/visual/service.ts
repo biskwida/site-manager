@@ -3,6 +3,8 @@
 // as venue media. Pure orchestration: the cut-out model, the renderer and file reading are injected, so this runs in tests
 // without the model and in the /api/visual route with it.
 import type { Store } from "../store/types";
+import type { Media } from "../domain/types";
+import { renderMenuPhoto } from "./menu-photo";
 import { colours, pickBackdrop, BACKDROPS, type Backdrop } from "./palette";
 import type { Format, PictureProps } from "./template";
 
@@ -50,22 +52,29 @@ function sniffType(bytes: Uint8Array): string {
   return "image/jpeg";
 }
 
+/**
+ * The cut-out is cached per photo, so a colour or text change does not run the model again. "v2" = main object only:
+ * cut-outs saved before that kept stray fragments (a table corner), so they are never reused.
+ */
+async function cachedCutout(d: VisualDeps, venueId: string, media: Media, original: Uint8Array): Promise<Uint8Array | null> {
+  const cachePath = `${venueId}/cutouts/v2/${media.id}.png`;
+  let cut: Uint8Array | null = null;
+  const cached = await d.store.findMediaByPath(cachePath);
+  if (cached) cut = await d.read(cached.public_url);
+  if (!cut) {
+    cut = await d.cutout(original).catch(() => null);
+    if (cut) await d.store.saveMedia(venueId, cut, "image/png", { name: `cutouts/v2/${media.id}.png` });
+  }
+  return cut;
+}
+
 export async function makeVisual(d: VisualDeps, req: VisualRequest): Promise<VisualResult> {
   const media = await d.store.getMedia(req.mediaId);
   if (!media || media.venue_id !== req.venueId) throw new Error(`media_id "${req.mediaId}" not found for this venue.`);
   const original = await d.read(media.public_url);
   if (!original) throw new Error("Could not read the photo; try again in a moment.");
 
-  // The cut-out is cached per photo, so a colour or text change does not run the model again. "v2" = main object only:
-  // cut-outs saved before that kept stray fragments (a table corner), so they are never reused.
-  const cachePath = `${req.venueId}/cutouts/v2/${media.id}.png`;
-  let cut: Uint8Array | null = null;
-  const cached = await d.store.findMediaByPath(cachePath);
-  if (cached) cut = await d.read(cached.public_url);
-  if (!cut) {
-    cut = await d.cutout(original).catch(() => null);
-    if (cut) await d.store.saveMedia(req.venueId, cut, "image/png", { name: `cutouts/v2/${media.id}.png` });
-  }
+  const cut = await cachedCutout(d, req.venueId, media, original);
   const kind: VisualResult["kind"] = cut ? "cutout" : "photo";
   const image = cut ? dataUrl(cut, "image/png") : dataUrl(original, sniffType(original));
 
@@ -86,4 +95,26 @@ export async function makeVisual(d: VisualDeps, req: VisualRequest): Promise<Vis
     pictures.push({ format, media_id: saved.id, url: saved.public_url });
   }
   return { kind, backdrop: (BACKDROPS as readonly string[]).includes(backdrop) ? (backdrop as Backdrop) : backdrop, pictures };
+}
+
+export interface MenuPhotoRequest {
+  venueId: string;
+  /** The owner's photo of the item. */
+  mediaId: string;
+}
+
+export type MenuPhotoResult = { media_id: string; url: string } | { error: "no_object" };
+
+/** The plain website photo: the object alone, centred on white. `{ error: "no_object" }` when nothing could be cut out (nothing is saved then). */
+export async function makeMenuPhoto(d: VisualDeps, req: MenuPhotoRequest): Promise<MenuPhotoResult> {
+  const media = await d.store.getMedia(req.mediaId);
+  if (!media || media.venue_id !== req.venueId) throw new Error(`media_id "${req.mediaId}" not found for this venue.`);
+  const original = await d.read(media.public_url);
+  if (!original) throw new Error("Could not read the photo; try again in a moment.");
+  const cut = await cachedCutout(d, req.venueId, media, original);
+  if (!cut) return { error: "no_object" };
+  // Never progressive: the same JPEG settings as Claudia's other proven copies, which every channel and site accepts.
+  const jpeg = await renderMenuPhoto(cut);
+  const saved = await d.store.saveMedia(req.venueId, jpeg, "image/jpeg");
+  return { media_id: saved.id, url: saved.public_url };
 }
