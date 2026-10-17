@@ -285,7 +285,20 @@ describe("the exact pictures before the buttons", () => {
     expect(row.ig_feed_image_url).toBeUndefined();
     expect(row.story_image_url).toMatch(/^https:\/\//);
     expect(messenger.photos.map((p) => [p.url, p.caption])).toEqual([[row.story_image_url, "Instagram история"]]);
-    expect([...sentPhotos]).toEqual([picture.public_url, row.story_image_url]);
+    expect([...sentPhotos]).toEqual([picture.public_url]); // social_post only reads the set: its own sends are not recorded
+  });
+
+  it("shows every proposal of a turn its own pictures, even when an earlier proposal in the turn sent the same file", async () => {
+    const { tools, store, venue, messenger } = await setup();
+    // A 4:5 photo: the Facebook post and the Instagram post both publish the original, so both proposals show the same file.
+    const photo = await store.saveMedia(venue.id, await jpeg(1080, 1350), "image/jpeg");
+    const facebook = await call(tools, "social_post", input(photo.id, { targets: ["facebook_post"] }));
+    const instagram = await call(tools, "social_post", input(photo.id, { targets: ["instagram_post"] }));
+    expect([facebook.status, instagram.status]).toEqual(["proposed", "proposed"]);
+    expect(messenger.photos.map((p) => [p.url, p.caption])).toEqual([[photo.public_url, "Facebook пост"], [photo.public_url, "Instagram пост"]]);
+    // each picture is the message just above its own proposal
+    expect(messenger.sent.map((s) => s.setId)).toEqual([facebook.change_set_id, instagram.change_set_id]);
+    expect(messenger.sent.map((s) => Number(s.messageRef) - 1)).toEqual(messenger.photos.map((p) => Number(p.messageRef)));
   });
 
   it("make_visual's post and story, then their social_posts in the same turn: no picture is sent twice", async () => {
@@ -306,8 +319,7 @@ describe("the exact pictures before the buttons", () => {
   });
 
   it("still proposes when a picture cannot be sent", async () => {
-    const sentPhotos = new Set<string>();
-    const { tools, store, venue, messenger } = await setup({ sentPhotos });
+    const { tools, store, venue, messenger } = await setup();
     const tried: string[] = [];
     // Meta's 24-hour window closed, a network error: sendPhoto answers null.
     (messenger as Messenger).sendPhoto = async (_chatRef, url) => {
@@ -321,7 +333,6 @@ describe("the exact pictures before the buttons", () => {
     const proposal = messenger.sent.find((s) => s.setId)!;
     expect(proposal.setId).toBe(r.change_set_id);
     expect((await store.getChangeSet(r.change_set_id as string)).message_ref).toBe(proposal.messageRef);
-    expect(sentPhotos.size).toBe(0); // not shown, so a later proposal in this turn sends them again
   });
 
   it("posts to stories without a copy when the photo is already 9:16", async () => {

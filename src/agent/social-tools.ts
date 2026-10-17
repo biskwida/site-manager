@@ -114,10 +114,11 @@ export function socialTools(d: ToolDeps, k: ToolKit) {
         const change: Change = { position: 0, op: "social_post", entity: "social_post", entity_id: m.id, before: null, after: row as unknown as Change["after"] };
         const p = k.previews(s, [change]);
         const cs = await d.store.createChangeSet({ venue_id: d.venueId, chat_ref: d.chatRef, summary_bg: input.summary_bg, summary_en: input.summary_en, ...p, source: d.source ?? "text", status: "proposed", changes: [change] });
-        // The exact picture for each place, labelled, above the buttons. One already in the chat from this turn (make_visual's) is not
-        // sent again; one that cannot be sent (Meta's 24-hour window, a network error) never holds back the proposal.
+        // The exact picture for each place, labelled, above the buttons. Only a picture make_visual already put in the chat this turn is
+        // skipped; this proposal's own sends are not recorded, so a second proposal in the turn (even of the same file) shows all its
+        // pictures just above its own buttons. A picture that cannot be sent (Meta's 24-hour window, a network error) never holds back the proposal.
         for (const pic of previewPictures(row, k.lang)) {
-          if (!d.sentPhotos.has(pic.url) && (await d.messenger.sendPhoto(d.chatRef, pic.url, pic.label)) !== null) d.sentPhotos.add(pic.url);
+          if (!d.sentPhotos.has(pic.url)) await d.messenger.sendPhoto(d.chatRef, pic.url, pic.label);
         }
         const messageRef = await d.messenger.sendProposal(d.chatRef, proposalText(k.mine(p), k.lang, null, s.venue.tz), cs.id, k.lang);
         if (messageRef !== null) await d.store.updateChangeSet(cs.id, { message_ref: messageRef });

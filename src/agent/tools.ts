@@ -49,7 +49,7 @@ export interface AgentDeps {
   notes?: string[];
   /** Ids of the change sets this turn created (filled by the tools). One owner message may hold several tasks, so its own proposals never block each other. */
   turnSets?: Set<string>;
-  /** URLs of the pictures sent to the owner's chat in this turn (make_visual's, social_post's), so social_post does not send one again. run.ts starts an empty set each turn. */
+  /** URLs of the pictures make_visual sent to the owner's chat in this turn, so social_post does not send one again (it sends every other picture of its own proposal and records none). run.ts starts an empty set each turn. */
   sentPhotos?: Set<string>;
 }
 
