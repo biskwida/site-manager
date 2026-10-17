@@ -50,6 +50,16 @@ describe("loadSite", () => {
   });
 });
 
+describe("loadSite and keep markers", () => {
+  it("the draft banner never shows a keep marker: the draft's summaries and previews come without them", async () => {
+    const { store, venue, items } = await makeDemo();
+    const site = await store.getSite(venue.id);
+    const cs = await store.createChangeSet({ venue_id: venue.id, chat_ref: "tg:1001", summary_bg: "Отмяна: ⟦Капучино⟧ отново в наличност", summary_en: "Undo: ⟦Cappuccino⟧ back in stock", preview_bg: "• ⟦Капучино⟧: 2,90 € → 3,20 €", preview_en: "• ⟦Cappuccino⟧: €2.90 → €3.20", source: "text", status: "proposed", changes: planChanges(site, [{ op: "set_price", item_id: items.Cappuccino.id, price_eur: 3.2 }], { newId: () => "n", now: "2026-10-09T09:00:00.000Z" }) });
+    const draft = (await loadSite(store, "agala", { draftId: cs.id, key: await store.getAdminToken(venue.id) }))?.draft;
+    expect(draft).toMatchObject({ summary_bg: "Отмяна: Капучино отново в наличност", summary_en: "Undo: Cappuccino back in stock", preview_bg: "• Капучино: 2,90 € → 3,20 €", preview_en: "• Cappuccino: €2.90 → €3.20" });
+  });
+});
+
 describe("publicSiteState", () => {
   it("strips the deploy record and the wizard draft from the public feed, keeping everything templates read", async () => {
     const { store, venue } = await makeDemo();

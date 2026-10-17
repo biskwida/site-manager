@@ -1,15 +1,20 @@
 // test/tick.test.ts
 import { describe, expect, it } from "vitest";
+import type { BotDeps } from "@/src/bot/bot";
+import { handleInbound } from "@/src/bot/inbound";
 import { encryptSecrets, parseSecretKey } from "@/src/destinations/secrets";
 import { FakeDeployer } from "@/src/deploy/fake";
 import { startDeploy } from "@/src/deploy/run";
 import { planChanges } from "@/src/domain/changes";
+import type { InMemoryStore } from "@/src/store/memory";
 import { cleanupDrafts, DRAFT_TTL_MS, runTick } from "@/src/tick";
 import { FakeWordPress } from "./fake-wordpress";
 import { FakeMessenger, makeDemo } from "./helpers";
 
 const T0 = new Date("2026-10-09T09:00:00.000Z");
 const ctx = { newId: () => crypto.randomUUID(), now: T0.toISOString() };
+/** What the owner's chat needs to receive a message; the agent never runs. */
+const botDeps = (store: InMemoryStore, messenger: FakeMessenger): BotDeps => ({ token: "t", store, messenger, baseUrl: "https://sm.example", now: () => T0, startRun: () => undefined, transcribe: null, download: async () => ({ bytes: new Uint8Array([1]), contentType: "image/jpeg" }) });
 
 describe("runTick", () => {
   it("applies due scheduled sets, notifies the chat in its language, and leaves future ones", async () => {
@@ -40,7 +45,9 @@ describe("runTick", () => {
     expect(after.items.find((i) => i.id === special.id)?.active).toBe(false);
     const autos = await store.listChangeSets(venue.id, { status: ["applied"] });
     expect(autos.filter((s) => s.source === "auto")).toHaveLength(2);
-    expect(autos.find((s) => s.source === "auto" && s.changes[0].op === "set_sold_out")).toMatchObject({ summary_bg: "Баница със сирене отново в наличност", summary_en: "Cheese banitsa back in stock" });
+    // The dish name is kept like in every preview (it reaches a chat through an undo); the dashboard shows it without the markers.
+    expect(autos.find((s) => s.source === "auto" && s.changes[0].op === "set_sold_out")).toMatchObject({ summary_bg: "⟦Баница със сирене⟧ отново в наличност", summary_en: "⟦Cheese banitsa⟧ back in stock", preview_en: "• ⟦Cheese banitsa⟧: back in stock" });
+    expect(autos.find((s) => s.source === "auto" && s.changes[0].op === "remove_item")).toMatchObject({ summary_bg: "Специалното „⟦Супа⟧“ изтече", preview_bg: "• Премахва ⟦Супа⟧" });
     const r2 = await runTick({ store, messenger: null, now: new Date("2026-10-09T09:05:00.000Z") });
     expect(r2.auto).toEqual([]);
   });
@@ -55,6 +62,28 @@ describe("runTick", () => {
     const r2 = await runTick({ store, messenger: m, now: new Date("2026-10-09T10:00:00.000Z") });
     expect(r2.reminded).toEqual([]);
     expect(m.sent).toHaveLength(1);
+  });
+
+  it("a reminder after the owner switched to English is in English", async () => {
+    const { store, venue } = await makeDemo(); // the owner (tg:1001) is stored as bg
+    const m = new FakeMessenger();
+    const soon = await store.createChangeSet({ venue_id: venue.id, chat_ref: "tg:1001", summary_bg: "Коледно работно време", summary_en: "Christmas hours", preview_bg: "p", preview_en: "p", source: "text", status: "scheduled", apply_at: "2026-10-10T06:00:00.000Z", changes: [] });
+    // The owner writes English; the tick itself is told nothing about it.
+    await handleInbound(botDeps(store, m), { chatRef: "tg:1001", kind: "text", text: "please change the price of the cappuccino to 4.20" });
+    const r = await runTick({ store, messenger: m, now: T0 });
+    expect(r.reminded).toEqual([soon.id]);
+    expect(m.sent).toEqual([expect.objectContaining({ chatRef: "tg:1001", text: "⏰ Reminder: on 10 Oct 2026, 09:00 this will be applied: Christmas hours", proactive: true })]);
+  });
+
+  it("and after the owner writes Bulgarian again, the next reminder is in Bulgarian", async () => {
+    const { store, venue } = await makeDemo();
+    await store.setMemberLang(venue.id, "tg:1001", "en"); // e.g. /lang en, or an earlier English message
+    const m = new FakeMessenger();
+    const soon = await store.createChangeSet({ venue_id: venue.id, chat_ref: "tg:1001", summary_bg: "Коледно работно време", summary_en: "Christmas hours", preview_bg: "p", preview_en: "p", source: "text", status: "scheduled", apply_at: "2026-10-10T06:00:00.000Z", changes: [] });
+    await handleInbound(botDeps(store, m), { chatRef: "tg:1001", kind: "text", text: "Капучиното става 4,20" });
+    const r = await runTick({ store, messenger: m, now: T0 });
+    expect(r.reminded).toEqual([soon.id]);
+    expect(m.sent).toEqual([expect.objectContaining({ chatRef: "tg:1001", text: "⏰ Напомняне: на 10.10.2026, 09:00 ще се приложи: Коледно работно време", proactive: true })]);
   });
 
   it("expires proposals older than 2 h and concludes their message", async () => {

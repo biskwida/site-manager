@@ -1,7 +1,7 @@
 // src/domain/social-preview.ts
 // Preview lines for social_post rows (a photo published to Facebook and/or Instagram) and the pictures shown with them: the
 // exact file each place will publish. Pure; both languages; undo-safe (the inverted row has after = null and reads as a removal).
-import { quote, tr } from "./format";
+import { keep, quote, tr } from "./format";
 import { NETWORK_NAMES, type Change, type Lang, type Row, type SocialPostRow, type SocialTarget } from "./types";
 
 /** The format words, lower-case, for previews and make_visual's captions (which capitalise them). */
@@ -34,7 +34,8 @@ export function socialPreviewLines(c: Change, lang: Lang): string[] {
   const storyOnly = targets.length > 0 && targets.every((t) => t.endsWith("_story"));
   const lines = [`• ${storyOnly ? tr(lang, "Публикуване", "Publish") : tr(lang, "Публикация", "Post")}: ${socialTargetsText(targets, lang)}`];
   const caption = typeof c.after.caption === "string" && !storyOnly ? c.after.caption.trim() : "";
-  if (caption) lines.push(...quote(caption, lang).split("\n").map((l) => `  ${l}`));
+  // The caption exactly as it will be published, in any language (kept); every line indented.
+  if (caption) lines.push(...quote(keep(caption), lang).split("\n").map((l) => `  ${l}`));
   const ratio = c.after.ig_feed_ratio;
   if (ratio === "4:5" || ratio === "1.91:1") lines.push(`  (${tr(lang, `за Instagram снимката е допълнена до формат ${ratio}`, `for Instagram the photo is padded to ${ratio}`)})`);
   // Stories carry no text: when a captioned post goes out together with a story, say so (last line). `caption` is already empty for a story-only row.

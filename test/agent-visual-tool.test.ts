@@ -93,4 +93,11 @@ describe("make_visual", () => {
     expect(SYSTEM_PROMPT).toMatch(/направи пост/);
     expect(SYSTEM_PROMPT).toMatch(/праскова/);
   });
+
+  it("asks for the caption in the owner's language, not the venue's, once the picture is in the chat", async () => {
+    const { tools, photo } = await setup();
+    const r = await call(tools, "make_visual", { media_id: photo.id, dish: "Флат уайт", formats: ["post"] });
+    expect(String(r.next)).toMatch(/Caption in the owner's current language \(the Owner language line\)/);
+    expect(String(r.next)).not.toMatch(/venue's language/);
+  });
 });

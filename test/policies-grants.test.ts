@@ -34,4 +34,10 @@ describe("supabase/policies.sql venue grants", () => {
     expect(statements).toContain("revoke all on public.data_deletion_requests from anon, authenticated");
     expect(statements.filter((s) => /^grant /i.test(s)).join(" ")).not.toMatch(/data_deletion_requests/);
   });
+
+  it("translations is server-only: RLS on, no policy, everything revoked from anon/authenticated, never granted", () => {
+    expect(statements).toContain("alter table public.translations enable row level security");
+    expect(statements).toContain("revoke all on public.translations from anon, authenticated");
+    expect(statements.filter((s) => /^(grant|create policy) /i.test(s)).join(" ")).not.toMatch(/translations/);
+  });
 });

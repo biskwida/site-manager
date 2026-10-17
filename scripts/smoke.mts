@@ -6,7 +6,8 @@
 import { pickEffort, runTurn } from "../src/agent/run";
 import { ConsoleMessenger } from "../src/channels/console";
 import { makeRef } from "../src/channels/ref";
-import { TelegramMessenger, type Messenger } from "../src/bot/messenger";
+import type { Messenger } from "../src/bot/messenger";
+import { withTranslation } from "../src/bot/translate";
 import { loadConfig } from "../src/config";
 import { seedDemo } from "../src/seed/demo";
 import { makeServerDeps } from "../src/server/deps";
@@ -39,7 +40,7 @@ if (dry) {
   const { venue } = await seedDemo(mem, config.demoVenueSlug);
   member = await mem.upsertMember({ venue_id: venue.id, chat_ref: "tg:1", role: "owner", lang: "bg" });
   store = mem;
-  messenger = new ConsoleMessenger();
+  messenger = withTranslation(new ConsoleMessenger(), { store: mem, translate: null }); // what the owner reads: no keep markers
   baseUrl = config.publicBaseUrl || "http://localhost:3000";
   cfg = { model: config.agentModel, effort: config.agentEffort, apiKey: config.anthropicApiKey };
   console.log(`mode: dry (memory store, demo venue "${venue.slug}", owner chat 1, console messenger)`);
@@ -57,7 +58,7 @@ if (dry) {
   }
   member = found;
   store = deps.store;
-  messenger = new TelegramMessenger(deps.bot.api);
+  messenger = deps.messenger; // the production path: translation for other languages, no keep markers
   baseUrl = deps.config.publicBaseUrl;
   cfg = { model: deps.config.agentModel, effort: deps.config.agentEffort, apiKey: deps.config.anthropicApiKey };
   console.log(`mode: live (${deps.isMemory ? "memory" : "Supabase"} store, chat ${chat}, Telegram messenger)`);

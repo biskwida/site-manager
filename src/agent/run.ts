@@ -1,7 +1,7 @@
 // src/agent/run.ts
 import Anthropic from "@anthropic-ai/sdk";
 import type { Effort } from "../config";
-import { tr } from "../domain/format";
+import { baseLang, tr, unkeep } from "../domain/format";
 import type { ChangeSource } from "../domain/types";
 import { copy } from "../bot/copy";
 import { startProgress } from "../bot/progress";
@@ -43,11 +43,12 @@ export async function runTurn(deps: AgentDeps, input: TurnInput, cfg: AgentConfi
   const now = deps.now();
   const venue = await deps.store.getVenue(deps.venueId);
   const memory = await loadMemory(deps.store, deps.venueId, deps.chatRef, now, input.mediaId);
-  const lang = deps.member.lang;
+  // The agent is told the owner's own language; the fixed texts below start from Bulgarian or English (baseLang).
+  const lang = baseLang(deps.member.lang);
   const held = memory.waiting;
   const correctionComments = memory.correctionFor ? await correctionCommentsOf(deps, memory.correctionFor) : undefined;
   const text = userMessage({
-    venueName: venue.name, slug: venue.slug, nowText: nowText(now, venue.tz), lang, role: deps.member.role,
+    venueName: venue.name, slug: venue.slug, nowText: nowText(now, venue.tz), lang: deps.member.lang, role: deps.member.role,
     memory: memory.text, correctionFor: memory.correctionFor, correctionComments, mediaId: input.mediaId, heldMediaIds: held, text: input.text, source: input.source,
   });
   const content = [
@@ -77,11 +78,14 @@ export async function runTurn(deps: AgentDeps, input: TurnInput, cfg: AgentConfi
     await progress.stop();
     // A caption-less photo the agent only asked about (no change set this turn) stays held for the owner's answer, like any held photo.
     const keep = bare && answered && turnSets.size === 0;
+    // The model's own words are already in the owner's language: sent as written (verbatim). The fixed lines are translated.
+    const verbatim = answered && !!reply;
     if (keep && !reply) reply = copy(lang).photoWaiting; // the model said nothing: ask the usual question rather than stay silent
-    if (reply) await deps.messenger.send(deps.chatRef, reply);
+    if (reply) await deps.messenger.send(deps.chatRef, reply, verbatim ? { verbatim: true } : undefined);
     const photos = keep ? { media_ids: [input.mediaId!, ...held], waiting: true } : {};
     const fullOutcome = [outcome, ...notes].filter(Boolean).join("; ") || undefined;
-    await appendMemory(deps.store, deps.venueId, deps.chatRef, { at: now.toISOString(), owner: ownerLine, agent: reply || NO_REPLY, outcome: fullOutcome, ...photos }, now, claimed);
+    // The memory holds what the owner read: no keep marker (the messenger removed any the model echoed).
+    await appendMemory(deps.store, deps.venueId, deps.chatRef, { at: now.toISOString(), owner: ownerLine, agent: unkeep(reply) || NO_REPLY, outcome: fullOutcome, ...photos }, now, claimed);
   };
 
   try {
@@ -143,7 +147,7 @@ async function pendingOutcome(deps: AgentDeps, turnSets: Set<string>): Promise<s
   const order = [...turnSets];
   const rank = (id: string) => (turnSets.has(id) ? order.indexOf(id) : -1);
   proposed.sort((a, b) => rank(a.id) - rank(b.id) || a.created_at.localeCompare(b.created_at));
-  const names = proposed.map((cs) => (deps.member.lang === "bg" ? cs.summary_bg : cs.summary_en)).join(" | ");
+  const names = proposed.map((cs) => unkeep(deps.member.lang === "bg" ? cs.summary_bg : cs.summary_en)).join(" | ");
   return `proposed: ${names} (waiting for the owner's ${proposed.length === 1 ? "decision" : "decisions"})`;
 }
 

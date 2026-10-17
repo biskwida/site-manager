@@ -1,4 +1,4 @@
-import { proposalButtons, type Messenger } from "../bot/messenger";
+import { proposalButtons, type Messenger, type ProposalLabels } from "../bot/messenger";
 import { maskRef } from "./ref";
 import type { Lang } from "../domain/types";
 
@@ -10,8 +10,8 @@ export class ConsoleMessenger implements Messenger {
     this.log(`→ [${maskRef(chatRef)}] ${text}`);
     return `c${++this.n}`;
   }
-  async sendProposal(chatRef: string, text: string, _setId: string, lang: Lang) {
-    this.log(`→ [${maskRef(chatRef)}] ${text}\n   ${proposalButtons(lang).map((b) => `[${b.label}]`).join(" ")}`);
+  async sendProposal(chatRef: string, text: string, _setId: string, lang: Lang, labels?: ProposalLabels) {
+    this.log(`→ [${maskRef(chatRef)}] ${text}\n   ${proposalButtons(lang, labels).map((b) => `[${b.label}]`).join(" ")}`);
     return `c${++this.n}`;
   }
   async sendPhoto(chatRef: string, url: string, caption?: string) {

@@ -8,11 +8,26 @@ export interface Config {
   agentEffort: Effort;
   /** Small model for comment reply drafts (COMMENT_DRAFT_MODEL); one short call per comment. */
   commentDraftModel: string;
+  /**
+   * Small model that names the language of an owner's message and of a customer's comment (LANG_CLASSIFY_MODEL, src/bot/lang-classify.ts).
+   * For an owner it is asked first about Latin-only text of four words or more, and about Cyrillic without a marker letter of four
+   * words or more from a member not stored as Bulgarian; the letters (the English word list for Latin text) are only the fallback. For
+   * a comment (src/social/comments-draft.ts) it is asked about Latin text of two words or more, and English is the fallback. One
+   * five-token call on at most 300 characters, thinking off (claude-haiku-5-5 accepts that), 3 s limit, no retries.
+   */
+  langClassifyModel: string;
+  /** Small model that translates Claudia's fixed texts into a conversation language other than Bulgarian or English (TRANSLATE_MODEL, src/bot/translate.ts), cached per text in the translations table. */
+  translateModel: string;
   telegramToken: string;
   telegramWebhookSecret: string;
   /** Any OpenAI-compatible transcription endpoint; Groq free tier by default. */
   sttApiKey: string | null;
   sttBaseUrl: string;
+  /**
+   * A Whisper model that answers verbose_json with the language it heard (whisper-large-v3, whisper-large-v3-turbo or whisper-1): the
+   * owner may speak any language and that label tells which (src/bot/voice.ts). OpenAI's gpt-4o transcribe models answer json only and
+   * are not supported: every voice note would fail.
+   */
   sttModel: string;
   supabaseUrl: string;
   supabaseAnonKey: string;
@@ -110,11 +125,16 @@ export function loadConfig(env: Env = process.env, opts: { lenient?: boolean } =
   if ((metaPageToken || whatsappToken) && (!metaAppSecret || !metaVerifyToken)) throw new Error("META_APP_SECRET and META_VERIFY_TOKEN are required when META_PAGE_TOKEN or WHATSAPP_TOKEN is set");
   const whatsappPhoneNumberId = optional("WHATSAPP_PHONE_NUMBER_ID");
   if (whatsappToken && !whatsappPhoneNumberId) throw new Error("WHATSAPP_PHONE_NUMBER_ID is required with WHATSAPP_TOKEN");
+  // Without a scheme the admin link is a bare domain that the translation layer would not recognise as a link (src/bot/translate.ts).
+  const publicBaseUrl = need("PUBLIC_BASE_URL");
+  if (publicBaseUrl && !opts.lenient && !/^https?:\/\//i.test(publicBaseUrl)) throw new Error("PUBLIC_BASE_URL must start with http:// or https://");
   return {
     anthropicApiKey: need("ANTHROPIC_API_KEY"),
     agentModel: optional("AGENT_MODEL") ?? "claude-opus-5-5",
     agentEffort: effort,
     commentDraftModel: optional("COMMENT_DRAFT_MODEL") ?? "claude-haiku-5-5",
+    langClassifyModel: optional("LANG_CLASSIFY_MODEL") ?? "claude-haiku-5-5",
+    translateModel: optional("TRANSLATE_MODEL") ?? "claude-haiku-5-5",
     telegramToken: need("TELEGRAM_BOT_TOKEN"),
     telegramWebhookSecret: need("TELEGRAM_WEBHOOK_SECRET"),
     sttApiKey: optional("STT_API_KEY"),
@@ -123,7 +143,7 @@ export function loadConfig(env: Env = process.env, opts: { lenient?: boolean } =
     supabaseUrl: need("NEXT_PUBLIC_SUPABASE_URL"),
     supabaseAnonKey: need("NEXT_PUBLIC_SUPABASE_ANON_KEY"),
     supabaseServiceKey: need("SUPABASE_SERVICE_ROLE_KEY"),
-    publicBaseUrl: (need("PUBLIC_BASE_URL") || "http://localhost:3000").replace(/\/+$/, ""),
+    publicBaseUrl: (publicBaseUrl || "http://localhost:3000").replace(/\/+$/, ""),
     tickSecret: need("TICK_SECRET"),
     demoVenueSlug: optional("DEMO_VENUE_SLUG") ?? "agala",
     vercelToken: optional("VERCEL_TOKEN"),

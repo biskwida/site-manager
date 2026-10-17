@@ -66,6 +66,27 @@ export function storeContract(name: string, make: () => Promise<Store>, storageH
       await s.touchMember("fb:nobody", LATER); // unknown ref: no throw
     });
 
+    it("keeps any conversation language a member chats in, and refuses one that is not a lower-case two-letter code", async () => {
+      const s = await make();
+      const v = await s.createVenue({ slug: "t3l", name: "Test" });
+      const m = await s.redeemInvite(await s.createInvite(v.id, "owner", LATER), "tg:40", "pt", NOW);
+      expect(m).toMatchObject({ chat_ref: "tg:40", lang: "pt" });
+      await s.setMemberLang(v.id, "tg:40", "de");
+      expect((await s.findMember("tg:40"))?.lang).toBe("de");
+      expect(await s.upsertMember({ venue_id: v.id, chat_ref: "fb:41", role: "staff", lang: "el" })).toMatchObject({ lang: "el" });
+      // venue_members.lang ~ '^[a-z]{2}$' (supabase/schema.sql): the memory store refuses what the database would.
+      for (const bad of ["DE", "pt-br", "xx1", ""]) {
+        await expect(s.setMemberLang(v.id, "tg:40", bad)).rejects.toThrow();
+        await expect(s.upsertMember({ venue_id: v.id, chat_ref: "fb:42", role: "staff", lang: bad })).rejects.toThrow();
+      }
+      expect((await s.findMember("tg:40"))?.lang).toBe("de");
+      expect(await s.findMember("fb:42")).toBeNull();
+      const staffCode = await s.createInvite(v.id, "staff", LATER);
+      await expect(s.redeemInvite(staffCode, "fb:43", "PT", NOW)).rejects.toThrow();
+      expect(await s.findMember("fb:43")).toBeNull();
+      expect(await s.redeemInvite(staffCode, "fb:43", "pt", NOW)).toMatchObject({ role: "staff", lang: "pt" }); // the refused language did not use the code up
+    });
+
     it("creates, lists, applies and skips change sets", async () => {
       const s = await make();
       const v = await s.createVenue({ slug: "t4", name: "Test" });
@@ -919,6 +940,20 @@ export function storeContract(name: string, make: () => Promise<Store>, storageH
       await s.deleteVenue(v.id);
       expect(await s.getComment(a.id)).toBeNull();
       expect(await s.getComment(b.id)).toBeNull();
+    });
+
+    it("caches a translation per language and source hash; a second write replaces it; a language that is not a two-letter code is refused", async () => {
+      const s = await make();
+      // A fresh hash per run: a live database keeps the rows of earlier runs.
+      const hash = (crypto.randomUUID() + crypto.randomUUID()).replaceAll("-", "");
+      expect(await s.getTranslation("de", hash)).toBeNull();
+      await s.putTranslation("de", hash, "Preis ⟦1⟧ → €4.20");
+      expect(await s.getTranslation("de", hash)).toBe("Preis ⟦1⟧ → €4.20");
+      expect(await s.getTranslation("el", hash)).toBeNull();
+      await s.putTranslation("de", hash, "Preis ⟦1⟧: €4.20");
+      expect(await s.getTranslation("de", hash)).toBe("Preis ⟦1⟧: €4.20");
+      // translations.lang ~ '^[a-z]{2}$' (supabase/schema.sql): the memory store refuses what the database would.
+      await expect(s.putTranslation("DE", hash, "x")).rejects.toThrow();
     });
   });
 }

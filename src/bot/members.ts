@@ -1,7 +1,7 @@
 // src/bot/members.ts
 // Who has access to a venue, in display form: shared by the owner's /members command (inbound.ts) and the member:list script (server/access.ts).
 import { channelOf, maskRef, type Channel } from "../channels/ref";
-import type { Lang, Member, Role } from "../domain/types";
+import type { ChatLang, Lang, Member, Role } from "../domain/types";
 import type { InviteSummary } from "../store/types";
 import { formatDateTime } from "../time";
 
@@ -15,7 +15,8 @@ export interface MemberView {
   ref: string;
   /** The platform id part of `ref`, without the channel prefix. */
   id: string;
-  lang: Lang;
+  /** The member's conversation language ("bg", "de"); /members shows it in capitals. */
+  lang: ChatLang;
   /** Formatted in the venue's time zone; null when the member never wrote. */
   lastSeen: string | null;
   joined: string;

@@ -6,7 +6,7 @@ import type { WordPressClient } from "../destinations/wordpress-client";
 import { allergenName, allergenWarnings, suggestAllergens } from "../domain/allergens";
 import { invertChanges, isIso, planChanges, type PlanContext } from "../domain/changes";
 import { isSoldOut, visibleItems } from "../domain/effective";
-import { categoryName, tr } from "../domain/format";
+import { baseLang, categoryName, tr, unkeep } from "../domain/format";
 import { closingToday, nextOpening, todayStatus } from "../domain/hours";
 import { renderPreview } from "../domain/preview";
 import { bulkPrices } from "../domain/pricing";
@@ -134,26 +134,29 @@ const NEXT_STEP: Record<ChangeSet["status"], string> = {
 export function makeTools(deps: AgentDeps) {
   const turnSets = deps.turnSets ?? new Set<string>();
   const d: ToolDeps = { ...deps, turnSets, sentPhotos: deps.sentPhotos ?? new Set<string>(), store: recordingStore(deps.store, turnSets) };
-  // Tools run one at a time per turn, even if the runner calls several at once.
+  // Tools run one at a time per turn, even if the runner calls several at once. Results reach the agent without keep markers
+  // (previews carry them for the chat): text it copies from a result into site content, a caption or a reply must have none.
   let queue: Promise<unknown> = Promise.resolve();
   const attempt = (fn: () => Promise<unknown>): Promise<string> => {
     const run = queue.then(async () => {
       try {
-        return JSON.stringify(await fn());
+        return unkeep(JSON.stringify(await fn()));
       } catch (e) {
-        return JSON.stringify({ error: e instanceof Error ? e.message : String(e) });
+        return unkeep(JSON.stringify({ error: e instanceof Error ? e.message : String(e) }));
       }
     });
     queue = run;
     return run;
   };
 
-  const lang = d.member.lang;
+  // Previews, buttons and fixed texts come in Bulgarian or English; another conversation language starts from English.
+  const lang = baseLang(d.member.lang);
   const site = () => d.store.getSite(d.venueId);
   const ctx = (): PlanContext => ({ newId: () => crypto.randomUUID(), now: d.now().toISOString() });
-  const previews = (s: SiteState, changes: ReturnType<typeof planChanges>) => ({
-    preview_bg: renderPreview(s, changes, "bg", s.venue.tz),
-    preview_en: renderPreview(s, changes, "en", s.venue.tz),
+  // `restore`: the set is an undo, which puts back what was there (no "written automatically" note).
+  const previews = (s: SiteState, changes: ReturnType<typeof planChanges>, restore = false) => ({
+    preview_bg: renderPreview(s, changes, "bg", s.venue.tz, { restore }),
+    preview_en: renderPreview(s, changes, "en", s.venue.tz, { restore }),
   });
   const mine = (p: { preview_bg: string; preview_en: string }) => (lang === "bg" ? p.preview_bg : p.preview_en);
 
@@ -255,7 +258,7 @@ export function makeTools(deps: AgentDeps) {
           media_ids: s.media.map((m) => m.id),
           now: nowText(now, s.venue.tz),
           now_iso: now.toISOString(),
-          owner_lang: lang,
+          owner_lang: d.member.lang, // the owner's own language ("de"), the one the agent writes in; `lang` is only the base of the fixed texts
           member_role: d.member.role,
           public_url: `${d.baseUrl}/${s.venue.slug}`,
           pending_proposal: pending ? { id: pending.id, summary: lang === "bg" ? pending.summary_bg : pending.summary_en, apply_at: pending.apply_at } : null,
@@ -338,7 +341,7 @@ export interface ToolKit {
   attempt: (fn: () => Promise<unknown>) => Promise<string>;
   site: () => Promise<SiteState>;
   ctx: () => PlanContext;
-  previews: (s: SiteState, changes: ReturnType<typeof planChanges>) => { preview_bg: string; preview_en: string };
+  previews: (s: SiteState, changes: ReturnType<typeof planChanges>, restore?: boolean) => { preview_bg: string; preview_en: string };
   mine: (p: { preview_bg: string; preview_en: string }) => string;
   propose: (input: ProposeInput, applyAt: string | null) => Promise<unknown>;
   getSet: (id: string) => Promise<ChangeSet>;
@@ -424,7 +427,7 @@ function extraTools(d: AgentDeps, k: ToolKit) {
         const s = await k.site();
         // Preview against the current state, so a reverted price reads "3,20 € → 2,90 €".
         const changes = invertChanges(target.changes);
-        const p = k.previews(s, changes);
+        const p = k.previews(s, changes, true);
         const cs = await d.store.createChangeSet({
           venue_id: d.venueId, chat_ref: d.chatRef, summary_bg: `Отмяна: ${target.summary_bg}`, summary_en: `Undo: ${target.summary_en}`, ...p,
           source: "undo", status: "proposed", undoes_id: target.id, changes,

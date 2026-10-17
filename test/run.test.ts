@@ -194,6 +194,30 @@ describe("runTurn", () => {
     expect(await runTurn(deps, { text: "x", source: "text" }, { model: "m", effort: "medium" }, boom)).toBe("error");
     expect(messenger.sent[1].text).toBe("Възникна грешка. Опитайте отново след малко.");
   });
+  it("sends the agent's own reply verbatim (it already speaks the owner's language); the fixed lines it falls back on go out for translation", async () => {
+    const { deps, messenger, store, venue } = await setup();
+    await runTurn(deps, { text: "Wie viel kostet der Cappuccino?", source: "text" }, { model: "m", effort: "medium" }, fakeClient([], { stop_reason: "end_turn", text: "Der ⟦Cappuccino⟧ kostet 2,90 €." }).client);
+    expect(messenger.sent[0]).toMatchObject({ verbatim: true });
+    // What the owner read is what the memory keeps: a marker the agent echoed is not.
+    expect((await store.getConversation(venue.id, "tg:1001"))?.turns.at(-1)).toMatchObject({ agent: "Der Cappuccino kostet 2,90 €." });
+    await runTurn(deps, { text: "x", source: "text" }, { model: "m", effort: "medium" }, fakeClient([], { stop_reason: "refusal", text: "" }).client);
+    const boom = { beta: { messages: { toolRunner() { throw new Error("network down"); } } } } as unknown as Anthropic;
+    await runTurn(deps, { text: "x", source: "text" }, { model: "m", effort: "medium" }, boom);
+    expect(messenger.sent.slice(1).map((s) => s.verbatim)).toEqual([undefined, undefined]);
+
+    const quiet = await setup();
+    const q = await quiet.store.saveMedia(quiet.venue.id, new Uint8Array([1]), "image/jpeg");
+    await holdPhoto(quiet.store, quiet.venue.id, "tg:1001", q.id, "", T0);
+    await runTurn(quiet.deps, { text: PHOTO_NO_CAPTION, source: "photo", image: { data: "AAAA", media_type: "image/jpeg" }, mediaId: q.id }, { model: "m", effort: "medium" }, fakeClient([], { stop_reason: "end_turn", text: "" }).client);
+    expect(quiet.messenger.sent.map((s) => [s.text, s.verbatim])).toEqual([["📷 Получих снимката. Какво да направя с нея? Напишете или изпратете гласово съобщение.", undefined]]);
+  });
+  it("tool results reach the agent without keep markers, so it never copies one into site content, a caption or a reply", async () => {
+    const { deps, items } = await setup();
+    const { client, toolResults } = fakeClient([{ tool: "propose_changes", input: { summary_bg: "Капучино 3,20 €", summary_en: "Cappuccino €3.20", changes: [{ op: "set_price", item_id: items.Cappuccino.id, price_eur: 3.2 }] } }], { stop_reason: "end_turn", text: "" });
+    await runTurn(deps, { text: "капучиното става 3,20", source: "text" }, { model: "m", effort: "medium" }, client);
+    expect(toolResults[0]).toContain("Капучино: 2,90 € → 3,20 €");
+    expect(toolResults[0]).not.toMatch(/[⟦⟧]/);
+  });
   it("sends a picture once per turn: social_post skips the one make_visual just sent, and the next turn starts afresh", async () => {
     const { deps, messenger, store, venue } = await setup();
     const https = (url: string) => url.replace("memory://media/", "https://media.example/");

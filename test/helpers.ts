@@ -3,7 +3,8 @@ import { seedDemo } from "@/src/seed/demo";
 import { oklchToHex } from "@/src/templates/shared/color";
 import { InMemoryStore } from "@/src/store/memory";
 import type { Category, Item, Lang, Venue } from "@/src/domain/types";
-import type { Messenger, SendOpts } from "@/src/bot/messenger";
+import type { Messenger, ProposalLabels, SendOpts } from "@/src/bot/messenger";
+import { unkeep } from "@/src/domain/format";
 
 export interface Demo {
   store: InMemoryStore;
@@ -28,8 +29,17 @@ export async function makeDemo(store: InMemoryStore = new InMemoryStore()): Prom
   };
 }
 
+/**
+ * Records what the owner reads: texts without keep markers, as withTranslation (src/bot/translate.ts), in front of every channel,
+ * sends them to a Bulgarian or English member. `raw` holds every text exactly as the code handed it over, markers included.
+ */
 export class FakeMessenger implements Messenger {
-  sent: { chatRef: string; text: string; setId?: string; lang?: Lang; messageRef: string; proactive?: boolean }[] = [];
+  raw: string[] = [];
+  private read(text: string): string {
+    this.raw.push(text);
+    return unkeep(text);
+  }
+  sent: { chatRef: string; text: string; setId?: string; lang?: Lang; labels?: ProposalLabels; messageRef: string; proactive?: boolean; verbatim?: boolean }[] = [];
   concluded: { chatRef: string; messageRef: string | null; full: string; short: string; proactive?: boolean }[] = [];
   typed: string[] = [];
   edited: { chatRef: string; messageRef: string; text: string }[] = [];
@@ -38,27 +48,27 @@ export class FakeMessenger implements Messenger {
   private next = 100;
   async send(chatRef: string, text: string, opts?: SendOpts) {
     const messageRef = String(this.next++);
-    this.sent.push({ chatRef, text, messageRef, proactive: opts?.proactive });
+    this.sent.push({ chatRef, text: this.read(text), messageRef, proactive: opts?.proactive, verbatim: opts?.verbatim });
     return messageRef;
   }
-  async sendProposal(chatRef: string, text: string, setId: string, lang: Lang) {
+  async sendProposal(chatRef: string, text: string, setId: string, lang: Lang, labels?: ProposalLabels) {
     const messageRef = String(this.next++);
-    this.sent.push({ chatRef, text, setId, lang, messageRef });
+    this.sent.push({ chatRef, text: this.read(text), setId, lang, labels, messageRef });
     return messageRef;
   }
   async sendPhoto(chatRef: string, url: string, caption?: string) {
     const messageRef = String(this.next++);
-    this.photos.push({ chatRef, url, caption, messageRef });
+    this.photos.push({ chatRef, url, caption: caption === undefined ? undefined : this.read(caption), messageRef });
     return messageRef;
   }
   async conclude(chatRef: string, messageRef: string | null, full: string, short: string, opts?: SendOpts) {
-    this.concluded.push({ chatRef, messageRef, full, short, proactive: opts?.proactive });
+    this.concluded.push({ chatRef, messageRef, full: this.read(full), short: this.read(short), proactive: opts?.proactive });
   }
   async typing(chatRef: string) {
     this.typed.push(chatRef);
   }
   async edit(chatRef: string, messageRef: string, text: string) {
-    this.edited.push({ chatRef, messageRef, text });
+    this.edited.push({ chatRef, messageRef, text: this.read(text) });
   }
   async remove(chatRef: string, messageRef: string) {
     this.removed.push({ chatRef, messageRef });

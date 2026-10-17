@@ -1,7 +1,8 @@
 // src/store/types.ts
 import type {
-  BusinessType, Category, Change, ChangeSet, ChangeSetStatus, ChangeSource, CommentMode, CommentNetwork, Conversation, DeployInfo, DeployStatus, Item, Lang, Media, Member, Role, SiteState, SiteTextKey, TemplateId, Venue, VenueStatus, WeekHours,
+  BusinessType, Category, Change, ChangeSet, ChangeSetStatus, ChangeSource, ChatLang, CommentMode, CommentNetwork, Conversation, DeployInfo, DeployStatus, Item, Lang, Media, Member, Role, SiteState, SiteTextKey, TemplateId, Venue, VenueStatus, WeekHours,
 } from "../domain/types";
+import { isChatLang } from "../domain/types";
 import type { WizardDraft } from "../wizard/schema";
 
 /** How long a publish claim (claimPublish) blocks a second publish of the same draft; a publish that died keeps nobody out for longer. */
@@ -147,15 +148,16 @@ export interface Store {
   // members and access (chatRef = "<channel>:<id>", src/channels/ref.ts)
   findMember(chatRef: string): Promise<Member | null>;
   listMembers(venueId: string): Promise<Member[]>;
+  /** Members' `lang` must be a conversation language code (checkMemberLang), here and in setMemberLang and redeemInvite. */
   upsertMember(m: Omit<Member, "created_at" | "last_seen_at"> & { last_seen_at?: string | null }): Promise<Member>;
-  setMemberLang(venueId: string, chatRef: string, lang: Lang): Promise<void>;
+  setMemberLang(venueId: string, chatRef: string, lang: ChatLang): Promise<void>;
   /** Records an inbound message from the member; no-op for unknown refs. */
   touchMember(chatRef: string, nowIso: string): Promise<void>;
   createInvite(venueId: string, role: Role, expiresAt: string): Promise<string>;
   /** The open invite (unused, expires after `now`) for this venue and role that expires last; null when there is none. */
   findOpenInvite(venueId: string, role: Role, now: string): Promise<string | null>;
-  /** Links the chat and marks the code used; null when the code is unknown, used or expired. */
-  redeemInvite(code: string, chatRef: string, lang: Lang, now: string): Promise<Member | null>;
+  /** Links the chat and marks the code used; null when the code is unknown, used or expired. A `lang` that is not a language code is refused before the code is used. */
+  redeemInvite(code: string, chatRef: string, lang: ChatLang, now: string): Promise<Member | null>;
   /** Creates the token on first call. */
   getAdminToken(venueId: string): Promise<string>;
   findVenueByAdminToken(token: string): Promise<Venue | null>;
@@ -322,6 +324,11 @@ export function checkLimitValue(limit: number | null): void {
   if (limit !== null && !(Number.isInteger(limit) && limit >= 0)) throw new Error(`change limit must be a whole number >= 0 or null, got ${limit}`);
 }
 
+/** Throws unless `lang` is a conversation language code (isChatLang), the check venue_members.lang has in supabase/schema.sql. */
+export function checkMemberLang(lang: string): void {
+  if (!isChatLang(lang)) throw new Error(`member language must be a lower-case two-letter code, got ${JSON.stringify(lang)}`);
+}
+
 // --- Meta data deletion (appended 2026-10-14; src/server/meta-deletion.ts) ---
 export type DeletionProvider = "facebook" | "instagram";
 export type DeletionStatus = "pending" | "completed";
@@ -429,6 +436,15 @@ export interface Store {
   redactCommentSets(before: string, venueId?: string): Promise<number>;
   /** Replies and moderations that went out in [fromIso, toIso): rows with status replied, hidden or deleted and replied_at in the window. */
   countCommentActions(venueId: string, fromIso: string, toIso: string): Promise<number>;
+}
+
+// --- Translations (appended 2026-10-16; src/bot/translate.ts) ---
+// Declaration merging: the Store interface above gains the translation cache (table translations, server-only).
+export interface Store {
+  /** The cached translation into `lang` of the fixed text whose sha256 hex is `sourceHash`; null when there is none. */
+  getTranslation(lang: ChatLang, sourceHash: string): Promise<string | null>;
+  /** Stores a translation; a second write for the same language and text replaces the first. `lang` must pass checkMemberLang (translations.lang check). */
+  putTranslation(lang: ChatLang, sourceHash: string, text: string): Promise<void>;
 }
 
 /** What a comment set says once its customer text is gone (redactCommentSets). */

@@ -2,7 +2,7 @@
 // Preview lines for social_reply and social_moderate rows (replies and moderation of customer comments on the venue's
 // Facebook Page / Instagram account), and the set_comment_mode label. Pure; both languages; undo-safe (an inverted row has
 // after = null).
-import { quote, tr } from "./format";
+import { keep, quote, tr } from "./format";
 import { NETWORK_NAMES, type Change, type Lang, type Row } from "./types";
 
 export const EXCERPT_MAX = 60;
@@ -33,11 +33,12 @@ export function commentPreviewLines(c: Change, lang: Lang): string[] {
   const row = rowOf(c);
   const network = str(row.network);
   const net = network in NETWORK_NAMES ? NETWORK_NAMES[network as keyof typeof NETWORK_NAMES] : network;
-  const author = str(row.author_name) || tr(lang, "клиент", "a customer");
-  const text = quote(excerpt(str(row.comment_text)), lang);
+  // The customer's name and words, and the reply drafted for them, stay as written in any language (kept).
+  const author = keep(str(row.author_name)) || tr(lang, "клиент", "a customer");
+  const text = quote(keep(excerpt(str(row.comment_text))), lang);
   if (c.entity === "social_reply") {
     if (c.after === null) return [`• ${tr(lang, `Изтрива отговора на коментара от ${author}`, `Deletes the reply to ${author}'s comment`)} (${net})`];
-    return [`• ${tr(lang, `Отговор на коментар от ${author}`, `Reply to a comment by ${author}`)} (${net}): ${text} → ${quote(str(row.reply_text), lang)}`];
+    return [`• ${tr(lang, `Отговор на коментар от ${author}`, `Reply to a comment by ${author}`)} (${net}): ${text} → ${quote(keep(str(row.reply_text)), lang)}`];
   }
   const action = str(row.action);
   if (c.after === null) {

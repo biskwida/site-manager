@@ -39,6 +39,12 @@ describe("MetaMessenger", () => {
     expect(calls[0].json).toEqual({ recipient: { id: "178414" }, messaging_type: "RESPONSE", message: { attachment: { type: "template", payload: { template_type: "button", text: "• Капучино: 2,90 € → 3,20 €\n\nДа приложа ли?", buttons: [
       { type: "postback", title: "✅ Приложи", payload: "cs:apply:abc" }, { type: "postback", title: "✏️ Промени", payload: "cs:change:abc" }, { type: "postback", title: "❌ Откажи", payload: "cs:cancel:abc" } ] } } } });
   });
+  it("a proposal's postback titles are the translated labels it is given", async () => {
+    const { f, calls } = fakeFetch();
+    await new MetaMessenger({ pageToken: "PT", fetch: f }).sendProposal("fb:500", "Anwenden?", "abc", "en", { apply: "✅ Anwenden", change: "✏️ Ändern", cancel: "❌ Abbrechen" });
+    const buttons = (calls[0].json.message as { attachment: { payload: { buttons: { title: string; payload: string }[] } } }).attachment.payload.buttons;
+    expect(buttons.map((b) => [b.title, b.payload])).toEqual([["✅ Anwenden", "cs:apply:abc"], ["✏️ Ändern", "cs:change:abc"], ["❌ Abbrechen", "cs:cancel:abc"]]);
+  });
   it("sends a long preview as text first, then a short button message (Review Focus 3)", async () => {
     const { f, calls } = fakeFetch();
     const m = new MetaMessenger({ pageToken: "PT", fetch: f });

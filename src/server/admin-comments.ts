@@ -6,7 +6,7 @@
 import { copy } from "../bot/copy";
 import { syncLines } from "../destinations/sync";
 import { commentModeLabel } from "../domain/comment-preview";
-import { quote, tr } from "../domain/format";
+import { baseLang, keep, quote, tr } from "../domain/format";
 import { maskRef } from "../channels/ref";
 import { COMMENT_MODES, type ChangeSet, type CommentMode, type CommentNetwork, type Lang, type ModerateAction, type Venue } from "../domain/types";
 import { cancelCommentSet, commentLimitState, commentsOfSet, createCommentSet, previewLength, reachableOwners, splitCommentItems, type CommentSetDeps, type CommentSetItem } from "../social/comments-propose";
@@ -134,7 +134,7 @@ async function tellOwners(d: AdminDeps, venueId: string, now: Date, text: (lang:
   const { reachable } = await reachableOwners(d.store, venueId, now);
   for (const m of reachable) {
     try {
-      await d.messenger.send(m.chat_ref, await text(m.lang), { proactive: true });
+      await d.messenger.send(m.chat_ref, await text(baseLang(m.lang)), { proactive: true });
     } catch (e) {
       console.error(`[comments] dashboard notice to ${maskRef(m.chat_ref)} failed:`, e instanceof Error ? e.name : "error");
     }
@@ -245,8 +245,9 @@ export async function adminCommentAction(d: AdminDeps, venue: Venue, a: AdminCom
     // Like the other dashboard decisions, the owners' chats hear about it (Meta channels within the window).
     const setId = made.set.id;
     await tellOwners(d, venue.id, now, async (lang) => {
-      const who = c.author_name || tr(lang, "клиент", "a customer");
-      const head = tr(lang, `✅ Отговорено от таблото на ${who}: ${quote(a.reply_text, "bg")}`, `✅ Answered from the dashboard to ${who}: ${quote(a.reply_text, "en")}`);
+      // The customer's name and the reply as published stay as written in any language (kept).
+      const who = keep(c.author_name) || tr(lang, "клиент", "a customer");
+      const head = tr(lang, `✅ Отговорено от таблото на ${who}: ${quote(keep(a.reply_text), "bg")}`, `✅ Answered from the dashboard to ${who}: ${quote(keep(a.reply_text), "en")}`);
       return [head, ...(await syncLines(d.store, setId, lang))].join("\n");
     });
     return { ok: true, status: "applied", change_set_id: setId };

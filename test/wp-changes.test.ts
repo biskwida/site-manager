@@ -46,37 +46,38 @@ describe("wpPreviewLines", () => {
     expect(clip("x".repeat(100), 10)).toBe("xxxxxxxxx…");
   });
   it("describes a page edit with replacements and the preview link, in both languages", () => {
+    // The site's own words are kept as written in any language (keep markers, src/bot/translate.ts); links stay as they are.
     expect(wpPreviewLines(page, "bg")).toEqual([
-      "• WordPress: страница „About“",
-      "  „banitsa every morning“ → „banitsa and kozunak every morning“",
+      "• WordPress: страница „⟦About⟧“",
+      "  „⟦banitsa every morning⟧“ → „⟦banitsa and kozunak every morning⟧“",
       "  Преглед: https://cafe.example/about/?sm_preview=abc",
     ]);
     expect(wpPreviewLines(page, "en")).toEqual([
-      "• WordPress: page “About”",
-      "  “banitsa every morning” → “banitsa and kozunak every morning”",
+      "• WordPress: page “⟦About⟧”",
+      "  “⟦banitsa every morning⟧” → “⟦banitsa and kozunak every morning⟧”",
       "  Preview: https://cafe.example/about/?sm_preview=abc",
     ]);
   });
   it("describes an inverted page edit as restoring the previous text", () => {
     const [inv] = invertChanges([page]);
-    expect(wpPreviewLines(inv, "bg")).toEqual(["• WordPress: страница „About“", "  връща предишния текст"]);
-    expect(wpPreviewLines(inv, "en")).toEqual(["• WordPress: page “About”", "  restores the previous text"]);
+    expect(wpPreviewLines(inv, "bg")).toEqual(["• WordPress: страница „⟦About⟧“", "  връща предишния текст"]);
+    expect(wpPreviewLines(inv, "en")).toEqual(["• WordPress: page “⟦About⟧”", "  restores the previous text"]);
   });
   it("describes photos, options, menus and products", () => {
-    expect(wpPreviewLines(photo, "bg")).toEqual(["• WordPress: качва снимка „Коледна витрина“", "  като водеща снимка на страница „About“"]);
-    expect(wpPreviewLines(photo, "en")).toEqual(["• WordPress: uploads photo “Christmas window”", "  as the featured image of page “About”"]);
+    expect(wpPreviewLines(photo, "bg")).toEqual(["• WordPress: качва снимка „⟦Коледна витрина⟧“", "  като водеща снимка на страница „⟦About⟧“"]);
+    expect(wpPreviewLines(photo, "en")).toEqual(["• WordPress: uploads photo “⟦Christmas window⟧”", "  as the featured image of page “⟦About⟧”"]);
     const [noPhoto] = invertChanges([photo]);
-    expect(wpPreviewLines(noPhoto, "en")).toEqual(["• WordPress: removes photo “Christmas window”", "  and the featured image of page “About”"]);
-    expect(wpPreviewLines(option, "bg")).toEqual(["• WordPress: Име на сайта: „Agala“ → „Кафене „Ъгъла““"]);
-    expect(wpPreviewLines(option, "en")).toEqual(["• WordPress: Site title: “Agala” → “Кафене „Ъгъла“”"]);
-    expect(wpPreviewLines(menu, "en")).toEqual(["• WordPress: menu “Main”: 1 → 2 items", "  – Home → /", "  – Menu → /menu/"]);
-    expect(wpPreviewLines(menu, "bg")[0]).toBe("• WordPress: меню „Main“: 1 → 2 елемента");
-    expect(wpPreviewLines(product, "en")).toEqual(["• WordPress: product “Espresso beans”", "  price: “12” → “13.5”"]);
+    expect(wpPreviewLines(noPhoto, "en")).toEqual(["• WordPress: removes photo “⟦Christmas window⟧”", "  and the featured image of page “⟦About⟧”"]);
+    expect(wpPreviewLines(option, "bg")).toEqual(["• WordPress: Име на сайта: „⟦Agala⟧“ → „⟦Кафене „Ъгъла“⟧“"]);
+    expect(wpPreviewLines(option, "en")).toEqual(["• WordPress: Site title: “⟦Agala⟧” → “⟦Кафене „Ъгъла“⟧”"]);
+    expect(wpPreviewLines(menu, "en")).toEqual(["• WordPress: menu “⟦Main⟧”: 1 → 2 items", "  – ⟦Home⟧ → /", "  – ⟦Menu⟧ → /menu/"]);
+    expect(wpPreviewLines(menu, "bg")[0]).toBe("• WordPress: меню „⟦Main⟧“: 1 → 2 елемента");
+    expect(wpPreviewLines(product, "en")).toEqual(["• WordPress: product “⟦Espresso beans⟧”", "  price: “⟦12⟧” → “⟦13.5⟧”"]);
   });
   it("is wired into renderPreview", () => {
     const s = state();
     expect(renderPreview(s, [{ ...option, position: 0 }, { ...page, position: 1 }], "en", "Europe/Sofia")).toBe(
-      ["• WordPress: Site title: “Agala” → “Кафене „Ъгъла“”", "• WordPress: page “About”", "  “banitsa every morning” → “banitsa and kozunak every morning”", "  Preview: https://cafe.example/about/?sm_preview=abc"].join("\n"),
+      ["• WordPress: Site title: “⟦Agala⟧” → “⟦Кафене „Ъгъла“⟧”", "• WordPress: page “⟦About⟧”", "  “⟦banitsa every morning⟧” → “⟦banitsa and kozunak every morning⟧”", "  Preview: https://cafe.example/about/?sm_preview=abc"].join("\n"),
     );
   });
 });

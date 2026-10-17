@@ -66,7 +66,7 @@ describe("social_post availability", () => {
   it("the prompt tells the agent when and how to use it", () => {
     expect(SYSTEM_PROMPT).toMatch(/social_post/);
     expect(SYSTEM_PROMPT).toMatch(/история/);
-    expect(SYSTEM_PROMPT).toMatch(/default language/i);
+    expect(SYSTEM_PROMPT).toMatch(/caption in the Owner language/i);
   });
   it("the prompt and the targets description spell out story vs post", () => {
     // The live case: "смени водата на 1.50 и прати стори само в инстаграм" must become instagram_story only.

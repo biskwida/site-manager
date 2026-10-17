@@ -1,4 +1,4 @@
-import { proposalButtons, type Messenger } from "../../bot/messenger";
+import { PROPOSAL_LABEL_MAX, proposalButtons, type Messenger, type ProposalLabels } from "../../bot/messenger";
 import type { Lang } from "../../domain/types";
 import { graphPost } from "../meta/graph";
 import { parseRef } from "../ref";
@@ -45,12 +45,12 @@ export class WhatsAppMessenger implements Messenger {
     if (!to) return null;
     return WhatsAppMessenger.id(await this.post({ recipient_type: "individual", to, type: "image", image: { link: url, ...(caption ? { caption } : {}) } }, "sendPhoto"));
   }
-  async sendProposal(chatRef: string, text: string, setId: string, lang: Lang): Promise<string | null> {
+  async sendProposal(chatRef: string, text: string, setId: string, lang: Lang, labels?: ProposalLabels): Promise<string | null> {
     const to = this.to(chatRef, "sendProposal");
     if (!to) return null;
     const { lead, ask } = proposalParts(text, BODY_MAX);
     if (lead && (await this.sendText(to, lead)) === null) return null;
-    const buttons = proposalButtons(lang).map((b) => ({ type: "reply", reply: { id: `cs:${b.id}:${setId}`, title: b.label.slice(0, 20) } }));
+    const buttons = proposalButtons(lang, labels).map((b) => ({ type: "reply", reply: { id: `cs:${b.id}:${setId}`, title: b.label.slice(0, PROPOSAL_LABEL_MAX) } }));
     return WhatsAppMessenger.id(await this.post({ recipient_type: "individual", to, type: "interactive", interactive: { type: "button", body: { text: ask }, action: { buttons } } }, "sendProposal"));
   }
   async conclude(chatRef: string, _messageRef: string | null, _full: string, short: string): Promise<void> {

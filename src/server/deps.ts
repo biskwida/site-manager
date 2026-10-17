@@ -10,8 +10,10 @@ import { makeRef, type Channel } from "../channels/ref";
 import { ChannelRouter } from "../channels/router";
 import { WhatsAppMessenger } from "../channels/whatsapp/send";
 import { createBot, type BotDeps, type RunRequest } from "../bot/bot";
+import { makeLangClassifier } from "../bot/lang-classify";
 import { downloadTelegramFile } from "../bot/media";
 import { TelegramMessenger, type Messenger } from "../bot/messenger";
+import { makeTranslator, withTranslation } from "../bot/translate";
 import { makeTranscriber, type Transcriber } from "../bot/voice";
 import { loadConfig, type Config } from "../config";
 import { FakeDeployer } from "../deploy/fake";
@@ -35,7 +37,10 @@ import { httpVisualClient } from "../visual/client";
 export interface ServerDeps {
   config: Config;
   store: Store;
-  /** The ChannelRouter: dispatches by chat_ref prefix to the per-channel adapters. */
+  /**
+   * Every text to an owner goes through this: withTranslation (src/bot/translate.ts) in front of the ChannelRouter, which dispatches by
+   * chat_ref prefix to the per-channel adapters. The webhook turns, the approvals, the dashboard and the tick all send through it.
+   */
   messenger: Messenger;
   bot: Bot;
   /** Shared with createBot; the Meta webhook route reuses it for inbound handling. */
@@ -108,8 +113,11 @@ export async function makeServerDeps(o: DepsOptions): Promise<ServerDeps> {
   const sync: SyncDeps | null = destinationSecretKey ? { store: s, secretKey: destinationSecretKey, log } : null;
   // Every apply (bot button, dashboard, tick, agent) goes through store2 so wp_* rows reach the site right after the apply.
   const store2: Store = sync ? withDestinationSync(s, sync) : s;
+  // One classifier names the language of the owner's longer Latin-script words (botDeps) and of a customer's comment (the reply
+  // draft). Without an API key there is none: the owner's words go by the English word list, a Latin comment is answered in English.
+  const classifyLang = anthropic ? makeLangClassifier(anthropic, config.langClassifyModel) : null;
   // Without an API key draftReply answers with the neutral fallback line, so the owner still gets a proposal to edit.
-  const comments = sync ? { draft: (ctx: Parameters<DraftFn>[0]) => draftReply(anthropic, { model: config.commentDraftModel }, ctx) } : null;
+  const comments = sync ? { draft: (ctx: Parameters<DraftFn>[0]) => draftReply(anthropic, { model: config.commentDraftModel, classify: classifyLang }, ctx) } : null;
   const transcribe =
     o.transcribe !== undefined ? o.transcribe : config.sttApiKey ? makeTranscriber({ apiKey: config.sttApiKey, baseUrl: config.sttBaseUrl, model: config.sttModel }) : null;
   // The fake deployer is for offline mode only: in production it would hand owners https://<slug>.example.test.
@@ -141,6 +149,7 @@ export async function makeServerDeps(o: DepsOptions): Promise<ServerDeps> {
     now: () => new Date(),
     startRun: (r) => o.defer(() => handleRun(r)),
     transcribe,
+    classifyLang,
     download: (filePath) => downloadTelegramFile(config.telegramToken, filePath),
     connect: sync ? (venueId, siteUrl, code) => connectWordPress({ store: s, secretKey: destinationSecretKey, allowLocal: isMemory }, venueId, siteUrl, code) : undefined,
     // Without a deployer the hosted /<slug> is the site: nothing to publish, so no hook (and no "publishing" line).
@@ -151,7 +160,10 @@ export async function makeServerDeps(o: DepsOptions): Promise<ServerDeps> {
   if (config.metaPageToken) adapters.fb = adapters.ig = new MetaMessenger({ pageToken: config.metaPageToken });
   if (config.whatsappToken && config.whatsappPhoneNumberId) adapters.wa = new WhatsAppMessenger({ token: config.whatsappToken, phoneNumberId: config.whatsappPhoneNumberId });
   if (isMemory) for (const ch of ["fb", "ig", "wa"] as const) adapters[ch] ??= new ConsoleMessenger(log);
-  const messenger = new ChannelRouter({ store: store2, now: () => new Date(), adapters });
+  // Members chatting in a language other than Bulgarian or English get Claudia's fixed texts translated (TRANSLATE_MODEL, cached);
+  // every member gets them without keep markers. Without an API key those languages get the English texts.
+  const router = new ChannelRouter({ store: store2, now: () => new Date(), adapters });
+  const messenger = withTranslation(router, { store: store2, translate: anthropic ? makeTranslator(anthropic, config.translateModel, store2) : null });
   botDeps.messenger = messenger;
   const waDownload: MediaFetch = (mediaId) => downloadWhatsAppMedia(config.whatsappToken ?? "", mediaId);
   const fetchUrl: MediaFetch = (url) => downloadUrl(url);

@@ -3,6 +3,7 @@ import { limitReachedLine, usageLine } from "../bot/limit";
 import type { Messenger } from "../bot/messenger";
 import { invertChanges } from "../domain/changes";
 import { isSoldOut } from "../domain/effective";
+import { baseLang, unkeep, unkeepTexts } from "../domain/format";
 import { renderPreview } from "../domain/preview";
 import { TEMPLATE_IDS, type ChangeSet, type DeployInfo, type TemplateId, type Venue, type VenueStatus } from "../domain/types";
 import type { Deployer, DeployInput, DomainInstructions } from "../deploy/types";
@@ -77,9 +78,10 @@ export async function adminOverview(store: Store, venue: Venue, now: Date, baseU
     site_url: ownSite ? (venue.site_url as string) : deploy?.status === "ready" && deploy.url ? deploy.url : `${baseUrl}/${venue.slug}`,
     custom_domain: deploy?.custom_domain ?? null,
     domain_verified: deploy?.custom_domain ? (deploy.domain_verified ?? false) : null,
-    pending: pending.filter((cs) => cs.source !== "comment").slice(0, PENDING_MAX),
-    scheduled: [...scheduled].sort((a, b) => (a.apply_at ?? "").localeCompare(b.apply_at ?? "")),
-    log,
+    // Summaries and previews without the keep markers their chat copies carry (src/domain/format.ts keep).
+    pending: pending.filter((cs) => cs.source !== "comment").slice(0, PENDING_MAX).map(unkeepTexts),
+    scheduled: [...scheduled].sort((a, b) => (a.apply_at ?? "").localeCompare(b.apply_at ?? "")).map(unkeepTexts),
+    log: log.map(unkeepTexts),
     sold_out: site.items.filter((i) => i.active && isSoldOut(i, nowMs)).map((i) => ({ id: i.id, name_bg: i.name_bg, name_en: i.name_en, sold_out_until: i.sold_out_until as string })),
     wordpress: await wordPressOverview(store, venue.id),
     connected_apps: connectedApps(members),
@@ -105,7 +107,7 @@ export interface AdminDeps {
 async function concludeOnChannel(d: AdminDeps, cs: ChangeSet, mark: { bg: string; en: string }) {
   if (cs.chat_ref === null) return;
   const member = await d.store.findMember(cs.chat_ref);
-  const lang = member?.lang ?? "bg";
+  const lang = baseLang(member?.lang ?? "bg");
   const preview = lang === "bg" ? cs.preview_bg : cs.preview_en;
   const line = lang === "bg" ? mark.bg : mark.en;
   await d.messenger.conclude(cs.chat_ref, cs.message_ref, `${preview}\n\n${line}`, line, { proactive: true });
@@ -131,11 +133,14 @@ export async function adminAction(d: AdminDeps, venue: Venue, action: AdminActio
     const changes = invertChanges(cs.changes);
     const undo = await d.store.createChangeSet({
       venue_id: venue.id, chat_ref: cs.chat_ref, summary_bg: `Отмяна: ${cs.summary_bg}`, summary_en: `Undo: ${cs.summary_en}`,
-      preview_bg: renderPreview(site, changes, "bg", venue.tz), preview_en: renderPreview(site, changes, "en", venue.tz),
+      preview_bg: renderPreview(site, changes, "bg", venue.tz, { restore: true }), preview_en: renderPreview(site, changes, "en", venue.tz, { restore: true }),
       source: "undo", status: "proposed", undoes_id: cs.id, changes,
     });
     await d.store.applyChangeSet(undo.id, nowIso);
-    if (cs.chat_ref !== null) await d.messenger.send(cs.chat_ref, (await d.store.findMember(cs.chat_ref))?.lang === "en" ? `↩️ Reverted from the dashboard: ${cs.summary_en}` : `↩️ Отменено от таблото: ${cs.summary_bg}`, { proactive: true });
+    if (cs.chat_ref !== null) {
+      const lang = baseLang((await d.store.findMember(cs.chat_ref))?.lang ?? "bg");
+      await d.messenger.send(cs.chat_ref, lang === "en" ? `↩️ Reverted from the dashboard: ${cs.summary_en}` : `↩️ Отменено от таблото: ${cs.summary_bg}`, { proactive: true });
+    }
     return { ok: true, status: "applied", change_set_id: undo.id };
   }
   if (action === "cancel") {
@@ -193,7 +198,7 @@ export async function wordPressOverview(store: Store, venueId: string): Promise<
     status: d.status,
     connected_at: typeof d.config.connected_at === "string" ? d.config.connected_at : null,
     last_error: d.last_error,
-    syncs: last.map((s, i) => ({ id: s.id, change_set_id: s.change_set_id, status: s.status, summary_bg: sets[i]?.summary_bg ?? "", summary_en: sets[i]?.summary_en ?? "", updated_at: s.updated_at, last_error: s.last_error })),
+    syncs: last.map((s, i) => ({ id: s.id, change_set_id: s.change_set_id, status: s.status, summary_bg: unkeep(sets[i]?.summary_bg ?? ""), summary_en: unkeep(sets[i]?.summary_en ?? ""), updated_at: s.updated_at, last_error: s.last_error })),
   };
 }
 
@@ -377,7 +382,7 @@ export async function socialOverview(store: Store, venueId: string, available: {
     instagram: account(ig, ig?.config.username ? `@${String(ig.config.username)}` : ""),
     posts: last.map((s, i) => ({
       id: s.id, change_set_id: s.change_set_id, kind: ids.get(s.destination_id)!, status: s.status,
-      summary_bg: sets[i]?.summary_bg ?? "", summary_en: sets[i]?.summary_en ?? "", updated_at: s.updated_at, last_error: s.last_error,
+      summary_bg: unkeep(sets[i]?.summary_bg ?? ""), summary_en: unkeep(sets[i]?.summary_en ?? ""), updated_at: s.updated_at, last_error: s.last_error,
       links: publishedIn([s.result]).map((p) => safeLink(p.permalink)).filter((x): x is string => !!x),
     })),
   };

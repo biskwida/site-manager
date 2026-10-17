@@ -5,6 +5,7 @@ import { makeTools, type AgentDeps } from "@/src/agent/tools";
 import { handleDecision } from "@/src/bot/approvals";
 import { copy } from "@/src/bot/copy";
 import { planChanges } from "@/src/domain/changes";
+import { unkeep } from "@/src/domain/format";
 import type { SocialComment } from "@/src/store/types";
 import type { DraftContext, ReplyDraft } from "@/src/social/comments-draft";
 import { cancelCommentSet, COMMENT_PROPOSAL_TTL_MS, commentLimitState, commentProposalText, commentsOfSet, createCommentSet, proposalTtlHours, proposeForComments, splitCommentItems, type CommentSetItem, type ProposeDeps } from "@/src/social/comments-propose";
@@ -39,12 +40,14 @@ describe("commentProposalText", () => {
   it("one reply: the comment, the network, the post excerpt and the draft, then the question", async () => {
     const { add } = await setup();
     const c = await add("c1", "Имате ли безглутенови?");
+    // The post's caption, the customer's name and words and the draft are kept as written in any language (src/bot/translate.ts).
     expect(commentProposalText([item(c, "Да, имаме безглутенов хляб всеки ден.")], "bg")).toBe(
-      "💬 Нов коментар под поста „Днешното предложение: тиквена супа“ (Instagram) от Мария: „Имате ли безглутенови?“\n\nПредложен отговор:\n„Да, имаме безглутенов хляб всеки ден.“\n\nДа отговоря ли?",
+      "💬 Нов коментар под поста „⟦Днешното предложение: тиквена супа⟧“ (Instagram) от ⟦Мария⟧: „⟦Имате ли безглутенови?⟧“\n\nПредложен отговор:\n„⟦Да, имаме безглутенов хляб всеки ден.⟧“\n\nДа отговоря ли?",
     );
     expect(commentProposalText([item(c, "Yes, every day.")], "en")).toBe(
-      "💬 New comment under the post “Днешното предложение: тиквена супа” (Instagram) by Мария: “Имате ли безглутенови?”\n\nSuggested reply:\n“Yes, every day.”\n\nReply?",
+      "💬 New comment under the post “⟦Днешното предложение: тиквена супа⟧” (Instagram) by ⟦Мария⟧: “⟦Имате ли безглутенови?⟧”\n\nSuggested reply:\n“⟦Yes, every day.⟧”\n\nReply?",
     );
+    expect(commentProposalText([item({ ...c, author_name: "", post_caption: "" }, "x")], "en")).toMatch(/^💬 New comment under the post “\(no caption\)” \(Instagram\) by a customer: /); // Claudia's own words
   });
   it("keeps every message under Telegram's limit: a long single comment is cut, batches split by rows and by length", async () => {
     const { add } = await setup();
@@ -61,8 +64,8 @@ describe("commentProposalText", () => {
   it("a moderation: says why and asks to hide (or delete, not undoable)", async () => {
     const { add } = await setup();
     const c = await add("c2", "Buy followers at spam.example", "bot", { network: "facebook" });
-    expect(commentProposalText([item(c, null, "hide")], "bg")).toBe("⚠️ Коментар под поста „Днешното предложение: тиквена супа“ (Facebook) от bot: „Buy followers at spam.example“\n\nТози коментар изглежда спам или обиден. Предлагам да го скрием.\n\nДа го скрия ли?");
-    expect(commentProposalText([item(c, null, "hide")], "en")).toBe("⚠️ Comment under the post “Днешното предложение: тиквена супа” (Facebook) by bot: “Buy followers at spam.example”\n\nThis comment looks like spam or abuse. I suggest hiding it.\n\nHide it?");
+    expect(commentProposalText([item(c, null, "hide")], "bg")).toBe("⚠️ Коментар под поста „⟦Днешното предложение: тиквена супа⟧“ (Facebook) от ⟦bot⟧: „⟦Buy followers at spam.example⟧“\n\nТози коментар изглежда спам или обиден. Предлагам да го скрием.\n\nДа го скрия ли?");
+    expect(commentProposalText([item(c, null, "hide")], "en")).toBe("⚠️ Comment under the post “⟦Днешното предложение: тиквена супа⟧” (Facebook) by ⟦bot⟧: “⟦Buy followers at spam.example⟧”\n\nThis comment looks like spam or abuse. I suggest hiding it.\n\nHide it?");
     expect(commentProposalText([item(c, null, "delete")], "bg")).toContain("Предлагам да го изтрием (не може да се отмени).\n\nДа го изтрия ли?");
   });
   it("a batch: counts comments and posts, numbers the items, explains the buttons", async () => {
@@ -74,11 +77,11 @@ describe("commentProposalText", () => {
     expect(text).toBe([
       "💬 3 нови коментара под 2 поста",
       "",
-      "1. Иван (Instagram) под „Днешното предложение: тиквена супа“: „Страхотно!“",
-      "   → „Благодарим, Иване!“",
-      "2. Петя (Instagram) под „Нова торта“: „Кога отваряте?“",
-      "   → „Отваряме в 8:00.“",
-      "3. bot (Instagram) под „Нова торта“: „spam“",
+      "1. ⟦Иван⟧ (Instagram) под „⟦Днешното предложение: тиквена супа⟧“: „⟦Страхотно!⟧“",
+      "   → „⟦Благодарим, Иване!⟧“",
+      "2. ⟦Петя⟧ (Instagram) под „⟦Нова торта⟧“: „⟦Кога отваряте?⟧“",
+      "   → „⟦Отваряме в 8:00.⟧“",
+      "3. ⟦bot⟧ (Instagram) под „⟦Нова торта⟧“: „⟦spam⟧“",
       "   → скриване (спам или обиден)",
       "",
       "✅ отговаря на всички · ✏️ кажете кое да променя · ❌ отказва всички",
@@ -98,9 +101,10 @@ describe("createCommentSet", () => {
     expect(r.deferred).toBe(false);
     expect(r.sent.sort()).toEqual(["fb:900", "tg:1001"]);
     const cs = r.set!;
-    expect(cs).toMatchObject({ source: "comment", status: "proposed", chat_ref: "tg:1001", summary_bg: "Отговор на коментар от Мария", summary_en: "Reply to Мария's comment", apply_at: null });
+    // The customer's name is kept in the summaries too (the dashboard's undo line sends one to the chat); every reader strips it.
+    expect(cs).toMatchObject({ source: "comment", status: "proposed", chat_ref: "tg:1001", summary_bg: "Отговор на коментар от ⟦Мария⟧", summary_en: "Reply to ⟦Мария⟧'s comment", apply_at: null });
     expect(cs.changes).toEqual([{ position: 0, op: "social_reply", entity: "social_reply", entity_id: "c1", before: null, after: { network: "instagram", comment_id: "c1", post_ref: "media-1", author_name: "Мария", comment_text: "Имате ли безглутенови?", reply_text: "Да, имаме.", permalink: null } }]);
-    expect(cs.preview_bg).toBe("• Отговор на коментар от Мария (Instagram): „Имате ли безглутенови?“ → „Да, имаме.“");
+    expect(cs.preview_bg).toBe("• Отговор на коментар от ⟦Мария⟧ (Instagram): „⟦Имате ли безглутенови?⟧“ → „⟦Да, имаме.⟧“"); // a chat text: kept parts marked
     const proposals = messenger.sent.filter((m) => m.setId === cs.id);
     expect(proposals.map((m) => [m.chatRef, m.lang])).toEqual([["tg:1001", "bg"], ["fb:900", "en"]]);
     expect(proposals[0].text).toContain("Предложен отговор");
@@ -153,7 +157,7 @@ describe("proposeForComments", () => {
     expect(calls[0].menu.some((m) => m.name === "Капучино" && m.price_eur === 2.9)).toBe(true);
     expect(calls[0].postCaption).toBe("Днешното предложение: тиквена супа");
     expect(r.sets[1].changes[0]).toMatchObject({ entity: "social_moderate", entity_id: "c2", after: { action: "hide", network: "instagram", author_name: "bot" } });
-    expect(r.sets[1].summary_bg).toBe("Скриване на коментар от bot");
+    expect(r.sets[1].summary_bg).toBe("Скриване на коментар от ⟦bot⟧");
     expect(messenger.sent.map((m) => m.text.slice(0, 2))).toEqual(["💬", "⚠️"]);
     expect(await store.getComment(s.id)).toMatchObject({ status: "proposed", draft_kind: "spam", draft_text: null });
     expect(await store.getComment(a.id)).toMatchObject({ status: "proposed", draft_kind: "praise", draft_text: "Благодарим, Мария!" });
@@ -196,7 +200,7 @@ describe("handleDecision on a comment set", () => {
     expect((await store.getChangeSet(set!.id)).status).toBe("applied");
     expect(messenger.concluded).toHaveLength(1);
     expect(messenger.concluded[0]).toMatchObject({ chatRef: "tg:1001", messageRef: set!.proposal_refs?.["tg:1001"], short: "✅ Отговорено от друг собственик (Messenger)", proactive: true });
-    expect(messenger.concluded[0].full).toBe(`${set!.preview_bg}\n\n✅ Отговорено от друг собственик (Messenger)`);
+    expect(messenger.concluded[0].full).toBe(`${unkeep(set!.preview_bg)}\n\n✅ Отговорено от друг собственик (Messenger)`);
     const late = await handleDecision({ store, messenger, now: () => at(MIN) }, "tg:1001", "apply", set!.id);
     expect(late).toEqual({ edit: { full: `${set!.preview_bg}\n\nВече решено.`, short: "Вече решено." }, toast: "Вече решено." });
     expect(messenger.concluded).toHaveLength(1);

@@ -1,11 +1,13 @@
 // src/social/comments-draft.ts
 // One small-model call that drafts a reply to a customer comment from the venue's own facts (name, tagline, about, hours,
-// phone, the menu with prices and allergens, the post's caption). The owner always sees and approves the draft before it is
+// phone, the menu with prices and allergens, the post's caption), in the language of the comment: any language, named by its
+// letters or, for Latin text, by the language classifier (commentLang). The owner always sees and approves the draft before it is
 // posted. Never throws: any failure gives the neutral fallback line. Never logs comment text or model output.
 import type Anthropic from "@anthropic-ai/sdk";
+import { failureOf, type LangClassifier } from "../bot/lang-classify";
 import { allergenName } from "../domain/allergens";
-import { detectLang, formatPrice, itemName, tr, weekdayLabel } from "../domain/format";
-import { WEEKDAYS, type Lang, type SiteState, type Venue } from "../domain/types";
+import { baseLang, countWords, detectScriptLang, formatPrice, isLatinText, itemName, languageName, tr, weekdayLabel } from "../domain/format";
+import { WEEKDAYS, type ChatLang, type Lang, type SiteState, type Venue } from "../domain/types";
 import { errorSummary } from "../wizard/tool-schema";
 
 export type DraftKind = "question" | "praise" | "complaint" | "spam" | "abuse" | "other";
@@ -34,11 +36,27 @@ export interface ReplyDraft {
 }
 export type DraftFn = (ctx: DraftContext) => Promise<ReplyDraft>;
 
-/** The language to answer in: the comment's (Cyrillic → Bulgarian, Latin letters → English), else the venue's. */
-export function commentLang(text: string, fallback: Lang): Lang {
-  const cyrillic = detectLang(text);
-  if (cyrillic) return cyrillic;
-  return /\p{Script=Latin}/u.test(text) ? "en" : fallback;
+/**
+ * The language to answer a customer's comment in: the comment's own, whatever it is. A customer has no stored language, so:
+ * - no letters at all (an emoji, a number): `fallback`, the venue's language;
+ * - letters of a script that names a language (detectScriptLang, none stored): Greek is Greek, Cyrillic without a letter only
+ *   Russian, Ukrainian, Belarusian, Macedonian or Serbian has is Bulgarian, and so on;
+ * - otherwise (Latin text, or a script no language is listed for) one word ("Wow", "Merci") is English, without asking, and a text
+ *   of two words or more goes to the classifier (src/bot/lang-classify.ts, which reads the first 300 characters): its valid answer
+ *   wins, "en" included; "unknown", a failure, a timeout or no classifier give English.
+ * Never logs the comment.
+ */
+export async function commentLang(text: string, fallback: ChatLang, classify?: LangClassifier | null): Promise<ChatLang> {
+  if (!/\p{L}/u.test(text)) return fallback;
+  const byScript = isLatinText(text) ? null : detectScriptLang(text);
+  if (byScript) return byScript;
+  if (!classify || countWords(text) < 2) return "en";
+  try {
+    return (await classify(text)) ?? "en";
+  } catch (e) {
+    console.error("[comments] language classifier failed:", failureOf(e)); // the error's class, never the comment
+    return "en";
+  }
 }
 
 export function fallbackReply(venue: Pick<Venue, "phone">, lang: Lang): string {
@@ -110,26 +128,28 @@ function hoursLines(ctx: DraftContext, lang: Lang): string {
   }).join(", ");
 }
 
-export function draftSystemPrompt(ctx: DraftContext, lang: Lang): string {
+/** `lang` is the language of the reply (any); the venue's facts are given in Bulgarian for Bulgarian and in English for every other language. */
+export function draftSystemPrompt(ctx: DraftContext, lang: ChatLang): string {
   const v = ctx.venue;
-  const language = lang === "bg" ? "Bulgarian" : "English";
+  const facts = baseLang(lang);
+  const language = languageName(lang);
   const menu = ctx.menu
-    .map((m) => `- ${m.name}: ${formatPrice(m.price_eur, lang)}${m.allergens.length ? ` (${tr(lang, "алергени", "allergens")}: ${m.allergens.map((a) => `${a} ${allergenName(a, lang)}`).join(", ")})` : ""}`)
+    .map((m) => `- ${m.name}: ${formatPrice(m.price_eur, facts)}${m.allergens.length ? ` (${tr(facts, "алергени", "allergens")}: ${m.allergens.map((a) => `${a} ${allergenName(a, facts)}`).join(", ")})` : ""}`)
     .join("\n");
   return `You write short replies to customer comments under the social media posts of a café or restaurant, as the venue itself. The owner reads and approves every reply before it is posted.
 
 Venue: ${v.name}
-Tagline: ${lang === "bg" ? v.tagline_bg : v.tagline_en}
-About: ${lang === "bg" ? v.about_bg : v.about_en}
+Tagline: ${facts === "bg" ? v.tagline_bg : v.tagline_en}
+About: ${facts === "bg" ? v.about_bg : v.about_en}
 Phone: ${v.phone || "(none)"}
-Opening hours: ${hoursLines(ctx, lang)}
+Opening hours: ${hoursLines(ctx, facts)}
 Menu (name: price):
 ${menu || "(no menu)"}
 
 The post the comment is under: ${ctx.postCaption.trim() ? `"${ctx.postCaption.trim()}"` : "(no caption)"}
 
 Rules:
-- Answer in ${language} (Bulgarian is the default for this venue's customers): the comment's language.
+- Answer in ${language}: the comment's language, whatever language the venue facts above are in.
 - 1–2 sentences, warm and natural; no emojis unless the comment itself has them.
 - For price, allergen or availability questions use the menu above; never invent facts, prices, ingredients or hours. If the menu does not say, invite the customer to write or call.
 - A complaint gets an apology and an invitation to write to the venue${v.phone ? ` (${v.phone})` : ""}; never argue, never say who is at fault.
@@ -140,10 +160,14 @@ Rules:
 Answer with one JSON object and nothing else: {"reply": "<the reply>", "kind": "<question|praise|complaint|spam|abuse|other>"}`;
 }
 
-/** One draft; the neutral fallback line (kind "other") when the call fails, is refused or cut off, or returns nothing usable. */
-export async function draftReply(client: Anthropic | null, cfg: { model: string }, ctx: DraftContext): Promise<ReplyDraft> {
-  const lang = commentLang(ctx.comment.text, ctx.venue.default_lang);
-  const fallback: ReplyDraft = { reply: fallbackReply(ctx.venue, lang), kind: "other", fallback: true };
+/**
+ * One draft, in the language of the comment (commentLang; `cfg.classify` names Latin text, without it that is English); the neutral
+ * fallback line (kind "other", in Bulgarian or English: the base language of the comment's) when the call fails, is refused or cut
+ * off, or returns nothing usable.
+ */
+export async function draftReply(client: Anthropic | null, cfg: { model: string; classify?: LangClassifier | null }, ctx: DraftContext): Promise<ReplyDraft> {
+  const lang = await commentLang(ctx.comment.text, ctx.venue.default_lang, cfg.classify);
+  const fallback: ReplyDraft = { reply: fallbackReply(ctx.venue, baseLang(lang)), kind: "other", fallback: true };
   if (!client) return fallback;
   let res: Anthropic.Beta.BetaMessage;
   try {

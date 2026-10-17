@@ -30,6 +30,12 @@ describe("WhatsAppMessenger", () => {
     expect(calls[1].json.type).toBe("text");
     expect((calls[2].json.interactive as { body: { text: string } }).body.text).toBe("Да приложа ли?");
   });
+  it("a proposal's reply buttons carry the translated labels it is given", async () => {
+    const { f, calls } = fakeFetch();
+    await new WhatsAppMessenger({ token: "WT", phoneNumberId: "PNID", fetch: f }).sendProposal("wa:359888123456", "Anwenden?", "abc", "en", { apply: "✅ Anwenden", change: "✏️ Ändern", cancel: "❌ Abbrechen" });
+    const buttons = (calls[0].json.interactive as { action: { buttons: { reply: { id: string; title: string } }[] } }).action.buttons;
+    expect(buttons.map((b) => [b.reply.title, b.reply.id])).toEqual([["✅ Anwenden", "cs:apply:abc"], ["✏️ Ändern", "cs:change:abc"], ["❌ Abbrechen", "cs:cancel:abc"]]);
+  });
   it("typing marks the inbound message read with a typing indicator, and is skipped without one", async () => {
     const { f, calls } = fakeFetch();
     const m = new WhatsAppMessenger({ token: "WT", phoneNumberId: "PNID", fetch: f });

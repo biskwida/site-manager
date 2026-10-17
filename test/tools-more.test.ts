@@ -21,7 +21,9 @@ describe("schedule_changes", () => {
     expect(r).toMatchObject({ status: "proposed", apply_at: "2026-12-20T06:00:00.000Z" });
     expect((await store.getChangeSet(r.change_set_id as string)).apply_at).toBe("2026-12-20T06:00:00.000Z");
     expect(messenger.sent[0].text).toContain("⏰ Ще се приложи на 20.12.2026, 08:00");
-    expect(messenger.sent[0].text).toContain("• Почивен ден 24.12.2026: Бъдни вечер / Christmas Eve");
+    // The owner speaks Bulgarian: the holidays are read in Bulgarian only, and one line says the English version was written.
+    expect(messenger.sent[0].text).toContain("• Почивен ден 24.12.2026: Бъдни вечер\n• Почивен ден 25.12.2026: Коледа\n(английският вариант за сайта е написан автоматично)");
+    expect(messenger.sent[0].text).not.toContain("Christmas");
   });
   it("rejects a past or malformed apply_at", async () => {
     const { tools, items } = await setup();
@@ -91,6 +93,19 @@ describe("undo", () => {
     await store.applyChangeSet(undoSet.id, deps.now().toISOString());
     expect((await store.getSite(venue.id)).items.find((i) => i.id === items.Cappuccino.id)?.price_eur).toBe(2.9);
     expect((await store.getChangeSet(p.change_set_id as string)).status).toBe("reverted");
+  });
+  it("an undo preview of a text written in both languages has no 'written automatically' note: it restores, it writes nothing new", async () => {
+    const { tools, store, messenger } = await setup();
+    const p = await call(tools, "propose_changes", { summary_bg: "Мото", summary_en: "Tagline", changes: [{ op: "set_text", key: "tagline", text_bg: "Ново", text_en: "New" }] });
+    expect(String(p.preview)).toContain("(английският вариант за сайта е написан автоматично)"); // the fresh write has it
+    await store.applyChangeSet(p.change_set_id as string, T0.toISOString());
+    const u = await call(tools, "undo", { change_set_id: "last" });
+    expect(String(u.preview)).toMatch(/^• Мото: „Ново“ → „/);
+    expect(String(u.preview)).not.toContain("автоматично");
+    expect(messenger.last().text).not.toContain("автоматично");
+    const undoSet = await store.getChangeSet(u.change_set_id as string);
+    expect(undoSet.preview_bg).not.toContain("автоматично");
+    expect(undoSet.preview_en).not.toContain("automatically"); // both stored previews
   });
   it("refuses when nothing is applied, when the set is not applied, and for staff", async () => {
     const base = await setup();

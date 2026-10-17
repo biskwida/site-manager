@@ -62,16 +62,17 @@ describe("social_post in the change engine", () => {
 
 describe("socialPreviewLines", () => {
   it("lists the networks with their formats and quotes the caption on the next lines, then says the stories carry no text", () => {
+    // The caption is kept as written in any language (keep markers, src/bot/translate.ts): one kept part over its lines.
     expect(socialPreviewLines(post, "bg")).toEqual([
       "• Публикация: Facebook (пост, история), Instagram (пост)",
-      "  „Днешното предложение: тиквена супа 🎃",
-      "  #кафе“",
+      "  „⟦Днешното предложение: тиквена супа 🎃",
+      "  #кафе⟧“",
       "  (историите се публикуват без текст)",
     ]);
     expect(socialPreviewLines(post, "en")).toEqual([
       "• Post: Facebook (post, story), Instagram (post)",
-      "  “Днешното предложение: тиквена супа 🎃",
-      "  #кафе”",
+      "  “⟦Днешното предложение: тиквена супа 🎃",
+      "  #кафе⟧”",
       "  (stories are published without text)",
     ]);
   });
@@ -84,7 +85,7 @@ describe("socialPreviewLines", () => {
     const mixed = socialChange(socialRow({ targets: ["instagram_post", "instagram_story"], caption: "New cake", ig_feed_ratio: "4:5" }));
     expect(socialPreviewLines(mixed, "en")).toEqual([
       "• Post: Instagram (post, story)",
-      "  “New cake”",
+      "  “⟦New cake⟧”",
       "  (for Instagram the photo is padded to 4:5)",
       "  (stories are published without text)",
     ]);
@@ -92,7 +93,7 @@ describe("socialPreviewLines", () => {
   it("adds no stories line when the targets are only posts, or when there is no caption to leave out", () => {
     expect(socialPreviewLines(socialChange(socialRow({ targets: ["facebook_post", "instagram_post"], caption: "Нова торта" })), "bg")).toEqual([
       "• Публикация: Facebook (пост), Instagram (пост)",
-      "  „Нова торта“",
+      "  „⟦Нова торта⟧“",
     ]);
     expect(socialPreviewLines(socialChange(socialRow({ targets: ["instagram_post", "instagram_story"], caption: "" })), "bg")).toEqual(["• Публикация: Instagram (пост, история)"]);
     expect(socialPreviewLines(socialChange(socialRow({ targets: ["instagram_post", "instagram_story"], caption: " \n " })), "en")).toEqual(["• Post: Instagram (post, story)"]);

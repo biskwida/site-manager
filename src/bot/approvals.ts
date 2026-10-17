@@ -1,6 +1,7 @@
 // src/bot/approvals.ts
 import { setCorrection } from "../agent/memory";
 import { syncLines } from "../destinations/sync";
+import { baseLang } from "../domain/format";
 import type { ChangeSetStatus, Lang } from "../domain/types";
 import { cancelCommentSet, commentsOfSet, concludeCommentOwners, decidedLine, proposalTtlHours } from "../social/comments-propose";
 import type { Store } from "../store/types";
@@ -38,7 +39,7 @@ export interface DecisionResult {
  */
 export async function handleDecision(d: DecisionDeps, chatRef: string, decision: Decision, setId: string): Promise<DecisionResult> {
   const member = await d.store.findMember(chatRef);
-  const lang: Lang = member?.lang ?? "bg";
+  const lang: Lang = baseLang(member?.lang ?? "bg");
   const c = copy(lang);
   let cs;
   try {

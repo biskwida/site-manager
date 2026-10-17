@@ -84,7 +84,7 @@ create table if not exists public.venue_members (
   chat_ref text not null,                 -- "<channel>:<id>", src/channels/ref.ts
   tg_chat_id bigint,                      -- legacy, tg: refs only; dropped by migrations/2026-10-11-drop-legacy-chat-ids.sql
   role text not null check (role in ('owner', 'staff')),
-  lang text not null default 'bg' check (lang in ('bg', 'en')),
+  lang text not null default 'bg' check (lang ~ '^[a-z]{2}$'),
   last_seen_at timestamptz,
   created_at timestamptz not null default now(),
   primary key (venue_id, chat_ref)
@@ -92,6 +92,10 @@ create table if not exists public.venue_members (
 -- One venue per chat: the bot looks members up by chat_ref alone.
 create unique index if not exists venue_members_chat_ref_key on public.venue_members (chat_ref);
 create unique index if not exists venue_members_tg_chat_id_key on public.venue_members (venue_id, tg_chat_id);
+-- Any conversation language (2026-10-16): the lower-case ISO 639-1 code of the member's last message that showed one ("bg", "en",
+-- "de", …), not only bg/en. Re-created so an existing database learns it (migrations/2026-10-16-chat-lang.sql does the same).
+alter table public.venue_members drop constraint if exists venue_members_lang_check;
+alter table public.venue_members add constraint venue_members_lang_check check (lang ~ '^[a-z]{2}$');
 
 create table if not exists public.venue_invites (
   code text primary key check (length(code) >= 8),
@@ -268,4 +272,16 @@ create table if not exists public.data_deletion_requests (
   status text not null default 'pending' check (status in ('pending', 'completed')),
   created_at timestamptz not null default now(),
   completed_at timestamptz
+);
+
+-- Translations of Claudia's fixed texts (2026-10-16) into conversation languages other than Bulgarian and English: one row per
+-- language and source text (source_hash: sha256 of the text), written once and then reused. Names, quotes, captions and customer
+-- words are numbered markers (⟦1⟧) in both the source and the stored text (src/bot/translate.ts): no customer text is kept here.
+-- Server-only (policies.sql).
+create table if not exists public.translations (
+  lang text not null check (lang ~ '^[a-z]{2}$'),
+  source_hash text not null,
+  text text not null,
+  created_at timestamptz not null default now(),
+  primary key (lang, source_hash)
 );

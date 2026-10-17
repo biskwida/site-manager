@@ -18,6 +18,17 @@ describe("TelegramMessenger", () => {
     expect(api.calls).toEqual([{ method: "sendMessage", payload: expect.objectContaining({ chat_id: 1001, text: "x" }) }]);
   });
 
+  it("sends a proposal with the three buttons: Bulgarian or English labels, or the translated ones it is given", async () => {
+    const { api, messenger } = setup();
+    await messenger.sendProposal("tg:1001", "• Капучино: 2,90 € → 3,20 €\n\nДа приложа ли?", "set-1", "bg");
+    await messenger.sendProposal("tg:1001", "Anwenden?", "set-2", "en", { apply: "✅ Anwenden", change: "✏️ Ändern", cancel: "❌ Abbrechen" });
+    const keyboards = api.calls.map((c) => (c.payload as { reply_markup: { inline_keyboard: { text: string; callback_data: string }[][] } }).reply_markup.inline_keyboard.flat());
+    expect(keyboards).toEqual([
+      [{ text: "✅ Приложи", callback_data: "cs:apply:set-1" }, { text: "✏️ Промени", callback_data: "cs:change:set-1" }, { text: "❌ Откажи", callback_data: "cs:cancel:set-1" }],
+      [{ text: "✅ Anwenden", callback_data: "cs:apply:set-2" }, { text: "✏️ Ändern", callback_data: "cs:change:set-2" }, { text: "❌ Abbrechen", callback_data: "cs:cancel:set-2" }],
+    ]);
+  });
+
   it("concludes by editing the proposal to the full text and removing the buttons", async () => {
     const { api, messenger } = setup();
     await messenger.conclude("tg:1001", "42", "preview\n\n✅ Applied", "✅ Applied");

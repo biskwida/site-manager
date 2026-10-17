@@ -2,6 +2,7 @@
 import { describe, expect, it } from "vitest";
 import { createBot, type BotDeps, type RunRequest } from "@/src/bot/bot";
 import { TelegramMessenger } from "@/src/bot/messenger";
+import { withTranslation } from "@/src/bot/translate";
 import { FakeMessenger, makeDemo } from "./helpers";
 import { BOT_INFO, captureApi, photoUpdate, voiceUpdate } from "./tg";
 
@@ -15,7 +16,7 @@ async function setup(over: Partial<BotDeps> = {}) {
     startRun: (r) => runs.push(r), transcribe: null, download: async () => ({ bytes: new Uint8Array([9, 9]), contentType: "image/jpeg" }), botInfo: BOT_INFO, ...over,
   };
   const bot = createBot(deps);
-  deps.messenger = new TelegramMessenger(bot.api); // as in src/server/deps.ts
+  deps.messenger = withTranslation(new TelegramMessenger(bot.api), { store: demo.store, translate: null }); // as in src/server/deps.ts
   return { ...demo, runs, bot, api: captureApi(bot) };
 }
 
@@ -44,17 +45,17 @@ describe("voice", () => {
     expect(api.texts()[0]).toBe("Гласовите съобщения не са включени на този сървър. Моля, напишете го.");
   });
   it("echoes what it heard and starts a voice run", async () => {
-    const { bot, api, runs } = await setup({ transcribe: async (_b, lang) => `heard in ${lang}` });
+    const { bot, api, runs } = await setup({ transcribe: async (_b, stored) => ({ text: `heard in ${stored}`, lang: null }) }); // the member's stored language, as it is
     await bot.handleUpdate(voiceUpdate(1001));
     expect(runs[0]).toMatchObject({ source: "voice", text: "heard in bg" });
     expect(api.texts()[0]).toBe("🎤 Чух: „heard in bg“");
   });
-  it("runs the turn in Bulgarian when an English-speaking member speaks Bulgarian", async () => {
-    const { bot, api, runs, store } = await setup({ transcribe: async () => "Баницата свърши" });
+  it("runs the turn in Bulgarian when an English-speaking member speaks Bulgarian, and remembers it", async () => {
+    const { bot, api, runs, store } = await setup({ transcribe: async () => ({ text: "Баницата свърши, останаха само сладките", lang: "bg" }) });
     await bot.handleUpdate(voiceUpdate(1002, "en"));
-    expect(runs[0]).toMatchObject({ source: "voice", text: "Баницата свърши" });
+    expect(runs[0]).toMatchObject({ source: "voice", text: "Баницата свърши, останаха само сладките" });
     expect(runs[0].member.lang).toBe("bg");
     expect(api.texts()[0]).toMatch(/^🎤 Чух/);
-    expect((await store.findMember("tg:1002"))?.lang).toBe("en");
+    expect((await store.findMember("tg:1002"))?.lang).toBe("bg");
   });
 });

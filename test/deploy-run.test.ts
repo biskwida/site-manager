@@ -125,6 +125,7 @@ describe("pollDeployments", () => {
       ["tg:1001", "🎉 Сайтът на Кафене „Ъгъла“ е готов: https://agala.example.test\n\nОт тук нататък промените от този чат се появяват на него за секунди."],
       ["tg:1003", "🎉 Кафене „Ъгъла“'s site is live: https://agala.example.test\n\nFrom now on, changes from this chat show up there within seconds."],
     ]);
+    expect(m.raw[0]).toMatch(/^🎉 Сайтът на ⟦Кафене „Ъгъла“⟧ е готов: /); // the venue's name stays as written in any language
     expect(await pollDeployments(d)).toEqual({ ready: [], failed: [] }); // ready venues are not polled again
     expect(m.sent).toHaveLength(2);
   });
@@ -143,6 +144,7 @@ describe("pollDeployments", () => {
     expect(await pollDeployments({ store, deployer: failing, messenger: m, now: () => T0 })).toEqual({ ready: [], failed: [venue.id] });
     expect((await store.getVenue(venue.id)).deploy).toMatchObject({ status: "error", error: "Build failed\nModule not found: zod", url: null });
     expect(m.sent).toEqual([expect.objectContaining({ chatRef: "tg:1001", text: "Публикуването на сайта на Кафене „Ъгъла“ не успя. Отворете таблото и натиснете „Опитай пак“; дотогава сайтът ви остава достъпен на адреса от приветственото съобщение." })]);
+    expect(m.raw[0]).toMatch(/^Публикуването на сайта на ⟦Кафене „Ъгъла“⟧ не успя\./);
     const other = await store.createVenue({ slug: "other", name: "Other" });
     await startDeploy({ store, deployer: failing, feedUrlFor, now: () => T0 }, other.id);
     expect(await pollDeployments({ store, deployer: failing, messenger: null, now: () => T0 })).toEqual({ ready: [], failed: [other.id] });

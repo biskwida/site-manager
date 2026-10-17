@@ -43,6 +43,10 @@ end $$;
 alter table public.data_deletion_requests enable row level security;
 revoke all on public.data_deletion_requests from anon, authenticated;
 
+-- Translations of Claudia's fixed texts (2026-10-16): server-only, like the tables above (RLS on, no policies, no grants).
+alter table public.translations enable row level security;
+revoke all on public.translations from anon, authenticated;
+
 -- 2. No RPCs: the owner dashboard and the public site read through the app's server (service-role key, never in the browser).
 
 -- 3. Realtime for the public site and the dashboard.

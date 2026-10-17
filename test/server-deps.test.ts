@@ -4,6 +4,7 @@ import { describe, expect, it } from "vitest";
 import { makeServerDeps } from "@/src/server/deps";
 import { InMemoryStore } from "@/src/store/memory";
 import { seedDemo } from "@/src/seed/demo";
+import { draftContextOf } from "@/src/social/comments-draft";
 import { BOT_INFO, captureApi, textUpdate } from "./tg";
 
 describe("makeServerDeps (memory mode)", () => {
@@ -25,6 +26,32 @@ describe("makeServerDeps (memory mode)", () => {
     const client = { beta: { messages: {} } } as unknown as Anthropic;
     const injected = await makeServerDeps({ defer: (fn) => void fn(), env: { SITE_MANAGER_STORE: "memory", ANTHROPIC_API_KEY: "sk-test-not-used" }, log: () => {}, client });
     expect(injected.anthropic).toBe(client);
+  });
+
+  it("wires the language classifier to the shared Anthropic client and LANG_CLASSIFY_MODEL; no client, no classifier", async () => {
+    const calls: Record<string, unknown>[] = [];
+    const client = { beta: { messages: { create: async (p: Record<string, unknown>) => (calls.push(p), { stop_reason: "end_turn", content: [{ type: "text", text: "de" }] }) } } } as unknown as Anthropic;
+    const deps = await makeServerDeps({ defer: (fn) => void fn(), env: { SITE_MANAGER_STORE: "memory", LANG_CLASSIFY_MODEL: "claude-haiku-test" }, log: () => {}, client });
+    expect(await deps.botDeps.classifyLang?.("Ich möchte den Preis ändern")).toBe("de");
+    expect(calls).toHaveLength(1);
+    expect(calls[0]).toMatchObject({ model: "claude-haiku-test", max_tokens: 5 });
+    const offline = await makeServerDeps({ defer: (fn) => void fn(), env: { SITE_MANAGER_STORE: "memory" }, log: () => {} });
+    expect(offline.botDeps.classifyLang ?? null).toBeNull();
+  });
+
+  it("drafts a customer's reply in the customer's language: the comment draft shares the classifier of the owner's messages", async () => {
+    const calls: Record<string, unknown>[] = [];
+    const answer = (t: string) => ({ stop_reason: "end_turn", content: [{ type: "text", text: t }] });
+    const client = { beta: { messages: { create: async (p: Record<string, unknown>) => (calls.push(p), p.max_tokens === 5 ? answer("de") : answer('{"reply": "Ja, wir haben Hafermilch.", "kind": "question"}')) } } } as unknown as Anthropic;
+    const deps = await makeServerDeps({ defer: (fn) => void fn(), env: { SITE_MANAGER_STORE: "memory", LANG_CLASSIFY_MODEL: "claude-haiku-classify", COMMENT_DRAFT_MODEL: "claude-haiku-draft" }, log: () => {}, client });
+    const venue = (await deps.store.getVenueBySlug("agala"))!;
+    const context = draftContextOf(await deps.store.getSite(venue.id), { author_name: "Jan", text: "Habt ihr Hafermilch?", post_caption: "Heute: Kürbissuppe" });
+    expect(await deps.comments!.draft(context)).toEqual({ reply: "Ja, wir haben Hafermilch.", kind: "question", fallback: false });
+    expect(calls.map((c) => [c.model, c.max_tokens])).toEqual([["claude-haiku-classify", 5], ["claude-haiku-draft", 1000]]);
+    expect(String(calls[1].system)).toContain("Answer in German");
+    // Without an API key there is no classifier: a Latin comment is answered in English, with the neutral line.
+    const offline = await makeServerDeps({ defer: (fn) => void fn(), env: { SITE_MANAGER_STORE: "memory" }, log: () => {} });
+    expect(await offline.comments!.draft(context)).toMatchObject({ fallback: true, reply: expect.stringMatching(/^Thank you!/) });
   });
 
   it("uses the fake deployer in memory mode (even with a Vercel token) and deploys a live venue on demand", async () => {
@@ -149,5 +176,28 @@ describe("makeServerDeps (Supabase mode)", () => {
     expect(deps.botDeps.messenger).toBe(deps.messenger);
     expect(typeof deps.waDownload).toBe("function");
     expect(typeof deps.fetchUrl).toBe("function");
+  });
+  it("puts every channel behind withTranslation: a German owner's text goes through TRANSLATE_MODEL on the shared client, a Bulgarian one only loses its markers", async () => {
+    const calls: Record<string, unknown>[] = [];
+    const client = { beta: { messages: { create: async (p: Record<string, unknown>) => (calls.push(p), { stop_reason: "end_turn", content: [{ type: "text", text: "Hallo ⟦1⟧" }] }) } } } as unknown as Anthropic;
+    const logs: string[] = [];
+    const deps = await makeServerDeps({ defer: (fn) => void fn(), env: { SITE_MANAGER_STORE: "memory", DEMO_OWNER_CHAT_REF: "fb:4242", TRANSLATE_MODEL: "claude-haiku-test" }, log: (s) => logs.push(s), client });
+    const venue = (await deps.store.getVenueBySlug("agala"))!;
+    await deps.store.setMemberLang(venue.id, "fb:4242", "de");
+    await deps.messenger.send("fb:4242", "Hello ⟦Maria⟧");
+    expect(logs).toContain("→ [fb:4242] Hallo Maria");
+    expect(calls).toHaveLength(1);
+    expect(calls[0]).toMatchObject({ model: "claude-haiku-test" });
+    await deps.store.setMemberLang(venue.id, "fb:4242", "bg");
+    await deps.messenger.send("fb:4242", "Здравей ⟦Мария⟧");
+    expect(logs).toContain("→ [fb:4242] Здравей Мария");
+    expect(calls).toHaveLength(1);
+    expect(deps.botDeps.messenger).toBe(deps.messenger); // the webhook turns, approvals and the tick all send through it
+
+    // Without an API key: no translation, the English text without markers.
+    const offline = await makeServerDeps({ defer: (fn) => void fn(), env: { SITE_MANAGER_STORE: "memory", DEMO_OWNER_CHAT_REF: "fb:4242" }, log: (s) => logs.push(s) });
+    await offline.store.setMemberLang((await offline.store.getVenueBySlug("agala"))!.id, "fb:4242", "de");
+    await offline.messenger.send("fb:4242", "Hello ⟦Maria⟧");
+    expect(logs).toContain("→ [fb:4242] Hello Maria");
   });
 });

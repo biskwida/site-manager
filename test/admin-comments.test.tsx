@@ -66,6 +66,7 @@ describe("adminCommentAction", () => {
     expect(t.replies(t.maria.comment_id).map((x) => x.text)).toEqual(["Да, от вторник."]);
     expect(await t.store.getComment(t.maria.id)).toMatchObject({ status: "replied", draft_text: "Да, от вторник." });
     expect(t.messenger.sent.at(-1)).toMatchObject({ chatRef: "tg:1001", text: "✅ Отговорено от таблото на maria.k: „Да, от вторник.“\nInstagram: отговорът е публикуван ✅", proactive: true });
+    expect(t.messenger.raw.at(-1)).toMatch(/^✅ Отговорено от таблото на ⟦maria\.k⟧: „⟦Да, от вторник\.⟧“\n/); // the customer's name and the reply as published: kept
     expect(await adminCommentAction(t.d, t.venue, { action: "reply_comment", comment_id: t.maria.id, reply_text: "again" })).toMatchObject({ ok: false, error: expect.stringMatching(/already answered/) });
     expect(await adminCommentAction(t.d, t.venue, { action: "reply_comment", comment_id: "nope", reply_text: "x" })).toMatchObject({ ok: false, error: "Comment not found." });
   });

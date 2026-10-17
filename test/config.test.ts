@@ -20,11 +20,20 @@ describe("loadConfig", () => {
   it("reads COMMENT_DRAFT_MODEL", () => {
     expect(loadConfig({ ...full, COMMENT_DRAFT_MODEL: "claude-sonnet-5-5" }).commentDraftModel).toBe("claude-sonnet-5-5");
   });
+  it("reads LANG_CLASSIFY_MODEL and TRANSLATE_MODEL, both claude-haiku-5-5 by default", () => {
+    expect(loadConfig(full)).toMatchObject({ langClassifyModel: "claude-haiku-5-5", translateModel: "claude-haiku-5-5" });
+    expect(loadConfig({ ...full, LANG_CLASSIFY_MODEL: "claude-haiku-test", TRANSLATE_MODEL: "claude-sonnet-5-5" })).toMatchObject({ langClassifyModel: "claude-haiku-test", translateModel: "claude-sonnet-5-5" });
+  });
   it("names the missing key", () => {
     expect(() => loadConfig({ ...full, TELEGRAM_BOT_TOKEN: "" })).toThrow(/Missing TELEGRAM_BOT_TOKEN/);
   });
   it("rejects a bad effort", () => {
     expect(() => loadConfig({ ...full, AGENT_EFFORT: "max" })).toThrow(/AGENT_EFFORT/);
+  });
+  it("refuses a PUBLIC_BASE_URL without http:// or https://", () => {
+    for (const bad of ["site.example", "//site.example", "ftp://site.example", "localhost:3000"]) expect(() => loadConfig({ ...full, PUBLIC_BASE_URL: bad })).toThrow(/PUBLIC_BASE_URL must start with http:\/\/ or https:\/\//);
+    expect(loadConfig({ ...full, PUBLIC_BASE_URL: "http://localhost:3000/" }).publicBaseUrl).toBe("http://localhost:3000");
+    expect(loadConfig({}, { lenient: true }).publicBaseUrl).toBe("http://localhost:3000");
   });
   it("fills missing keys with empty strings when lenient", () => {
     const c = loadConfig({}, { lenient: true });

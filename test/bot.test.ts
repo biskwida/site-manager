@@ -2,6 +2,7 @@
 import { describe, expect, it } from "vitest";
 import { createBot, type BotDeps, type RunRequest } from "@/src/bot/bot";
 import { TelegramMessenger } from "@/src/bot/messenger";
+import { withTranslation } from "@/src/bot/translate";
 import { planChanges } from "@/src/domain/changes";
 import { FakeMessenger, makeDemo } from "./helpers";
 import { BOT_INFO, callbackUpdate, captureApi, textUpdate } from "./tg";
@@ -16,7 +17,7 @@ async function setup() {
     startRun: (r) => runs.push(r), transcribe: null, download: async () => ({ bytes: new Uint8Array([1]), contentType: "image/jpeg" }), botInfo: BOT_INFO,
   };
   const bot = createBot(deps);
-  deps.messenger = new TelegramMessenger(bot.api); // as in src/server/deps.ts
+  deps.messenger = withTranslation(new TelegramMessenger(bot.api), { store: demo.store, translate: null }); // as in src/server/deps.ts
   const api = captureApi(bot);
   return { ...demo, runs, bot, api, deps };
 }
@@ -89,6 +90,16 @@ describe("bot", () => {
     await bot.handleUpdate(textUpdate(1002, `/start ${await store.createInvite(third.id, "owner", "2026-10-10T00:00:00.000Z")}`, "en"));
     expect(api.texts()[3]).toBe("You now manage Third.");
   });
+  it("a bg member whose Telegram is English redeems a second venue's code: the new row and the welcome stay Bulgarian", async () => {
+    const { bot, api, store } = await setup();
+    await store.upsertMember({ venue_id: (await store.findMember("tg:1001"))!.venue_id, chat_ref: "tg:1003", role: "owner", lang: "bg" });
+    const other = await store.createVenue({ slug: "bar", name: "Бар Нощ" });
+    const code = await store.createInvite(other.id, "owner", "2026-10-10T00:00:00.000Z");
+    await bot.handleUpdate(textUpdate(1003, `/start ${code}`, "en")); // Telegram UI English, conversation Bulgarian
+    expect(await store.findMember("tg:1003")).toMatchObject({ venue_id: other.id, role: "owner", lang: "bg" });
+    expect(api.texts()[0]).toBe("Вече управлявате Бар Нощ.");
+    expect(api.texts()[1]).toMatch(/^Свързахте се като собственик на Бар Нощ/);
+  });
   it("an owner who taps a staff code for their own venue stays owner", async () => {
     const { bot, store, venue } = await setup();
     const staffCode = await store.createInvite(venue.id, "staff", "2026-10-20T00:00:00.000Z");
@@ -130,11 +141,11 @@ describe("bot", () => {
     expect(api.calls.some((c) => c.method === "sendChatAction")).toBe(true);
     expect(api.texts()).toEqual([]);
   });
-  it("a Cyrillic message from an English-speaking member runs the turn in Bulgarian", async () => {
+  it("a Cyrillic message from an English-speaking member runs the turn in Bulgarian and is remembered", async () => {
     const { bot, runs, store } = await setup();
     await bot.handleUpdate(textUpdate(1002, "Баницата свърши"));
     expect(runs[0].member.lang).toBe("bg");
-    expect((await store.findMember("tg:1002"))?.lang).toBe("en");
+    expect((await store.findMember("tg:1002"))?.lang).toBe("bg");
   });
   it("a Latin message keeps the stored language", async () => {
     const { bot, runs } = await setup();
@@ -183,5 +194,11 @@ describe("bot", () => {
     expect(api.texts().at(-1)).toMatch(/^✅ Свързах WordPress сайта „Smoke Café“ \(https:\/\/cafe\.example\)/);
     await bot.handleUpdate(textUpdate(1001, "/connect https://cafe.example BAD", "en"));
     expect(api.texts().at(-1)).toBe("Не успях да свържа сайта. Кодът е грешен."); // the member's language is bg; a Latin command text keeps it
+  });
+  it("a handshake without a site name still says connected", async () => {
+    const { bot, api, deps } = await setup();
+    deps.connect = async () => ({ ok: true, site: {} as never, destination: { config: { site_url: "https://cafe.example" } } as never }); // a handshake without a name
+    await bot.handleUpdate(textUpdate(1001, "/connect https://cafe.example GOOD"));
+    expect(api.texts().at(-1)).toMatch(/^✅ Свързах WordPress сайта/);
   });
 });

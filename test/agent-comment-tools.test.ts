@@ -64,7 +64,7 @@ describe("reply_to_comments", () => {
     const r = await call(t.tools, "reply_to_comments", { replies: [{ comment_id: t.maria.id, reply_text: "Да, имаме безглутенов хляб от вторник." }] });
     expect(r).toMatchObject({ status: "proposed", rows: 1, preview: "• Отговор на коментар от maria.k (Instagram): „Имате ли безглутенови?“ → „Да, имаме безглутенов хляб от вторник.“" });
     const cs = await t.store.getChangeSet(String(r.change_set_id));
-    expect(cs).toMatchObject({ source: "comment", chat_ref: "tg:1001", summary_bg: "Отговор на коментар от maria.k" });
+    expect(cs).toMatchObject({ source: "comment", chat_ref: "tg:1001", summary_bg: "Отговор на коментар от ⟦maria.k⟧" });
     expect(t.messenger.sent.find((m) => m.setId === cs.id)?.text).toContain("Предложен отговор:\n„Да, имаме безглутенов хляб от вторник.“");
     expect(await t.fresh(t.maria)).toMatchObject({ status: "proposed", change_set_id: cs.id, draft_text: "Да, имаме безглутенов хляб от вторник." });
     await handleDecision({ store: t.store, messenger: t.messenger, now: () => T0 }, "tg:1001", "apply", cs.id);

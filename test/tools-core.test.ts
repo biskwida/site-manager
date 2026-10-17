@@ -24,6 +24,13 @@ describe("get_site / get_menu", () => {
     expect((r.venue as Record<string, unknown>).name).toBe("Кафене „Ъгъла“");
     expect(r.hours).toHaveProperty("mon");
   });
+  it("reports the owner's own language, not the Bulgarian or English the fixed texts start from", async () => {
+    const { deps } = await setup();
+    for (const lang of ["de", "el", "en"]) {
+      const r = await call(makeTools({ ...deps, member: { ...deps.member, lang } }), "get_site", {});
+      expect(r).toMatchObject({ owner_lang: lang });
+    }
+  });
   it("lists active items by category with ids", async () => {
     const { tools, items } = await setup();
     const r = await call(tools, "get_menu", {});
@@ -39,7 +46,8 @@ describe("propose_changes", () => {
     const r = await call(tools, "propose_changes", { summary_bg: "Капучино 3,20 €", summary_en: "Cappuccino €3.20", changes: [{ op: "set_price", item_id: items.Cappuccino.id, price_eur: 3.2 }] });
     expect(r).toMatchObject({ status: "proposed", preview: "• Капучино: 2,90 € → 3,20 €" });
     const cs = await store.getChangeSet(r.change_set_id as string);
-    expect(cs).toMatchObject({ status: "proposed", source: "text", chat_ref: "tg:1001", preview_bg: "• Капучино: 2,90 € → 3,20 €", preview_en: "• Cappuccino: €2.90 → €3.20", message_ref: "100" });
+    // Stored as chat texts: the dish name kept (src/bot/translate.ts); the tool result above and the owner's message have no marker.
+    expect(cs).toMatchObject({ status: "proposed", source: "text", chat_ref: "tg:1001", preview_bg: "• ⟦Капучино⟧: 2,90 € → 3,20 €", preview_en: "• ⟦Cappuccino⟧: €2.90 → €3.20", message_ref: "100" });
     expect(messenger.sent[0]).toMatchObject({ chatRef: "tg:1001", setId: cs.id, lang: "bg", text: "• Капучино: 2,90 € → 3,20 €\n\nДа приложа ли?" });
     expect((await store.getSite(venue.id)).items.find((i) => i.id === items.Cappuccino.id)?.price_eur).toBe(2.9); // not applied yet
   });
@@ -110,12 +118,12 @@ describe("propose_changes", () => {
     expect(base.messenger.last().lang).toBe("en");
     expect(base.messenger.last().text).toContain("Today's special (until 18:00)");
   });
-  it("renders a preview in English for an English-speaking owner", async () => {
+  it("renders a preview in English only for an English-speaking owner, with one line saying the Bulgarian version was written", async () => {
     const base = await setup();
     await base.store.setMemberLang(base.venue.id, "tg:1001", "en");
     const tools = makeTools({ ...base.deps, member: { ...base.deps.member, lang: "en" } });
     const r = await call(tools, "propose_changes", { summary_bg: "x", summary_en: "x", changes: [{ op: "set_text", key: "tagline", text_bg: "Ново", text_en: "New" }] });
-    expect(r.preview).toBe("• Tagline: “Coffee, pastries and a quiet corner on Rakovski street.” → “New”\n  BG: „Кафе, закуски и спокойствие на ъгъла на „Раковски“.“ → „Ново“");
+    expect(r.preview).toBe("• Tagline: “Coffee, pastries and a quiet corner on Rakovski street.” → “New”\n(the Bulgarian version for the site was written automatically)");
   });
 });
 
