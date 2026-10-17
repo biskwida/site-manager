@@ -4,7 +4,8 @@
 import { quote, tr } from "./format";
 import { NETWORK_NAMES, type Change, type Lang, type Row, type SocialPostRow, type SocialTarget } from "./types";
 
-const FORMAT: Record<"post" | "story", { bg: string; en: string }> = {
+/** The format words, lower-case: the one table of them (make_visual capitalises these for its captions). */
+export const FORMAT: Record<"post" | "story", { bg: string; en: string }> = {
   post: { bg: "пост", en: "post" },
   story: { bg: "история", en: "story" },
 };

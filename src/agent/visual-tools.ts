@@ -4,13 +4,15 @@
 // owner sees the picture with ✅ / ✏️ / ❌ under it (src/agent/social-tools.ts), which does not send it a second time.
 import { betaZodTool } from "@anthropic-ai/sdk/helpers/beta/zod";
 import { z } from "zod";
+import { FORMAT } from "../domain/social-preview";
+import type { Lang } from "../domain/types";
 import { BACKDROPS } from "../visual/palette";
 import type { Format } from "../visual/template";
 import type { ToolDeps, ToolKit } from "./tools";
 
 const NAME_MAX = 40;
-/** The caption of each picture in the chat: its format, in the owner's language. */
-const FORMAT_LABEL: Record<Format, { bg: string; en: string }> = { post: { bg: "Пост", en: "Post" }, story: { bg: "История", en: "Story" } };
+/** The caption of each picture in the chat: its format word (the table social_post's labels use), capitalised, in the owner's language. */
+const formatCaption = (format: Format, lang: Lang): string => FORMAT[format][lang].replace(/^./, (c) => c.toUpperCase());
 
 export const MakeVisualSchema = z.object({
   media_id: z.string().describe("The media_id of the owner's photo (not of an earlier picture: always start from the photo)."),
@@ -40,7 +42,7 @@ export function visualTools(d: ToolDeps, k: ToolKit) {
         // Each picture carries its format as its label, and each one that reaches the chat is recorded, so the social_post that
         // follows in this turn does not send it again.
         for (const p of r.pictures) {
-          if ((await d.messenger.sendPhoto(d.chatRef, p.url, FORMAT_LABEL[p.format][k.lang])) !== null) d.sentPhotos.add(p.url);
+          if ((await d.messenger.sendPhoto(d.chatRef, p.url, formatCaption(p.format, k.lang))) !== null) d.sentPhotos.add(p.url);
         }
         d.notes?.push(`visual from photo ${input.media_id}: ${r.pictures.map((p) => `${p.format} ${p.media_id}`).join(", ")} (backdrop ${r.backdrop}${r.kind === "photo" ? ", photo in a card: no clean cut-out" : ""})`);
         const social = d.social;
