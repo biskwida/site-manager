@@ -5,14 +5,16 @@ import { audioContentType, audioFileName, makeTranscriber, whisperLang } from "@
 type Heard = { text: string; language?: string };
 const CFG = { apiKey: "k", baseUrl: "https://api.groq.com/openai/v1", model: "whisper-large-v3" };
 
-/** A transcription client that records every request and answers them in turn (the last answer repeats; an Error is thrown). */
+/** A transcription client that records every request and its options and answers them in turn (the last answer repeats; an Error is thrown). */
 function fakeStt(...answers: (Heard | Error)[]) {
   const calls: Record<string, unknown>[] = [];
+  const options: unknown[] = [];
   const factory = () => ({
     audio: {
       transcriptions: {
-        create: async (p: Record<string, unknown>) => {
+        create: async (p: Record<string, unknown>, o?: unknown) => {
           calls.push(p);
+          options.push(o);
           const a = answers[Math.min(calls.length, answers.length) - 1];
           if (a instanceof Error) throw a;
           return a;
@@ -20,7 +22,7 @@ function fakeStt(...answers: (Heard | Error)[]) {
       },
     },
   });
-  return { calls, transcribe: makeTranscriber(CFG, factory as never) };
+  return { calls, options, transcribe: makeTranscriber(CFG, factory as never) };
 }
 const bytes = new Uint8Array([1, 2]);
 
@@ -160,6 +162,36 @@ describe("makeTranscriber", () => {
   it("a failing first request rejects, so the owner gets the usual voice-failed line", async () => {
     const { transcribe } = fakeStt(new Error("HTTP 500"));
     await expect(transcribe(bytes, "bg")).rejects.toThrow("HTTP 500");
+  });
+
+  describe("empty transcripts", () => {
+    it("an empty first transcript is returned as it is, with no language and no second request, whatever the label", async () => {
+      for (const language of ["russian", "german", "bulgarian", undefined]) {
+        const { calls, transcribe } = fakeStt({ language, text: "  " });
+        expect(await transcribe(bytes, "bg"), String(language)).toEqual({ text: "", lang: null });
+        expect(calls, String(language)).toHaveLength(1); // silence has nothing to ask again about; the owner gets the voice-failed line
+      }
+    });
+
+    it("an empty second transcript keeps the first one, still Bulgarian", async () => {
+      const { calls, transcribe } = fakeStt({ language: "russian", text: "кафето е готово" }, { language: "bulgarian", text: "  " });
+      expect(await transcribe(bytes, "en")).toEqual({ text: "кафето е готово", lang: "bg" });
+      expect(calls).toHaveLength(2);
+    });
+  });
+
+  describe("time limits", () => {
+    it("the first request waits at most 30 s and is retried once; the second waits at most 20 s and is not retried", async () => {
+      const { options, transcribe } = fakeStt({ language: "russian", text: "кафето е готово" }, { language: "bulgarian", text: "Кафето е готово." });
+      await transcribe(bytes, "bg");
+      expect(options).toEqual([{ timeout: 30000, maxRetries: 1 }, { timeout: 20000, maxRetries: 0 }]);
+    });
+
+    it("a note that needs only one request carries the first request's limits", async () => {
+      const { options, transcribe } = fakeStt({ language: "german", text: "Ich möchte den Preis ändern" });
+      await transcribe(bytes, "bg");
+      expect(options).toEqual([{ timeout: 30000, maxRetries: 1 }]);
+    });
   });
 });
 

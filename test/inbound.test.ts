@@ -771,6 +771,13 @@ describe("handleInbound: any conversation language", () => {
         ["Добавь пиццу в меню", "ru", true],
         ["Ο καφές είναι έτοιμος", "el", true],
         ["make it a 4.20 😀", "en", false], // three words and two things that are not
+        // Scripts written without spaces: a real sentence is many words, a thank-you is one.
+        ["我想把卡布奇诺的价格改成四欧元", "zh", true],
+        ["谢谢", "zh", false],
+        ["カプチーノの値段を四ユーロに変更してください", "ja", true],
+        ["ありがとう", "ja", false],
+        ["ฉันต้องการเปลี่ยนราคากาแฟเป็นสี่ยูโร", "th", true],
+        ["ขอบคุณ", "th", false],
       ];
       for (const [text, lang, saved] of cases) {
         const { saves } = await note("tg:1001", text, lang);
@@ -799,6 +806,17 @@ describe("handleInbound: any conversation language", () => {
     const { d, runs, messenger, store } = await setup({ transcribe: async () => ({ text: "  ", lang: "de" }) });
     const saves = langSaves(store);
     await handleInbound(d, { chatRef: "tg:1001", kind: "voice", media: voice });
+    expect(texts(messenger)).toEqual(["Не успях да разпозная записа. Опитайте отново или го напишете."]);
+    expect(runs).toHaveLength(0);
+    expect(saves).toEqual([]);
+  });
+
+  it("a silent clip Whisper labels Russian is the usual voice-failed line after one request, and changes no language", async () => {
+    const { asked, transcribe } = whisper({ language: "russian", text: "" });
+    const { d, runs, messenger, store } = await setup({ transcribe });
+    const saves = langSaves(store);
+    await handleInbound(d, { chatRef: "tg:1001", kind: "voice", media: voice }); // stored bg: no second request in Bulgarian to invent words
+    expect(asked).toHaveLength(1);
     expect(texts(messenger)).toEqual(["Не успях да разпозная записа. Опитайте отново или го напишете."]);
     expect(runs).toHaveLength(0);
     expect(saves).toEqual([]);

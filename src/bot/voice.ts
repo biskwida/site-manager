@@ -9,8 +9,10 @@ export interface Transcript {
   lang: ChatLang | null;
 }
 /**
- * `stored` is the member's stored language. It is never sent to the speech-to-text service and never forces a transcript: it is only
- * the tie-break detectScriptLang gives Cyrillic that has no letter of its own (src/domain/format.ts).
+ * `stored` is the member's stored language. It is never sent to the speech-to-text service and never forces a transcript. It decides how
+ * a label in the Bulgarian family (ru, uk, be, mk, sr) is read: a member stored outside the family is taken to speak Bulgarian and the
+ * note is transcribed again as Bulgarian; a member stored inside it keeps the first transcript (see makeTranscriber). It is also the
+ * tie-break detectScriptLang gives Cyrillic that has no letter of its own when there is no usable label (src/domain/format.ts).
  */
 export type Transcriber = (bytes: Uint8Array, stored: ChatLang, contentType?: string) => Promise<Transcript>;
 
@@ -72,8 +74,17 @@ export function whisperLang(name: string | undefined): ChatLang | null {
 const BULGARIAN_FAMILY: ReadonlySet<ChatLang> = new Set(["ru", "uk", "be", "mk", "sr"]);
 
 interface SttClient {
-  audio: { transcriptions: { create(p: { file: File; model: string; response_format: "verbose_json"; language?: string }): Promise<{ text: string; language?: string }> } };
+  audio: {
+    transcriptions: {
+      create(p: { file: File; model: string; response_format: "verbose_json"; language?: string }, options?: { timeout?: number; maxRetries?: number }): Promise<{ text: string; language?: string }>;
+    };
+  };
 }
+
+/** The owner is waiting for the first transcript, and the SDK's own limit is ten minutes with two retries: 30 s and one retry. */
+const FIRST_REQUEST = { timeout: 30000, maxRetries: 1 };
+/** The second request only improves a transcript already in hand, which stays when it fails: 20 s and no retry. */
+const SECOND_REQUEST = { timeout: 20000, maxRetries: 0 };
 
 const defaultFactory = (cfg: { apiKey: string; baseURL: string }): SttClient => new OpenAI({ apiKey: cfg.apiKey, baseURL: cfg.baseURL }) as unknown as SttClient;
 
@@ -86,17 +97,21 @@ const defaultFactory = (cfg: { apiKey: string; baseURL: string }): SttClient => 
  * words (ы, э), so for those labels the transcript's letters cannot tell Bulgarian from Russian: the member's stored language decides.
  * - Stored outside that family (bg, en, any other): the note is transcribed again with language "bg" and is Bulgarian, whatever
  *   letters the first transcript had, so a voice note never moves a Bulgarian owner into Russian (many have Telegram in English).
- *   If that second request fails, the first transcript stays.
+ *   If that second request fails or comes back empty, the first transcript stays.
  * - Stored inside it: the first transcript stands, no second request. The label is their language when the letters also show one of
  *   the family (ј љ њ џ are Macedonian letters too, so the label picks), otherwise no language: no switch.
+ *
+ * An empty first transcript (silence) is returned as it is, with no language and no second request: handleVoice answers it with the
+ * voice-failed line. Each request has a time limit (FIRST_REQUEST, SECOND_REQUEST).
  */
 export function makeTranscriber(cfg: { apiKey: string; baseUrl: string; model: string }, factory: (c: { apiKey: string; baseURL: string }) => SttClient = defaultFactory): Transcriber {
   const client = factory({ apiKey: cfg.apiKey, baseURL: cfg.baseUrl });
   return async (bytes, stored, contentType) => {
     const f = audioFileName(contentType);
     const file = await toFile(bytes, f.name, { type: f.type });
-    const first = await client.audio.transcriptions.create({ file, model: cfg.model, response_format: "verbose_json" });
+    const first = await client.audio.transcriptions.create({ file, model: cfg.model, response_format: "verbose_json" }, FIRST_REQUEST);
     const text = (first.text ?? "").trim();
+    if (!text) return { text, lang: null };
     const heard = whisperLang(first.language);
     if (!heard) return { text, lang: detectScriptLang(text, stored) };
     if (!BULGARIAN_FAMILY.has(heard)) return { text, lang: heard };
@@ -105,8 +120,8 @@ export function makeTranscriber(cfg: { apiKey: string; baseUrl: string; model: s
       return { text, lang: letters !== null && BULGARIAN_FAMILY.has(letters) ? heard : null };
     }
     try {
-      const second = await client.audio.transcriptions.create({ file, model: cfg.model, response_format: "verbose_json", language: "bg" });
-      return { text: (second.text ?? "").trim(), lang: "bg" };
+      const second = await client.audio.transcriptions.create({ file, model: cfg.model, response_format: "verbose_json", language: "bg" }, SECOND_REQUEST);
+      return { text: (second.text ?? "").trim() || text, lang: "bg" };
     } catch (e) {
       console.error(`[bot] second transcription failed, keeping the first: ${e instanceof Error ? e.message : String(e)}`); // the transcript is never in it
       return { text, lang: "bg" };

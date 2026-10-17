@@ -181,4 +181,39 @@ describe("isMarkerlessCyrillic and countWords", () => {
     expect(countWords("Баницата свърши днес 4,20 👍")).toBe(3);
     expect(countWords("don't stop")).toBe(2);
   });
+  it("countWords: the counts the voice-note gate relies on (four words or more can switch the language)", () => {
+    expect(countWords("make it a 4.20 😀")).toBe(3);
+    expect(countWords("Thank you.")).toBe(2);
+    expect(countWords("Продолжение следует")).toBe(2);
+    expect(countWords("don’t do it now")).toBe(4);
+  });
+  it("countWords cuts a script written without spaces into the words it finds: one sentence is not one word", () => {
+    // The least each sentence has (the segmenter finds 8 to 12 words in them), and a thank-you stays a few words at most: the exact count
+    // is the ICU dictionary's, which changes between versions.
+    const sentences: [string, number][] = [
+      ["我想把卡布奇诺的价格改成四欧元", 6], // Chinese
+      ["カプチーノの値段を四ユーロに変更してください", 6], // Japanese
+      ["ฉันต้องการเปลี่ยนราคากาแฟเป็นสี่ยูโร", 5], // Thai
+      ["ຂ້ອຍຕ້ອງການປ່ຽນລາຄາກາເຟເປັນສີ່ເອີໂຣ", 5], // Lao
+      ["ខ្ញុំចង់ប្តូរតម្លៃកាហ្វេទៅជាបួនអឺរ៉ូ", 5], // Khmer
+      ["ကျွန်တော်ကော်ဖီဈေးကိုလေးယူရိုပြောင်းချင်ပါတယ်", 5], // Burmese
+    ];
+    for (const [text, atLeast] of sentences) expect(countWords(text), text).toBeGreaterThanOrEqual(atLeast);
+    for (const text of ["谢谢", "ありがとう", "ขอบคุณ", "ຂອບໃຈ", "អរគុណ"]) expect(countWords(text), text).toBeLessThan(4);
+    expect(countWords("4.20 😀 谢谢")).toBe(countWords("谢谢")); // numbers and emoji are still not words
+    expect(countWords("我想'价格")).toBe(countWords("我想 价格")); // an apostrophe between letters, which the segmenter splits off, is not a word either
+  });
+  it("countWords counts every spaced script exactly as it did, as runs of letters, whatever is glued to them", () => {
+    const before = (text: string) => text.match(/\p{L}[\p{L}\p{M}]*(?:['’]\p{L}[\p{L}\p{M}]*)*/gu)?.length ?? 0;
+    const texts = [
+      "Flat white свърши днес", "Капучиното става три и двайсет", "Баницата свърши днес 4,20 👍", "don't stop", "don’t do it now", "l'homme est là", "Ich möchte den Preis ändern",
+      "Ο καφές είναι έτοιμος", "나는 카푸치노 가격을 4유로로 바꾸고 싶어요", "أريد تغيير سعر الكابتشينو إلى أربعة يورو", "אני רוצה לשנות את מחיר הקפוצ'ינו", "मैं कैपुचीनो की कीमत चार यूरो करना चाहता हूँ",
+      // letters joined by a ".", ":" or "_" or by digits with no space, which Intl.Segmenter alone would take for one word
+      "готово.Идвайте", "т.е. утре", "U.S.A. today", "Mr.Smith", "Note:this", "foo_bar baz", "x2y3", "abc123def", "www.my-open-cafe.bg", "по-добре", "co-op and e-mail", "4.20 👍", "",
+    ];
+    for (const text of texts) expect(countWords(text), text).toBe(before(text));
+    expect(countWords("готово.Идвайте")).toBe(2);
+    expect(countWords("Mr.Smith")).toBe(2);
+    expect(countWords("www.my-open-cafe.bg")).toBe(5);
+  });
 });
