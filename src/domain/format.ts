@@ -22,10 +22,10 @@ function hasEnglishWords(text: string): boolean {
 }
 
 /**
- * Bulgarian or English, for texts answered in one of the site's two languages (customer comments, src/social/comments-draft.ts):
- * "bg" when the text has any Cyrillic letter; "en" when it has none and at least two different plain English words
- * (ENGLISH_WORDS); null otherwise (a price, an emoji, a dish name, Bulgarian written in Latin letters such as "kafeto e 4.20").
- * The owner's own messages go through detectScriptLang, which tells more languages apart.
+ * Bulgarian or English by the letters alone: "bg" when the text has any Cyrillic letter; "en" when it has none and at least two
+ * different plain English words (ENGLISH_WORDS); null otherwise (a price, an emoji, a dish name, Bulgarian written in Latin letters
+ * such as "kafeto e 4.20"). The two-language rule on its own: the owner's messages go through detectScriptLang, which tells more
+ * languages apart, and a customer's comment through commentLang (src/social/comments-draft.ts), which also asks the classifier.
  */
 export function detectLang(text: string): Lang | null {
   if (/\p{Script=Cyrillic}/u.test(text)) return "bg";
@@ -62,8 +62,10 @@ const SCRIPT_LANGS: readonly (readonly [RegExp, ChatLang])[] = [
 const count = (text: string, re: RegExp): number => text.match(re)?.length ?? 0;
 
 /**
- * The language an owner's message shows by its letters, or null when it shows none (a price, an emoji, a dish name, Bulgarian
- * typed in Latin letters, Latin text the English words cannot place; src/bot/inbound.ts asks the classifier about longer Latin text):
+ * The language a text shows by its letters, or null when it shows none (a price, an emoji, a dish name, Bulgarian typed in Latin
+ * letters, Latin text the English words cannot place). The letters are not always the last word: src/bot/inbound.ts asks the
+ * classifier first about an owner's Latin text of four words or more and about marker-less Cyrillic of four words or more from a member
+ * not stored as Bulgarian, and src/social/comments-draft.ts about a customer's Latin comment of two words or more:
  * 1. Cyrillic: Russian, Ukrainian, Belarusian, Macedonian or Serbian by the letters only they have (CYRILLIC_LANGS), else Bulgarian;
  *    but Cyrillic without such a letter is null for a member whose `current` language is one of those five, who keeps it
  *    ("Добавь пиццу" has no Russian-only letter).

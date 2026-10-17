@@ -75,29 +75,34 @@ function fieldValue(key: string, v: unknown, s: SiteState, lang: Lang): string {
   return quote(keep(String(v)), lang);
 }
 
-function holidayAddLine(h: Row, lang: Lang, other: Lang): string {
-  return `• ${tr(lang, "Почивен ден", "Holiday")} ${formatDate(String(h.date), lang)}: ${keep(String(h[`note_${lang}`]))} / ${keep(String(h[`note_${other}`]))}`;
+function holidayAddLine(h: Row, lang: Lang): string {
+  return `• ${tr(lang, "Почивен ден", "Holiday")} ${formatDate(String(h.date), lang)}: ${keep(String(h[`note_${lang}`]))}`;
 }
 function holidayRemoveLine(h: Row, lang: Lang): string {
   return `• ${tr(lang, "Премахва почивния ден", "Removes the holiday on")} ${formatDate(String(h.date), lang)}`;
 }
-function announcementAddLine(an: Row, lang: Lang, other: Lang, tz: string): string {
+function announcementAddLine(an: Row, lang: Lang, tz: string): string {
   const exp = an.expires_at ? ` (${tr(lang, "до", "until")} ${formatDateTime(String(an.expires_at), lang, tz)})` : "";
-  return `• ${tr(lang, "Съобщение", "Announcement")}: ${quote(keep(String(an[`text_${lang}`])), lang)} / ${quote(keep(String(an[`text_${other}`])), other)}${exp}`;
+  return `• ${tr(lang, "Съобщение", "Announcement")}: ${quote(keep(String(an[`text_${lang}`])), lang)}${exp}`;
 }
 function announcementRemoveLine(an: Row, lang: Lang): string {
   return `• ${tr(lang, "Премахва съобщението", "Removes the announcement")} ${quote(keep(String(an[`text_${lang}`])), lang)}`;
 }
 
 /**
- * One line (sometimes more) per change, in the reader's language, from the state the changes were planned against.
+ * One line (sometimes more) per change, in the reader's language only, from the state the changes were planned against. The website
+ * stores both languages and the agent writes the other one itself, but the chat speaks one: a change that writes both site languages
+ * shows the reader's version, and one note at the end of the set says the other was written (a field an edit names in the other
+ * language alone is shown, the owner asked for it).
  * Undo-safe: an inverted set keeps each `op` with `before`/`after` swapped, so an inverted add renders as a removal and vice versa.
  */
 export function renderPreview(s: SiteState, changes: Change[], lang: Lang, tz: string): string {
   const other: Lang = lang === "bg" ? "en" : "bg";
   const lines: string[] = [];
+  // Set by the first change that writes both site languages; the note is added once, last.
+  let bothLanguages = false;
   // A dish name stays as written in any language (keep markers: src/bot/translate.ts); the site's own texts below are kept too.
-  const name = (i: Item, l: Lang = lang) => keep(itemName(i, l));
+  const name = (i: Item) => keep(itemName(i, lang));
   const itemOf = (c: Change): Item => {
     const found = s.items.find((i) => i.id === c.entity_id);
     if (found) return found;
@@ -129,19 +134,25 @@ export function renderPreview(s: SiteState, changes: Change[], lang: Lang, tz: s
         }
         const it = c.after as unknown as Item;
         const cat = s.categories.find((x) => x.id === it.category_id);
-        const names = `${name(it)} / ${name(it, other)}`;
+        bothLanguages = true; // a new dish always has both names (planChange requires them)
         const head = it.is_special
-          ? `• ${tr(lang, "Специално днес", "Today's special")}${it.special_expires_at ? ` (${tr(lang, "до", "until")} ${localTime(new Date(it.special_expires_at), tz)})` : ""}: ${names} — ${formatPrice(it.price_eur, lang)}`
-          : `• ${tr(lang, "Ново в", "New in")} ${quote(cat ? keep(categoryName(cat, lang)) : "?", lang)}: ${names} — ${formatPrice(it.price_eur, lang)}`;
+          ? `• ${tr(lang, "Специално днес", "Today's special")}${it.special_expires_at ? ` (${tr(lang, "до", "until")} ${localTime(new Date(it.special_expires_at), tz)})` : ""}: ${name(it)} — ${formatPrice(it.price_eur, lang)}`
+          : `• ${tr(lang, "Ново в", "New in")} ${quote(cat ? keep(categoryName(cat, lang)) : "?", lang)}: ${name(it)} — ${formatPrice(it.price_eur, lang)}`;
         lines.push(head);
-        const descs: [Lang, string][] = [[lang, lang === "bg" ? it.desc_bg : it.desc_en], [other, other === "bg" ? it.desc_bg : it.desc_en]];
-        for (const [l, d] of descs) if (d) lines.push(`  ${l.toUpperCase()}: ${keep(d)}`);
+        const desc = lang === "bg" ? it.desc_bg : it.desc_en;
+        if (desc) lines.push(`  ${lang.toUpperCase()}: ${keep(desc)}`);
         lines.push(allergenLine(it.allergens, lang));
         break;
       }
       case "update_item": {
         const it = itemOf(c);
         for (const k of Object.keys(a)) {
+          // A field set in both languages (name_bg and name_en): the reader's line is shown, the other is the note's business.
+          const twin = k.replace(/_(bg|en)$/, (_, l: Lang) => `_${l === "bg" ? "en" : "bg"}`);
+          if (twin !== k && twin in a) {
+            bothLanguages = true;
+            if (k.endsWith(`_${other}`)) continue;
+          }
           const label = FIELD[k]?.[lang] ?? k;
           lines.push(`• ${name(it)}: ${label}: ${fieldValue(k, b[k], s, lang)} → ${fieldValue(k, a[k], s, lang)}`);
         }
@@ -177,11 +188,13 @@ export function renderPreview(s: SiteState, changes: Change[], lang: Lang, tz: s
       case "add_holiday":
       case "remove_holiday":
         // before === null is an insert: a planned add, or an inverted remove (undo of a delete).
-        lines.push(c.before === null ? holidayAddLine(c.after!, lang, other) : holidayRemoveLine(c.before, lang));
+        lines.push(c.before === null ? holidayAddLine(c.after!, lang) : holidayRemoveLine(c.before, lang));
+        if (c.before === null) bothLanguages = true;
         break;
       case "add_announcement":
       case "remove_announcement":
-        lines.push(c.before === null ? announcementAddLine(c.after!, lang, other, tz) : announcementRemoveLine(c.before, lang));
+        lines.push(c.before === null ? announcementAddLine(c.after!, lang, tz) : announcementRemoveLine(c.before, lang));
+        if (c.before === null) bothLanguages = true;
         break;
       case "set_text": {
         const key = c.entity === "site_text" ? c.entity_id : Object.keys(a)[0].replace(/_(bg|en)$/, "");
@@ -189,10 +202,9 @@ export function renderPreview(s: SiteState, changes: Change[], lang: Lang, tz: s
         const pick = (row: Record<string, unknown>, l: Lang) => row[`text_${l}`] ?? row[`${key}_${l}`] ?? row[key];
         const bv = pick(b, lang), av = pick(a, lang);
         lines.push(`• ${label}: ${bv === undefined || bv === null ? "—" : quote(keep(String(bv)), lang)} → ${quote(keep(String(av ?? "")), lang)}`);
-        const bo = pick(b, other), ao = pick(a, other);
-        if (ao !== undefined && ao !== null && !MONO_TEXT_KEYS.includes(key as TextKey)) {
-          lines.push(`  ${other.toUpperCase()}: ${bo === undefined || bo === null ? "—" : quote(keep(String(bo)), other)} → ${quote(keep(String(ao)), other)}`);
-        }
+        // A text with two versions writes both; one value for both languages (an address, a phone number) has no other version.
+        const ao = pick(a, other);
+        if (ao !== undefined && ao !== null && !MONO_TEXT_KEYS.includes(key as TextKey)) bothLanguages = true;
         break;
       }
       case "set_theme":
@@ -219,5 +231,6 @@ export function renderPreview(s: SiteState, changes: Change[], lang: Lang, tz: s
       }
     }
   }
+  if (bothLanguages) lines.push(tr(lang, "(английският вариант за сайта е написан автоматично)", "(the Bulgarian version for the site was written automatically)"));
   return lines.join("\n");
 }

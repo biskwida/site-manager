@@ -1,9 +1,10 @@
 // src/bot/lang-classify.ts
-// One small-model call that names the language of an owner's message when its letters cannot: Latin text of four words or more
-// ("Ich will den Preis in der Karte ändern"), or Cyrillic without a marker letter from a member not stored as Bulgarian
-// (src/bot/inbound.ts decides when to ask, and sends at most the first 300 characters). Never throws and never logs the message
-// or the answer: a failed or timed-out call, a refusal, "unknown" or anything that is not the code of a known language is null,
-// and inbound.ts falls back to the letters (the English word list for Latin text).
+// One small-model call that names the language of a text when its letters cannot: an owner's Latin text of four words or more
+// ("Ich will den Preis in der Karte ändern"), their Cyrillic without a marker letter when they are not stored as Bulgarian
+// (src/bot/inbound.ts decides when to ask), or a customer's comment of two words or more (src/social/comments-draft.ts). It reads at
+// most the first 300 characters of any text. Never throws and never logs the text or the answer: a failed or timed-out call, a
+// refusal, "unknown" or anything that is not the code of a known language is null, and the caller falls back to the letters (the
+// English word list for an owner's Latin text, English for a comment).
 import Anthropic from "@anthropic-ai/sdk";
 import { languageName } from "../domain/format";
 import { isChatLang, type ChatLang } from "../domain/types";
@@ -14,6 +15,8 @@ const QUESTION =
   "Which language is this message written in? Reply with only its ISO 639-1 code, or unknown. If the message is only a dish or product name, a brand, or a list of names, reply unknown. Bulgarian written in Latin letters (shliokavitsa) is bg.";
 /** The owner is waiting for the turn to start: a slow answer is no answer. */
 const REQUEST_OPTIONS = { timeout: 3000, maxRetries: 0 };
+/** The classifier is shown at most this many characters of a text: enough to name its language, and a pasted menu or a long comment need not travel in full. */
+const MAX_CHARS = 300;
 
 /**
  * A failed call for the log: the error's class ("APIConnectionTimeoutError", "RateLimitError 429"), never its message, which can
@@ -49,7 +52,8 @@ export function makeLangClassifier(client: Anthropic, model: string): LangClassi
           thinking: { type: "disabled" },
           output_config: { effort: "low" },
           system: QUESTION,
-          messages: [{ role: "user", content: [{ type: "text", text }] }],
+          // Cut at a character (code point), never between the two halves of an emoji.
+          messages: [{ role: "user", content: [{ type: "text", text: Array.from(text).slice(0, MAX_CHARS).join("") }] }],
         },
         REQUEST_OPTIONS,
       );

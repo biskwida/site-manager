@@ -35,7 +35,7 @@ export const SocialPostSchema = z.object({
   summary_bg: z.string().min(1).describe("One line in Bulgarian, e.g. „Публикация: днешното предложение“"),
   summary_en: z.string().min(1).describe("The same line in English"),
   media_id: z.string().min(1).describe("The media_id of the photo the owner sent"),
-  caption: z.string().describe("The post text, exactly as it will appear (hashtags included). In the venue's default language unless the owner gave the text. Stories show no caption."),
+  caption: z.string().describe("The post text, exactly as it will appear (hashtags included). In the owner's current language (the Owner language line) unless the owner asks for another language or gives the text. Stories show no caption."),
   targets: z.array(z.enum(SOCIAL_TARGETS as [SocialTarget, ...SocialTarget[]])).min(1).max(4).describe('Where to publish: facebook_post, facebook_story, instagram_post, instagram_story. "само стори", "като стори", "story only" or a story asked for without a post → only *_story; "само пост", "в профила", "във фийда", "post only" → only *_post; "и стори, и пост", "both" → both. A named network ("в инстаграм", "във фейсбук") → only that network. When the owner names neither story nor post: the feed post, on every connected network unless one is named. "прати стори само в инстаграм" → ["instagram_story"].'),
 });
 

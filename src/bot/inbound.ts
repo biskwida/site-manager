@@ -39,8 +39,6 @@ const LINKS = /https?:\/\/\S+|www\.\S+/gi;
 const withoutLinks = (text: string) => text.replace(LINKS, " ");
 /** Words a text needs before the classifier is asked about it; shorter text (a dish name, "ok", "make it a story") goes by its letters. */
 const CLASSIFY_MIN_WORDS = 4;
-/** The classifier gets at most this many characters of a message: enough to name its language. */
-const CLASSIFY_MAX_CHARS = 300;
 /** Words a voice transcript needs before it can switch the language: on a silent or noisy clip Whisper invents short phrases ("Thank you.", "Продолжение следует…") in any language. */
 const VOICE_LANG_MIN_WORDS = 4;
 
@@ -59,7 +57,7 @@ function asksClassifier(prose: string, current: ChatLang): boolean {
 
 /**
  * The language of the owner's own words (a message, a photo caption, a command word), not counting links. When asksClassifier
- * says so, the classifier names it from the first 300 characters (one small-model call, src/bot/lang-classify.ts), English
+ * says so, the classifier names it (one small-model call that reads the first 300 characters, src/bot/lang-classify.ts), English
  * included. Without its answer ("unknown", a failure, a timeout, no classifier) and for everything else the letters decide
  * (detectScriptLang with the stored language: the English word list for Latin text, and marker-less Cyrillic keeps a ru, uk,
  * be, mk or sr member's language). null keeps the stored language. A failing classifier never costs the message.
@@ -69,7 +67,7 @@ async function languageOf(d: BotDeps, text: string, current: ChatLang): Promise<
   const byLetters = detectScriptLang(prose, current);
   if (!d.classifyLang || !asksClassifier(prose, current)) return byLetters;
   try {
-    return (await d.classifyLang(Array.from(prose).slice(0, CLASSIFY_MAX_CHARS).join(""))) ?? byLetters;
+    return (await d.classifyLang(prose)) ?? byLetters;
   } catch (e) {
     console.error(`[bot] language classifier failed: ${e instanceof Error ? e.name : "error"}`); // never the owner's words
     return byLetters;

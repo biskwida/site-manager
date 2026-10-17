@@ -14,11 +14,19 @@ const NAME_MAX = 40;
 /** The caption of each picture in the chat: its format word (the table social_post's labels use), capitalised, in the owner's language. */
 const formatCaption = (format: Format, lang: Lang): string => FORMAT[format][lang].replace(/^./, (c) => c.toUpperCase());
 
+/**
+ * Which language the words on the picture are in. The fonts (src/visual/fonts) cover Latin and Cyrillic only, so a Greek, Arabic or
+ * Japanese owner's words would print as empty boxes: those pictures say it in English (the caption under them stays in the owner's language).
+ */
+const PICTURE_LANGUAGE =
+  "In the owner's current language (the Owner language line) unless the owner asks for another language or gives the text. " +
+  "Picture text uses the Owner language only when it is written in Latin or Cyrillic letters, otherwise English: the picture fonts cover only those scripts.";
+
 export const MakeVisualSchema = z.object({
   media_id: z.string().describe("The media_id of the owner's photo (not of an earlier picture: always start from the photo)."),
-  dish: z.string().describe(`The name on the picture, as the owner said it, at most ${NAME_MAX} characters.`),
-  price: z.string().optional().describe('The price as printed on the picture, in the venue\'s format ("4,30 €" for Bulgarian, "€4.30" for English). From the owner, else from get_menu for that item, else omit.'),
-  line: z.string().optional().describe(`An optional short line under the price ("Със сърце", "Ново", "Само днес"), at most ${NAME_MAX} characters.`),
+  dish: z.string().describe(`The name on the picture, as the owner said it, at most ${NAME_MAX} characters. ${PICTURE_LANGUAGE}`),
+  price: z.string().optional().describe(`The price as printed on the picture, in the picture's language ("4,30 €" for Bulgarian, "€4.30" for English). From the owner, else from get_menu for that item, else omit. ${PICTURE_LANGUAGE}`),
+  line: z.string().optional().describe(`An optional short line under the price ("Със сърце", "Ново", "Само днес"), at most ${NAME_MAX} characters. ${PICTURE_LANGUAGE}`),
   colour: z.string().optional().describe(`Backdrop: one of ${BACKDROPS.join(", ")}, or a #rrggbb colour. Omit to let the picture pick one that suits the photo. Words: тюркоаз/синьо-зелено → teal, праскова → peach, крем/бежово → cream, зелено → sage, розово → rose, синьо → sky, жълто → butter, тъмно/черно → dark.`),
   formats: z.array(z.enum(["post", "story"])).describe('"post" (feed, 4:5) and/or "story" (9:16). "и като стори", "и стори" → both; "само стори" → ["story"]; otherwise ["post"].'),
 });
@@ -47,7 +55,7 @@ export function visualTools(d: ToolDeps, k: ToolKit) {
         d.notes?.push(`visual from photo ${input.media_id}: ${r.pictures.map((p) => `${p.format} ${p.media_id}`).join(", ")} (backdrop ${r.backdrop}${r.kind === "photo" ? ", photo in a card: no clean cut-out" : ""})`);
         const social = d.social;
         const next = social && (social.instagram || social.facebook)
-          ? "The picture(s) are in the chat. Now, in this same turn, call social_post with each new picture's media_id: the post picture with the *_post targets, the story picture with the *_story targets (networks as the owner asked; none named = every connected one). Caption in the venue's language from the name and line, short and warm. The owner decides with the buttons."
+          ? "The picture(s) are in the chat. Now, in this same turn, call social_post with each new picture's media_id: the post picture with the *_post targets, the story picture with the *_story targets (networks as the owner asked; none named = every connected one). Caption in the owner's current language (the Owner language line) from the name and line, short and warm. The owner decides with the buttons."
           : "The picture(s) are in the chat. Instagram and Facebook are not connected, so tell the owner in one short sentence that the picture is ready and that posting needs the \"Facebook and Instagram\" card on the dashboard.";
         return { pictures: r.pictures.map(({ format, media_id }) => ({ format, media_id })), backdrop: r.backdrop, cutout: r.kind === "cutout" ? "ok" : "fallback: the photo is shown in a card because nothing could be cut out cleanly; mention it in one short sentence", next };
       }),

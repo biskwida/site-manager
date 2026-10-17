@@ -113,8 +113,11 @@ export async function makeServerDeps(o: DepsOptions): Promise<ServerDeps> {
   const sync: SyncDeps | null = destinationSecretKey ? { store: s, secretKey: destinationSecretKey, log } : null;
   // Every apply (bot button, dashboard, tick, agent) goes through store2 so wp_* rows reach the site right after the apply.
   const store2: Store = sync ? withDestinationSync(s, sync) : s;
+  // One classifier names the language of the owner's longer Latin-script words (botDeps) and of a customer's comment (the reply
+  // draft). Without an API key there is none: the owner's words go by the English word list, a Latin comment is answered in English.
+  const classifyLang = anthropic ? makeLangClassifier(anthropic, config.langClassifyModel) : null;
   // Without an API key draftReply answers with the neutral fallback line, so the owner still gets a proposal to edit.
-  const comments = sync ? { draft: (ctx: Parameters<DraftFn>[0]) => draftReply(anthropic, { model: config.commentDraftModel }, ctx) } : null;
+  const comments = sync ? { draft: (ctx: Parameters<DraftFn>[0]) => draftReply(anthropic, { model: config.commentDraftModel, classify: classifyLang }, ctx) } : null;
   const transcribe =
     o.transcribe !== undefined ? o.transcribe : config.sttApiKey ? makeTranscriber({ apiKey: config.sttApiKey, baseUrl: config.sttBaseUrl, model: config.sttModel }) : null;
   // The fake deployer is for offline mode only: in production it would hand owners https://<slug>.example.test.
@@ -146,8 +149,7 @@ export async function makeServerDeps(o: DepsOptions): Promise<ServerDeps> {
     now: () => new Date(),
     startRun: (r) => o.defer(() => handleRun(r)),
     transcribe,
-    // Without an API key the owner's Latin-script words go by the English word list only.
-    classifyLang: anthropic ? makeLangClassifier(anthropic, config.langClassifyModel) : null,
+    classifyLang,
     download: (filePath) => downloadTelegramFile(config.telegramToken, filePath),
     connect: sync ? (venueId, siteUrl, code) => connectWordPress({ store: s, secretKey: destinationSecretKey, allowLocal: isMemory }, venueId, siteUrl, code) : undefined,
     // Without a deployer the hosted /<slug> is the site: nothing to publish, so no hook (and no "publishing" line).

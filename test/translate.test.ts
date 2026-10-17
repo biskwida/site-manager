@@ -8,13 +8,14 @@ import { handleInbound } from "@/src/bot/inbound";
 import type { Messenger, ProposalLabels, SendOpts } from "@/src/bot/messenger";
 import { makeTranslator, withTranslation, type Translator } from "@/src/bot/translate";
 import { commentProposalText, type CommentSetItem } from "@/src/social/comments-propose";
+import { planChanges } from "@/src/domain/changes";
 import { renderPreview } from "@/src/domain/preview";
 import type { Change, Lang, Member } from "@/src/domain/types";
 import { sha256Hex } from "@/src/server/hash";
 import { InMemoryStore } from "@/src/store/memory";
 import type { SocialComment, Store } from "@/src/store/types";
 import { makeDemo } from "./helpers";
-import { TZ } from "./fixtures";
+import { state, TZ } from "./fixtures";
 
 const NOW = "2026-10-16T09:00:00.000Z";
 
@@ -263,6 +264,21 @@ describe("withTranslation", () => {
     expect(sent[1]).toBe("• Beitrag: Instagram (post, story)\n  “Post of the day: our Cappuccino ☕\n  Apply for the loyalty card! #coffee”\n  (Storys erscheinen ohne Text)\n\nAnwenden?");
     // The model never saw the dish name or the caption: they travel as numbered markers.
     expect(calls.map(asked).join("\n")).not.toMatch(/Cappuccino|loyalty/);
+  });
+
+  it("a German owner's new dish: one version of the dish, as written, and the note that the Bulgarian version was written, translated", async () => {
+    const store = new InMemoryStore();
+    const site = state();
+    const dish = { category_id: "c-coffee", name_bg: "Сладкиш със сирене", name_en: "Käsekuchen", desc_bg: "С извара", desc_en: "Mit Quark", price_eur: 4.2, allergens: [], is_special: false, special_expires_at: null };
+    const changes = planChanges(site, [{ op: "add_item", item: dish }], { newId: () => "new-1", now: NOW });
+    const { client, calls } = fakeClient((t) => t.replace("the Bulgarian version for the site was written automatically", "die bulgarische Version für die Website wurde automatisch erstellt").replace("Apply this?", "Anwenden?"));
+    const r = recorder();
+    const m = withTranslation(r.m, { store: members({ "tg:1": "de" }).store, translate: makeTranslator(client, "m", store) });
+    await m.sendProposal("tg:1", proposalText(renderPreview(site, changes, "en", TZ), "en", null, TZ), "set-1", "en");
+    expect(r.calls[0]).toMatchObject({ text: "• New in “Coffee”: Käsekuchen — €4.20\n  EN: Mit Quark\n  Allergens: none\n(die bulgarische Version für die Website wurde automatisch erstellt)\n\nAnwenden?" });
+    // Neither Bulgarian text is shown, and the model never saw the dish or its description.
+    expect(r.calls[0]).not.toMatchObject({ text: expect.stringMatching(/\p{Script=Cyrillic}/u) });
+    expect(calls.map(asked).join("\n")).not.toMatch(/Käsekuchen|Quark/);
   });
 
   it("a German owner's comment proposal: the customer's words, name and the drafted reply arrive exactly as written", async () => {

@@ -24,6 +24,13 @@ describe("get_site / get_menu", () => {
     expect((r.venue as Record<string, unknown>).name).toBe("Кафене „Ъгъла“");
     expect(r.hours).toHaveProperty("mon");
   });
+  it("reports the owner's own language, not the Bulgarian or English the fixed texts start from", async () => {
+    const { deps } = await setup();
+    for (const lang of ["de", "el", "en"]) {
+      const r = await call(makeTools({ ...deps, member: { ...deps.member, lang } }), "get_site", {});
+      expect(r).toMatchObject({ owner_lang: lang });
+    }
+  });
   it("lists active items by category with ids", async () => {
     const { tools, items } = await setup();
     const r = await call(tools, "get_menu", {});
@@ -111,12 +118,12 @@ describe("propose_changes", () => {
     expect(base.messenger.last().lang).toBe("en");
     expect(base.messenger.last().text).toContain("Today's special (until 18:00)");
   });
-  it("renders a preview in English for an English-speaking owner", async () => {
+  it("renders a preview in English only for an English-speaking owner, with one line saying the Bulgarian version was written", async () => {
     const base = await setup();
     await base.store.setMemberLang(base.venue.id, "tg:1001", "en");
     const tools = makeTools({ ...base.deps, member: { ...base.deps.member, lang: "en" } });
     const r = await call(tools, "propose_changes", { summary_bg: "x", summary_en: "x", changes: [{ op: "set_text", key: "tagline", text_bg: "Ново", text_en: "New" }] });
-    expect(r.preview).toBe("• Tagline: “Coffee, pastries and a quiet corner on Rakovski street.” → “New”\n  BG: „Кафе, закуски и спокойствие на ъгъла на „Раковски“.“ → „Ново“");
+    expect(r.preview).toBe("• Tagline: “Coffee, pastries and a quiet corner on Rakovski street.” → “New”\n(the Bulgarian version for the site was written automatically)");
   });
 });
 

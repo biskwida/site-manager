@@ -257,7 +257,7 @@ export function makeTools(deps: AgentDeps) {
           media_ids: s.media.map((m) => m.id),
           now: nowText(now, s.venue.tz),
           now_iso: now.toISOString(),
-          owner_lang: lang,
+          owner_lang: d.member.lang, // the owner's own language ("de"), the one the agent writes in; `lang` is only the base of the fixed texts
           member_role: d.member.role,
           public_url: `${d.baseUrl}/${s.venue.slug}`,
           pending_proposal: pending ? { id: pending.id, summary: lang === "bg" ? pending.summary_bg : pending.summary_en, apply_at: pending.apply_at } : null,

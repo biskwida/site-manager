@@ -41,6 +41,29 @@ describe("makeLangClassifier", () => {
     });
   });
 
+  it("a 1,000-character text reaches the client as its first 300 characters, for every caller", async () => {
+    const { client, calls } = fakeClient(answer("de"));
+    const long = "Wir haben heute frischen Apfelstrudel und warmen Kakao im Angebot. ".repeat(20).slice(0, 1000);
+    expect(long).toHaveLength(1000);
+    expect(await makeLangClassifier(client, "m")(long)).toBe("de");
+    const sent = (calls[0].messages as { content: { text: string }[] }[])[0].content[0].text;
+    expect(sent).toBe(long.slice(0, 300));
+    expect(sent).toHaveLength(300);
+  });
+
+  it("cuts at a character, never inside an emoji or another pair of code units, and sends a short text whole", async () => {
+    const { client, calls } = fakeClient(answer("de"));
+    const classify = makeLangClassifier(client, "m");
+    await classify("😀".repeat(400));
+    await classify(MESSAGE);
+    await classify("x".repeat(300));
+    const sent = calls.map((c) => (c.messages as { content: { text: string }[] }[])[0].content[0].text);
+    expect(sent[0]).toBe("😀".repeat(300));
+    expect(Array.from(sent[0])).toHaveLength(300);
+    expect(sent[1]).toBe(MESSAGE);
+    expect(sent[2]).toBe("x".repeat(300));
+  });
+
   it("waits at most 3 s and does not retry: the request options are { timeout: 3000, maxRetries: 0 }", async () => {
     const { client, options } = fakeClient(answer("de"));
     await makeLangClassifier(client, "m")(MESSAGE);

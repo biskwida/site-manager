@@ -945,17 +945,7 @@ describe("handleInbound: any conversation language", () => {
     });
   });
 
-  it("the classifier gets at most the first 300 characters of a message", async () => {
-    const { asked, classifyLang } = classifier("de");
-    const { d, store } = await setup({ classifyLang });
-    const long = "Ich möchte den Preis von jedem Kuchen auf der Karte ändern. ".repeat(20).slice(0, 1000);
-    expect(long).toHaveLength(1000);
-    await handleInbound(d, { chatRef: "tg:1001", kind: "text", text: long });
-    expect(asked).toHaveLength(1);
-    expect(asked[0]).toBe(long.slice(0, 300));
-    expect(await langOf(store, "tg:1001")).toBe("de");
-  });
-
+  // The 300-character cap is the classifier's own (src/bot/lang-classify.ts), so every caller gets it: inbound hands over the whole text.
   it("a 1,000-character text reaches the client as 300 characters", async () => {
     const sent: string[] = [];
     const client = { beta: { messages: { create: async (p: { messages: { content: { text: string }[] }[] }) => (sent.push(p.messages[0].content[0].text), { stop_reason: "end_turn", content: [{ type: "text", text: "de" }] }) } } } as unknown as Anthropic;

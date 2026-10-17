@@ -34,7 +34,12 @@ export interface BotDeps {
   startRun: (r: RunRequest) => void;
   /** null when STT is not configured. */
   transcribe: Transcriber | null;
-  /** Names the language of the owner's Latin-script words when their letters cannot (src/bot/lang-classify.ts); absent or null = never asked. */
+  /**
+   * Names the language of the owner's words when their letters cannot (src/bot/lang-classify.ts, asked from src/bot/inbound.ts): Latin
+   * text of four words or more, and Cyrillic without a marker letter of four words or more from a member not stored as Bulgarian.
+   * Absent or null = never asked. (src/server/deps.ts gives the same classifier to the reply drafts, which ask it about a customer's
+   * comment: src/social/comments-draft.ts.)
+   */
   classifyLang?: LangClassifier | null;
   /** Downloads a Telegram file by file_path; the URL (with the bot token) stays inside. */
   download: (filePath: string) => Promise<{ bytes: Uint8Array; contentType: string }>;

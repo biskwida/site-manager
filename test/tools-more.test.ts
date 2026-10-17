@@ -21,7 +21,9 @@ describe("schedule_changes", () => {
     expect(r).toMatchObject({ status: "proposed", apply_at: "2026-12-20T06:00:00.000Z" });
     expect((await store.getChangeSet(r.change_set_id as string)).apply_at).toBe("2026-12-20T06:00:00.000Z");
     expect(messenger.sent[0].text).toContain("⏰ Ще се приложи на 20.12.2026, 08:00");
-    expect(messenger.sent[0].text).toContain("• Почивен ден 24.12.2026: Бъдни вечер / Christmas Eve");
+    // The owner speaks Bulgarian: the holidays are read in Bulgarian only, and one line says the English version was written.
+    expect(messenger.sent[0].text).toContain("• Почивен ден 24.12.2026: Бъдни вечер\n• Почивен ден 25.12.2026: Коледа\n(английският вариант за сайта е написан автоматично)");
+    expect(messenger.sent[0].text).not.toContain("Christmas");
   });
   it("rejects a past or malformed apply_at", async () => {
     const { tools, items } = await setup();
