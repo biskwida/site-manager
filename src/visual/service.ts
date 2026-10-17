@@ -113,6 +113,9 @@ export type MenuPhotoResult =
   | { error: "no_object" };
 
 const MAX_STYLE_PHOTOS = 30;
+/** Each item-photo read for "match" gets this long (the route's read allows 15 s), and the whole sample 20 s, inside the route's 60 s. */
+const STYLE_READ_MS = 5_000;
+const STYLE_BUDGET_MS = 20_000;
 
 /** The venue's other item photos, as reads that start when called: each distinct photo once, never the one being processed or the given item's own, at most 30. */
 async function itemPhotoReads(d: VisualDeps, venueId: string, exceptMediaId: string, exceptItemId?: string): Promise<(() => Promise<Uint8Array | null>)[]> {
@@ -132,7 +135,7 @@ export async function makeMenuPhoto(d: VisualDeps, req: MenuPhotoRequest): Promi
   const cut = await cachedCutout(d, req.venueId, media, original);
   if (!cut) return { error: "no_object" };
   // "match" looks at the menu only after the cut-out worked, so a refused photo costs no extra reads.
-  const found = req.style === "match" ? await houseStyleReport(await itemPhotoReads(d, req.venueId, media.id, req.itemId)) : null;
+  const found = req.style === "match" ? await houseStyleReport(await itemPhotoReads(d, req.venueId, media.id, req.itemId), { readTimeoutMs: STYLE_READ_MS, budgetMs: STYLE_BUDGET_MS }) : null;
   const house = found?.style ?? null;
   // Never progressive: the same JPEG settings as Claudia's other proven copies, which every channel and site accepts.
   const jpeg = await renderMenuPhoto(cut, house ? { background: house.background, fill: house.fill } : {});

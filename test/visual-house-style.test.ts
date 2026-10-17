@@ -105,7 +105,27 @@ describe("houseStyle", () => {
     const r = await houseStyleReport(Array.from({ length: 30 }, () => slow), { concurrency: 3, budgetMs: 50 });
     expect(started).toBeLessThan(30);
     expect(started).toBeGreaterThanOrEqual(3);
-    expect(r.of).toBe(started);
+    expect(r.of).toBeLessThanOrEqual(started); // reads still in flight at the deadline are ignored
     expect(r.style).not.toBeNull();
+  });
+  it("does not wait past the budget for a read that never resolves", async () => {
+    const good = await photo("#f4efe6");
+    const never = () => new Promise<Uint8Array | null>(() => {});
+    const t = Date.now();
+    const r = await Promise.race([
+      houseStyleReport([good, good, never], { budgetMs: 150, readTimeoutMs: 60_000 }),
+      new Promise<"hung">((done) => setTimeout(() => done("hung"), 2_000)),
+    ]);
+    expect(r).not.toBe("hung");
+    expect(Date.now() - t).toBeLessThan(1_000);
+    expect(r).toMatchObject({ of: 2, attempted: 3, style: { matched: 2, of: 2 } });
+  });
+  it("gives up on one read after its own timeout and reads the next", async () => {
+    const good = await photo("#f4efe6");
+    const never = () => new Promise<Uint8Array | null>(() => {});
+    const t = Date.now();
+    const r = await houseStyleReport([never, async () => good, async () => good], { concurrency: 1, readTimeoutMs: 100 });
+    expect(Date.now() - t).toBeLessThan(1_500);
+    expect(r).toMatchObject({ of: 2, attempted: 3, style: { matched: 2 } });
   });
 });

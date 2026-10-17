@@ -17,6 +17,15 @@ export interface HouseStyle {
 /** A photo, or a way to get it (a read that may fail with null). */
 export type PhotoSource = Uint8Array | (() => Promise<Uint8Array | null>);
 
+export interface StyleOptions {
+  /** Reads (and analyses) at once; 6 by default. */
+  concurrency?: number;
+  /** The hard deadline for the whole sample; 20 s by default. */
+  budgetMs?: number;
+  /** One read's own timeout; 5 s by default. */
+  readTimeoutMs?: number;
+}
+
 const SIDE = 256; // photos are analysed at this size at most
 const RING = 0.04; // the outer ring of pixels that holds the backdrop
 const PLAIN_SD = 12; // a ring is plain when every channel's standard deviation is at most this
@@ -80,8 +89,23 @@ async function analyse(bytes: Uint8Array): Promise<Analysed> {
   return { rgb, fill: Math.min(MAX_FILL, Math.max(MIN_FILL, longer)) };
 }
 
-/** Reads and analyses the photos a few at a time; a photo that cannot be read or decoded is skipped, and no new read starts after the budget. */
-async function readAll(sources: PhotoSource[], o: { concurrency: number; budgetMs: number }): Promise<{ read: Analysed[]; attempted: number }> {
+/** The read's bytes, or null when it fails or takes longer than `ms` (the read itself is left to finish or hang on its own). */
+async function timed(read: () => Promise<Uint8Array | null>, ms: number): Promise<Uint8Array | null> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const late = new Promise<null>((done) => { timer = setTimeout(() => done(null), ms); });
+  try {
+    return await Promise.race([read(), late]);
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+/**
+ * Reads and analyses the photos a few at a time; a photo that cannot be read or decoded is skipped, each read gets
+ * `readTimeoutMs`, and the budget is a hard deadline: no new read starts after it, and the photos analysed by then are
+ * judged (reads still in flight are ignored).
+ */
+async function readAll(sources: PhotoSource[], o: { concurrency: number; budgetMs: number; readTimeoutMs: number }): Promise<{ read: Analysed[]; attempted: number }> {
   const started = Date.now();
   const slots: (Analysed | undefined)[] = []; // by source index, so the outcome does not depend on which read finishes first
   let next = 0;
@@ -90,20 +114,23 @@ async function readAll(sources: PhotoSource[], o: { concurrency: number; budgetM
       const index = next++;
       const src = sources[index];
       try {
-        const bytes = typeof src === "function" ? await src() : src;
+        const bytes = typeof src === "function" ? await timed(src, o.readTimeoutMs) : src;
         if (bytes) slots[index] = await analyse(bytes);
       } catch {
         // unreadable or undecodable: leave it out
       }
     }
   };
-  await Promise.all(Array.from({ length: Math.min(o.concurrency, sources.length) }, worker));
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const deadline = new Promise<void>((done) => { timer = setTimeout(done, o.budgetMs); });
+  await Promise.race([Promise.all(Array.from({ length: Math.min(o.concurrency, sources.length) }, worker)), deadline]);
+  clearTimeout(timer);
   return { read: slots.filter((a): a is Analysed => a !== undefined), attempted: next };
 }
 
 /** The style, how many photos were read (`of`) and how many reads were started (`attempted`), so the caller can tell "no photos" from "unreadable" from "mixed backdrops". */
-export async function houseStyleReport(sources: PhotoSource[], o: { concurrency?: number; budgetMs?: number } = {}): Promise<{ style: HouseStyle | null; of: number; attempted: number }> {
-  const { read, attempted } = await readAll(sources, { concurrency: o.concurrency ?? 6, budgetMs: o.budgetMs ?? 20_000 });
+export async function houseStyleReport(sources: PhotoSource[], o: StyleOptions = {}): Promise<{ style: HouseStyle | null; of: number; attempted: number }> {
+  const { read, attempted } = await readAll(sources, { concurrency: o.concurrency ?? 6, budgetMs: o.budgetMs ?? 20_000, readTimeoutMs: o.readTimeoutMs ?? 5_000 });
   const of = read.length;
   const plain = read.filter((a): a is Analysed & { rgb: [number, number, number] } => a.rgb !== null);
   const labs: Lab[] = plain.map((a) => rgbToLab(...a.rgb));
@@ -119,6 +146,6 @@ export async function houseStyleReport(sources: PhotoSource[], o: { concurrency?
 }
 
 /** The shared backdrop and object size of the venue's item photos, or null when there are too few photos or their backdrops disagree. */
-export async function houseStyle(photos: PhotoSource[], o: { concurrency?: number; budgetMs?: number } = {}): Promise<HouseStyle | null> {
+export async function houseStyle(photos: PhotoSource[], o: StyleOptions = {}): Promise<HouseStyle | null> {
   return (await houseStyleReport(photos, o)).style;
 }
