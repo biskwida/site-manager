@@ -43,21 +43,23 @@ describe("makeVisual", () => {
       ["story", venue.name, "Флат уайт", "4,30 €", "Със сърце", "cutout"],
     ]);
     expect(rendered[0].image).toMatch(/^data:image\/png;base64,/);
-    expect(await store.findMediaByPath(`${venue.id}/cutouts/v2/${photo.id}.png`)).not.toBeNull();
+    expect(await store.findMediaByPath(`${venue.id}/cutouts/v3/${photo.id}.png`)).not.toBeNull();
     // A second picture from the same photo (a colour change) reuses the cut-out.
     const again = await makeVisual(deps, { venueId: venue.id, mediaId: photo.id, dish: "Флат уайт", colour: "peach", formats: ["post"] });
     expect(again.backdrop).toBe("peach");
     expect(cutoutCount()).toBe(1);
   });
 
-  it("does not reuse a cut-out cached at the old path, which kept stray fragments", async () => {
-    const { deps, photo, venue, store, cutoutCount } = await setup();
-    const stale = await store.saveMedia(venue.id, new Uint8Array([9, 9, 9]), "image/png", { name: `cutouts/${photo.id}.png` });
-    expect(stale.storage_path).toBe(`${venue.id}/cutouts/${photo.id}.png`);
-    await makeVisual(deps, { venueId: venue.id, mediaId: photo.id, dish: "x", formats: ["post"] });
-    expect(cutoutCount()).toBe(1);
-    expect(await store.findMediaByPath(`${venue.id}/cutouts/v2/${photo.id}.png`)).not.toBeNull();
-  });
+  for (const old of ["", "v2/"]) {
+    it(`does not reuse a cut-out cached at the old path cutouts/${old} (fragments, or a fragment's faint rim)`, async () => {
+      const { deps, photo, venue, store, cutoutCount } = await setup();
+      const stale = await store.saveMedia(venue.id, new Uint8Array([9, 9, 9]), "image/png", { name: `cutouts/${old}${photo.id}.png` });
+      expect(stale.storage_path).toBe(`${venue.id}/cutouts/${old}${photo.id}.png`);
+      await makeVisual(deps, { venueId: venue.id, mediaId: photo.id, dish: "x", formats: ["post"] });
+      expect(cutoutCount()).toBe(1);
+      expect(await store.findMediaByPath(`${venue.id}/cutouts/v3/${photo.id}.png`)).not.toBeNull();
+    });
+  }
 
   it("falls back to the photo in a card when the cut-out finds nothing", async () => {
     const { deps, photo, venue, rendered } = await setup({ cutout: async () => null });

@@ -115,7 +115,7 @@ describe("makeMenuPhoto", () => {
     await makeMenuPhoto(deps, { venueId: venue.id, mediaId: photo.id });
     await makeMenuPhoto(deps, { venueId: venue.id, mediaId: photo.id });
     expect(cutoutCount()).toBe(1);
-    expect(await store.findMediaByPath(`${venue.id}/cutouts/v2/${photo.id}.png`)).not.toBeNull();
+    expect(await store.findMediaByPath(`${venue.id}/cutouts/v3/${photo.id}.png`)).not.toBeNull();
   });
   it("refuses a photo from another venue or one it cannot read", async () => {
     const { deps, photo, store } = await setup();

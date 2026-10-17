@@ -54,11 +54,12 @@ function sniffType(bytes: Uint8Array): string {
 }
 
 /**
- * The cut-out is cached per photo, so a colour or text change does not run the model again. "v2" = main object only:
- * cut-outs saved before that kept stray fragments (a table corner), so they are never reused.
+ * The cut-out is cached per photo, so a colour or text change does not run the model again. "v3" = main object only, with
+ * a dropped fragment's faint rim cleared too: cut-outs saved before that (cutouts/ kept stray fragments, cutouts/v2/ their
+ * soft rims, which pushed the dish off centre) are never reused.
  */
 async function cachedCutout(d: VisualDeps, venueId: string, media: Media, original: Uint8Array): Promise<Uint8Array | null> {
-  const cachePath = `${venueId}/cutouts/v2/${media.id}.png`;
+  const cachePath = `${venueId}/cutouts/v3/${media.id}.png`;
   let cut: Uint8Array | null = null;
   const cached = await d.store.findMediaByPath(cachePath);
   if (cached) cut = await d.read(cached.public_url);
@@ -68,7 +69,7 @@ async function cachedCutout(d: VisualDeps, venueId: string, media: Media, origin
       console.error(`[visual] cutout failed: ${e instanceof Error ? e.name : "error"}`);
       return null;
     });
-    if (cut) await d.store.saveMedia(venueId, cut, "image/png", { name: `cutouts/v2/${media.id}.png` });
+    if (cut) await d.store.saveMedia(venueId, cut, "image/png", { name: `cutouts/v3/${media.id}.png` });
   }
   return cut;
 }
