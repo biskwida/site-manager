@@ -4,6 +4,7 @@
 // without the model and in the /api/visual route with it.
 import type { Store } from "../store/types";
 import type { Media } from "../domain/types";
+import { houseStyleReport } from "./house-style";
 import { renderMenuPhoto } from "./menu-photo";
 import { colours, pickBackdrop, BACKDROPS, type Backdrop } from "./palette";
 import type { Format, PictureProps } from "./template";
@@ -101,11 +102,26 @@ export interface MenuPhotoRequest {
   venueId: string;
   /** The owner's photo of the item. */
   mediaId: string;
+  /** "match" = the backdrop and object size most of the venue's item photos share (white when they have none); "white" (default) = plain white. */
+  style?: "match" | "white";
 }
 
-export type MenuPhotoResult = { media_id: string; url: string } | { error: "no_object" };
+export type MenuPhotoResult =
+  | { media_id: string; url: string; style: { background: string; matched: number; of: number } | "white"; reason?: "no_photos" | "mixed" }
+  | { error: "no_object" };
 
-/** The plain website photo: the object alone, centred on white. `{ error: "no_object" }` when nothing could be cut out (nothing is saved then). */
+const MAX_STYLE_PHOTOS = 30;
+
+/** The venue's other item photos, as reads that start when called: each distinct photo once, never the one being processed, at most 30. */
+async function itemPhotoReads(d: VisualDeps, venueId: string, exceptMediaId: string): Promise<(() => Promise<Uint8Array | null>)[]> {
+  const site = await d.store.getSite(venueId);
+  const urls = new Map(site.media.map((m) => [m.id, m.public_url]));
+  const ids = new Set<string>();
+  for (const item of site.items) if (item.image_media_id && item.image_media_id !== exceptMediaId && urls.has(item.image_media_id)) ids.add(item.image_media_id);
+  return [...ids].slice(0, MAX_STYLE_PHOTOS).map((id) => () => d.read(urls.get(id)!));
+}
+
+/** The plain website photo: the object alone, centred on white or on the menu's own backdrop. `{ error: "no_object" }` when nothing could be cut out (nothing is saved then). */
 export async function makeMenuPhoto(d: VisualDeps, req: MenuPhotoRequest): Promise<MenuPhotoResult> {
   const media = await d.store.getMedia(req.mediaId);
   if (!media || media.venue_id !== req.venueId) throw new Error(`media_id "${req.mediaId}" not found for this venue.`);
@@ -113,8 +129,13 @@ export async function makeMenuPhoto(d: VisualDeps, req: MenuPhotoRequest): Promi
   if (!original) throw new Error("Could not read the photo; try again in a moment.");
   const cut = await cachedCutout(d, req.venueId, media, original);
   if (!cut) return { error: "no_object" };
+  // "match" looks at the menu only after the cut-out worked, so a refused photo costs no extra reads.
+  const found = req.style === "match" ? await houseStyleReport(await itemPhotoReads(d, req.venueId, media.id)) : null;
+  const house = found?.style ?? null;
   // Never progressive: the same JPEG settings as Claudia's other proven copies, which every channel and site accepts.
-  const jpeg = await renderMenuPhoto(cut);
+  const jpeg = await renderMenuPhoto(cut, house ? { background: house.background, fill: house.fill } : {});
   const saved = await d.store.saveMedia(req.venueId, jpeg, "image/jpeg");
-  return { media_id: saved.id, url: saved.public_url };
+  const base = { media_id: saved.id, url: saved.public_url };
+  if (house) return { ...base, style: { background: house.background, matched: house.matched, of: house.of } };
+  return found ? { ...base, style: "white", reason: found.of < 2 ? "no_photos" : "mixed" } : { ...base, style: "white" };
 }

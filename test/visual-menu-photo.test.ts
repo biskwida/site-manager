@@ -114,3 +114,81 @@ describe("makeMenuPhoto", () => {
     await expect(makeMenuPhoto(unreadable.deps, { venueId: unreadable.venue.id, mediaId: unreadable.photo.id })).rejects.toThrow(/could not read/i);
   });
 });
+
+describe("renderMenuPhoto with a style", () => {
+  it("uses the background colour and a fill-wide box", async () => {
+    const jpeg = await renderMenuPhoto(await redBox(800, 600), { background: "#f4efe6", fill: 0.6 });
+    const [r, g, b] = await pixel(jpeg, 5, 5);
+    expect(Math.abs(r - 0xf4) + Math.abs(g - 0xef) + Math.abs(b - 0xe6)).toBeLessThanOrEqual(8);
+    const box = await redBounds(jpeg);
+    expect(Math.abs(box.w - 720)).toBeLessThanOrEqual(3);
+    expect(box.h).toBeLessThanOrEqual(660);
+    expect(Math.abs(box.cx - 599.5)).toBeLessThanOrEqual(2);
+  });
+  it("keeps the 660 px height limit and the 2x cap under a fill", async () => {
+    expect((await redBounds(await renderMenuPhoto(await redBox(200, 800), { fill: 0.85 }))).h).toBeLessThanOrEqual(660);
+    expect((await redBounds(await renderMenuPhoto(await redBox(50, 50), { fill: 0.85 }))).w).toBeLessThanOrEqual(100);
+  });
+});
+
+/** A venue photo: a plain backdrop with a dark object in the middle. */
+const venuePhoto = async (backdrop: string, share = 0.6) => {
+  const size = Math.round(400 * share);
+  const object = await sharp({ create: { width: size, height: size, channels: 3, background: "#3b2a20" } }).png().toBuffer();
+  return new Uint8Array(await sharp({ create: { width: 400, height: 400, channels: 3, background: backdrop } }).composite([{ input: object, left: Math.round((400 - size) / 2), top: Math.round((400 - size) / 2) }]).png().toBuffer());
+};
+
+describe("makeMenuPhoto style", () => {
+  async function withItemPhotos(backdrops: string[], over: Partial<VisualDeps> = {}) {
+    const s = await setup({ cutout: async () => redBox(800, 600), ...over });
+    const category = Object.values(s.categories)[0];
+    for (const [i, backdrop] of backdrops.entries()) {
+      const m = await s.store.saveMedia(s.venue.id, await venuePhoto(backdrop), "image/png");
+      await s.store.insertItem({ venue_id: s.venue.id, category_id: category.id, name_bg: `Т${i}`, name_en: `T${i}`, desc_bg: "", desc_en: "", price_eur: 3, allergens: [], position: 100 + i, image_media_id: m.id });
+    }
+    return s;
+  }
+  const bytesOf = (s: Awaited<ReturnType<typeof setup>>, id: string) => s.store.getMedia(id).then((m) => s.store.files.get(m!.storage_path)!);
+
+  it("a matched menu photo uses that background and size", async () => {
+    const s = await withItemPhotos(["#f4efe6", "#f4efe6", "#f5f0e7", "#c8e6d0"]);
+    const r = await makeMenuPhoto(s.deps, { venueId: s.venue.id, mediaId: s.photo.id, style: "match" });
+    if ("error" in r) throw new Error("expected a photo");
+    expect(r.style).toEqual({ background: expect.stringMatching(/^#f[45]/), matched: 3, of: 4 });
+    expect(r.reason).toBeUndefined();
+    const jpeg = await bytesOf(s, r.media_id);
+    const [pr, pg, pb] = await pixel(jpeg, 5, 5);
+    expect(Math.abs(pr - 0xf4) + Math.abs(pg - 0xef) + Math.abs(pb - 0xe6)).toBeLessThanOrEqual(10);
+    expect(Math.abs((await redBounds(jpeg)).w - 720)).toBeLessThanOrEqual(6);
+  });
+  it("leaves out the photo being processed", async () => {
+    const s = await withItemPhotos(["#f4efe6", "#f4efe6"]);
+    const category = Object.values(s.categories)[0];
+    await s.store.insertItem({ venue_id: s.venue.id, category_id: category.id, name_bg: "Х", name_en: "X", desc_bg: "", desc_en: "", price_eur: 3, allergens: [], position: 200, image_media_id: s.photo.id });
+    const r = await makeMenuPhoto(s.deps, { venueId: s.venue.id, mediaId: s.photo.id, style: "match" });
+    expect(r).toMatchObject({ style: { matched: 2, of: 2 } });
+  });
+  it("uses at most 30 item photos", async () => {
+    const s = await withItemPhotos(Array.from({ length: 34 }, () => "#f4efe6"));
+    const r = await makeMenuPhoto(s.deps, { venueId: s.venue.id, mediaId: s.photo.id, style: "match" });
+    expect(r).toMatchObject({ style: { of: 30 } });
+  });
+  it("falls back to white and says why when there are no item photos", async () => {
+    const s = await setup();
+    const r = await makeMenuPhoto(s.deps, { venueId: s.venue.id, mediaId: s.photo.id, style: "match" });
+    expect(r).toMatchObject({ style: "white", reason: "no_photos" });
+    const [pr, pg, pb] = await pixel(await bytesOf(s, (r as { media_id: string }).media_id), 5, 5);
+    expect([pr, pg, pb].every((v) => v >= 250)).toBe(true);
+  });
+  it("falls back to white as mixed when the backdrops disagree", async () => {
+    const s = await withItemPhotos(["#ffffff", "#222222", "#c8e6d0"]);
+    expect(await makeMenuPhoto(s.deps, { venueId: s.venue.id, mediaId: s.photo.id, style: "match" })).toMatchObject({ style: "white", reason: "mixed" });
+  });
+  it("is white without looking at the menu when asked for white, and by default", async () => {
+    const s = await withItemPhotos(["#f4efe6", "#f4efe6"]);
+    expect(await makeMenuPhoto(s.deps, { venueId: s.venue.id, mediaId: s.photo.id, style: "white" })).toMatchObject({ style: "white" });
+    const dflt = await makeMenuPhoto(s.deps, { venueId: s.venue.id, mediaId: s.photo.id });
+    expect(dflt).toMatchObject({ style: "white" });
+    expect((dflt as { reason?: string }).reason).toBeUndefined();
+  });
+});

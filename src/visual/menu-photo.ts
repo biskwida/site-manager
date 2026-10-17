@@ -7,20 +7,28 @@ const BOX_W = 912;
 const BOX_H = 660;
 const MAX_UPSCALE = 2;
 
-/** The finished JPEG (baseline, quality 90): the object trimmed, fitted into the box, centred on white. */
-export async function renderMenuPhoto(cutoutPng: Uint8Array): Promise<Uint8Array> {
+export interface MenuPhotoStyle {
+  /** #rrggbb; white by default. */
+  background?: string;
+  /** The object's share of the square's width (the venue's house style); the box is that wide and at most 660 high. Without it the box is 912 wide. */
+  fill?: number;
+}
+
+/** The finished JPEG (baseline, quality 90): the object trimmed, fitted into the box, centred on the background (white by default). */
+export async function renderMenuPhoto(cutoutPng: Uint8Array, style: MenuPhotoStyle = {}): Promise<Uint8Array> {
+  const boxW = style.fill ? Math.round(style.fill * SIDE) : BOX_W;
   const sharp = (await import("sharp")).default;
   // The model's cut-out is usually trimmed already; trimming again is harmless, and a fully uniform image (nothing to trim) is kept as is.
   const trimmed = await sharp(cutoutPng).trim({ threshold: 8 }).png().toBuffer().catch(() => Buffer.from(cutoutPng));
   const { width, height } = await sharp(trimmed).metadata();
   const w = width ?? 1;
   const h = height ?? 1;
-  const scale = Math.min(BOX_W / w, BOX_H / h, MAX_UPSCALE);
+  const scale = Math.min(boxW / w, BOX_H / h, MAX_UPSCALE);
   const rw = Math.max(1, Math.round(w * scale));
   const rh = Math.max(1, Math.round(h * scale));
   const object = await sharp(trimmed).resize(rw, rh, { fit: "fill" }).png().toBuffer();
   const left = Math.round((SIDE - rw) / 2);
   const top = Math.round((SIDE - rh) / 2);
-  const out = await sharp({ create: { width: SIDE, height: SIDE, channels: 3, background: "#ffffff" } }).composite([{ input: object, left, top }]).jpeg({ quality: 90 }).toBuffer();
+  const out = await sharp({ create: { width: SIDE, height: SIDE, channels: 3, background: style.background ?? "#ffffff" } }).composite([{ input: object, left, top }]).jpeg({ quality: 90 }).toBuffer();
   return new Uint8Array(out);
 }
