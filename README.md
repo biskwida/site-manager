@@ -120,7 +120,7 @@ npm run env:set -- ANTHROPIC_API_KEY   # asks for the value with echo off, write
 | Key | Where to get it | Required |
 |---|---|---|
 | `ANTHROPIC_API_KEY` | console.anthropic.com → API keys | Yes (the agent; the wizard's menu reading and "Write for me" use it too) |
-| `AGENT_MODEL` | Default `claude-opus-5-5` | No |
+| `AGENT_MODEL` | Default `claude-haiku-5-5` | No |
 | `AGENT_EFFORT` | `low`, `medium` (default) or `high`; image, bulk and scheduling turns use `high` automatically | No |
 | `LANG_CLASSIFY_MODEL` | Default `claude-haiku-5-5`. Names the language of Latin text of four words or more (and marker-less Cyrillic from a member not stored as Bulgarian), so Claudia answers in the language the owner writes in | No |
 | `TRANSLATE_MODEL` | Default `claude-haiku-5-5`. Translates what Claudia sends to a member whose language is neither Bulgarian nor English (cached per message; links, prices and venue names are never sent to it) | No |

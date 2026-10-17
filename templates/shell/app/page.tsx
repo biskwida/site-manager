@@ -2,12 +2,12 @@ import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 import { LangProvider } from "@/src/i18n";
 import { def } from "@/src/templates/current";
-import { FEED_URL, loadFeed, siteUrl, SLUG } from "./feed";
+import { FEED_URL, loadFeed, loadFeedOrNull, siteUrl, SLUG } from "./feed";
 
 export const dynamic = "force-dynamic";
 
 export async function generateMetadata(): Promise<Metadata> {
-  const state = await loadFeed();
+  const state = await loadFeedOrNull();
   if (!state) return { title: "Site" };
   const v = state.venue;
   return { metadataBase: new URL(siteUrl()), title: v.name, description: v.default_lang === "bg" ? v.tagline_bg : v.tagline_en };

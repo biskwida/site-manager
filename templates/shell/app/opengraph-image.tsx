@@ -1,6 +1,6 @@
 // Text card: venue name + tagline on the accent colour (cover photo behind it when there is one).
 import { ImageResponse } from "next/og";
-import { loadFeed } from "./feed";
+import { loadFeedOrNull } from "./feed";
 
 export const dynamic = "force-dynamic";
 export const alt = "Site";
@@ -24,7 +24,7 @@ async function cyrillicFont(text: string): Promise<ArrayBuffer | null> {
 }
 
 export default async function Image() {
-  const state = await loadFeed();
+  const state = await loadFeedOrNull();
   const name = state?.venue.name ?? "Site";
   const tagline = state ? (state.venue.default_lang === "bg" ? state.venue.tagline_bg : state.venue.tagline_en) : "";
   const accent = state && /^#[0-9a-f]{6}$/i.test(state.venue.theme.accent) ? state.venue.theme.accent : "#2f6b4f";
