@@ -77,6 +77,11 @@ describe("storyImage", () => {
     await expectPixel(bytes, 540, 1914, RED);
   });
 
+  it("encodes the copy as a baseline JPEG, with the Instagram feed copy's settings", async () => {
+    const bytes = made(await storyImage(await jpeg(900, 1200), BACKGROUND));
+    expect((await sharp(bytes).metadata()).isProgressive).toBe(false);
+  });
+
   it("returns ok for a photo already 9:16, within 1%, and makes one for a photo outside that", async () => {
     expect(await storyImage(await jpeg(1080, 1920), BACKGROUND)).toEqual({ kind: "ok" });
     expect(await storyImage(await jpeg(720, 1280), BACKGROUND)).toEqual({ kind: "ok" });

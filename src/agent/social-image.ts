@@ -121,7 +121,7 @@ export async function storyImage(bytes: Uint8Array, background: string): Promise
       .pipelineColourspace("srgb") // else a one-channel greyscale photo turns the background grey as well
       .rotate()
       .resize(STORY_WIDTH, STORY_HEIGHT, { fit: "contain", background })
-      .jpeg({ quality: 88, mozjpeg: true })
+      .jpeg({ quality: 90 }) // the feed copy's settings (baseline): that encoding is proven live on Instagram
       .toBuffer();
     return { kind: "made", bytes: new Uint8Array(story) };
   } catch {
