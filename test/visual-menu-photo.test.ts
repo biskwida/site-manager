@@ -197,6 +197,10 @@ describe("makeMenuPhoto style", () => {
     const onlyOwn: VisualDeps = { ...s.deps, read: async (u) => (u === photoUrl || u.includes("/cutouts/") ? s.deps.read(u) : null) };
     expect(await makeMenuPhoto(onlyOwn, { venueId: s.venue.id, mediaId: s.photo.id, style: "match" })).toMatchObject({ style: "white", reason: "unreadable" });
   });
+  it("says too_few, not unreadable, when the only other item photo reads fine", async () => {
+    const s = await withItemPhotos(["#f4efe6"]);
+    expect(await makeMenuPhoto(s.deps, { venueId: s.venue.id, mediaId: s.photo.id, style: "match" })).toMatchObject({ style: "white", reason: "too_few" });
+  });
   it("does not let the item's current cream menu photo vote when it is re-run on the original", async () => {
     const s = await withItemPhotos(["#222222", "#c8e6d0"]);
     const category = Object.values(s.categories)[0];

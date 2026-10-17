@@ -109,7 +109,7 @@ export interface MenuPhotoRequest {
 }
 
 export type MenuPhotoResult =
-  | { media_id: string; url: string; style: { background: string; matched: number; of: number } | "white"; reason?: "no_photos" | "unreadable" | "mixed" }
+  | { media_id: string; url: string; style: { background: string; matched: number; of: number } | "white"; reason?: "no_photos" | "unreadable" | "too_few" | "mixed" }
   | { error: "no_object" };
 
 const MAX_STYLE_PHOTOS = 30;
@@ -139,5 +139,5 @@ export async function makeMenuPhoto(d: VisualDeps, req: MenuPhotoRequest): Promi
   const saved = await d.store.saveMedia(req.venueId, jpeg, "image/jpeg");
   const base = { media_id: saved.id, url: saved.public_url };
   if (house) return { ...base, style: { background: house.background, matched: house.matched, of: house.of } };
-  return found ? { ...base, style: "white", reason: found.attempted === 0 ? "no_photos" : found.of < 2 ? "unreadable" : "mixed" } : { ...base, style: "white" };
+  return found ? { ...base, style: "white", reason: found.attempted === 0 ? "no_photos" : found.of < 2 ? (found.of < found.attempted ? "unreadable" : "too_few") : "mixed" } : { ...base, style: "white" };
 }
