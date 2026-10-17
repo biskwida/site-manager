@@ -44,6 +44,8 @@ const CYRILLIC_LANGS: readonly (readonly [RegExp, ChatLang])[] = [
   [/[ѓќѕ]/iu, "mk"],
   [/[ћђјљњџ]/iu, "sr"],
 ];
+/** The Cyrillic languages told apart by letters of their own (CYRILLIC_LANGS): be, ru, uk, mk, sr. */
+const MARKED_CYRILLIC: ReadonlySet<ChatLang> = new Set(CYRILLIC_LANGS.map(([, lang]) => lang));
 /** Scripts that name one language. Kana and Hangul come before Han: Japanese and Korean also write Chinese characters. */
 const SCRIPT_LANGS: readonly (readonly [RegExp, ChatLang])[] = [
   [/\p{Script=Greek}/u, "el"],
@@ -61,18 +63,30 @@ const count = (text: string, re: RegExp): number => text.match(re)?.length ?? 0;
 
 /**
  * The language an owner's message shows by its letters, or null when it shows none (a price, an emoji, a dish name, Bulgarian
- * typed in Latin letters, Latin text the English words cannot place; src/bot/inbound.ts may ask the classifier about the last):
- * 1. Cyrillic: Russian, Ukrainian, Belarusian, Macedonian or Serbian by the letters only they have (CYRILLIC_LANGS), else Bulgarian.
+ * typed in Latin letters, Latin text the English words cannot place; src/bot/inbound.ts asks the classifier about longer Latin text):
+ * 1. Cyrillic: Russian, Ukrainian, Belarusian, Macedonian or Serbian by the letters only they have (CYRILLIC_LANGS), else Bulgarian;
+ *    but Cyrillic without such a letter is null for a member whose `current` language is one of those five, who keeps it
+ *    ("Добавь пиццу" has no Russian-only letter).
  * 2. Greek, Arabic, Hebrew, Japanese, Korean, Chinese, Thai, Georgian, Armenian or Hindi by the script (SCRIPT_LANGS).
  * 3. Latin: English with two different plain English words (ENGLISH_WORDS).
  * Those English words win over another script when Latin letters are the majority: "change the price of Капучино to 4.20" names
  * a dish, it is English; "Flat white свърши" (no listed word) is Bulgarian.
  */
-export function detectScriptLang(text: string): ChatLang | null {
+export function detectScriptLang(text: string, current?: ChatLang | null): ChatLang | null {
   const latin = count(text, /\p{Script=Latin}/gu);
   if (hasEnglishWords(text) && latin > count(text, /\p{L}/gu) - latin) return "en";
-  if (/\p{Script=Cyrillic}/u.test(text)) return CYRILLIC_LANGS.find(([re]) => re.test(text))?.[1] ?? "bg";
+  if (/\p{Script=Cyrillic}/u.test(text)) {
+    const marked = CYRILLIC_LANGS.find(([re]) => re.test(text))?.[1];
+    if (marked) return marked;
+    return current && MARKED_CYRILLIC.has(current) ? null : "bg";
+  }
   return SCRIPT_LANGS.find(([re]) => re.test(text))?.[1] ?? null;
+}
+
+/** Whether every letter of a text is Latin, and it has at least one: no Cyrillic, Greek, Han or other letters. */
+export function isLatinText(text: string): boolean {
+  const latin = count(text, /\p{Script=Latin}/gu);
+  return latin > 0 && latin === count(text, /\p{L}/gu);
 }
 
 /** The hand-written texts a conversation language starts from: Bulgarian for Bulgarian, English for every other language. */

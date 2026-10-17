@@ -4,7 +4,7 @@ import { followsAgentReply, holdPhoto } from "../agent/memory";
 import { PHOTO_NO_CAPTION } from "../agent/prompt";
 import type { ImageInput } from "../agent/run";
 import { channelOf, isMetaChannel, maskRef, type Channel } from "../channels/ref";
-import { baseLang, countLatinWords, detectScriptLang } from "../domain/format";
+import { baseLang, countLatinWords, detectScriptLang, isLatinText } from "../domain/format";
 import type { ChatLang, Member } from "../domain/types";
 import { handleDecision, parseCallback } from "./approvals";
 import type { BotDeps } from "./bot";
@@ -37,23 +37,27 @@ const CODE = /^[A-Z0-9-]{8,}$/;
 /** Addresses a message carries. They are not the owner's language: "https://my-open-cafe.bg" would count "my" and "open" as English. */
 const LINKS = /https?:\/\/\S+|www\.\S+/gi;
 const withoutLinks = (text: string) => text.replace(LINKS, " ");
-/** The language a text shows by its letters (detectScriptLang), not counting its links; null when it shows none. */
-const scriptLangOf = (text: string): ChatLang | null => detectScriptLang(withoutLinks(text));
+/** The language a member's text shows by its letters (detectScriptLang with their stored language), not counting its links. */
+const scriptLangOf = (text: string, current: ChatLang): ChatLang | null => detectScriptLang(withoutLinks(text), current);
+/** Latin text of at least this many words goes to the classifier; shorter text (a dish name, "ok", "make it a story") by the English words. */
+const CLASSIFY_MIN_WORDS = 4;
 
 /**
- * The language of the owner's own words (a message, a photo caption, a command word), not counting links: by its letters, else,
- * for Latin text of three words or more, the classifier's answer (one small-model call, src/bot/lang-classify.ts). null when
- * neither tells, and the stored language stays. A failing classifier costs the switch, never the message.
+ * The language of the owner's own words (a message, a photo caption, a command word), not counting links. Latin-only text of
+ * four words or more is the classifier's to name (one small-model call, src/bot/lang-classify.ts), English included, since
+ * German or Dutch can hold two of the English words ("Ich will den Preis in der Karte ändern"). Without its answer ("unknown",
+ * a failure, a timeout, no classifier) and for everything else the letters decide (detectScriptLang). null keeps the stored
+ * language. A failing classifier never costs the message.
  */
-async function languageOf(d: BotDeps, text: string): Promise<ChatLang | null> {
+async function languageOf(d: BotDeps, text: string, current: ChatLang): Promise<ChatLang | null> {
   const prose = withoutLinks(text).trim();
-  const lang = detectScriptLang(prose);
-  if (lang !== null || !d.classifyLang || countLatinWords(prose) < 3) return lang;
+  const byLetters = detectScriptLang(prose, current);
+  if (!d.classifyLang || !isLatinText(prose) || countLatinWords(prose) < CLASSIFY_MIN_WORDS) return byLetters;
   try {
-    return await d.classifyLang(prose);
+    return (await d.classifyLang(prose)) ?? byLetters;
   } catch (e) {
     console.error(`[bot] language classifier failed: ${e instanceof Error ? e.name : "error"}`); // never the owner's words
-    return null;
+    return byLetters;
   }
 }
 const COMMANDS = new Set(["lang", "help", "menu", "undo", "connect", "members"]);
@@ -152,11 +156,11 @@ export async function handleInbound(d: BotDeps, m: InboundMessage): Promise<void
       // A command word ("помощ", "menu") is the owner's words and shows a language like any message. A slash command shows none
       // (/connect's arguments are a link and a code), and a language word ("език en") sets the language it names.
       const commandWord = !text.startsWith("/") && splitCommand(cmd).name !== "lang";
-      await runCommand(d, commandWord ? await followLanguage(d, member, await languageOf(d, text)) : member, channel, cmd);
+      await runCommand(d, commandWord ? await followLanguage(d, member, await languageOf(d, text, member.lang)) : member, channel, cmd);
       return;
     }
     // The owner's language, saved before the run so that what Claudia sends on its own later follows it.
-    const speaker = await followLanguage(d, member, await languageOf(d, text));
+    const speaker = await followLanguage(d, member, await languageOf(d, text, member.lang));
     // Start first: a failed acknowledgement must not lose the message.
     d.startRun({ venueId: member.venue_id, chatRef: member.chat_ref, member: speaker, text, source: "text", replyTo: m.messageRef });
     await d.messenger.typing(m.chatRef, m.messageRef);
@@ -293,7 +297,7 @@ async function runCommand(d: BotDeps, member: Member, channel: Channel, cmd: str
 async function handlePhoto(d: BotDeps, stored: Member, m: InboundMessage) {
   const caption = (m.text ?? "").trim();
   // The caption is the owner's words: its language is saved first, so even the download error below comes in it. No caption, no change.
-  const member = await followLanguage(d, stored, await languageOf(d, caption));
+  const member = await followLanguage(d, stored, await languageOf(d, caption, stored.lang));
   const c = copy(baseLang(member.lang));
   let bytes: Uint8Array;
   let media_type: ImageInput["media_type"] | null;
@@ -352,7 +356,7 @@ async function handleVoice(d: BotDeps, member: Member, m: InboundMessage) {
     return;
   }
   // A transcript is read by its letters only; it never goes to the classifier.
-  const speaker = await followLanguage(d, member, scriptLangOf(text));
+  const speaker = await followLanguage(d, member, scriptLangOf(text, member.lang));
   d.startRun({ venueId: member.venue_id, chatRef: member.chat_ref, member: speaker, text, source: "voice", replyTo: m.messageRef });
   await d.messenger.send(member.chat_ref, copy(baseLang(speaker.lang)).heard(text));
 }

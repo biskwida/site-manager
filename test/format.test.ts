@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { baseLang, countLatinWords, detectLang, detectScriptLang, languageName } from "@/src/domain/format";
+import { baseLang, countLatinWords, detectLang, detectScriptLang, isLatinText, languageName } from "@/src/domain/format";
 import { isChatLang } from "@/src/domain/types";
 
 describe("detectLang", () => {
@@ -114,6 +114,30 @@ describe("detectScriptLang", () => {
 
   it("is null for what shows no language, and for Latin text the word list cannot place", () => {
     for (const text of ["", "   ", "4.20", "ok 👍", "kafeto e 4.20", "Ich möchte den Preis ändern", "pusni post i story v instagram"]) expect(detectScriptLang(text)).toBeNull();
+  });
+
+  it("goes by the English words alone for Latin text, so German with will and in reads as English (the classifier decides those)", () => {
+    expect(detectScriptLang("Ich will den Preis in der Karte ändern")).toBe("en");
+    expect(detectScriptLang("We zijn morgen open")).toBe("en");
+  });
+
+  it("keeps the stored language of a Russian, Ukrainian, Belarusian, Macedonian or Serbian speaker for Cyrillic without a marker letter", () => {
+    for (const current of ["ru", "uk", "be", "mk", "sr"]) {
+      expect(detectScriptLang("Добавь пиццу", current)).toBeNull();
+      expect(detectScriptLang("Капучиното е 4,20", current)).toBeNull();
+    }
+    for (const current of ["bg", "en", "de", undefined, null]) expect(detectScriptLang("Добавь пиццу", current)).toBe("bg");
+    expect(detectScriptLang("Ђе је кафа", "sr")).toBe("sr"); // a marker letter still decides
+    expect(detectScriptLang("Мы открыты", "uk")).toBe("ru");
+    expect(detectScriptLang("Ще піду", "ru")).toBe("uk");
+    expect(detectScriptLang("change the price of Капучино to 4.20", "ru")).toBe("en"); // English words still win when Latin letters are the majority
+  });
+});
+
+describe("isLatinText", () => {
+  it("is true only when every letter is Latin", () => {
+    for (const text of ["We zijn morgen open", "Ich möchte den Preis ändern", "change the price to 4.20 👍", "ça va"]) expect(isLatinText(text)).toBe(true);
+    for (const text of ["", "4.20 👍", "change the price of Капучино to 4.20", "Ο καφές", "抹茶 latte"]) expect(isLatinText(text)).toBe(false);
   });
 });
 

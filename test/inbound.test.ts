@@ -595,17 +595,81 @@ describe("handleInbound: any conversation language", () => {
     expect(runs[0].member.lang).toBe("de");
   });
 
-  it("Flat white 4.30 → classifier not called; nor for a price, two Latin words, a bare link, or what the script or the English words place", async () => {
+  it("Flat white 4.30 → classifier not called; nor for a price, up to three Latin words, a bare link, or a message with other letters", async () => {
     const { asked, classifyLang } = classifier("de");
     const { d, runs, store } = await setup({ classifyLang });
-    for (const text of ["Flat white 4.30", "4.20", "kafeto e 4.20", "https://my-open-cafe.bg/menu/today/specials"]) await handleInbound(d, { chatRef: "tg:1001", kind: "text", text });
+    for (const text of ["Flat white 4.30", "4.20", "kafeto e 4.20", "Neue Preise heute", "https://my-open-cafe.bg/menu/today/specials"]) await handleInbound(d, { chatRef: "tg:1001", kind: "text", text });
     expect(await langOf(store, "tg:1001")).toBe("bg");
-    for (const [text, lang] of [["change the price to 4.20", "en"], ["Это кофе", "ru"], ["Ο καφές είναι 4,20", "el"], ["Капучиното е 4,20", "bg"]]) {
+    // Up to three Latin words go by the English words alone; a message with other letters goes by its letters.
+    for (const [text, lang] of [["please change it", "en"], ["Это кофе", "ru"], ["please change the price of Капучино to 4.20", "en"], ["Ο καφές είναι 4,20", "el"], ["Капучиното е 4,20", "bg"]]) {
       await handleInbound(d, { chatRef: "tg:1001", kind: "text", text });
       expect(await langOf(store, "tg:1001")).toBe(lang);
     }
     expect(asked).toEqual([]);
-    expect(runs.map((r) => r.member.lang)).toEqual(["bg", "bg", "bg", "bg", "en", "ru", "el", "bg"]);
+    expect(runs.map((r) => r.member.lang)).toEqual(["bg", "bg", "bg", "bg", "bg", "en", "ru", "en", "el", "bg"]);
+  });
+
+  it("the classifier decides Latin text of four words or more, even what the English words would call English", async () => {
+    const cases: [string, string, string][] = [
+      ["Ich will den Preis in der Karte ändern", "de", "de"], // "will" and "in" alone would say English
+      ["We zijn morgen open", "nl", "nl"],
+      ["change the price to 4.20", "en", "en"],
+    ];
+    for (const [text, answer, saved] of cases) {
+      const { asked, classifyLang } = classifier(answer);
+      const { d, runs, store } = await setup({ classifyLang });
+      await handleInbound(d, { chatRef: "tg:1001", kind: "text", text }); // stored bg
+      expect(asked).toEqual([text]);
+      expect(await langOf(store, "tg:1001")).toBe(saved);
+      expect(runs[0].member.lang).toBe(saved);
+    }
+  });
+
+  it("without an answer from the classifier (unknown, a failure) the English words decide", async () => {
+    const errs: string[] = [];
+    const orig = console.error;
+    console.error = (...a: unknown[]) => { errs.push(a.join(" ")); };
+    try {
+      for (const answer of [null, new Error("timeout")]) {
+        const { asked, classifyLang } = classifier(answer);
+        const { d, runs, store } = await setup({ classifyLang });
+        await handleInbound(d, { chatRef: "tg:1001", kind: "text", text: "change the price to 4.20" }); // stored bg
+        expect(asked).toHaveLength(1);
+        expect(await langOf(store, "tg:1001")).toBe("en");
+        expect(runs[0].member.lang).toBe("en");
+      }
+    } finally { console.error = orig; }
+  });
+
+  it("Cyrillic without a marker letter keeps a Russian, Ukrainian, Belarusian, Macedonian or Serbian speaker's language", async () => {
+    const { d, store, venue } = await setup();
+    const saves = langSaves(store);
+    for (const [ref, lang] of [["wa:3591", "ru"], ["wa:3592", "uk"], ["wa:3593", "be"], ["wa:3594", "mk"], ["wa:3595", "sr"]]) {
+      await store.upsertMember({ venue_id: venue.id, chat_ref: ref, role: "owner", lang });
+      await handleInbound(d, { chatRef: ref, kind: "text", text: "Добавь пиццу" });
+      expect(await langOf(store, ref)).toBe(lang);
+    }
+    expect(saves).toEqual([]);
+    await handleInbound(d, { chatRef: "wa:3595", kind: "text", text: "Ђе је кафа" }); // a Serbian marker: still Serbian
+    expect(await langOf(store, "wa:3595")).toBe("sr");
+    await handleInbound(d, { chatRef: "wa:3591", kind: "text", text: "Ще піду" }); // a Ukrainian marker switches a Russian speaker
+    expect(await langOf(store, "wa:3591")).toBe("uk");
+    await handleInbound(d, { chatRef: "tg:1002", kind: "text", text: "Капучиното е 4,20" }); // stored en: Bulgarian as before
+    expect(await langOf(store, "tg:1002")).toBe("bg");
+    expect(saves).toEqual(["wa:3591=uk", "tg:1002=bg"]);
+  });
+
+  it("a voice note and a photo caption in Cyrillic without a marker letter keep a Russian speaker's language too", async () => {
+    const { d, runs, messenger, store, venue } = await setup({ transcribe: async () => "добавь пиццу в меню" });
+    await store.upsertMember({ venue_id: venue.id, chat_ref: "wa:3596", role: "owner", lang: "ru" });
+    const saves = langSaves(store);
+    await handleInbound(d, { chatRef: "wa:3596", kind: "voice", media: voice });
+    expect(runs[0]).toMatchObject({ source: "voice", text: "добавь пиццу в меню" });
+    expect(runs[0].member.lang).toBe("ru");
+    expect(texts(messenger).at(-1)).toBe("🎤 Heard: “добавь пиццу в меню”"); // Russian has no hand-written texts: English for now
+    await handleInbound(d, { chatRef: "wa:3596", kind: "photo", text: "новое фото для меню", media: photo });
+    expect(runs[1].member.lang).toBe("ru");
+    expect(saves).toEqual([]);
   });
 
   it("asks the classifier about the words around a link, never the link", async () => {
