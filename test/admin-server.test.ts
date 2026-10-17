@@ -40,6 +40,21 @@ describe("admin", () => {
     expect(after.log.map((x) => x.status)).toEqual(["applied", "cancelled", "rejected", "reverted"]);
     expect(after.log[0]).toMatchObject({ source: "undo", undoes_id: p1.id });
   });
+  it("a dashboard revert of a text written in both languages stores previews without the 'written automatically' note", async () => {
+    const { store, venue } = await makeDemo();
+    const messenger = new FakeMessenger();
+    const d = { store, messenger, now: () => T0, baseUrl: "https://site.example" };
+    const site = await store.getSite(venue.id);
+    const changes = planChanges(site, [{ op: "set_text", key: "welcome", text_bg: "Здравейте", text_en: "Hello" }], { newId: () => "x", now: T0.toISOString() });
+    const cs = await store.createChangeSet({ venue_id: venue.id, chat_ref: "tg:1001", summary_bg: "Приветствие", summary_en: "Welcome", preview_bg: renderPreview(site, changes, "bg", venue.tz), preview_en: renderPreview(site, changes, "en", venue.tz), source: "text", status: "proposed", changes });
+    expect(cs.preview_bg).toContain("автоматично");
+    await store.applyChangeSet(cs.id, T0.toISOString());
+    expect((await adminAction(d, venue, "undo", cs.id)).ok).toBe(true);
+    const undo = (await store.listChangeSets(venue.id, { status: ["applied"] })).find((x) => x.source === "undo")!;
+    expect(undo.preview_bg).toMatch(/^• Приветствие: „⟦Здравейте⟧“/);
+    expect(undo.preview_bg).not.toContain("автоматично");
+    expect(undo.preview_en).not.toContain("automatically");
+  });
   it("shows no keep marker anywhere: pending, scheduled and logged sets, and the WordPress and social summaries (the chat keeps them, the dashboard never)", async () => {
     const { store, venue, items } = await makeDemo();
     const site = await store.getSite(venue.id);

@@ -93,10 +93,11 @@ function announcementRemoveLine(an: Row, lang: Lang): string {
  * One line (sometimes more) per change, in the reader's language only, from the state the changes were planned against. The website
  * stores both languages and the agent writes the other one itself, but the chat speaks one: a change that writes both site languages
  * shows the reader's version, and one note at the end of the set says the other was written (a field an edit names in the other
- * language alone is shown, the owner asked for it).
+ * language alone is shown, the owner asked for it). `restore` is for an inverted set (an undo): it puts back what was there and
+ * writes nothing new, so it gets no note.
  * Undo-safe: an inverted set keeps each `op` with `before`/`after` swapped, so an inverted add renders as a removal and vice versa.
  */
-export function renderPreview(s: SiteState, changes: Change[], lang: Lang, tz: string): string {
+export function renderPreview(s: SiteState, changes: Change[], lang: Lang, tz: string, opts: { restore?: boolean } = {}): string {
   const other: Lang = lang === "bg" ? "en" : "bg";
   const lines: string[] = [];
   // Set by the first change that writes both site languages; the note is added once, last.
@@ -231,6 +232,6 @@ export function renderPreview(s: SiteState, changes: Change[], lang: Lang, tz: s
       }
     }
   }
-  if (bothLanguages) lines.push(tr(lang, "(английският вариант за сайта е написан автоматично)", "(the Bulgarian version for the site was written automatically)"));
+  if (bothLanguages && !opts.restore) lines.push(tr(lang, "(английският вариант за сайта е написан автоматично)", "(the Bulgarian version for the site was written automatically)"));
   return lines.join("\n");
 }

@@ -94,6 +94,19 @@ describe("undo", () => {
     expect((await store.getSite(venue.id)).items.find((i) => i.id === items.Cappuccino.id)?.price_eur).toBe(2.9);
     expect((await store.getChangeSet(p.change_set_id as string)).status).toBe("reverted");
   });
+  it("an undo preview of a text written in both languages has no 'written automatically' note: it restores, it writes nothing new", async () => {
+    const { tools, store, messenger } = await setup();
+    const p = await call(tools, "propose_changes", { summary_bg: "Мото", summary_en: "Tagline", changes: [{ op: "set_text", key: "tagline", text_bg: "Ново", text_en: "New" }] });
+    expect(String(p.preview)).toContain("(английският вариант за сайта е написан автоматично)"); // the fresh write has it
+    await store.applyChangeSet(p.change_set_id as string, T0.toISOString());
+    const u = await call(tools, "undo", { change_set_id: "last" });
+    expect(String(u.preview)).toMatch(/^• Мото: „Ново“ → „/);
+    expect(String(u.preview)).not.toContain("автоматично");
+    expect(messenger.last().text).not.toContain("автоматично");
+    const undoSet = await store.getChangeSet(u.change_set_id as string);
+    expect(undoSet.preview_bg).not.toContain("автоматично");
+    expect(undoSet.preview_en).not.toContain("automatically"); // both stored previews
+  });
   it("refuses when nothing is applied, when the set is not applied, and for staff", async () => {
     const base = await setup();
     expect((await call(base.tools, "undo", { change_set_id: "last" })).error).toMatch(/Nothing to undo/);

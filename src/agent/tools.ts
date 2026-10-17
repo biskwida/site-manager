@@ -153,9 +153,10 @@ export function makeTools(deps: AgentDeps) {
   const lang = baseLang(d.member.lang);
   const site = () => d.store.getSite(d.venueId);
   const ctx = (): PlanContext => ({ newId: () => crypto.randomUUID(), now: d.now().toISOString() });
-  const previews = (s: SiteState, changes: ReturnType<typeof planChanges>) => ({
-    preview_bg: renderPreview(s, changes, "bg", s.venue.tz),
-    preview_en: renderPreview(s, changes, "en", s.venue.tz),
+  // `restore`: the set is an undo, which puts back what was there (no "written automatically" note).
+  const previews = (s: SiteState, changes: ReturnType<typeof planChanges>, restore = false) => ({
+    preview_bg: renderPreview(s, changes, "bg", s.venue.tz, { restore }),
+    preview_en: renderPreview(s, changes, "en", s.venue.tz, { restore }),
   });
   const mine = (p: { preview_bg: string; preview_en: string }) => (lang === "bg" ? p.preview_bg : p.preview_en);
 
@@ -340,7 +341,7 @@ export interface ToolKit {
   attempt: (fn: () => Promise<unknown>) => Promise<string>;
   site: () => Promise<SiteState>;
   ctx: () => PlanContext;
-  previews: (s: SiteState, changes: ReturnType<typeof planChanges>) => { preview_bg: string; preview_en: string };
+  previews: (s: SiteState, changes: ReturnType<typeof planChanges>, restore?: boolean) => { preview_bg: string; preview_en: string };
   mine: (p: { preview_bg: string; preview_en: string }) => string;
   propose: (input: ProposeInput, applyAt: string | null) => Promise<unknown>;
   getSet: (id: string) => Promise<ChangeSet>;
@@ -426,7 +427,7 @@ function extraTools(d: AgentDeps, k: ToolKit) {
         const s = await k.site();
         // Preview against the current state, so a reverted price reads "3,20 € → 2,90 €".
         const changes = invertChanges(target.changes);
-        const p = k.previews(s, changes);
+        const p = k.previews(s, changes, true);
         const cs = await d.store.createChangeSet({
           venue_id: d.venueId, chat_ref: d.chatRef, summary_bg: `Отмяна: ${target.summary_bg}`, summary_en: `Undo: ${target.summary_en}`, ...p,
           source: "undo", status: "proposed", undoes_id: target.id, changes,

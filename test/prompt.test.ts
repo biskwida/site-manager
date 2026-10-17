@@ -37,6 +37,10 @@ describe("SYSTEM_PROMPT: the language rule", () => {
     expect(SYSTEM_PROMPT).toMatch(/^15\. Language: /m);
   });
 
+  it("rule 4 tells the agent to write both site languages when the owner writes in neither", () => {
+    expect(SYSTEM_PROMPT).toMatch(/^4\. Languages: .*When the owner gives one language, write the other yourself; when the owner writes in neither Bulgarian nor English, write both Bulgarian and English yourself:/m);
+  });
+
   it("leaves no older rule that sends captions to the venue's language or says the owner speaks only Bulgarian or English", () => {
     expect(SYSTEM_PROMPT).not.toMatch(/default language/i);
     expect(SYSTEM_PROMPT).toMatch(/Write the caption in the Owner language unless the owner asks for another language or gives the text/);
@@ -63,6 +67,11 @@ describe("tool descriptions: the language of captions and picture text", () => {
       expect(description).toMatch(/owner'?s current language/i);
       expect(description).toContain("(the Owner language line)");
       expect(description).toContain("unless the owner asks for another language or gives the text");
+      // What the fonts cover: Bulgarian, English and Western European Latin; Latin Extended letters are not covered.
+      expect(description).toContain("Bulgarian, English and Western European Latin");
+      expect(description).toContain("Latin Extended letters (ł č š ş ğ ő ă and the like: Polish, Czech, Turkish, Romanian, Croatian…) are not covered");
+      expect(description).toContain("the picture text is English");
+      expect(description).toContain("The caption stays in the owner's language.");
     }
     expect(MakeVisualSchema.shape.dish.description).toContain("at most 40 characters"); // what was there is kept
     expect(MakeVisualSchema.shape.line.description).toContain("at most 40 characters");

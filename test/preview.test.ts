@@ -101,13 +101,16 @@ describe("renderPreview", () => {
       { op: "remove_announcement", announcement_id: "a1" },
     ], ctx());
     const applied = applyChanges(s, changes);
-    expect(renderPreview(applied, invertChanges(changes), "en", TZ)).toBe([
+    // An undo restores what was there: nothing was written automatically, so no note (restore: true).
+    expect(renderPreview(applied, invertChanges(changes), "en", TZ, { restore: true })).toBe([
       "• Announcement: “⟦Old text⟧”",
       "• Holiday 31 Dec 2026: ⟦New Year's Eve⟧",
       "• Removes the announcement “⟦Happy holidays!⟧”",
       "• Removes the holiday on 24 Dec 2026",
-      "(the Bulgarian version for the site was written automatically)",
     ].join("\n"));
+    expect(renderPreview(applied, invertChanges(changes), "bg", TZ, { restore: true })).not.toContain("автоматично");
+    // The same lines without the option are a fresh write: the note is there.
+    expect(renderPreview(applied, invertChanges(changes), "en", TZ)).toContain("written automatically");
   });
   it("renders background and accent lines with the colour's name, and the undo back to the default", () => {
     const s = state();

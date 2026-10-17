@@ -15,12 +15,15 @@ const NAME_MAX = 40;
 const formatCaption = (format: Format, lang: Lang): string => FORMAT[format][lang].replace(/^./, (c) => c.toUpperCase());
 
 /**
- * Which language the words on the picture are in. The fonts (src/visual/fonts) cover Latin and Cyrillic only, so a Greek, Arabic or
- * Japanese owner's words would print as empty boxes: those pictures say it in English (the caption under them stays in the owner's language).
+ * Which language the words on the picture are in. The fonts (src/visual/fonts) have Cyrillic and the basic Latin subset (Western
+ * European letters: ä é ß €), not Latin Extended (ł č š ş ğ ő ă ...) nor Greek, Arabic or Japanese, which would print as empty boxes:
+ * those pictures say it in English (the caption under them stays in the owner's language).
  */
 const PICTURE_LANGUAGE =
   "In the owner's current language (the Owner language line) unless the owner asks for another language or gives the text. " +
-  "Picture text uses the Owner language only when it is written in Latin or Cyrillic letters, otherwise English: the picture fonts cover only those scripts.";
+  "Picture text uses the Owner language only when it is written in Latin or Cyrillic letters the picture fonts cover (Bulgarian, English and Western European Latin), otherwise English. " +
+  "Latin Extended letters (ł č š ş ğ ő ă and the like: Polish, Czech, Turkish, Romanian, Croatian…) are not covered, so in those languages, and in any other script, the picture text is English. " +
+  "The caption stays in the owner's language.";
 
 export const MakeVisualSchema = z.object({
   media_id: z.string().describe("The media_id of the owner's photo (not of an earlier picture: always start from the photo)."),

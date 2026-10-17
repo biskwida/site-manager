@@ -133,7 +133,7 @@ export async function adminAction(d: AdminDeps, venue: Venue, action: AdminActio
     const changes = invertChanges(cs.changes);
     const undo = await d.store.createChangeSet({
       venue_id: venue.id, chat_ref: cs.chat_ref, summary_bg: `Отмяна: ${cs.summary_bg}`, summary_en: `Undo: ${cs.summary_en}`,
-      preview_bg: renderPreview(site, changes, "bg", venue.tz), preview_en: renderPreview(site, changes, "en", venue.tz),
+      preview_bg: renderPreview(site, changes, "bg", venue.tz, { restore: true }), preview_en: renderPreview(site, changes, "en", venue.tz, { restore: true }),
       source: "undo", status: "proposed", undoes_id: cs.id, changes,
     });
     await d.store.applyChangeSet(undo.id, nowIso);
