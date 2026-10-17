@@ -7,7 +7,8 @@ import { socialErrorText } from "@/src/destinations/social-errors";
 import { withDestinationSync } from "@/src/destinations/store-hook";
 import { BACKOFF_MS, enqueueForChangeSet, runPendingSyncs, syncLines } from "@/src/destinations/sync";
 import { invertChanges } from "@/src/domain/changes";
-import type { Change, SocialTarget } from "@/src/domain/types";
+import { previewPictures } from "@/src/domain/social-preview";
+import { NETWORK_NAMES, type Change, type SocialPostRow, type SocialTarget } from "@/src/domain/types";
 import { FakeMeta } from "./fake-meta";
 import { makeDemo } from "./helpers";
 
@@ -15,10 +16,13 @@ const KEY = parseSecretKey("ab".repeat(32));
 const T0 = new Date("2026-10-11T09:00:00.000Z");
 const at = (ms: number) => new Date(T0.getTime() + ms);
 const IMAGE = "https://media.example/v1/m-1.jpg";
+/** The copies a proposal makes (Instagram feed padded to 4:5, the 9:16 story): other files in our storage. */
+const FEED = "https://media.example/v1/m-1-feed.jpg";
+const STORY = "https://media.example/v1/m-1-story.jpg";
 
-const post = (targets: SocialTarget[], caption = "Днешното предложение: тиквена супа"): Change => ({
+const post = (targets: SocialTarget[], caption = "Днешното предложение: тиквена супа", copies: Partial<SocialPostRow> = {}): Change => ({
   position: 0, op: "social_post", entity: "social_post", entity_id: "m-1", before: null,
-  after: { media_id: "m-1", image_url: IMAGE, caption, targets },
+  after: { media_id: "m-1", image_url: IMAGE, caption, targets, ...copies },
 });
 const ALL: SocialTarget[] = ["facebook_post", "facebook_story", "instagram_post", "instagram_story"];
 
@@ -167,6 +171,66 @@ describe("publishing", () => {
     await store.applyChangeSet(cs.id, T0.toISOString());
     const dump = JSON.stringify({ rows: await store.listSyncs({ changeSetId: cs.id }), logs, dests: await store.listDestinations(cs.venue_id) });
     for (const t of meta.allTokens()) expect(dump).not.toContain(t);
+  });
+});
+
+/** The file each place was made from, as Meta received it: Facebook posts and stories by their photo, Instagram media by its container. */
+function publishedFiles(meta: FakeMeta): Record<SocialTarget, unknown> {
+  const fb = [...meta.posts.values()];
+  const ig = [...meta.igMedia.values()];
+  return {
+    facebook_post: fb.find((p) => p.kind === "photo")?.url,
+    facebook_story: fb.find((p) => p.kind === "story")?.url,
+    instagram_post: ig.find((m) => m.media_type === "IMAGE")?.image_url,
+    instagram_story: ig.find((m) => m.media_type === "STORIES")?.image_url,
+  };
+}
+
+/** The file the owner was shown for one place: the picture whose label names that network and format ("Instagram + Facebook story"). */
+function shownFor(row: SocialPostRow, target: SocialTarget): string {
+  const [network, format] = target.split("_") as [keyof typeof NETWORK_NAMES, "post" | "story"];
+  const shown = previewPictures(row, "en").filter((pic) => pic.label.split(", ").some((part) => part.endsWith(` ${format}`) && part.slice(0, -format.length - 1).split(" + ").includes(NETWORK_NAMES[network])));
+  expect(shown, `${target} is shown on exactly one picture`).toHaveLength(1);
+  return shown[0].url;
+}
+
+describe("what is approved is what is published (stories publish Claudia's 9:16 copy)", () => {
+  it("Instagram publishes the story copy", async () => {
+    const { store, set, meta } = await connected({ facebook: false });
+    const cs = await set([post(["instagram_story"], "", { story_image_url: STORY })]);
+    await store.applyChangeSet(cs.id, T0.toISOString());
+    // The STORIES container request carries the copy, and so does the media that went out.
+    expect([...meta.containers.values()].map((c) => [c.media_type, c.image_url])).toEqual([["STORIES", STORY]]);
+    expect([...meta.igMedia.values()].map((m) => [m.media_type, m.image_url])).toEqual([["STORIES", STORY]]);
+  });
+
+  it("Facebook uploads the story copy", async () => {
+    const { store, set, meta } = await connected({ instagram: false });
+    const cs = await set([post(["facebook_story"], "", { story_image_url: STORY })]);
+    await store.applyChangeSet(cs.id, T0.toISOString());
+    // The unpublished /photos upload that becomes the story carries the copy, and the story is made from that photo.
+    expect([...meta.photos.values()].map((p) => [p.published, p.url])).toEqual([[false, STORY]]);
+    expect([...meta.posts.values()].map((p) => [p.kind, p.url])).toEqual([["story", STORY]]);
+  });
+
+  it("an older row without a story copy publishes the original for stories (never the Instagram feed copy), as before", async () => {
+    const { store, set, meta } = await connected();
+    // Proposed before stories had a copy: it may have the padded feed copy, but no story_image_url.
+    const cs = await set([post(ALL, "Днешното предложение: тиквена супа", { ig_feed_image_url: FEED, ig_feed_ratio: "4:5" })]);
+    await store.applyChangeSet(cs.id, T0.toISOString());
+    expect(publishedFiles(meta)).toEqual({ facebook_post: IMAGE, facebook_story: IMAGE, instagram_post: FEED, instagram_story: IMAGE });
+  });
+
+  it("every place sends exactly the file the preview shows for it", async () => {
+    const { store, set, meta } = await connected();
+    const change = post(ALL, "Днешното предложение: тиквена супа", { ig_feed_image_url: FEED, ig_feed_ratio: "4:5", story_image_url: STORY });
+    const cs = await set([change]);
+    await store.applyChangeSet(cs.id, T0.toISOString());
+    const row = change.after as unknown as SocialPostRow;
+    const sent = publishedFiles(meta);
+    for (const target of ALL) expect({ target, file: sent[target] }).toEqual({ target, file: shownFor(row, target) });
+    // Three different files, so the comparison above cannot pass by every place sending the same one.
+    expect(new Set(Object.values(sent))).toEqual(new Set([IMAGE, FEED, STORY]));
   });
 });
 

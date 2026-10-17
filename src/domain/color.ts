@@ -1,8 +1,8 @@
 // src/domain/color.ts
 // Background colour rules shared by the agent (validation, preview lines), the templates and outside sites (Coffique copies
-// this file): parse a hex colour, its WCAG relative luminance, which ink (text colour) reads on it, and a coarse name for it.
-// Pure, no dependencies, safe in the deployed venue shell.
-import type { Lang } from "./types";
+// this file): parse a hex colour, its WCAG relative luminance, which ink (text colour) reads on it, a coarse name for it, and the
+// colour a story's bars take. Pure, no dependencies, safe in the deployed venue shell.
+import type { Lang, Theme } from "./types";
 
 /** Text on a light background. */
 export const INK_DARK = "#111111";
@@ -103,4 +103,19 @@ export function colorName(hex: string, lang: Lang): string {
   if (l < 0.28) return pick(...hue.dark);
   if (l > 0.75) return pick(...hue.light);
   return pick(hue.bg, hue.en);
+}
+
+/** How far toward white an accent is mixed to make a story's background when the café has no background colour of its own. */
+const STORY_TINT = 0.8;
+
+/**
+ * The colour a story's bars take, as lower-case #rrggbb: the café's background colour when it has one, otherwise its accent mixed
+ * 80% toward white (each channel round(c + (255 - c) * 0.8)): ({ accent: "#3d6b4f" }) → "#d8e1dc". A background that is not a
+ * hex colour counts as unset and an accent that is not one gives white, so the result is always a colour a picture can use.
+ */
+export function storyBackground(theme: Theme): string {
+  const own = theme.background ? parseHex(theme.background) : null;
+  const accent = parseHex(theme.accent) ?? [255, 255, 255];
+  const rgb = own ?? accent.map((c) => Math.round(c + (255 - c) * STORY_TINT));
+  return `#${rgb.map((c) => c.toString(16).padStart(2, "0")).join("")}`;
 }

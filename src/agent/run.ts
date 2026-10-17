@@ -57,9 +57,11 @@ export async function runTurn(deps: AgentDeps, input: TurnInput, cfg: AgentConfi
   ];
   const turnSets = new Set<string>();
   const notes: string[] = [];
+  // The pictures make_visual sends to the chat in this turn only (social_post does not repeat them): the next message's proposals show theirs again.
+  const sentPhotos = new Set<string>();
   const progress = startProgress({ messenger: deps.messenger, chatRef: deps.chatRef, lang, hasImage: !!input.image || held.length > 0, inReplyTo: input.replyTo });
   // Each tool call updates the status line ("Reading the menu…").
-  const tools = makeTools({ ...deps, correctionFor: memory.correctionFor, source: input.source, turnSets, notes }).map((t) => {
+  const tools = makeTools({ ...deps, correctionFor: memory.correctionFor, source: input.source, turnSets, notes, sentPhotos }).map((t) => {
     const run = t.run as (...args: unknown[]) => ReturnType<typeof t.run>;
     return { ...t, run: ((...args: unknown[]) => { progress.step(t.name); return run(...args); }) as typeof t.run };
   });

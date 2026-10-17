@@ -41,7 +41,7 @@ export interface AgentDeps {
   wordpress?: WordPressClient | null;
   /** Networks connected for posting (registers social_post when either is true). */
   social?: { facebook: boolean; instagram: boolean } | null;
-  /** Outbound HTTP for reading the owner's photo (social_post checks its shape for Instagram); default the global fetch. */
+  /** Outbound HTTP for reading the owner's photo (social_post reads it for Instagram's 4:5..1.91:1 check and to make the 9:16 story picture); default the global fetch. */
   fetch?: typeof fetch;
   /** The picture service (photo → Instagram picture); registers make_visual when present. */
   visual?: VisualClient | null;
@@ -49,7 +49,12 @@ export interface AgentDeps {
   notes?: string[];
   /** Ids of the change sets this turn created (filled by the tools). One owner message may hold several tasks, so its own proposals never block each other. */
   turnSets?: Set<string>;
+  /** URLs of the pictures make_visual sent to the owner's chat in this turn, so social_post does not send one again (it sends every other picture of its own proposal and records none). run.ts starts an empty set each turn. */
+  sentPhotos?: Set<string>;
 }
+
+/** AgentDeps as the tools use them: makeTools gives them the turn's set of sent pictures (an empty one when the caller passes none). */
+export type ToolDeps = AgentDeps & { sentPhotos: Set<string> };
 
 /** The store as the tools see it: every change set they create is recorded in `created`. Other methods pass through, bound to the real store. */
 function recordingStore(store: Store, created: Set<string>): Store {
@@ -128,7 +133,7 @@ const NEXT_STEP: Record<ChangeSet["status"], string> = {
 
 export function makeTools(deps: AgentDeps) {
   const turnSets = deps.turnSets ?? new Set<string>();
-  const d: AgentDeps = { ...deps, turnSets, store: recordingStore(deps.store, turnSets) };
+  const d: ToolDeps = { ...deps, turnSets, sentPhotos: deps.sentPhotos ?? new Set<string>(), store: recordingStore(deps.store, turnSets) };
   // Tools run one at a time per turn, even if the runner calls several at once.
   let queue: Promise<unknown> = Promise.resolve();
   const attempt = (fn: () => Promise<unknown>): Promise<string> => {
