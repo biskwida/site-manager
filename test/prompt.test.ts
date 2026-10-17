@@ -84,7 +84,13 @@ describe("SYSTEM_PROMPT: website photos", () => {
     expect(SYSTEM_PROMPT).toMatch(/make_menu_photo/);
     expect(SYSTEM_PROMPT).toMatch(/never make_visual for a website/i);
     expect(SYSTEM_PROMPT).toMatch(/make_visual is only for Instagram\/Facebook posts and stories/);
-    expect(SYSTEM_PROMPT).toMatch(/note/);
+    expect(SYSTEM_PROMPT).toContain("If the result has a note, tell it to the owner in one short line in the Owner language.");
+    expect(SYSTEM_PROMPT).toContain("make_visual's card never goes on the website: that is make_menu_photo (rule 16).");
+    expect(SYSTEM_PROMPT).toContain("never put make_visual's card on the site");
+  });
+
+  it("tells the agent to name the backdrop colour in plain words and never show the hex", () => {
+    expect(SYSTEM_PROMPT).toContain("Name the backdrop colour in that line with the nearest plain colour word (cream, white, light grey, beige, pink, light blue, using rule 11's words), and never show the hex code.");
   });
 
   it("keeps a photo sent as it is on set_item_image, pointing at the casual-speech rule", () => {

@@ -166,7 +166,7 @@ describe("make_menu_photo", () => {
   });
 
   const notes: [string, MenuPhotoResult, RegExp | null][] = [
-    ["matched", { media_id: "m", url: "https://media.example/m.jpg", style: { background: "#f3eadb", matched: 3, of: 4 } }, /^Used the backdrop 3 of your 4 menu photos share\.$/],
+    ["matched", { media_id: "m", url: "https://media.example/m.jpg", style: { background: "#f3eadb", matched: 3, of: 4 } }, /^Used the backdrop #f3eadb that 3 of your 4 menu photos share\.$/],
     ["no_photos", { media_id: "m", url: "https://media.example/m.jpg", style: "white", reason: "no_photos" }, /^Your other items have no photos, so I used white\.$/],
     ["too_few", { media_id: "m", url: "https://media.example/m.jpg", style: "white", reason: "too_few" }, /^Only one other item has a photo, so I used white\.$/],
     ["unreadable", { media_id: "m", url: "https://media.example/m.jpg", style: "white", reason: "unreadable" }, /^I couldn't read your other menu photos, so I used white\.$/],

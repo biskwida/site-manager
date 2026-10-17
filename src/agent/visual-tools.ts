@@ -45,7 +45,7 @@ const NO_OBJECT = "Could not separate the object from this photo; ask the owner 
 
 /** The one line the agent tells the owner about the backdrop that was used; null for plain white that was asked for. */
 function menuPhotoNote(r: Extract<MenuPhotoResult, { media_id: string }>): string | null {
-  if (r.style !== "white") return `Used the backdrop ${r.style.matched} of your ${r.style.of} menu photos share.`;
+  if (r.style !== "white") return `Used the backdrop ${r.style.background} that ${r.style.matched} of your ${r.style.of} menu photos share.`;
   switch (r.reason) {
     case "no_photos": return "Your other items have no photos, so I used white.";
     case "too_few": return "Only one other item has a photo, so I used white.";
