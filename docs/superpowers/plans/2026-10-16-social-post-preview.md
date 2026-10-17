@@ -186,7 +186,7 @@ it("an older row without a story copy publishes the original", async () => { /* 
 
 - [ ] **Step 2: Run** `npx vitest run test/destinations-social.test.ts` — expected: FAIL on the first two.
 
-- [ ] **Step 3: Implement** `row.story_image_url ?? row.image_url` for both story paths; feed posts unchanged.
+- [ ] **Step 3: Implement** both destinations publish `publishedUrl(row, target)` (src/domain/social-preview.ts), the rule the preview uses: the story copy for stories, the padded copy for the Instagram feed, else the original (Task 2 ruling).
 
 - [ ] **Step 4: Run** `npx vitest run && npx tsc --noEmit -p . && npm run -s lint` — expected: all pass, no errors.
 
