@@ -381,6 +381,18 @@ describe("the exact pictures before the buttons", () => {
     expect(messenger.photos).toEqual([]);
   });
 
+  it("tells a photo over 8 MB apart from one it could not read: a retry cannot help the first", async () => {
+    const { tools, store, venue, messenger } = await setup();
+    const huge = await store.saveMedia(venue.id, new Uint8Array(8 * 1024 * 1024 + 1), "image/jpeg");
+    const tooLarge = "This photo is larger than 8 MB, Instagram's limit; ask the owner to send it again as a regular photo (not as a file) or a smaller one.";
+    expect((await call(tools, "social_post", input(huge.id, { targets: ["instagram_post"] }))).error).toBe(tooLarge);
+    expect(await store.listChangeSets(venue.id)).toEqual([]);
+    expect(messenger.photos).toEqual([]);
+    // Exactly 8 MB is within the limit: it is read, and fails only as the non-image it is.
+    const limit = await store.saveMedia(venue.id, new Uint8Array(8 * 1024 * 1024), "image/jpeg");
+    expect((await call(tools, "social_post", input(limit.id, { targets: ["instagram_post"] }))).error).toMatch(/Could not read this photo as an image/);
+  });
+
   it("refuses a story copy that storage gives no public https address", async () => {
     const { tools, store, venue, messenger } = await setup();
     const photo = await store.saveMedia(venue.id, await jpeg(900, 1200), "image/jpeg");

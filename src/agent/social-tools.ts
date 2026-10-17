@@ -19,12 +19,13 @@ export const IG_MENTIONS_MAX = 20;
 const MAX_PHOTO_BYTES = 8 * 1024 * 1024;
 const UNREADABLE = "Could not read this photo as an image; ask the owner to send it again as a regular photo.";
 
-async function readPhoto(f: typeof fetch, url: string): Promise<Uint8Array | null> {
+/** The photo's bytes, or why there are none: "too_large" (over Instagram's limit: a retry cannot help) or null (not fetched: a retry may). */
+async function readPhoto(f: typeof fetch, url: string): Promise<Uint8Array | "too_large" | null> {
   try {
     const res = await f(url, { signal: AbortSignal.timeout(15_000) });
     if (!res.ok) return null;
     const bytes = new Uint8Array(await res.arrayBuffer());
-    return bytes.byteLength > MAX_PHOTO_BYTES ? null : bytes;
+    return bytes.byteLength > MAX_PHOTO_BYTES ? "too_large" : bytes;
   } catch {
     return null;
   }
@@ -86,6 +87,7 @@ export function socialTools(d: ToolDeps, k: ToolKit) {
         if (targets.includes("instagram_post") || stories) {
           // Read once: the Instagram feed shape and the story picture both come from these bytes.
           const bytes = await readPhoto(d.fetch ?? fetch, m.public_url);
+          if (bytes === "too_large") throw new Error("This photo is larger than 8 MB, Instagram's limit; ask the owner to send it again as a regular photo (not as a file) or a smaller one.");
           if (!bytes) throw new Error("Could not read the photo to prepare it for posting; try again in a moment.");
           if (targets.includes("instagram_post")) {
             // Instagram's feed takes 4:5..1.91:1 only: pad a taller or wider photo now, so the preview says so and the push only publishes.
