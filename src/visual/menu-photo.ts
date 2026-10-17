@@ -18,17 +18,20 @@ export interface MenuPhotoStyle {
 export async function renderMenuPhoto(cutoutPng: Uint8Array, style: MenuPhotoStyle = {}): Promise<Uint8Array> {
   const boxW = style.fill ? Math.round(style.fill * SIDE) : BOX_W;
   const sharp = (await import("sharp")).default;
-  // Trim by the alpha channel: the default trim takes its background from the top-left pixel, so an object touching that corner would not be trimmed.
-  const trimmed = await sharp(cutoutPng).trim({ background: { r: 0, g: 0, b: 0, alpha: 0 }, threshold: 8 }).png().toBuffer();
-  const { width, height } = await sharp(trimmed).metadata();
-  const w = width ?? 1;
-  const h = height ?? 1;
+  // A safety net for cut-outs cached before they came cropped: trim by the alpha channel (the default trim takes its background
+  // from the top-left pixel, so an object touching that corner would not be trimmed). The steps in between stay raw: no PNG encodes.
+  const trimmed = await sharp(cutoutPng).ensureAlpha().trim({ background: { r: 0, g: 0, b: 0, alpha: 0 }, threshold: 8 }).raw().toBuffer({ resolveWithObject: true });
+  const w = trimmed.info.width;
+  const h = trimmed.info.height;
   const scale = Math.min(boxW / w, BOX_H / h, MAX_UPSCALE);
   const rw = Math.max(1, Math.round(w * scale));
   const rh = Math.max(1, Math.round(h * scale));
-  const object = await sharp(trimmed).resize(rw, rh, { fit: "fill" }).png().toBuffer();
+  const object = await sharp(trimmed.data, { raw: { width: w, height: h, channels: trimmed.info.channels } }).resize(rw, rh, { fit: "fill" }).raw().toBuffer({ resolveWithObject: true });
   const left = Math.round((SIDE - rw) / 2);
   const top = Math.round((SIDE - rh) / 2);
-  const out = await sharp({ create: { width: SIDE, height: SIDE, channels: 3, background: style.background ?? "#ffffff" } }).composite([{ input: object, left, top }]).jpeg({ quality: 90 }).toBuffer();
+  const out = await sharp({ create: { width: SIDE, height: SIDE, channels: 3, background: style.background ?? "#ffffff" } })
+    .composite([{ input: object.data, raw: { width: object.info.width, height: object.info.height, channels: object.info.channels }, left, top }])
+    .jpeg({ quality: 90 })
+    .toBuffer();
   return new Uint8Array(out);
 }

@@ -1,12 +1,21 @@
 // src/visual/main-object.ts
 // Server-only (used by cutout.ts). The background model sometimes leaves a piece of the table beside the dish: keep the
-// main object and clear everything else, so the trim and the picture that follow never see the fragment.
+// main object, clear everything else and crop to what is left, so the picture that follows never sees the fragment.
 const ON = 16; // alpha above this counts as object
 const MAX_SIDE = 512; // labelling runs on a mask this size at most, so it stays fast on 4000 px phone photos
 const SIMILAR = 0.25; // a piece at least this share of the largest one is part of the subject too (a cup and its saucer)
 
-/** The PNG with only the main object opaque (other pixels' alpha 0, not trimmed), and `coverage`: the kept object's share of all pixels (0..1). */
-export async function keepMainObject(png: Uint8Array): Promise<{ png: Uint8Array; coverage: number }> {
+export interface MainObject {
+  /** The main object alone (other pixels' alpha 0), cropped to `box`; a 1x1 transparent PNG when nothing is kept. */
+  png: Uint8Array;
+  /** The kept object's share of all pixels of the ORIGINAL picture (0..1). */
+  coverage: number;
+  /** Where the crop sits in the original picture: the box of the kept pixels above the threshold; null when nothing is kept. */
+  box: { left: number; top: number; width: number; height: number } | null;
+}
+
+/** Keeps the main object (and any piece of similar size), clears the rest and crops to it, so no separate trim (and its PNG encode) is needed. */
+export async function keepMainObject(png: Uint8Array): Promise<MainObject> {
   const sharp = (await import("sharp")).default;
   const { data, info } = await sharp(png).ensureAlpha().raw().toBuffer({ resolveWithObject: true });
   const { width: w, height: h } = info;
@@ -67,14 +76,27 @@ export async function keepMainObject(png: Uint8Array): Promise<{ png: Uint8Array
   // transparent, faint pixels too: a dropped fragment's soft rim (alpha 9-16) would otherwise stretch the trim and push the
   // dish off centre. Faint pixels inside kept cells stay: they are the object's own soft edge.
   let covered = 0;
+  let x0 = w, y0 = h, x1 = -1, y1 = -1;
   for (let y = 0; y < h; y++) {
     const row = rowOf[y] * mw;
     for (let x = 0; x < w; x++) {
       const i = (y * w + x) * 4 + 3;
       if (!kept[labels[row + colOf[x]]]) data[i] = 0;
-      else if (data[i] > ON) covered++;
+      else if (data[i] > ON) {
+        covered++;
+        if (x < x0) x0 = x;
+        if (x > x1) x1 = x;
+        if (y < y0) y0 = y;
+        if (y > y1) y1 = y;
+      }
     }
   }
-  const out = await sharp(data, { raw: { width: w, height: h, channels: 4 } }).png().toBuffer();
-  return { png: new Uint8Array(out), coverage: covered / (w * h) };
+  if (x1 < 0) {
+    const empty = await sharp({ create: { width: 1, height: 1, channels: 4, background: { r: 0, g: 0, b: 0, alpha: 0 } } }).png().toBuffer();
+    return { png: new Uint8Array(empty), coverage: 0, box: null };
+  }
+  const box = { left: x0, top: y0, width: x1 - x0 + 1, height: y1 - y0 + 1 };
+  // One encode, of the crop only: this PNG is the cut-out the service caches, so it keeps the default compression.
+  const out = await sharp(data, { raw: { width: w, height: h, channels: 4 } }).extract(box).png().toBuffer();
+  return { png: new Uint8Array(out), coverage: covered / (w * h), box };
 }
