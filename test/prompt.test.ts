@@ -75,11 +75,17 @@ describe("tool descriptions: the language of captions and picture text", () => {
     }
     expect(MakeVisualSchema.shape.dish.description).toContain("at most 40 characters"); // what was there is kept
     expect(MakeVisualSchema.shape.line.description).toContain("at most 40 characters");
-    expect(MakeVisualSchema.shape.price.description).toContain("Omit when you pass item_id; else the owner's price, else omit — never estimate.");
+    expect(MakeVisualSchema.shape.price.description).toContain("Omit when you pass item_id; else the owner's price (also a promotion price for a menu dish, with no item_id), else omit — never estimate.");
   });
 });
 
 describe("SYSTEM_PROMPT: website photos", () => {
+  it("rule 13: item_id for a menu dish, the owner's own price (no item_id) when they state a different one", () => {
+    expect(SYSTEM_PROMPT).toContain("item_id when the dish is on the menu");
+    expect(SYSTEM_PROMPT).toContain("when the owner states a different price for the picture (a promotion, \"за 3,50 днес\"), their price in price and no item_id");
+    expect(MakeVisualSchema.shape.item_id.description).toContain("Omit it when the owner states a different price");
+  });
+
   it("sends website photo requests to make_menu_photo, never make_visual", () => {
     expect(SYSTEM_PROMPT).toMatch(/make_menu_photo/);
     expect(SYSTEM_PROMPT).toMatch(/never make_visual for a website/i);

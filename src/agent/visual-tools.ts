@@ -30,8 +30,8 @@ const PICTURE_LANGUAGE =
 export const MakeVisualSchema = z.object({
   media_id: z.string().describe("The media_id of the owner's photo (not of an earlier picture: always start from the photo)."),
   dish: z.string().describe(`The name on the picture, as the owner said it, at most ${NAME_MAX} characters. ${PICTURE_LANGUAGE}`),
-  item_id: z.string().optional().describe("The menu item when the dish is on the menu; the price then comes from the menu. Id from get_menu."),
-  price: z.string().optional().describe(`The price as printed on the picture, in the picture's language ("4,30 €" for Bulgarian, "€4.30" for English). Omit when you pass item_id; else the owner's price, else omit — never estimate. ${PICTURE_LANGUAGE}`),
+  item_id: z.string().optional().describe("The menu item when the dish is on the menu; the price then comes from the menu. Id from get_menu. Omit it when the owner states a different price for the picture (a promotion, \"за 3,50 днес\"): their price goes in `price`."),
+  price: z.string().optional().describe(`The price as printed on the picture, in the picture's language ("4,30 €" for Bulgarian, "€4.30" for English). Omit when you pass item_id; else the owner's price (also a promotion price for a menu dish, with no item_id), else omit — never estimate. ${PICTURE_LANGUAGE}`),
   line: z.string().optional().describe(`An optional short line under the price ("Със сърце", "Ново", "Само днес"), at most ${NAME_MAX} characters. ${PICTURE_LANGUAGE}`),
   colour: z.string().optional().describe(`Backdrop: one of ${BACKDROPS.join(", ")}, or a #rrggbb colour. Omit to let the picture pick one that suits the photo. Words: тюркоаз/синьо-зелено → teal, праскова → peach, крем/бежово → cream, зелено → sage, розово → rose, синьо → sky, жълто → butter, тъмно/черно → dark.`),
   formats: z.array(z.enum(["post", "story"])).describe('"post" (feed, 4:5) and/or "story" (9:16). "и като стори", "и стори" → both; "само стори" → ["story"]; otherwise ["post"].'),
