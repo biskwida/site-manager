@@ -99,10 +99,11 @@ describe("houseStyle", () => {
     let started = 0;
     const slow = async () => {
       started++;
-      await new Promise((r) => setTimeout(r, 30));
+      await new Promise((r) => setTimeout(r, 40));
       return good;
     };
-    const r = await houseStyleReport(Array.from({ length: 30 }, () => slow), { concurrency: 3, budgetMs: 50 });
+    // 10 rounds of 40 ms reads cannot fit in 300 ms; the first round finishes well inside it even on a busy machine.
+    const r = await houseStyleReport(Array.from({ length: 30 }, () => slow), { concurrency: 3, budgetMs: 300 });
     expect(started).toBeLessThan(30);
     expect(started).toBeGreaterThanOrEqual(3);
     expect(r.of).toBeLessThanOrEqual(started); // reads still in flight at the deadline are ignored
