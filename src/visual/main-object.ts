@@ -2,7 +2,7 @@
 // Server-only (used by cutout.ts). The background model sometimes leaves a piece of the table beside the dish: keep the
 // main object and clear everything else, so the trim and the picture that follow never see the fragment.
 const ON = 16; // alpha above this counts as object
-const MAX_SIDE = 512; // labelling runs on a mask this size at most: fast, and a speck of a few pixels vanishes in it
+const MAX_SIDE = 512; // labelling runs on a mask this size at most, so it stays fast on 4000 px phone photos
 const SIMILAR = 0.25; // a piece at least this share of the largest one is part of the subject too (a cup and its saucer)
 
 /** The PNG with only the main object opaque (other pixels' alpha 0, not trimmed), and `coverage`: the kept object's share of all pixels (0..1). */
@@ -13,18 +13,16 @@ export async function keepMainObject(png: Uint8Array): Promise<{ png: Uint8Array
   const scale = Math.min(1, MAX_SIDE / Math.max(w, h));
   const mw = Math.max(1, Math.round(w * scale));
   const mh = Math.max(1, Math.round(h * scale));
-  // Which mask column/row each full-size pixel falls in, and which pixel each mask cell samples (its centre, nearest neighbour).
+  // Which mask column/row each full-size pixel falls in. The mask is max-pooled: a cell is on when ANY pixel of its block is
+  // above the threshold, so a 3-px cup handle on a 4000 px phone photo survives the downscale (sampling would skip it).
   const colOf = new Int32Array(w);
   for (let x = 0; x < w; x++) colOf[x] = Math.min(mw - 1, Math.floor((x * mw) / w));
   const rowOf = new Int32Array(h);
   for (let y = 0; y < h; y++) rowOf[y] = Math.min(mh - 1, Math.floor((y * mh) / h));
   const mask = new Uint8Array(mw * mh);
-  for (let my = 0; my < mh; my++) {
-    const sy = Math.min(h - 1, Math.floor(((my + 0.5) * h) / mh));
-    for (let mx = 0; mx < mw; mx++) {
-      const sx = Math.min(w - 1, Math.floor(((mx + 0.5) * w) / mw));
-      if (data[(sy * w + sx) * 4 + 3] > ON) mask[my * mw + mx] = 1;
-    }
+  for (let y = 0; y < h; y++) {
+    const row = rowOf[y] * mw;
+    for (let x = 0; x < w; x++) if (data[(y * w + x) * 4 + 3] > ON) mask[row + colOf[x]] = 1;
   }
 
   // 8-connected labelling with an explicit stack (no recursion: a big object would overflow the call stack).
@@ -64,15 +62,15 @@ export async function keepMainObject(png: Uint8Array): Promise<{ png: Uint8Array
   const kept = new Uint8Array(areas.length);
   for (let l = 1; l < areas.length; l++) if (areas[l] === largest || areas[l] >= SIMILAR * largest) kept[l] = 1;
 
-  // Back at full size: a pixel stays only when the mask cell it falls in belongs to a kept piece.
+  // Back at full size: an object pixel stays only when the mask cell it falls in belongs to a kept piece. Faint pixels (alpha <= 16) stay as they are.
   let covered = 0;
   for (let y = 0; y < h; y++) {
     const row = rowOf[y] * mw;
     for (let x = 0; x < w; x++) {
       const i = (y * w + x) * 4 + 3;
-      if (kept[labels[row + colOf[x]]]) {
-        if (data[i] > ON) covered++;
-      } else data[i] = 0;
+      if (data[i] <= ON) continue;
+      if (kept[labels[row + colOf[x]]]) covered++;
+      else data[i] = 0;
     }
   }
   const out = await sharp(data, { raw: { width: w, height: h, channels: 4 } }).png().toBuffer();

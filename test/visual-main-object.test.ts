@@ -58,11 +58,14 @@ describe("keepMainObject", () => {
   });
 
   it("treats faint alpha (<=16) as background", async () => {
+    // A faint patch as big as the circle: were it an object it would be kept and double the coverage.
     const { png } = await make(400, [circle(300, 300, 60), square(10, 10, 100, 10)]);
     const out = await keepMainObject(png);
     const a = await alphaAt(out.png);
-    expect(a(30, 30)).toBe(0); // the faint patch (10000 px, close in size to the circle) is not an object, so it is cleared
     expect(a(300, 300)).toBe(255);
+    expect(a(30, 30)).toBe(10); // faint pixels stay as they are
+    expect(out.coverage).toBeGreaterThan(0.06);
+    expect(out.coverage).toBeLessThan(0.08);
     // On its own a faint patch is no object at all.
     const faintOnly = await make(400, [square(10, 10, 50, 10)]);
     expect((await keepMainObject(faintOnly.png)).coverage).toBe(0);
@@ -83,5 +86,23 @@ describe("keepMainObject", () => {
     const a = await alphaAt(out.png);
     expect(a(800, 800)).toBe(255);
     expect(a(30, 1550)).toBe(0);
+  });
+
+  it("keeps a 3-px handle on a phone-size photo and drops a distant fragment", async () => {
+    const W = 4000, H = 3000;
+    const raw = Buffer.alloc(W * H * 4); // all transparent
+    const set = (x: number, y: number) => { raw[(y * W + x) * 4 + 3] = 255; };
+    for (let y = 700; y <= 2300; y++) for (let x = 1200; x <= 2800; x++) { const d = Math.hypot(x - 2000, y - 1500); if (d <= 800 && d >= 760) set(x, y); } // ring r=800
+    for (let y = 1500; y < 1503; y++) for (let x = 2795; x < 3100; x++) set(x, y); // 3-px handle touching the ring
+    for (let y = 2830; y < 2950; y++) for (let x = 50; x < 170; x++) set(x, y); // 120x120 fragment far away
+    const png = new Uint8Array(await sharp(raw, { raw: { width: W, height: H, channels: 4 } }).png().toBuffer());
+    const t = Date.now();
+    const out = await keepMainObject(png);
+    expect(Date.now() - t).toBeLessThan(3000);
+    const { data } = await sharp(out.png).ensureAlpha().raw().toBuffer({ resolveWithObject: true });
+    const alpha = (x: number, y: number) => data[(y * W + x) * 4 + 3];
+    for (let x = 2850; x < 3100; x += 10) for (let y = 1500; y < 1503; y++) expect(alpha(x, y)).toBe(255); // the whole handle
+    expect(alpha(2000, 700)).toBe(255); // the ring
+    expect(alpha(100, 2900)).toBe(0); // the fragment
   });
 });
