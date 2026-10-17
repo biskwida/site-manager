@@ -78,3 +78,21 @@ describe("tool descriptions: the language of captions and picture text", () => {
     expect(MakeVisualSchema.shape.price.description).toContain("From the owner, else from get_menu for that item, else omit.");
   });
 });
+
+describe("SYSTEM_PROMPT: website photos", () => {
+  it("sends website photo requests to make_menu_photo, never make_visual", () => {
+    expect(SYSTEM_PROMPT).toMatch(/make_menu_photo/);
+    expect(SYSTEM_PROMPT).toMatch(/never make_visual for a website/i);
+    expect(SYSTEM_PROMPT).toMatch(/make_visual is only for Instagram\/Facebook posts and stories/);
+    expect(SYSTEM_PROMPT).toMatch(/note/);
+  });
+
+  it("keeps a photo sent as it is on set_item_image, pointing at the casual-speech rule", () => {
+    expect(SYSTEM_PROMPT).toMatch(/goes straight to set_item_image \(rule 2\)/);
+  });
+
+  it("numbers the rules continuously", () => {
+    const nums = [...SYSTEM_PROMPT.matchAll(/^(\d+)\. /gm)].map((m) => Number(m[1]));
+    expect(nums).toEqual(nums.map((_, i) => i + 1));
+  });
+});

@@ -7,6 +7,7 @@ import { z } from "zod";
 import { FORMAT } from "../domain/social-preview";
 import type { Lang } from "../domain/types";
 import { BACKDROPS } from "../visual/palette";
+import type { MenuPhotoResult } from "../visual/service";
 import type { Format } from "../visual/template";
 import type { ToolDeps, ToolKit } from "./tools";
 
@@ -33,6 +34,26 @@ export const MakeVisualSchema = z.object({
   colour: z.string().optional().describe(`Backdrop: one of ${BACKDROPS.join(", ")}, or a #rrggbb colour. Omit to let the picture pick one that suits the photo. Words: тюркоаз/синьо-зелено → teal, праскова → peach, крем/бежово → cream, зелено → sage, розово → rose, синьо → sky, жълто → butter, тъмно/черно → dark.`),
   formats: z.array(z.enum(["post", "story"])).describe('"post" (feed, 4:5) and/or "story" (9:16). "и като стори", "и стори" → both; "само стори" → ["story"]; otherwise ["post"].'),
 });
+
+export const MakeMenuPhotoSchema = z.object({
+  media_id: z.string().describe("The media_id of the owner's photo of the item (not of an earlier picture: always start from the photo)."),
+  item_id: z.string().describe("The id of the menu item the photo is for, from get_menu."),
+  style: z.enum(["match", "white"]).optional().describe('"match" when the owner says "like the rest", "като другите" or "same as the menu": the backdrop and object size most of the menu photos share. "white" for "white" or "бял фон", and when the owner says nothing about the backdrop (omitted = "white").'),
+});
+
+const NO_OBJECT = "Could not separate the object from this photo; ask the owner for a photo of the item alone on a plain surface, taken straight on.";
+
+/** The one line the agent tells the owner about the backdrop that was used; null for plain white that was asked for. */
+function menuPhotoNote(r: Extract<MenuPhotoResult, { media_id: string }>): string | null {
+  if (r.style !== "white") return `Used the backdrop ${r.style.matched} of your ${r.style.of} menu photos share.`;
+  switch (r.reason) {
+    case "no_photos": return "Your other items have no photos, so I used white.";
+    case "too_few": return "Only one other item has a photo, so I used white.";
+    case "unreadable": return "I couldn't read your other menu photos, so I used white.";
+    case "mixed": return "Your menu photos have different backdrops, so I used white.";
+    default: return null;
+  }
+}
 
 export function visualTools(d: ToolDeps, k: ToolKit) {
   const visual = d.visual;
@@ -63,5 +84,24 @@ export function visualTools(d: ToolDeps, k: ToolKit) {
         return { pictures: r.pictures.map(({ format, media_id }) => ({ format, media_id })), backdrop: r.backdrop, cutout: r.kind === "cutout" ? "ok" : "fallback: the photo is shown in a card because nothing could be cut out cleanly; mention it in one short sentence", next };
       }),
   });
-  return [make];
+  const menuPhoto = visual.menuPhoto?.bind(visual);
+  if (!menuPhoto) return [make];
+  const makeMenu = betaZodTool({
+    name: "make_menu_photo",
+    description: "Clean an owner's photo for the website or menu: the item cut out of its background, centred on a plain backdrop (white, or the one the other menu photos share), no text. Sends the photo to the chat. Changes nothing on the site: propose set_item_image with the media_id it returns. Use it, never make_visual, for any photo that goes on the website.",
+    inputSchema: MakeMenuPhotoSchema,
+    run: (input) =>
+      k.attempt(async () => {
+        if (d.member.role !== "owner") throw new Error("Making pictures for the website is the owner's decision; tell the owner to send this.");
+        const site = await k.site();
+        if (!site.items.some((i) => i.id === input.item_id)) throw new Error("item_id not found; use an id from get_menu.");
+        const r = await menuPhoto({ venueId: d.venueId, mediaId: input.media_id, itemId: input.item_id, style: input.style ?? "white" });
+        if ("error" in r) throw new Error(NO_OBJECT);
+        if ((await d.messenger.sendPhoto(d.chatRef, r.url, k.lang === "bg" ? "Снимка за менюто" : "Menu photo")) !== null) d.sentPhotos.add(r.url);
+        d.notes?.push(`menu photo from photo ${input.media_id}: ${r.media_id}`);
+        const note = menuPhotoNote(r);
+        return { media_id: r.media_id, ...(note ? { note } : {}), next: `Propose set_item_image for item ${input.item_id} with this media_id now (propose_changes). Say nothing else about the picture.${note ? " Tell the owner the note in one short line in the Owner language." : ""}` };
+      }),
+  });
+  return [make, makeMenu];
 }
