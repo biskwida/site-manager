@@ -9,8 +9,10 @@ export interface Config {
   /** Small model for comment reply drafts (COMMENT_DRAFT_MODEL); one short call per comment. */
   commentDraftModel: string;
   /**
-   * Small model that names the language of an owner's Latin-script message the English word list cannot place
-   * (LANG_CLASSIFY_MODEL, src/bot/lang-classify.ts): one five-token call with thinking off, which claude-haiku-5-5 accepts.
+   * Small model that names the language of an owner's message (LANG_CLASSIFY_MODEL, src/bot/lang-classify.ts). It is asked first
+   * about Latin-only text of four words or more, and about Cyrillic without a marker letter of four words or more from a member
+   * not stored as Bulgarian; the letters (the English word list for Latin text) are only the fallback. One five-token call on at
+   * most 300 characters, thinking off (claude-haiku-5-5 accepts that), 3 s limit, no retries.
    */
   langClassifyModel: string;
   /** Small model that translates Claudia's fixed texts into a conversation language other than Bulgarian or English (TRANSLATE_MODEL), cached per text in the translations table. */

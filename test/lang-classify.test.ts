@@ -59,12 +59,27 @@ describe("makeLangClassifier", () => {
     expect(calls[0].system).toContain("Bulgarian written in Latin letters (shliokavitsa) is bg.");
   });
 
-  it("a timeout is a failure: null, logged without the message", async () => {
+  it("a timeout is a failure: null, logged by the error's name without the message", async () => {
     const { client } = fakeClient(new Anthropic.APIConnectionTimeoutError());
     let result: unknown = "not called";
     const log = await logged(async () => { result = await makeLangClassifier(client, "m")(MESSAGE); });
     expect(result).toBeNull();
-    expect(log).toMatch(/\[lang\]/);
+    expect(log).toMatch(/\[lang\].*APIConnectionTimeoutError/);
+    expect(log).not.toContain("möchte");
+  });
+
+  it("names a timeout even when a minified build renamed its class", async () => {
+    class t extends Anthropic.APIConnectionTimeoutError {} // what a mangled class name looks like
+    const log = await logged(() => makeLangClassifier(fakeClient(new t()).client, "m")(MESSAGE));
+    expect(log).toContain("APIConnectionTimeoutError");
+  });
+
+  it("names an API error by its class, never by its message (which can echo the request)", async () => {
+    const error = new Anthropic.RateLimitError(429, { type: "error", error: { type: "rate_limit_error", message: MESSAGE } }, `429 ${MESSAGE}`, new Headers());
+    let result: unknown = "not called";
+    const log = await logged(async () => { result = await makeLangClassifier(fakeClient(error).client, "m")(MESSAGE); });
+    expect(result).toBeNull();
+    expect(log).toContain("RateLimitError");
     expect(log).not.toContain("möchte");
   });
 

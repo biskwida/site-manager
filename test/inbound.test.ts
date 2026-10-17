@@ -1,9 +1,11 @@
 // test/inbound.test.ts
+import type Anthropic from "@anthropic-ai/sdk";
 import { describe, expect, it } from "vitest";
 import { appendMemory } from "@/src/agent/memory";
 import { PHOTO_NO_CAPTION } from "@/src/agent/prompt";
 import { createBot, telegramLang, type BotDeps, type RunRequest } from "@/src/bot/bot";
 import { followLanguage, handleInbound, normalizeCommand } from "@/src/bot/inbound";
+import { makeLangClassifier } from "@/src/bot/lang-classify";
 import { planChanges } from "@/src/domain/changes";
 import type { InMemoryStore } from "@/src/store/memory";
 import { FakeMessenger, makeDemo } from "./helpers";
@@ -670,6 +672,124 @@ describe("handleInbound: any conversation language", () => {
     await handleInbound(d, { chatRef: "wa:3596", kind: "photo", text: "новое фото для меню", media: photo });
     expect(runs[1].member.lang).toBe("ru");
     expect(saves).toEqual([]);
+  });
+
+  describe("marker-less Cyrillic of four words or more from a member who is not stored as bg goes to the classifier", () => {
+    const BULGARIAN = "Капучиното става три и двайсет"; // five words, no letter Russian lacks
+    const RUSSIAN = "Добавь пиццу в меню сегодня"; // five words, no Russian-only letter
+    /** A member stored in `lang`, with every language save recorded. */
+    async function member(lang: string, answer: string | null | Error) {
+      const { asked, classifyLang } = classifier(answer);
+      const s = await setup({ classifyLang });
+      await s.store.upsertMember({ venue_id: s.venue.id, chat_ref: "wa:3601", role: "owner", lang });
+      return { ...s, asked, saves: langSaves(s.store) };
+    }
+
+    it("(a) ru member, Bulgarian, classifier bg: saved bg", async () => {
+      const { d, runs, store, asked, saves } = await member("ru", "bg");
+      await handleInbound(d, { chatRef: "wa:3601", kind: "text", text: BULGARIAN });
+      expect(asked).toEqual([BULGARIAN]);
+      expect(saves).toEqual(["wa:3601=bg"]);
+      expect(await langOf(store, "wa:3601")).toBe("bg");
+      expect(runs[0].member.lang).toBe("bg");
+    });
+
+    it("(b) ru member, classifier ru: no save", async () => {
+      const { d, runs, asked, saves } = await member("ru", "ru");
+      await handleInbound(d, { chatRef: "wa:3601", kind: "text", text: RUSSIAN });
+      expect(asked).toEqual([RUSSIAN]);
+      expect(saves).toEqual([]);
+      expect(runs[0].member.lang).toBe("ru");
+    });
+
+    it("(c) ru member, classifier unknown or a throw: no save", async () => {
+      const errs: string[] = [];
+      const orig = console.error;
+      console.error = (...a: unknown[]) => { errs.push(a.join(" ")); };
+      try {
+        for (const answer of [null, new Error("timeout")]) {
+          const { d, runs, asked, saves } = await member("ru", answer);
+          await handleInbound(d, { chatRef: "wa:3601", kind: "text", text: BULGARIAN });
+          expect(asked).toHaveLength(1);
+          expect(saves).toEqual([]);
+          expect(runs[0].member.lang).toBe("ru");
+        }
+      } finally { console.error = orig; }
+      expect(errs.join("\n")).not.toContain("Капучиното");
+    });
+
+    it("(d) en member, marker-less Cyrillic, classifier ru: saved ru", async () => {
+      const { d, store, asked, saves } = await member("en", "ru");
+      await handleInbound(d, { chatRef: "wa:3601", kind: "text", text: RUSSIAN });
+      expect(asked).toEqual([RUSSIAN]);
+      expect(saves).toEqual(["wa:3601=ru"]);
+      expect(await langOf(store, "wa:3601")).toBe("ru");
+    });
+
+    it("(d) en member without an answer from the classifier: Bulgarian, as before", async () => {
+      const { d, store, saves } = await member("en", null);
+      await handleInbound(d, { chatRef: "wa:3601", kind: "text", text: RUSSIAN });
+      expect(saves).toEqual(["wa:3601=bg"]);
+      expect(await langOf(store, "wa:3601")).toBe("bg");
+    });
+
+    it("(e) bg member, marker-less Cyrillic: the classifier is never called", async () => {
+      const { d, runs, asked, saves } = await member("bg", "ru");
+      for (const text of [BULGARIAN, RUSSIAN]) await handleInbound(d, { chatRef: "wa:3601", kind: "text", text });
+      await handleInbound(d, { chatRef: "wa:3601", kind: "photo", text: RUSSIAN, media: photo });
+      expect(asked).toEqual([]);
+      expect(saves).toEqual([]);
+      expect(runs.map((r) => r.member.lang)).toEqual(["bg", "bg", "bg"]);
+    });
+
+    it("(f) ru member, three words of marker-less Cyrillic: no call, no save", async () => {
+      const { d, runs, asked, saves } = await member("ru", "bg");
+      await handleInbound(d, { chatRef: "wa:3601", kind: "text", text: "Баницата свърши днес" });
+      expect(asked).toEqual([]);
+      expect(saves).toEqual([]);
+      expect(runs[0].member.lang).toBe("ru");
+    });
+
+    it("(g) a ru member's text with a Russian marker letter: no call", async () => {
+      const { d, runs, asked, saves } = await member("ru", "bg");
+      await handleInbound(d, { chatRef: "wa:3601", kind: "text", text: "Мы открыты сегодня до десяти" });
+      expect(asked).toEqual([]);
+      expect(saves).toEqual([]);
+      expect(runs[0].member.lang).toBe("ru");
+    });
+
+    it("counts words of any script: mixed Cyrillic and Latin without English words goes too; English that wins does not", async () => {
+      const { d, store, venue, asked } = await member("ru", "bg");
+      await handleInbound(d, { chatRef: "wa:3601", kind: "text", text: "Flat white свърши днес" });
+      expect(asked).toEqual(["Flat white свърши днес"]);
+      expect(await langOf(store, "wa:3601")).toBe("bg");
+      await store.setMemberLang(venue.id, "wa:3601", "ru");
+      await handleInbound(d, { chatRef: "wa:3601", kind: "text", text: "please change the price of Капучино to 4.20" });
+      expect(asked).toHaveLength(1); // English won by its words: no call
+      expect(await langOf(store, "wa:3601")).toBe("en");
+    });
+  });
+
+  it("the classifier gets at most the first 300 characters of a message", async () => {
+    const { asked, classifyLang } = classifier("de");
+    const { d, store } = await setup({ classifyLang });
+    const long = "Ich möchte den Preis von jedem Kuchen auf der Karte ändern. ".repeat(20).slice(0, 1000);
+    expect(long).toHaveLength(1000);
+    await handleInbound(d, { chatRef: "tg:1001", kind: "text", text: long });
+    expect(asked).toHaveLength(1);
+    expect(asked[0]).toBe(long.slice(0, 300));
+    expect(await langOf(store, "tg:1001")).toBe("de");
+  });
+
+  it("a 1,000-character text reaches the client as 300 characters", async () => {
+    const sent: string[] = [];
+    const client = { beta: { messages: { create: async (p: { messages: { content: { text: string }[] }[] }) => (sent.push(p.messages[0].content[0].text), { stop_reason: "end_turn", content: [{ type: "text", text: "de" }] }) } } } as unknown as Anthropic;
+    const { d, store } = await setup({ classifyLang: makeLangClassifier(client, "claude-haiku-5-5") });
+    const long = "Wir haben heute frischen Apfelstrudel und warmen Kakao im Angebot. ".repeat(20).slice(0, 1000);
+    await handleInbound(d, { chatRef: "tg:1001", kind: "text", text: long });
+    expect(sent).toEqual([long.slice(0, 300)]);
+    expect(sent[0]).toHaveLength(300);
+    expect(await langOf(store, "tg:1001")).toBe("de");
   });
 
   it("asks the classifier about the words around a link, never the link", async () => {

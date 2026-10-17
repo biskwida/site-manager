@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { baseLang, countLatinWords, detectLang, detectScriptLang, isLatinText, languageName } from "@/src/domain/format";
+import { baseLang, countLatinWords, countWords, detectLang, detectScriptLang, isLatinText, isMarkerlessCyrillic, languageName } from "@/src/domain/format";
 import { isChatLang } from "@/src/domain/types";
 
 describe("detectLang", () => {
@@ -167,5 +167,18 @@ describe("conversation language helpers", () => {
     expect(countLatinWords("4.20 👍")).toBe(0);
     expect(countLatinWords("don't stop")).toBe(2);
     expect(countLatinWords("Капучиното е 4,20")).toBe(0);
+  });
+});
+
+describe("isMarkerlessCyrillic and countWords", () => {
+  it("isMarkerlessCyrillic: Cyrillic with no marker letter that English words do not win", () => {
+    for (const text of ["Капучиното става три и двайсет", "Добавь пиццу в меню сегодня", "Flat white свърши днес"]) expect(isMarkerlessCyrillic(text)).toBe(true);
+    for (const text of ["Мы открыты сегодня", "Ђе је кафа", "please change the price of Капучино to 4.20", "We zijn morgen open", "Ο καφές", "4.20", ""]) expect(isMarkerlessCyrillic(text)).toBe(false);
+  });
+  it("countWords counts words of any script, not numbers or emoji", () => {
+    expect(countWords("Flat white свърши днес")).toBe(4);
+    expect(countWords("Капучиното става три и двайсет")).toBe(5);
+    expect(countWords("Баницата свърши днес 4,20 👍")).toBe(3);
+    expect(countWords("don't stop")).toBe(2);
   });
 });

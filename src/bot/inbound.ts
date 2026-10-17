@@ -4,7 +4,7 @@ import { followsAgentReply, holdPhoto } from "../agent/memory";
 import { PHOTO_NO_CAPTION } from "../agent/prompt";
 import type { ImageInput } from "../agent/run";
 import { channelOf, isMetaChannel, maskRef, type Channel } from "../channels/ref";
-import { baseLang, countLatinWords, detectScriptLang, isLatinText } from "../domain/format";
+import { baseLang, countLatinWords, countWords, detectScriptLang, isLatinText, isMarkerlessCyrillic } from "../domain/format";
 import type { ChatLang, Member } from "../domain/types";
 import { handleDecision, parseCallback } from "./approvals";
 import type { BotDeps } from "./bot";
@@ -39,22 +39,37 @@ const LINKS = /https?:\/\/\S+|www\.\S+/gi;
 const withoutLinks = (text: string) => text.replace(LINKS, " ");
 /** The language a member's text shows by its letters (detectScriptLang with their stored language), not counting its links. */
 const scriptLangOf = (text: string, current: ChatLang): ChatLang | null => detectScriptLang(withoutLinks(text), current);
-/** Latin text of at least this many words goes to the classifier; shorter text (a dish name, "ok", "make it a story") by the English words. */
+/** Words a text needs before the classifier is asked about it; shorter text (a dish name, "ok", "make it a story") goes by its letters. */
 const CLASSIFY_MIN_WORDS = 4;
+/** The classifier gets at most this many characters of a message: enough to name its language. */
+const CLASSIFY_MAX_CHARS = 300;
 
 /**
- * The language of the owner's own words (a message, a photo caption, a command word), not counting links. Latin-only text of
- * four words or more is the classifier's to name (one small-model call, src/bot/lang-classify.ts), English included, since
- * German or Dutch can hold two of the English words ("Ich will den Preis in der Karte ändern"). Without its answer ("unknown",
- * a failure, a timeout, no classifier) and for everything else the letters decide (detectScriptLang). null keeps the stored
- * language. A failing classifier never costs the message.
+ * Whether the classifier, not the letters, names the language of these words (links removed):
+ * - Latin-only text of four words or more: German or Dutch can hold two of the English words ("Ich will den Preis in der Karte
+ *   ändern"), so the English word list cannot decide it;
+ * - Cyrillic without a marker letter, of four words or more in any script, from a member stored in a language other than
+ *   Bulgarian: Bulgarian has no letter Russian lacks, so a Bulgarian owner stored as ru (a Russian Telegram) could never get
+ *   back to bg by the letters. A member stored as bg is never asked about: their marker-less Cyrillic stays Bulgarian.
+ */
+function asksClassifier(prose: string, current: ChatLang): boolean {
+  if (isLatinText(prose)) return countLatinWords(prose) >= CLASSIFY_MIN_WORDS;
+  return current !== "bg" && isMarkerlessCyrillic(prose) && countWords(prose) >= CLASSIFY_MIN_WORDS;
+}
+
+/**
+ * The language of the owner's own words (a message, a photo caption, a command word), not counting links. When asksClassifier
+ * says so, the classifier names it from the first 300 characters (one small-model call, src/bot/lang-classify.ts), English
+ * included. Without its answer ("unknown", a failure, a timeout, no classifier) and for everything else the letters decide
+ * (detectScriptLang with the stored language: the English word list for Latin text, and marker-less Cyrillic keeps a ru, uk,
+ * be, mk or sr member's language). null keeps the stored language. A failing classifier never costs the message.
  */
 async function languageOf(d: BotDeps, text: string, current: ChatLang): Promise<ChatLang | null> {
   const prose = withoutLinks(text).trim();
   const byLetters = detectScriptLang(prose, current);
-  if (!d.classifyLang || !isLatinText(prose) || countLatinWords(prose) < CLASSIFY_MIN_WORDS) return byLetters;
+  if (!d.classifyLang || !asksClassifier(prose, current)) return byLetters;
   try {
-    return (await d.classifyLang(prose)) ?? byLetters;
+    return (await d.classifyLang(Array.from(prose).slice(0, CLASSIFY_MAX_CHARS).join(""))) ?? byLetters;
   } catch (e) {
     console.error(`[bot] language classifier failed: ${e instanceof Error ? e.name : "error"}`); // never the owner's words
     return byLetters;

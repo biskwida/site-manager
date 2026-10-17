@@ -89,6 +89,14 @@ export function isLatinText(text: string): boolean {
   return latin > 0 && latin === count(text, /\p{L}/gu);
 }
 
+/**
+ * Cyrillic that no letter of CYRILLIC_LANGS marks and that English words do not win: what detectScriptLang calls Bulgarian
+ * when it knows nothing else. Bulgarian has no letter Russian lacks, so such text can be either (src/bot/inbound.ts asks).
+ */
+export function isMarkerlessCyrillic(text: string): boolean {
+  return detectScriptLang(text) === "bg";
+}
+
 /** The hand-written texts a conversation language starts from: Bulgarian for Bulgarian, English for every other language. */
 export function baseLang(chat: ChatLang): Lang {
   return chat === "bg" ? "bg" : "en";
@@ -108,6 +116,11 @@ export function languageName(code: ChatLang): string {
 /** Words written in Latin letters ("don't" is one word); numbers, emoji and other scripts do not count. */
 export function countLatinWords(text: string): number {
   return count(text, /\p{Script=Latin}+(?:['’]\p{Script=Latin}+)*/gu);
+}
+
+/** Words in letters of any script ("Flat white свърши днес" is four); numbers and emoji do not count. */
+export function countWords(text: string): number {
+  return count(text, /\p{L}[\p{L}\p{M}]*(?:['’]\p{L}[\p{L}\p{M}]*)*/gu);
 }
 
 export function tr(lang: Lang, bg: string, en: string): string {
