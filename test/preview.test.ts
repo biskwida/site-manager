@@ -135,6 +135,13 @@ describe("renderPreview", () => {
     const changes = planChanges(s, [{ op: "set_price", item_id: "i-cap", price_eur: 3.2 }], ctx());
     expect(() => renderPreview({ ...s, items: [] }, changes, "en", TZ)).toThrow("preview: item i-cap not found");
   });
+  it("a holiday with no note has no trailing colon", () => {
+    const s = state();
+    const changes = planChanges(s, [{ op: "add_holiday", date: "2026-12-24", note_bg: "x", note_en: "x" }], ctx());
+    for (const c of changes) if (c.op === "add_holiday") c.after = { ...c.after, note_bg: "", note_en: "" }; // an inverted or older set can hold an empty note
+    expect(renderPreview(s, changes, "en", TZ)).toMatch(/^• Holiday 24 Dec 2026$/m);
+    expect(renderPreview(s, changes, "bg", TZ)).toMatch(/^• Почивен ден 24\.12\.2026$/m);
+  });
   it("renders hours, holidays, announcements, texts, images and theme", () => {
     const s = state();
     const changes = planChanges(s, [

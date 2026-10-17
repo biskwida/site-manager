@@ -1096,6 +1096,26 @@ describe("Telegram's language_code", () => {
     for (const none of [undefined, "", "  ", "x", "fil"]) expect(telegramLang(none)).toBe("en"); // "fil" (Filipino) has no two-letter code: not "fi"
   });
 
+  it("telegramLang takes only a known language: an unknown two-letter code is English", () => {
+    expect(telegramLang("xx")).toBe("en");
+    expect(telegramLang("xx-YY")).toBe("en");
+    expect(telegramLang("de")).toBe("de");
+  });
+
+  it("a forwarded message does not switch the language: no save, the run uses the stored one", async () => {
+    const { d, runs, store } = await setup({ botInfo: BOT_INFO });
+    const bot = createBot(d);
+    const update = textUpdate(1001, "Please change the price of the cappuccino", "bg"); // member 1001 is stored bg
+    (update.message as unknown as Record<string, unknown>).forward_origin = { type: "hidden_user", date: 0, sender_user_name: "Someone" };
+    await bot.handleUpdate(update);
+    expect(runs).toHaveLength(1);
+    expect(runs[0].member.lang).toBe("bg");
+    expect(runs[0].text).toBe("Please change the price of the cappuccino");
+    expect(await langOf(store, "tg:1001")).toBe("bg");
+    await bot.handleUpdate(textUpdate(1001, "Please change the price of the cappuccino", "bg")); // the same words typed by the owner switch it
+    expect(await langOf(store, "tg:1001")).toBe("en");
+  });
+
   it("linking with Telegram language_code pt-BR → member lang pt, welcomed in English for now", async () => {
     const { d, messenger, store, venue } = await setup({ botInfo: BOT_INFO });
     const bot = createBot(d);

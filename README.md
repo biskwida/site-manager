@@ -122,6 +122,8 @@ npm run env:set -- ANTHROPIC_API_KEY   # asks for the value with echo off, write
 | `ANTHROPIC_API_KEY` | console.anthropic.com → API keys | Yes (the agent; the wizard's menu reading and "Write for me" use it too) |
 | `AGENT_MODEL` | Default `claude-opus-5-5` | No |
 | `AGENT_EFFORT` | `low`, `medium` (default) or `high`; image, bulk and scheduling turns use `high` automatically | No |
+| `LANG_CLASSIFY_MODEL` | Default `claude-haiku-5-5`. Names the language of Latin text of four words or more (and marker-less Cyrillic from a member not stored as Bulgarian), so Claudia answers in the language the owner writes in | No |
+| `TRANSLATE_MODEL` | Default `claude-haiku-5-5`. Translates what Claudia sends to a member whose language is neither Bulgarian nor English (cached per message; links, prices and venue names are never sent to it) | No |
 | `TELEGRAM_BOT_TOKEN` | @BotFather in Telegram → `/newbot` | Yes |
 | `TELEGRAM_WEBHOOK_SECRET` | Any random string: `openssl rand -hex 32` | Yes |
 | `STT_API_KEY` | console.groq.com → API keys (free tier) or an OpenAI key | No: without it, voice notes get a polite "please type it" |
@@ -173,6 +175,8 @@ npm run venue:create -- --name "Кафене „Ъгъла“" --slug agala --la
 ```
 
 On a database created before the channels change, run the `chat_ref` migration before `db:apply` (see [docs/CHANNELS.md → Database migration](docs/CHANNELS.md#database-migration)).
+
+The conversation-language change widens `venue_members.lang` to any two-letter language code and adds the translation cache: apply before deploying this version: `npm run db:apply -- supabase/migrations/2026-10-16-chat-lang.sql`.
 
 `venue:create` prints the site URL, the admin link and two one-use invite codes (owner and staff, valid 7 days) once. Keep them; they are not shown again. With `--seed demo` the demo café's own name and menu are used. Without it you get an empty venue with default hours and `--name` is required. `--site-url https://…` marks the venue as having its own site (see [Venues with their own site](#venues-with-their-own-site)).
 

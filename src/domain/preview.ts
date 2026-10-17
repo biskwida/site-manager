@@ -76,7 +76,8 @@ function fieldValue(key: string, v: unknown, s: SiteState, lang: Lang): string {
 }
 
 function holidayAddLine(h: Row, lang: Lang): string {
-  return `• ${tr(lang, "Почивен ден", "Holiday")} ${formatDate(String(h.date), lang)}: ${keep(String(h[`note_${lang}`]))}`;
+  const note = keep(String(h[`note_${lang}`] ?? ""));
+  return `• ${tr(lang, "Почивен ден", "Holiday")} ${formatDate(String(h.date), lang)}${note ? `: ${note}` : ""}`;
 }
 function holidayRemoveLine(h: Row, lang: Lang): string {
   return `• ${tr(lang, "Премахва почивния ден", "Removes the holiday on")} ${formatDate(String(h.date), lang)}`;

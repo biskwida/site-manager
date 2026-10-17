@@ -3,6 +3,7 @@ import { Bot, type Context } from "grammy";
 import type { UserFromGetMe } from "grammy/types";
 import type { ImageInput } from "../agent/run";
 import { makeRef } from "../channels/ref";
+import { languageName } from "../domain/format";
 import { isChatLang, type ChatLang, type Member } from "../domain/types";
 import type { ConnectResult } from "../destinations/connect";
 import type { Store } from "../store/types";
@@ -56,7 +57,7 @@ export { adminUrl, INVITE_TTL_MS, publicUrl } from "./links";
 /** Telegram's language_code ("pt-BR", "zh-hans", "en") as a conversation language: its two-letter language, lower case ("pt"); English when it has none ("fil" has no two-letter code). */
 export function telegramLang(code?: string): ChatLang {
   const lang = (code ?? "").trim().toLowerCase().split(/[-_]/)[0];
-  return isChatLang(lang) ? lang : "en";
+  return isChatLang(lang) && languageName(lang) !== lang ? lang : "en"; // a code that names no language ("xx") is English, as for the classifier and Whisper
 }
 
 export function createBot(d: BotDeps): Bot {
@@ -73,12 +74,14 @@ export function createBot(d: BotDeps): Bot {
     },
   });
 
-  bot.on("message:text", (ctx) => handleInbound(d, { chatRef: ref(ctx), kind: "text", text: ctx.message.text, langHint: hint(ctx), messageRef: String(ctx.message.message_id) }));
-  bot.on("message:photo", (ctx) => handleInbound(d, { chatRef: ref(ctx), kind: "photo", text: ctx.message.caption, langHint: hint(ctx), media: tgMedia(ctx, ctx.message.photo.at(-1)!.file_id) }));
+  const forwarded = (ctx: Context) => ctx.message?.forward_origin !== undefined;
+
+  bot.on("message:text", (ctx) => handleInbound(d, { chatRef: ref(ctx), kind: "text", text: ctx.message.text, langHint: hint(ctx), forwarded: forwarded(ctx), messageRef: String(ctx.message.message_id) }));
+  bot.on("message:photo", (ctx) => handleInbound(d, { chatRef: ref(ctx), kind: "photo", text: ctx.message.caption, langHint: hint(ctx), forwarded: forwarded(ctx), media: tgMedia(ctx, ctx.message.photo.at(-1)!.file_id) }));
   bot.on("message:document", async (ctx) => {
     const doc = ctx.message.document;
     if (!doc.mime_type?.startsWith("image/")) return;
-    await handleInbound(d, { chatRef: ref(ctx), kind: "photo", text: ctx.message.caption, langHint: hint(ctx), media: tgMedia(ctx, doc.file_id) });
+    await handleInbound(d, { chatRef: ref(ctx), kind: "photo", text: ctx.message.caption, langHint: hint(ctx), forwarded: forwarded(ctx), media: tgMedia(ctx, doc.file_id) });
   });
   bot.on("message:voice", (ctx) => handleInbound(d, { chatRef: ref(ctx), kind: "voice", langHint: hint(ctx), media: tgMedia(ctx, ctx.message.voice.file_id) }));
   bot.on("message:audio", (ctx) => handleInbound(d, { chatRef: ref(ctx), kind: "voice", langHint: hint(ctx), media: tgMedia(ctx, ctx.message.audio.file_id) }));
