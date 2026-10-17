@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { baseLang, countLatinWords, countWords, detectLang, detectScriptLang, isLatinText, isMarkerlessCyrillic, languageName } from "@/src/domain/format";
+import { baseLang, countLatinWords, countWords, detectLang, detectScriptLang, isLatinText, isMarkerlessCyrillic, keep, languageName, unkeep } from "@/src/domain/format";
 import { isChatLang } from "@/src/domain/types";
 
 describe("detectLang", () => {
@@ -217,5 +217,19 @@ describe("isMarkerlessCyrillic and countWords", () => {
     expect(countWords("готово.Идвайте")).toBe(2);
     expect(countWords("Mr.Smith")).toBe(2);
     expect(countWords("www.my-open-cafe.bg")).toBe(5);
+  });
+});
+
+describe("keep markers", () => {
+  it("keep wraps text that a translation must leave as written; unkeep removes every marker", () => {
+    expect(keep("Cappuccino")).toBe("⟦Cappuccino⟧");
+    expect(keep("Line one\nline two")).toBe("⟦Line one\nline two⟧");
+    expect(unkeep(`Preis ${keep("Cappuccino")} → €4.20 (${keep("Café")})`)).toBe("Preis Cappuccino → €4.20 (Café)");
+    expect(unkeep("no markers")).toBe("no markers");
+  });
+  it("kept parts never nest or come empty: markers inside the text are dropped, and nothing is kept as nothing", () => {
+    expect(keep("I ⟦love⟧ it")).toBe("⟦I love it⟧");
+    expect(keep("")).toBe("");
+    expect(unkeep("stray ⟦ and ⟧")).toBe("stray  and ");
   });
 });

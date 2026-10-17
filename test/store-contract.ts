@@ -941,5 +941,19 @@ export function storeContract(name: string, make: () => Promise<Store>, storageH
       expect(await s.getComment(a.id)).toBeNull();
       expect(await s.getComment(b.id)).toBeNull();
     });
+
+    it("caches a translation per language and source hash; a second write replaces it; a language that is not a two-letter code is refused", async () => {
+      const s = await make();
+      // A fresh hash per run: a live database keeps the rows of earlier runs.
+      const hash = (crypto.randomUUID() + crypto.randomUUID()).replaceAll("-", "");
+      expect(await s.getTranslation("de", hash)).toBeNull();
+      await s.putTranslation("de", hash, "Preis ⟦1⟧ → €4.20");
+      expect(await s.getTranslation("de", hash)).toBe("Preis ⟦1⟧ → €4.20");
+      expect(await s.getTranslation("el", hash)).toBeNull();
+      await s.putTranslation("de", hash, "Preis ⟦1⟧: €4.20");
+      expect(await s.getTranslation("de", hash)).toBe("Preis ⟦1⟧: €4.20");
+      // translations.lang ~ '^[a-z]{2}$' (supabase/schema.sql): the memory store refuses what the database would.
+      await expect(s.putTranslation("DE", hash, "x")).rejects.toThrow();
+    });
   });
 }

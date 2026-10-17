@@ -2,7 +2,8 @@
 -- 1) venue_members.lang holds the lower-case ISO 639-1 code of the member's last message that showed a language ("bg", "en",
 --    "de", "el", …), not only bg/en. Every existing row ('bg' or 'en') already passes the new check.
 -- 2) translations: Claudia's fixed texts translated into the other conversation languages, one row per language and source text,
---    written once and then reused. Server-only: RLS on, no policies, nothing granted to anon/authenticated.
+--    written once and then reused; names, quotes, captions and customer words are stored as numbered markers (⟦1⟧), never as
+--    written (src/bot/translate.ts). Server-only: RLS on, no policies, nothing granted to anon/authenticated.
 -- Run it BEFORE deploying the code that writes other languages: until then the old check refuses them, and linking a Telegram
 -- user whose app is set to, say, Portuguese fails. Idempotent; schema.sql and policies.sql carry the same statements.
 --   npm run db:apply -- supabase/migrations/2026-10-16-chat-lang.sql

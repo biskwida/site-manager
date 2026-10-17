@@ -625,4 +625,15 @@ export class InMemoryStore implements Store {
   async countCommentActions(venueId: string, fromIso: string, toIso: string) {
     return [...this.comments.values()].filter((c) => c.venue_id === venueId && (c.status === "replied" || c.status === "hidden" || c.status === "deleted") && c.replied_at !== null && c.replied_at >= fromIso && c.replied_at < toIso).length;
   }
+
+  // --- Translations (appended 2026-10-16) ---
+  /** By "<lang>:<source hash>". */
+  translations = new Map<string, string>();
+  async getTranslation(lang: ChatLang, sourceHash: string) {
+    return this.translations.get(`${lang}:${sourceHash}`) ?? null;
+  }
+  async putTranslation(lang: ChatLang, sourceHash: string, text: string) {
+    checkMemberLang(lang); // translations.lang has the same check as venue_members.lang
+    this.translations.set(`${lang}:${sourceHash}`, text);
+  }
 }

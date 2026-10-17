@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { ConsoleMessenger } from "@/src/channels/console";
 import { ChannelRouter } from "@/src/channels/router";
 import { FakeMessenger, makeDemo } from "./helpers";
 
@@ -61,6 +62,18 @@ describe("ChannelRouter", () => {
       expect(await r.send("wa:359888123456", "x", { proactive: true })).toBeNull();
     } finally { console.log = orig; }
     expect(logs).toContain("[router] skipped proactive wa:…3456: outside 24h window");
+  });
+  it("passes a proposal's translated button labels on to the channel; the console messenger prints them", async () => {
+    const { store } = await makeDemo();
+    const tg = new FakeMessenger();
+    const lines: string[] = [];
+    const r = new ChannelRouter({ store, now: () => T0, adapters: { tg, fb: new ConsoleMessenger((l) => lines.push(l)) } });
+    const labels = { apply: "✅ Anwenden", change: "✏️ Ändern", cancel: "❌ Abbrechen" };
+    expect(await r.sendProposal("tg:1001", "Anwenden?", "set-1", "en", labels)).toBe("100");
+    expect(tg.sent[0]).toMatchObject({ text: "Anwenden?", setId: "set-1", lang: "en", labels });
+    await r.sendProposal("fb:5", "Anwenden?", "set-1", "en", labels);
+    await r.sendProposal("fb:5", "Apply this?", "set-2", "en");
+    expect(lines).toEqual(["→ [fb:5] Anwenden?\n   [✅ Anwenden] [✏️ Ändern] [❌ Abbrechen]", "→ [fb:5] Apply this?\n   [✅ Apply] [✏️ Change] [❌ Cancel]"]);
   });
   it("routes a photo to the chat's channel", async () => {
     const { store } = await makeDemo();

@@ -5,7 +5,7 @@ import { refreshInstagramTokens } from "./destinations/instagram";
 import { pollDeployments } from "./deploy/run";
 import type { Deployer } from "./deploy/types";
 import { planChange } from "./domain/changes";
-import { baseLang, itemName, tr } from "./domain/format";
+import { baseLang, itemName, keep, tr } from "./domain/format";
 import type { Lang, Venue } from "./domain/types";
 import type { ApplyResult, ExpiredTimer, Store } from "./store/types";
 import { limitReachedLine, usageLine } from "./bot/limit";
@@ -267,8 +267,10 @@ async function writeAutoSet(store: Store, t: ExpiredTimer, now: string): Promise
   const change = t.kind === "sold_out"
     ? planChange(site, { op: "set_sold_out", item_id: t.item.id, until: null }, ctx)
     : planChange(site, { op: "remove_item", item_id: t.item.id }, ctx);
-  const nameBg = itemName(t.item, "bg");
-  const nameEn = itemName(t.item, "en");
+  // Kept like the dish names of every preview (src/domain/preview.ts): an undo of this set carries its summary into the chat. The
+  // dashboard and the agent's tool results read them without the markers.
+  const nameBg = keep(itemName(t.item, "bg"));
+  const nameEn = keep(itemName(t.item, "en"));
   const cs = await store.createChangeSet({
     venue_id: t.item.venue_id,
     chat_ref: null,

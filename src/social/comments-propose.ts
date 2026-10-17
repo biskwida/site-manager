@@ -13,7 +13,7 @@ import type { Messenger } from "../bot/messenger";
 import { channelOf, isMetaChannel, maskRef } from "../channels/ref";
 import { PROACTIVE_WINDOW_MS } from "../channels/router";
 import { excerpt } from "../domain/comment-preview";
-import { baseLang, quote, tr } from "../domain/format";
+import { baseLang, keep, quote, tr } from "../domain/format";
 import { renderPreview } from "../domain/preview";
 import { NETWORK_NAMES, type Change, type ChangeSet, type ChangeSource, type Lang, type Member, type ModerateAction, type SocialModerateRow, type SocialReplyRow, type Venue } from "../domain/types";
 import type { CommentStatus, SocialComment, Store } from "../store/types";
@@ -84,8 +84,10 @@ export function commentChanges(items: CommentSetItem[]): Change[] {
   });
 }
 
-const author = (c: SocialComment, lang: Lang) => c.author_name || tr(lang, "клиент", "a customer");
-const captionOf = (c: SocialComment, lang: Lang) => (c.post_caption.trim() ? excerpt(c.post_caption) : tr(lang, "(без текст)", "(no caption)"));
+// In the proposal text the customer's name and words, the post's caption and the drafted reply stay as written in any language
+// (kept, src/bot/translate.ts). commentSetSummary writes the set's summaries without markers.
+const author = (c: SocialComment, lang: Lang) => keep(c.author_name) || tr(lang, "клиент", "a customer");
+const captionOf = (c: SocialComment, lang: Lang) => (c.post_caption.trim() ? keep(excerpt(c.post_caption)) : tr(lang, "(без текст)", "(no caption)"));
 const networkName = (c: SocialComment) => NETWORK_NAMES[c.network] ?? c.network;
 
 /** Keeps the lines (unlike excerpt), cut to `max` characters. */
@@ -105,8 +107,8 @@ export function commentProposalText(items: CommentSetItem[], lang: Lang, o: { ba
     const it = items[0];
     const c = it.comment;
     const where = bg
-      ? `под поста ${quote(captionOf(c, lang), lang)} (${networkName(c)}) от ${author(c, lang)}: ${quote(clip(c.text, SINGLE_COMMENT_MAX), lang)}`
-      : `under the post ${quote(captionOf(c, lang), lang)} (${networkName(c)}) by ${author(c, lang)}: ${quote(clip(c.text, SINGLE_COMMENT_MAX), lang)}`;
+      ? `под поста ${quote(captionOf(c, lang), lang)} (${networkName(c)}) от ${author(c, lang)}: ${quote(keep(clip(c.text, SINGLE_COMMENT_MAX)), lang)}`
+      : `under the post ${quote(captionOf(c, lang), lang)} (${networkName(c)}) by ${author(c, lang)}: ${quote(keep(clip(c.text, SINGLE_COMMENT_MAX)), lang)}`;
     if (it.moderate) {
       const why = bg ? "Този коментар изглежда спам или обиден." : "This comment looks like spam or abuse.";
       const what = it.moderate === "delete"
@@ -114,7 +116,7 @@ export function commentProposalText(items: CommentSetItem[], lang: Lang, o: { ba
         : (bg ? "Предлагам да го скрием.\n\nДа го скрия ли?" : "I suggest hiding it.\n\nHide it?");
       return `⚠️ ${bg ? "Коментар" : "Comment"} ${where}\n\n${why} ${what}`;
     }
-    return `💬 ${bg ? "Нов коментар" : "New comment"} ${where}\n\n${bg ? "Предложен отговор" : "Suggested reply"}:\n${quote(it.reply_text ?? "", lang)}\n\n${bg ? "Да отговоря ли?" : "Reply?"}`;
+    return `💬 ${bg ? "Нов коментар" : "New comment"} ${where}\n\n${bg ? "Предложен отговор" : "Suggested reply"}:\n${quote(keep(it.reply_text ?? ""), lang)}\n\n${bg ? "Да отговоря ли?" : "Reply?"}`;
   }
   const posts = new Set(items.map((it) => it.comment.post_ref)).size;
   const head = bg
@@ -122,10 +124,10 @@ export function commentProposalText(items: CommentSetItem[], lang: Lang, o: { ba
     : `💬 ${items.length} new ${items.length === 1 ? "comment" : "comments"} under ${posts} ${posts === 1 ? "post" : "posts"}`;
   const lines = items.flatMap((it, i) => {
     const c = it.comment;
-    const first = `${i + 1}. ${author(c, lang)} (${networkName(c)}) ${bg ? "под" : "under"} ${quote(captionOf(c, lang), lang)}: ${quote(excerpt(c.text, BATCH_COMMENT_MAX), lang)}`;
+    const first = `${i + 1}. ${author(c, lang)} (${networkName(c)}) ${bg ? "под" : "under"} ${quote(captionOf(c, lang), lang)}: ${quote(keep(excerpt(c.text, BATCH_COMMENT_MAX)), lang)}`;
     const second = it.moderate
       ? `   → ${it.moderate === "delete" ? tr(lang, "изтриване (спам или обиден)", "deletion (spam or abuse)") : tr(lang, "скриване (спам или обиден)", "hiding (spam or abuse)")}`
-      : `   → ${quote(it.reply_text ?? "", lang)}`;
+      : `   → ${quote(keep(it.reply_text ?? ""), lang)}`;
     return [first, second];
   });
   const foot = bg ? "✅ отговаря на всички · ✏️ кажете кое да променя · ❌ отказва всички" : "✅ replies to all · ✏️ tell me which to change · ❌ cancels all";
@@ -135,8 +137,8 @@ export function commentProposalText(items: CommentSetItem[], lang: Lang, o: { ba
 export function commentSetSummary(items: CommentSetItem[]): { summary_bg: string; summary_en: string } {
   if (items.length === 1) {
     const it = items[0];
-    const name = author(it.comment, "bg");
-    const nameEn = author(it.comment, "en");
+    const name = it.comment.author_name || "клиент";
+    const nameEn = it.comment.author_name || "a customer";
     if (it.moderate === "delete") return { summary_bg: `Изтриване на коментар от ${name}`, summary_en: `Delete a comment by ${nameEn}` };
     if (it.moderate) return { summary_bg: `Скриване на коментар от ${name}`, summary_en: `Hide a comment by ${nameEn}` };
     return { summary_bg: `Отговор на коментар от ${name}`, summary_en: `Reply to ${nameEn}'s comment` };

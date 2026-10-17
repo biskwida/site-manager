@@ -1,5 +1,6 @@
 "use client";
 import { useState, type ReactNode } from "react";
+import { unkeep } from "@/src/domain/format";
 import type { ChangeSet } from "@/src/domain/types";
 import { useLang } from "@/src/i18n";
 import type { AdminActionName } from "@/src/server/admin";
@@ -24,11 +25,12 @@ export function Chip({ children, tone = "plain" }: { children: ReactNode; tone?:
   return <span className={`inline-block rounded-full px-2.5 py-0.5 text-xs font-semibold ${tones[tone]}`}>{children}</span>;
 }
 
+// The server already removes the chat's keep markers (src/server/admin.ts); removing them here too keeps any other path clean.
 export function summaryOf(cs: ChangeSet, lang: "bg" | "en") {
-  return (lang === "bg" ? cs.summary_bg : cs.summary_en) || cs.summary_bg || cs.summary_en;
+  return unkeep((lang === "bg" ? cs.summary_bg : cs.summary_en) || cs.summary_bg || cs.summary_en);
 }
 export function previewOf(cs: ChangeSet, lang: "bg" | "en") {
-  return (lang === "bg" ? cs.preview_bg : cs.preview_en) || cs.preview_bg || cs.preview_en;
+  return unkeep((lang === "bg" ? cs.preview_bg : cs.preview_en) || cs.preview_bg || cs.preview_en);
 }
 
 interface ActionSpec {

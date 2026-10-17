@@ -66,33 +66,35 @@ describe("comment entities in the change engine", () => {
 
 describe("commentPreviewLines", () => {
   it("shows a reply as comment → reply, in both languages", () => {
-    expect(commentPreviewLines(reply, "bg")).toEqual(["• Отговор на коментар от Мария (Instagram): „Имате ли безглутенови?“ → „Да, имаме безглутенов хляб всеки ден.“"]);
-    expect(commentPreviewLines(reply, "en")).toEqual(["• Reply to a comment by Мария (Instagram): “Имате ли безглутенови?” → “Да, имаме безглутенов хляб всеки ден.”"]);
-    expect(renderPreview(state(), [reply], "bg", TZ)).toContain("Отговор на коментар от Мария");
+    // The customer's name and words and the reply drafted for them are kept as written in any language (src/bot/translate.ts).
+    expect(commentPreviewLines(reply, "bg")).toEqual(["• Отговор на коментар от ⟦Мария⟧ (Instagram): „⟦Имате ли безглутенови?⟧“ → „⟦Да, имаме безглутенов хляб всеки ден.⟧“"]);
+    expect(commentPreviewLines(reply, "en")).toEqual(["• Reply to a comment by ⟦Мария⟧ (Instagram): “⟦Имате ли безглутенови?⟧” → “⟦Да, имаме безглутенов хляб всеки ден.⟧”"]);
+    expect(renderPreview(state(), [reply], "bg", TZ)).toContain("Отговор на коментар от ⟦Мария⟧");
+    expect(commentPreviewLines({ ...reply, after: { ...reply.after, author_name: "" } }, "en")[0]).toMatch(/^• Reply to a comment by a customer \(Instagram\)/); // no name: Claudia's words
   });
   it("shows an undo of a reply as a removal", () => {
     const [inv] = invertChanges([reply]);
-    expect(commentPreviewLines(inv, "bg")).toEqual(["• Изтрива отговора на коментара от Мария (Instagram)"]);
-    expect(commentPreviewLines(inv, "en")).toEqual(["• Deletes the reply to Мария's comment (Instagram)"]);
+    expect(commentPreviewLines(inv, "bg")).toEqual(["• Изтрива отговора на коментара от ⟦Мария⟧ (Instagram)"]);
+    expect(commentPreviewLines(inv, "en")).toEqual(["• Deletes the reply to ⟦Мария⟧'s comment (Instagram)"]);
   });
   it("shows hide, delete (not undoable) and their undo rows", () => {
-    expect(commentPreviewLines(hide, "bg")).toEqual(["• Скрива коментар от Spam Bot (Facebook): „Buy followers at ...“"]);
-    expect(commentPreviewLines(hide, "en")).toEqual(["• Hides a comment by Spam Bot (Facebook): “Buy followers at ...”"]);
-    expect(commentPreviewLines(del, "bg")).toEqual(["• Изтрива коментар от Spam Bot (Facebook): „Buy followers at ...“", "  (изтриването не може да се отмени)"]);
-    expect(commentPreviewLines(del, "en")).toEqual(["• Deletes a comment by Spam Bot (Facebook): “Buy followers at ...”", "  (a deletion cannot be undone)"]);
+    expect(commentPreviewLines(hide, "bg")).toEqual(["• Скрива коментар от ⟦Spam Bot⟧ (Facebook): „⟦Buy followers at ...⟧“"]);
+    expect(commentPreviewLines(hide, "en")).toEqual(["• Hides a comment by ⟦Spam Bot⟧ (Facebook): “⟦Buy followers at ...⟧”"]);
+    expect(commentPreviewLines(del, "bg")).toEqual(["• Изтрива коментар от ⟦Spam Bot⟧ (Facebook): „⟦Buy followers at ...⟧“", "  (изтриването не може да се отмени)"]);
+    expect(commentPreviewLines(del, "en")).toEqual(["• Deletes a comment by ⟦Spam Bot⟧ (Facebook): “⟦Buy followers at ...⟧”", "  (a deletion cannot be undone)"]);
     const [unhide] = invertChanges([hide]);
-    expect(commentPreviewLines(unhide, "bg")).toEqual(["• Показва отново коментара от Spam Bot (Facebook)"]);
-    expect(commentPreviewLines(unhide, "en")).toEqual(["• Shows Spam Bot's comment again (Facebook)"]);
+    expect(commentPreviewLines(unhide, "bg")).toEqual(["• Показва отново коментара от ⟦Spam Bot⟧ (Facebook)"]);
+    expect(commentPreviewLines(unhide, "en")).toEqual(["• Shows ⟦Spam Bot⟧'s comment again (Facebook)"]);
     const [undel] = invertChanges([del]);
-    expect(commentPreviewLines(undel, "bg")).toEqual(["• Коментарът от Spam Bot е изтрит и не може да бъде върнат (Facebook)"]);
-    expect(commentPreviewLines(undel, "en")).toEqual(["• Spam Bot's comment was deleted and cannot be restored (Facebook)"]);
+    expect(commentPreviewLines(undel, "bg")).toEqual(["• Коментарът от ⟦Spam Bot⟧ е изтрит и не може да бъде върнат (Facebook)"]);
+    expect(commentPreviewLines(undel, "en")).toEqual(["• ⟦Spam Bot⟧'s comment was deleted and cannot be restored (Facebook)"]);
   });
   it("cuts long comments to one line of 60 characters", () => {
     expect(excerpt("a".repeat(80))).toBe(`${"a".repeat(59)}…`);
     expect(excerpt("first line\nsecond")).toBe("first line…");
     expect(excerpt("short")).toBe("short");
     const long = { ...reply, after: { ...reply.after, comment_text: "x".repeat(100) } };
-    expect(commentPreviewLines(long, "bg")[0]).toContain(`„${"x".repeat(59)}…“`);
+    expect(commentPreviewLines(long, "bg")[0]).toContain(`„⟦${"x".repeat(59)}…⟧“`);
   });
   it("has progress labels for the comment tools", () => {
     expect(progressLabel("reply_to_comments", "bg")).toBe("💬 Подготвям отговора…");

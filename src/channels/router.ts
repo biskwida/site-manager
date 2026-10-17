@@ -1,4 +1,4 @@
-import type { Messenger, SendOpts } from "../bot/messenger";
+import type { Messenger, ProposalLabels, SendOpts } from "../bot/messenger";
 import type { Lang } from "../domain/types";
 import type { Store } from "../store/types";
 import { channelOf, isMetaChannel, maskRef, type Channel } from "./ref";
@@ -47,8 +47,8 @@ export class ChannelRouter implements Messenger {
   async sendPhoto(chatRef: string, url: string, caption?: string) {
     return (await this.pick(chatRef)?.a.sendPhoto(chatRef, url, caption)) ?? null;
   }
-  async sendProposal(chatRef: string, text: string, setId: string, lang: Lang) {
-    return (await this.pick(chatRef)?.a.sendProposal(chatRef, text, setId, lang)) ?? null;
+  async sendProposal(chatRef: string, text: string, setId: string, lang: Lang, labels?: ProposalLabels) {
+    return (await this.pick(chatRef)?.a.sendProposal(chatRef, text, setId, lang, labels)) ?? null;
   }
   async conclude(chatRef: string, messageRef: string | null, full: string, short: string, opts?: SendOpts) {
     const p = this.pick(chatRef);

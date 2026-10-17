@@ -2,7 +2,7 @@ import { formatDate, formatDateTime, hhmm, localTime } from "../time";
 import { allergenName } from "./allergens";
 import { colorName, inkFor, INK_LIGHT } from "./color";
 import { commentModeLabel, commentPreviewLines } from "./comment-preview";
-import { categoryName, formatPrice, itemName, quote, tr, weekdayLabel } from "./format";
+import { categoryName, formatPrice, itemName, keep, quote, tr, weekdayLabel } from "./format";
 import { socialPreviewLines } from "./social-preview";
 import { wpPreviewLines } from "./wp-preview";
 import { MONO_TEXT_KEYS, WEEKDAYS, type Change, type Item, type Lang, type Row, type SiteState, type TextKey, type Theme, type WeekHours } from "./types";
@@ -70,23 +70,23 @@ function fieldValue(key: string, v: unknown, s: SiteState, lang: Lang): string {
   if (key === "allergens") return (v as number[]).join(", ") || tr(lang, "няма", "none");
   if (key === "category_id") {
     const c = s.categories.find((x) => x.id === v);
-    return c ? categoryName(c, lang) : String(v);
+    return c ? keep(categoryName(c, lang)) : String(v);
   }
-  return quote(String(v), lang);
+  return quote(keep(String(v)), lang);
 }
 
 function holidayAddLine(h: Row, lang: Lang, other: Lang): string {
-  return `• ${tr(lang, "Почивен ден", "Holiday")} ${formatDate(String(h.date), lang)}: ${String(h[`note_${lang}`])} / ${String(h[`note_${other}`])}`;
+  return `• ${tr(lang, "Почивен ден", "Holiday")} ${formatDate(String(h.date), lang)}: ${keep(String(h[`note_${lang}`]))} / ${keep(String(h[`note_${other}`]))}`;
 }
 function holidayRemoveLine(h: Row, lang: Lang): string {
   return `• ${tr(lang, "Премахва почивния ден", "Removes the holiday on")} ${formatDate(String(h.date), lang)}`;
 }
 function announcementAddLine(an: Row, lang: Lang, other: Lang, tz: string): string {
   const exp = an.expires_at ? ` (${tr(lang, "до", "until")} ${formatDateTime(String(an.expires_at), lang, tz)})` : "";
-  return `• ${tr(lang, "Съобщение", "Announcement")}: ${quote(String(an[`text_${lang}`]), lang)} / ${quote(String(an[`text_${other}`]), other)}${exp}`;
+  return `• ${tr(lang, "Съобщение", "Announcement")}: ${quote(keep(String(an[`text_${lang}`])), lang)} / ${quote(keep(String(an[`text_${other}`])), other)}${exp}`;
 }
 function announcementRemoveLine(an: Row, lang: Lang): string {
-  return `• ${tr(lang, "Премахва съобщението", "Removes the announcement")} ${quote(String(an[`text_${lang}`]), lang)}`;
+  return `• ${tr(lang, "Премахва съобщението", "Removes the announcement")} ${quote(keep(String(an[`text_${lang}`])), lang)}`;
 }
 
 /**
@@ -96,6 +96,8 @@ function announcementRemoveLine(an: Row, lang: Lang): string {
 export function renderPreview(s: SiteState, changes: Change[], lang: Lang, tz: string): string {
   const other: Lang = lang === "bg" ? "en" : "bg";
   const lines: string[] = [];
+  // A dish name stays as written in any language (keep markers: src/bot/translate.ts); the site's own texts below are kept too.
+  const name = (i: Item, l: Lang = lang) => keep(itemName(i, l));
   const itemOf = (c: Change): Item => {
     const found = s.items.find((i) => i.id === c.entity_id);
     if (found) return found;
@@ -109,31 +111,31 @@ export function renderPreview(s: SiteState, changes: Change[], lang: Lang, tz: s
     switch (c.op) {
       case "set_price": {
         const it = itemOf(c);
-        lines.push(`• ${itemName(it, lang)}: ${formatPrice(Number(b.price_eur), lang)} → ${formatPrice(Number(a.price_eur), lang)}`);
+        lines.push(`• ${name(it)}: ${formatPrice(Number(b.price_eur), lang)} → ${formatPrice(Number(a.price_eur), lang)}`);
         break;
       }
       case "set_sold_out": {
         const it = itemOf(c);
         const until = a.sold_out_until as string | null;
         lines.push(until
-          ? `• ${itemName(it, lang)}: ${tr(lang, "изчерпано до", "sold out until")} ${formatDateTime(until, lang, tz)}`
-          : `• ${itemName(it, lang)}: ${tr(lang, "отново в наличност", "back in stock")}`);
+          ? `• ${name(it)}: ${tr(lang, "изчерпано до", "sold out until")} ${formatDateTime(until, lang, tz)}`
+          : `• ${name(it)}: ${tr(lang, "отново в наличност", "back in stock")}`);
         break;
       }
       case "add_item": {
         if (c.after === null) {
-          lines.push(`• ${tr(lang, "Премахва", "Removes")} ${itemName(itemOf(c), lang)}`);
+          lines.push(`• ${tr(lang, "Премахва", "Removes")} ${name(itemOf(c))}`);
           break;
         }
         const it = c.after as unknown as Item;
         const cat = s.categories.find((x) => x.id === it.category_id);
-        const names = `${itemName(it, lang)} / ${itemName(it, other)}`;
+        const names = `${name(it)} / ${name(it, other)}`;
         const head = it.is_special
           ? `• ${tr(lang, "Специално днес", "Today's special")}${it.special_expires_at ? ` (${tr(lang, "до", "until")} ${localTime(new Date(it.special_expires_at), tz)})` : ""}: ${names} — ${formatPrice(it.price_eur, lang)}`
-          : `• ${tr(lang, "Ново в", "New in")} ${quote(cat ? categoryName(cat, lang) : "?", lang)}: ${names} — ${formatPrice(it.price_eur, lang)}`;
+          : `• ${tr(lang, "Ново в", "New in")} ${quote(cat ? keep(categoryName(cat, lang)) : "?", lang)}: ${names} — ${formatPrice(it.price_eur, lang)}`;
         lines.push(head);
         const descs: [Lang, string][] = [[lang, lang === "bg" ? it.desc_bg : it.desc_en], [other, other === "bg" ? it.desc_bg : it.desc_en]];
-        for (const [l, d] of descs) if (d) lines.push(`  ${l.toUpperCase()}: ${d}`);
+        for (const [l, d] of descs) if (d) lines.push(`  ${l.toUpperCase()}: ${keep(d)}`);
         lines.push(allergenLine(it.allergens, lang));
         break;
       }
@@ -141,20 +143,20 @@ export function renderPreview(s: SiteState, changes: Change[], lang: Lang, tz: s
         const it = itemOf(c);
         for (const k of Object.keys(a)) {
           const label = FIELD[k]?.[lang] ?? k;
-          lines.push(`• ${itemName(it, lang)}: ${label}: ${fieldValue(k, b[k], s, lang)} → ${fieldValue(k, a[k], s, lang)}`);
+          lines.push(`• ${name(it)}: ${label}: ${fieldValue(k, b[k], s, lang)} → ${fieldValue(k, a[k], s, lang)}`);
         }
         break;
       }
       case "remove_item": {
         const it = itemOf(c);
         lines.push(a.active === true
-          ? `• ${tr(lang, "Връща", "Restores")} ${itemName(it, lang)}`
-          : `• ${tr(lang, "Премахва", "Removes")} ${itemName(it, lang)}`);
+          ? `• ${tr(lang, "Връща", "Restores")} ${name(it)}`
+          : `• ${tr(lang, "Премахва", "Removes")} ${name(it)}`);
         break;
       }
       case "set_item_image": {
         const it = itemOf(c);
-        lines.push(a.image_media_id ? `• ${tr(lang, "Нова снимка за", "New photo for")} ${itemName(it, lang)}` : `• ${tr(lang, "Премахва снимката на", "Removes the photo of")} ${itemName(it, lang)}`);
+        lines.push(a.image_media_id ? `• ${tr(lang, "Нова снимка за", "New photo for")} ${name(it)}` : `• ${tr(lang, "Премахва снимката на", "Removes the photo of")} ${name(it)}`);
         break;
       }
       case "set_cover_image":
@@ -186,10 +188,10 @@ export function renderPreview(s: SiteState, changes: Change[], lang: Lang, tz: s
         const label = TEXT_LABEL[key]?.[lang] ?? key;
         const pick = (row: Record<string, unknown>, l: Lang) => row[`text_${l}`] ?? row[`${key}_${l}`] ?? row[key];
         const bv = pick(b, lang), av = pick(a, lang);
-        lines.push(`• ${label}: ${bv === undefined || bv === null ? "—" : quote(String(bv), lang)} → ${quote(String(av ?? ""), lang)}`);
+        lines.push(`• ${label}: ${bv === undefined || bv === null ? "—" : quote(keep(String(bv)), lang)} → ${quote(keep(String(av ?? "")), lang)}`);
         const bo = pick(b, other), ao = pick(a, other);
         if (ao !== undefined && ao !== null && !MONO_TEXT_KEYS.includes(key as TextKey)) {
-          lines.push(`  ${other.toUpperCase()}: ${bo === undefined || bo === null ? "—" : quote(String(bo), other)} → ${quote(String(ao), other)}`);
+          lines.push(`  ${other.toUpperCase()}: ${bo === undefined || bo === null ? "—" : quote(keep(String(bo)), other)} → ${quote(keep(String(ao)), other)}`);
         }
         break;
       }

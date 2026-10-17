@@ -764,6 +764,17 @@ export class SupabaseStore implements Store {
     if (error) throw new Error(`countCommentActions: ${error.message}`);
     return count ?? 0;
   }
+
+  // --- Translations (appended 2026-10-16) ---
+  async getTranslation(lang: ChatLang, sourceHash: string) {
+    const { data, error } = await this.db.from("translations").select("text").eq("lang", lang).eq("source_hash", sourceHash).maybeSingle();
+    if (error) throw new Error(`getTranslation: ${error.message}`);
+    return data ? str(data.text) : null;
+  }
+  async putTranslation(lang: ChatLang, sourceHash: string, text: string) {
+    checkMemberLang(lang); // the column check would refuse it anyway; this fails before the round trip
+    await must(this.db.from("translations").upsert({ lang, source_hash: sourceHash, text }, { onConflict: "lang,source_hash" }).select("lang"), "putTranslation");
+  }
 }
 
 export function toDeletionRequest(r: Row): DataDeletionRequest {

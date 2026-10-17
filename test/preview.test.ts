@@ -48,8 +48,9 @@ describe("renderPreview", () => {
   it("renders a price change in both languages", () => {
     const s = state();
     const changes = planChanges(s, [{ op: "set_price", item_id: "i-cap", price_eur: 3.2 }], ctx());
-    expect(renderPreview(s, changes, "bg", TZ)).toBe("• Капучино: 2,90 € → 3,20 €");
-    expect(renderPreview(s, changes, "en", TZ)).toBe("• Cappuccino: €2.90 → €3.20");
+    // Names and the site's own texts are kept as written in any language (keep markers, src/bot/translate.ts); the rest is Claudia's.
+    expect(renderPreview(s, changes, "bg", TZ)).toBe("• ⟦Капучино⟧: 2,90 € → 3,20 €");
+    expect(renderPreview(s, changes, "en", TZ)).toBe("• ⟦Cappuccino⟧: €2.90 → €3.20");
   });
   it("renders sold out with the return time and back in stock", () => {
     const s = state();
@@ -57,25 +58,25 @@ describe("renderPreview", () => {
       { op: "set_sold_out", item_id: "i-ban", until: "2026-10-10T06:00:00.000Z" },
       { op: "set_sold_out", item_id: "i-cap", until: null },
     ], ctx());
-    expect(renderPreview(s, changes, "bg", TZ)).toBe("• Баница със сирене: изчерпано до 10.10.2026, 09:00\n• Капучино: отново в наличност");
-    expect(renderPreview(s, changes, "en", TZ)).toBe("• Cheese banitsa: sold out until 10 Oct 2026, 09:00\n• Cappuccino: back in stock");
+    expect(renderPreview(s, changes, "bg", TZ)).toBe("• ⟦Баница със сирене⟧: изчерпано до 10.10.2026, 09:00\n• ⟦Капучино⟧: отново в наличност");
+    expect(renderPreview(s, changes, "en", TZ)).toBe("• ⟦Cheese banitsa⟧: sold out until 10 Oct 2026, 09:00\n• ⟦Cappuccino⟧: back in stock");
   });
   it("renders a new item with both names, descriptions, category and allergens", () => {
     const s = state();
     const changes = planChanges(s, [{ op: "add_item", item: { category_id: "c-coffee", name_bg: "Лате", name_en: "Latte", desc_bg: "С мляко", desc_en: "With milk", price_eur: 3.2, allergens: [7], is_special: false, special_expires_at: null } }], ctx());
-    expect(renderPreview(s, changes, "bg", TZ)).toBe("• Ново в „Кафе“: Лате / Latte — 3,20 €\n  BG: С мляко\n  EN: With milk\n  Алергени: 7 (Мляко)");
-    expect(renderPreview(s, changes, "en", TZ)).toBe("• New in “Coffee”: Latte / Лате — €3.20\n  EN: With milk\n  BG: С мляко\n  Allergens: 7 (Milk)");
+    expect(renderPreview(s, changes, "bg", TZ)).toBe("• Ново в „⟦Кафе⟧“: ⟦Лате⟧ / ⟦Latte⟧ — 3,20 €\n  BG: ⟦С мляко⟧\n  EN: ⟦With milk⟧\n  Алергени: 7 (Мляко)");
+    expect(renderPreview(s, changes, "en", TZ)).toBe("• New in “⟦Coffee⟧”: ⟦Latte⟧ / ⟦Лате⟧ — €3.20\n  EN: ⟦With milk⟧\n  BG: ⟦С мляко⟧\n  Allergens: 7 (Milk)");
   });
   it("renders a special with its expiry", () => {
     const s = state();
     const changes = planChanges(s, [{ op: "add_item", item: { category_id: "c-pastry", name_bg: "Супа топчета", name_en: "Meatball soup", desc_bg: "", desc_en: "", price_eur: 4.5, allergens: [1, 3], is_special: true, special_expires_at: "2026-10-09T15:00:00.000Z" } }], ctx());
-    expect(renderPreview(s, changes, "bg", TZ)).toBe("• Специално днес (до 18:00): Супа топчета / Meatball soup — 4,50 €\n  Алергени: 1 (Глутен), 3 (Яйца)");
+    expect(renderPreview(s, changes, "bg", TZ)).toBe("• Специално днес (до 18:00): ⟦Супа топчета⟧ / ⟦Meatball soup⟧ — 4,50 €\n  Алергени: 1 (Глутен), 3 (Яйца)");
   });
   it("shows both languages of a bilingual text even when the new texts are identical", () => {
     const s = state();
     const changes = planChanges(s, [{ op: "set_text", key: "welcome", text_bg: "Hi", text_en: "Hi" }], ctx());
-    expect(renderPreview(s, changes, "en", TZ)).toBe("• Welcome text: “Welcome!” → “Hi”\n  BG: „Добре дошли!“ → „Hi“");
-    expect(renderPreview(s, changes, "bg", TZ)).toBe("• Приветствие: „Добре дошли!“ → „Hi“\n  EN: “Welcome!” → “Hi”");
+    expect(renderPreview(s, changes, "en", TZ)).toBe("• Welcome text: “⟦Welcome!⟧” → “⟦Hi⟧”\n  BG: „⟦Добре дошли!⟧“ → „⟦Hi⟧“");
+    expect(renderPreview(s, changes, "bg", TZ)).toBe("• Приветствие: „⟦Добре дошли!⟧“ → „⟦Hi⟧“\n  EN: “⟦Welcome!⟧” → “⟦Hi⟧”");
   });
   it("renders the inverse of a set", () => {
     const s = state();
@@ -85,8 +86,8 @@ describe("renderPreview", () => {
       { op: "remove_item", item_id: "i-esp" },
     ], ctx());
     const applied = applyChanges(s, changes);
-    expect(renderPreview(applied, invertChanges(changes), "en", TZ)).toBe("• Restores Espresso\n• Cappuccino: €3.20 → €2.90\n• Removes Latte");
-    expect(renderPreview(applied, invertChanges(changes), "bg", TZ)).toBe("• Връща Еспресо\n• Капучино: 3,20 € → 2,90 €\n• Премахва Лате");
+    expect(renderPreview(applied, invertChanges(changes), "en", TZ)).toBe("• Restores ⟦Espresso⟧\n• ⟦Cappuccino⟧: €3.20 → €2.90\n• Removes ⟦Latte⟧");
+    expect(renderPreview(applied, invertChanges(changes), "bg", TZ)).toBe("• Връща ⟦Еспресо⟧\n• ⟦Капучино⟧: 3,20 € → 2,90 €\n• Премахва ⟦Лате⟧");
   });
   it("renders inverted holiday and announcement changes", () => {
     const s = state({
@@ -101,9 +102,9 @@ describe("renderPreview", () => {
     ], ctx());
     const applied = applyChanges(s, changes);
     expect(renderPreview(applied, invertChanges(changes), "en", TZ)).toBe([
-      "• Announcement: “Old text” / „Стар текст“",
-      "• Holiday 31 Dec 2026: New Year's Eve / Нова година",
-      "• Removes the announcement “Happy holidays!”",
+      "• Announcement: “⟦Old text⟧” / „⟦Стар текст⟧“",
+      "• Holiday 31 Dec 2026: ⟦New Year's Eve⟧ / ⟦Нова година⟧",
+      "• Removes the announcement “⟦Happy holidays!⟧”",
       "• Removes the holiday on 24 Dec 2026",
     ].join("\n"));
   });
@@ -151,17 +152,17 @@ describe("renderPreview", () => {
       "  Fri 08:00–18:00",
       "  Sat 09:00–16:00",
       "  Sun 10:00–14:00",
-      "• Holiday 24 Dec 2026: Christmas Eve / Бъдни вечер",
-      "• Announcement: “Happy holidays!” / „Весели празници!“",
-      "• Tagline: “Coffee on the corner” → “New tagline”",
-      "  BG: „Кафе на ъгъла“ → „Ново мото“",
+      "• Holiday 24 Dec 2026: ⟦Christmas Eve⟧ / ⟦Бъдни вечер⟧",
+      "• Announcement: “⟦Happy holidays!⟧” / „⟦Весели празници!⟧“",
+      "• Tagline: “⟦Coffee on the corner⟧” → “⟦New tagline⟧”",
+      "  BG: „⟦Кафе на ъгъла⟧“ → „⟦Ново мото⟧“",
       "• New cover photo",
       "• Accent colour: #2f6b4f → #aa3311 (red)",
-      "• Removes Espresso",
-      "• Cappuccino: name (EN): “Cappuccino” → “Cappuccino XL”",
+      "• Removes ⟦Espresso⟧",
+      "• ⟦Cappuccino⟧: name (EN): “⟦Cappuccino⟧” → “⟦Cappuccino XL⟧”",
     ].join("\n"));
     expect(renderPreview(s, changes, "bg", TZ).split("\n")[0]).toBe("• Работно време:");
     expect(renderPreview(s, changes, "bg", TZ)).toContain("  нед 10:00–14:00");
-    expect(renderPreview(s, changes, "bg", TZ)).toContain("• Премахва Еспресо");
+    expect(renderPreview(s, changes, "bg", TZ)).toContain("• Премахва ⟦Еспресо⟧");
   });
 });

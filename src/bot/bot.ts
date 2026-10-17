@@ -87,7 +87,8 @@ export function createBot(d: BotDeps): Bot {
   bot.catch(async (err) => {
     console.error("bot error:", err.error instanceof Error ? err.error.message : err.error);
     const lang = langFromCode(err.ctx.from?.language_code);
-    await err.ctx.reply(copy(lang).error).catch(() => undefined);
+    // Through the messenger like every other line to an owner (translated for a member in another language); it never throws.
+    if (err.ctx.chat) await d.messenger.send(makeRef("tg", err.ctx.chat.id), copy(lang).error);
   });
   return bot;
 }

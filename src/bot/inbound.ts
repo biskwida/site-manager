@@ -4,7 +4,7 @@ import { followsAgentReply, holdPhoto } from "../agent/memory";
 import { PHOTO_NO_CAPTION } from "../agent/prompt";
 import type { ImageInput } from "../agent/run";
 import { channelOf, isMetaChannel, maskRef, type Channel } from "../channels/ref";
-import { baseLang, countLatinWords, countWords, detectScriptLang, isLatinText, isMarkerlessCyrillic } from "../domain/format";
+import { baseLang, countLatinWords, countWords, detectScriptLang, isLatinText, isMarkerlessCyrillic, keep } from "../domain/format";
 import type { ChatLang, Member } from "../domain/types";
 import { handleDecision, parseCallback } from "./approvals";
 import type { BotDeps } from "./bot";
@@ -378,5 +378,6 @@ async function handleVoice(d: BotDeps, member: Member, m: InboundMessage) {
   // keeps the stored one. A transcript never goes to the classifier.
   const speaker = await followLanguage(d, member, countWords(text) >= VOICE_LANG_MIN_WORDS ? spoken : null);
   d.startRun({ venueId: member.venue_id, chatRef: member.chat_ref, member: speaker, text, source: "voice", replyTo: m.messageRef });
-  await d.messenger.send(member.chat_ref, copy(baseLang(speaker.lang)).heard(text));
+  // The transcript is the owner's own words: quoted as heard in any language (kept).
+  await d.messenger.send(member.chat_ref, copy(baseLang(speaker.lang)).heard(keep(text)));
 }

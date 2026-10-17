@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { planChanges } from "@/src/domain/changes";
+import { renderPreview } from "@/src/domain/preview";
 import { adminAction, adminOverview } from "@/src/server/admin";
 import { FakeMessenger, makeDemo } from "./helpers";
 
@@ -38,6 +39,32 @@ describe("admin", () => {
     const after = await adminOverview(store, venue, T0, "https://site.example");
     expect(after.log.map((x) => x.status)).toEqual(["applied", "cancelled", "rejected", "reverted"]);
     expect(after.log[0]).toMatchObject({ source: "undo", undoes_id: p1.id });
+  });
+  it("shows no keep marker anywhere: pending, scheduled and logged sets, and the WordPress and social summaries (the chat keeps them, the dashboard never)", async () => {
+    const { store, venue, items } = await makeDemo();
+    const site = await store.getSite(venue.id);
+    const changes = planChanges(site, [{ op: "set_price", item_id: items.Cappuccino.id, price_eur: 3.2 }], { newId: () => "n", now: T0.toISOString() });
+    // Stored previews keep their markers (they are chat texts); a summary may hold one too (the tick's automatic sets and their undo).
+    const kept = { summary_bg: "Отмяна: ⟦Капучино⟧ отново в наличност", summary_en: "Undo: ⟦Cappuccino⟧ back in stock", preview_bg: renderPreview(site, changes, "bg", venue.tz), preview_en: renderPreview(site, changes, "en", venue.tz) };
+    expect(kept.preview_en).toBe("• ⟦Cappuccino⟧: €2.90 → €3.20");
+    const set = (status: "proposed" | "scheduled", applyAt: string | null = null) => store.createChangeSet({ venue_id: venue.id, chat_ref: "tg:1001", ...kept, source: "text", status, apply_at: applyAt, changes });
+    await set("proposed");
+    await set("scheduled", "2026-12-01T08:00:00.000Z");
+    const applied = await set("proposed");
+    await store.applyChangeSet(applied.id, T0.toISOString());
+    for (const kind of ["wordpress", "facebook"] as const) {
+      const dest = await store.upsertDestination({ venue_id: venue.id, kind, config: { site_url: "https://cafe.example", page_name: "Ъгъла" }, secrets: "x" });
+      await store.createSync({ venue_id: venue.id, destination_id: dest.id, change_set_id: applied.id, payload: { kind }, next_at: T0.toISOString() });
+    }
+    const o = await adminOverview(store, venue, T0, "https://site.example");
+    expect([o.pending.length, o.scheduled.length, o.log.length, o.wordpress?.syncs.length, o.social?.posts.length]).toEqual([1, 1, 1, 1, 1]);
+    const json = JSON.stringify(o);
+    expect(json).not.toMatch(/[⟦⟧]/);
+    expect(o.pending[0]).toMatchObject({ summary_en: "Undo: Cappuccino back in stock", preview_bg: "• Капучино: 2,90 € → 3,20 €", preview_en: "• Cappuccino: €2.90 → €3.20" });
+    expect(o.wordpress?.syncs[0]).toMatchObject({ summary_bg: "Отмяна: Капучино отново в наличност" });
+    expect(o.social?.posts[0]).toMatchObject({ summary_en: "Undo: Cappuccino back in stock" });
+    // The stored rows are untouched: the chat still reads its markers.
+    expect((await store.getChangeSet(applied.id)).preview_en).toBe("• ⟦Cappuccino⟧: €2.90 → €3.20");
   });
   it("tells a member who chats in a language without hand-written texts about dashboard decisions in English, not Bulgarian", async () => {
     const { store, venue, items } = await makeDemo();

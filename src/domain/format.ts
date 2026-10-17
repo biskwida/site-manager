@@ -141,6 +141,24 @@ export function tr(lang: Lang, bg: string, en: string): string {
   return lang === "bg" ? bg : en;
 }
 
+const KEEP_MARKERS = /[⟦⟧]/g;
+/**
+ * Text a translation must leave as written, inside a chat text: a dish or category name, the owner's quoted words, a caption, a
+ * customer's comment or a reply drafted for one ("⟦Flat white⟧"). Only chat texts are marked (previews, proposals, statuses): the
+ * same names on a website, in the wizard or on the dashboard never are, so itemName, categoryName and quote stay plain. Markers
+ * inside the text are dropped, so kept parts never nest, and empty text stays empty. src/bot/translate.ts keeps these parts and
+ * removes the markers before anything is sent.
+ */
+export function keep(text: string): string {
+  const plain = unkeep(text);
+  return plain ? `⟦${plain}⟧` : "";
+}
+
+/** The text without keep markers: what the owner reads in the chat, and what the dashboard and the draft banner show. */
+export function unkeep(text: string): string {
+  return text.replace(KEEP_MARKERS, "");
+}
+
 /** "2,90 €" (bg) / "€2.90" (en). */
 export function formatPrice(eur: number, lang: Lang): string {
   const fixed = eur.toFixed(2);

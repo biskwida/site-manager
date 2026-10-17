@@ -6,7 +6,7 @@ import type { WordPressClient } from "../destinations/wordpress-client";
 import { allergenName, allergenWarnings, suggestAllergens } from "../domain/allergens";
 import { invertChanges, isIso, planChanges, type PlanContext } from "../domain/changes";
 import { isSoldOut, visibleItems } from "../domain/effective";
-import { baseLang, categoryName, tr } from "../domain/format";
+import { baseLang, categoryName, tr, unkeep } from "../domain/format";
 import { closingToday, nextOpening, todayStatus } from "../domain/hours";
 import { renderPreview } from "../domain/preview";
 import { bulkPrices } from "../domain/pricing";
@@ -134,14 +134,15 @@ const NEXT_STEP: Record<ChangeSet["status"], string> = {
 export function makeTools(deps: AgentDeps) {
   const turnSets = deps.turnSets ?? new Set<string>();
   const d: ToolDeps = { ...deps, turnSets, sentPhotos: deps.sentPhotos ?? new Set<string>(), store: recordingStore(deps.store, turnSets) };
-  // Tools run one at a time per turn, even if the runner calls several at once.
+  // Tools run one at a time per turn, even if the runner calls several at once. Results reach the agent without keep markers
+  // (previews carry them for the chat): text it copies from a result into site content, a caption or a reply must have none.
   let queue: Promise<unknown> = Promise.resolve();
   const attempt = (fn: () => Promise<unknown>): Promise<string> => {
     const run = queue.then(async () => {
       try {
-        return JSON.stringify(await fn());
+        return unkeep(JSON.stringify(await fn()));
       } catch (e) {
-        return JSON.stringify({ error: e instanceof Error ? e.message : String(e) });
+        return unkeep(JSON.stringify({ error: e instanceof Error ? e.message : String(e) }));
       }
     });
     queue = run;

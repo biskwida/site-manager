@@ -275,7 +275,9 @@ create table if not exists public.data_deletion_requests (
 );
 
 -- Translations of Claudia's fixed texts (2026-10-16) into conversation languages other than Bulgarian and English: one row per
--- language and source text (source_hash: sha256 of the text), written once and then reused. Server-only (policies.sql).
+-- language and source text (source_hash: sha256 of the text), written once and then reused. Names, quotes, captions and customer
+-- words are numbered markers (⟦1⟧) in both the source and the stored text (src/bot/translate.ts): no customer text is kept here.
+-- Server-only (policies.sql).
 create table if not exists public.translations (
   lang text not null check (lang ~ '^[a-z]{2}$'),
   source_hash text not null,

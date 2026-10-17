@@ -4,6 +4,7 @@
 import { makeTools } from "../src/agent/tools";
 import { handleDecision } from "../src/bot/approvals";
 import { handleInbound } from "../src/bot/inbound";
+import { withTranslation } from "../src/bot/translate";
 import { ConsoleMessenger } from "../src/channels/console";
 import { ChannelRouter } from "../src/channels/router";
 import { seedDemo } from "../src/seed/demo";
@@ -15,7 +16,8 @@ const store = new InMemoryStore();
 const { venue, items } = await seedDemo(store);
 await store.upsertMember({ venue_id: venue.id, chat_ref: "tg:1", role: "owner", lang: "bg" });
 const member = (await store.findMember("tg:1"))!;
-const messenger = new ConsoleMessenger();
+// As in production (src/server/deps.ts): the owner reads no keep markers (a Bulgarian owner: nothing to translate).
+const messenger = withTranslation(new ConsoleMessenger(), { store, translate: null });
 let now = new Date("2026-10-09T09:00:00.000Z"); // Friday 12:00 in Sofia
 const clock = () => now;
 const tools = makeTools({ store, venueId: venue.id, chatRef: "tg:1", member, messenger, now: clock, baseUrl: "http://localhost:3000" });
@@ -88,7 +90,7 @@ assert(t2.applied.includes(sc.change_set_id) && (await store.getSite(venue.id)).
 console.log("\n8. Messenger owner: bare-code link, apply tap, the 24 h rule");
 // Meta leg: a Messenger owner links with a bare code, proposes, taps apply; a proactive reminder is skipped after 25 h of silence.
 const fbLog: string[] = [];
-const router = new ChannelRouter({ store, now: clock, adapters: { fb: new ConsoleMessenger((l) => fbLog.push(l)) } });
+const router = withTranslation(new ChannelRouter({ store, now: clock, adapters: { fb: new ConsoleMessenger((l) => fbLog.push(l)) } }), { store, translate: null });
 const botDeps = { token: "t", store, messenger: router, baseUrl: "http://localhost:3000", now: clock, startRun: () => undefined, transcribe: null, download: async () => ({ bytes: new Uint8Array(), contentType: "" }) };
 const code = await store.createInvite(venue.id, "owner", new Date(clock().getTime() + 86_400_000).toISOString());
 await handleInbound(botDeps, { chatRef: "fb:4242", kind: "text", text: code });

@@ -13,6 +13,7 @@ import { createBot, type BotDeps, type RunRequest } from "../bot/bot";
 import { makeLangClassifier } from "../bot/lang-classify";
 import { downloadTelegramFile } from "../bot/media";
 import { TelegramMessenger, type Messenger } from "../bot/messenger";
+import { makeTranslator, withTranslation } from "../bot/translate";
 import { makeTranscriber, type Transcriber } from "../bot/voice";
 import { loadConfig, type Config } from "../config";
 import { FakeDeployer } from "../deploy/fake";
@@ -36,7 +37,10 @@ import { httpVisualClient } from "../visual/client";
 export interface ServerDeps {
   config: Config;
   store: Store;
-  /** The ChannelRouter: dispatches by chat_ref prefix to the per-channel adapters. */
+  /**
+   * Every text to an owner goes through this: withTranslation (src/bot/translate.ts) in front of the ChannelRouter, which dispatches by
+   * chat_ref prefix to the per-channel adapters. The webhook turns, the approvals, the dashboard and the tick all send through it.
+   */
   messenger: Messenger;
   bot: Bot;
   /** Shared with createBot; the Meta webhook route reuses it for inbound handling. */
@@ -154,7 +158,10 @@ export async function makeServerDeps(o: DepsOptions): Promise<ServerDeps> {
   if (config.metaPageToken) adapters.fb = adapters.ig = new MetaMessenger({ pageToken: config.metaPageToken });
   if (config.whatsappToken && config.whatsappPhoneNumberId) adapters.wa = new WhatsAppMessenger({ token: config.whatsappToken, phoneNumberId: config.whatsappPhoneNumberId });
   if (isMemory) for (const ch of ["fb", "ig", "wa"] as const) adapters[ch] ??= new ConsoleMessenger(log);
-  const messenger = new ChannelRouter({ store: store2, now: () => new Date(), adapters });
+  // Members chatting in a language other than Bulgarian or English get Claudia's fixed texts translated (TRANSLATE_MODEL, cached);
+  // every member gets them without keep markers. Without an API key those languages get the English texts.
+  const router = new ChannelRouter({ store: store2, now: () => new Date(), adapters });
+  const messenger = withTranslation(router, { store: store2, translate: anthropic ? makeTranslator(anthropic, config.translateModel, store2) : null });
   botDeps.messenger = messenger;
   const waDownload: MediaFetch = (mediaId) => downloadWhatsAppMedia(config.whatsappToken ?? "", mediaId);
   const fetchUrl: MediaFetch = (url) => downloadUrl(url);

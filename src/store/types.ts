@@ -438,6 +438,15 @@ export interface Store {
   countCommentActions(venueId: string, fromIso: string, toIso: string): Promise<number>;
 }
 
+// --- Translations (appended 2026-10-16; src/bot/translate.ts) ---
+// Declaration merging: the Store interface above gains the translation cache (table translations, server-only).
+export interface Store {
+  /** The cached translation into `lang` of the fixed text whose sha256 hex is `sourceHash`; null when there is none. */
+  getTranslation(lang: ChatLang, sourceHash: string): Promise<string | null>;
+  /** Stores a translation; a second write for the same language and text replaces the first. `lang` must pass checkMemberLang (translations.lang check). */
+  putTranslation(lang: ChatLang, sourceHash: string, text: string): Promise<void>;
+}
+
 /** What a comment set says once its customer text is gone (redactCommentSets). */
 export const COMMENT_REDACTED = { bg: "Коментар, изтрит след 30 дни", en: "Comment removed after 30 days" } as const;
 /** A change row's before/after without the customer's text and name (other keys kept); null stays null. */

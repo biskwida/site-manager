@@ -45,7 +45,9 @@ describe("runTick", () => {
     expect(after.items.find((i) => i.id === special.id)?.active).toBe(false);
     const autos = await store.listChangeSets(venue.id, { status: ["applied"] });
     expect(autos.filter((s) => s.source === "auto")).toHaveLength(2);
-    expect(autos.find((s) => s.source === "auto" && s.changes[0].op === "set_sold_out")).toMatchObject({ summary_bg: "Баница със сирене отново в наличност", summary_en: "Cheese banitsa back in stock" });
+    // The dish name is kept like in every preview (it reaches a chat through an undo); the dashboard shows it without the markers.
+    expect(autos.find((s) => s.source === "auto" && s.changes[0].op === "set_sold_out")).toMatchObject({ summary_bg: "⟦Баница със сирене⟧ отново в наличност", summary_en: "⟦Cheese banitsa⟧ back in stock", preview_en: "• ⟦Cheese banitsa⟧: back in stock" });
+    expect(autos.find((s) => s.source === "auto" && s.changes[0].op === "remove_item")).toMatchObject({ summary_bg: "Специалното „⟦Супа⟧“ изтече", preview_bg: "• Премахва ⟦Супа⟧" });
     const r2 = await runTick({ store, messenger: null, now: new Date("2026-10-09T09:05:00.000Z") });
     expect(r2.auto).toEqual([]);
   });

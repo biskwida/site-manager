@@ -15,7 +15,7 @@ export interface Config {
    * most 300 characters, thinking off (claude-haiku-5-5 accepts that), 3 s limit, no retries.
    */
   langClassifyModel: string;
-  /** Small model that translates Claudia's fixed texts into a conversation language other than Bulgarian or English (TRANSLATE_MODEL), cached per text in the translations table. */
+  /** Small model that translates Claudia's fixed texts into a conversation language other than Bulgarian or English (TRANSLATE_MODEL, src/bot/translate.ts), cached per text in the translations table. */
   translateModel: string;
   telegramToken: string;
   telegramWebhookSecret: string;

@@ -7,13 +7,15 @@ import type { Lang } from "../domain/types";
 export interface SendOpts {
   /** Started by us, not a reply: the router enforces Meta's 24 h window. */
   proactive?: boolean;
+  /** The agent's own reply, already in the owner's language: withTranslation (src/bot/translate.ts) only removes keep markers. */
+  verbatim?: boolean;
 }
 
 export interface Messenger {
   /** Plain message; returns the message ref or null if sending failed (never throws). */
   send(chatRef: string, text: string, opts?: SendOpts): Promise<string | null>;
-  /** Preview with ✅ / ✏️ / ❌ buttons. */
-  sendProposal(chatRef: string, text: string, setId: string, lang: Lang): Promise<string | null>;
+  /** Preview with ✅ / ✏️ / ❌ buttons; `labels` (another conversation language, from withTranslation) replace the Bulgarian or English ones. */
+  sendProposal(chatRef: string, text: string, setId: string, lang: Lang, labels?: ProposalLabels): Promise<string | null>;
   /** A picture by public https URL, with an optional caption. Returns the message ref or null if sending failed (never throws). */
   sendPhoto(chatRef: string, url: string, caption?: string): Promise<string | null>;
   /** Telegram: edits the proposal message to `full` and removes the buttons. Meta channels: send `short` as a new message. Best-effort. */
@@ -26,19 +28,25 @@ export interface Messenger {
   remove?(chatRef: string, messageRef: string): Promise<void>;
 }
 
-/** The three proposal buttons, shared by every channel (labels ≤ 20 characters for Meta). */
-export function proposalButtons(lang: Lang): { id: "apply" | "change" | "cancel"; label: string }[] {
+export type ProposalButtonId = "apply" | "change" | "cancel";
+/** Button labels in another conversation language (withTranslation): each at most PROPOSAL_LABEL_MAX characters. */
+export type ProposalLabels = Record<ProposalButtonId, string>;
+/** WhatsApp and Messenger cap a button title at 20 characters. */
+export const PROPOSAL_LABEL_MAX = 20;
+
+/** The three proposal buttons, shared by every channel (labels ≤ 20 characters for Meta): Bulgarian or English, or the given `labels`. */
+export function proposalButtons(lang: Lang, labels?: ProposalLabels): { id: ProposalButtonId; label: string }[] {
   const bg = lang === "bg";
   return [
-    { id: "apply", label: bg ? "✅ Приложи" : "✅ Apply" },
-    { id: "change", label: bg ? "✏️ Промени" : "✏️ Change" },
-    { id: "cancel", label: bg ? "❌ Откажи" : "❌ Cancel" },
+    { id: "apply", label: labels?.apply ?? (bg ? "✅ Приложи" : "✅ Apply") },
+    { id: "change", label: labels?.change ?? (bg ? "✏️ Промени" : "✏️ Change") },
+    { id: "cancel", label: labels?.cancel ?? (bg ? "❌ Откажи" : "❌ Cancel") },
   ];
 }
 
-export function proposalKeyboard(setId: string, lang: Lang): InlineKeyboard {
+export function proposalKeyboard(setId: string, lang: Lang, labels?: ProposalLabels): InlineKeyboard {
   const kb = new InlineKeyboard();
-  for (const b of proposalButtons(lang)) kb.text(b.label, `cs:${b.id}:${setId}`);
+  for (const b of proposalButtons(lang, labels)) kb.text(b.label, `cs:${b.id}:${setId}`);
   return kb;
 }
 
@@ -69,9 +77,9 @@ export class TelegramMessenger implements Messenger {
       return null;
     }
   }
-  async sendProposal(chatRef: string, text: string, setId: string, lang: Lang) {
+  async sendProposal(chatRef: string, text: string, setId: string, lang: Lang, labels?: ProposalLabels) {
     try {
-      const m = await this.api.sendMessage(telegramChat(chatRef), text, { reply_markup: proposalKeyboard(setId, lang) });
+      const m = await this.api.sendMessage(telegramChat(chatRef), text, { reply_markup: proposalKeyboard(setId, lang, labels) });
       return String(m.message_id);
     } catch (e) {
       console.error("[messenger] sendProposal failed:", e instanceof Error ? e.message : e);

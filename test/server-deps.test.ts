@@ -161,4 +161,27 @@ describe("makeServerDeps (Supabase mode)", () => {
     expect(typeof deps.waDownload).toBe("function");
     expect(typeof deps.fetchUrl).toBe("function");
   });
+  it("puts every channel behind withTranslation: a German owner's text goes through TRANSLATE_MODEL on the shared client, a Bulgarian one only loses its markers", async () => {
+    const calls: Record<string, unknown>[] = [];
+    const client = { beta: { messages: { create: async (p: Record<string, unknown>) => (calls.push(p), { stop_reason: "end_turn", content: [{ type: "text", text: "Hallo ⟦1⟧" }] }) } } } as unknown as Anthropic;
+    const logs: string[] = [];
+    const deps = await makeServerDeps({ defer: (fn) => void fn(), env: { SITE_MANAGER_STORE: "memory", DEMO_OWNER_CHAT_REF: "fb:4242", TRANSLATE_MODEL: "claude-haiku-test" }, log: (s) => logs.push(s), client });
+    const venue = (await deps.store.getVenueBySlug("agala"))!;
+    await deps.store.setMemberLang(venue.id, "fb:4242", "de");
+    await deps.messenger.send("fb:4242", "Hello ⟦Maria⟧");
+    expect(logs).toContain("→ [fb:4242] Hallo Maria");
+    expect(calls).toHaveLength(1);
+    expect(calls[0]).toMatchObject({ model: "claude-haiku-test" });
+    await deps.store.setMemberLang(venue.id, "fb:4242", "bg");
+    await deps.messenger.send("fb:4242", "Здравей ⟦Мария⟧");
+    expect(logs).toContain("→ [fb:4242] Здравей Мария");
+    expect(calls).toHaveLength(1);
+    expect(deps.botDeps.messenger).toBe(deps.messenger); // the webhook turns, approvals and the tick all send through it
+
+    // Without an API key: no translation, the English text without markers.
+    const offline = await makeServerDeps({ defer: (fn) => void fn(), env: { SITE_MANAGER_STORE: "memory", DEMO_OWNER_CHAT_REF: "fb:4242" }, log: (s) => logs.push(s) });
+    await offline.store.setMemberLang((await offline.store.getVenueBySlug("agala"))!.id, "fb:4242", "de");
+    await offline.messenger.send("fb:4242", "Hello ⟦Maria⟧");
+    expect(logs).toContain("→ [fb:4242] Hello Maria");
+  });
 });

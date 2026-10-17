@@ -214,6 +214,7 @@ describe("handleInbound", () => {
     expect(seen).toEqual(["audio/mp4"]);
     expect(runs[0]).toMatchObject({ source: "voice", text: "Капучиното става три и двайсет", replyTo: "wamid.7" });
     expect(texts(messenger)[0]).toBe("🎤 Чух: „Капучиното става три и двайсет“");
+    expect(messenger.raw[0]).toBe("🎤 Чух: „⟦Капучиното става три и двайсет⟧“"); // the owner's words stay as heard in any language
   });
   it("guesses the voice type from the file name when the download's content type is uninformative", async () => {
     const seen: string[] = [];

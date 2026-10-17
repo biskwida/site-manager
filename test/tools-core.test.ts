@@ -39,7 +39,8 @@ describe("propose_changes", () => {
     const r = await call(tools, "propose_changes", { summary_bg: "Капучино 3,20 €", summary_en: "Cappuccino €3.20", changes: [{ op: "set_price", item_id: items.Cappuccino.id, price_eur: 3.2 }] });
     expect(r).toMatchObject({ status: "proposed", preview: "• Капучино: 2,90 € → 3,20 €" });
     const cs = await store.getChangeSet(r.change_set_id as string);
-    expect(cs).toMatchObject({ status: "proposed", source: "text", chat_ref: "tg:1001", preview_bg: "• Капучино: 2,90 € → 3,20 €", preview_en: "• Cappuccino: €2.90 → €3.20", message_ref: "100" });
+    // Stored as chat texts: the dish name kept (src/bot/translate.ts); the tool result above and the owner's message have no marker.
+    expect(cs).toMatchObject({ status: "proposed", source: "text", chat_ref: "tg:1001", preview_bg: "• ⟦Капучино⟧: 2,90 € → 3,20 €", preview_en: "• ⟦Cappuccino⟧: €2.90 → €3.20", message_ref: "100" });
     expect(messenger.sent[0]).toMatchObject({ chatRef: "tg:1001", setId: cs.id, lang: "bg", text: "• Капучино: 2,90 € → 3,20 €\n\nДа приложа ли?" });
     expect((await store.getSite(venue.id)).items.find((i) => i.id === items.Cappuccino.id)?.price_eur).toBe(2.9); // not applied yet
   });

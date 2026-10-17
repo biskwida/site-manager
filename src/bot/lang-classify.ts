@@ -18,9 +18,9 @@ const REQUEST_OPTIONS = { timeout: 3000, maxRetries: 0 };
 /**
  * A failed call for the log: the error's class ("APIConnectionTimeoutError", "RateLimitError 429"), never its message, which can
  * echo the request. The SDK's errors keep the default name "Error", so the class comes from the constructor; a timeout is
- * named by instanceof, since a minified build may rename classes.
+ * named by instanceof, since a minified build may rename classes. src/bot/translate.ts logs its failures the same way.
  */
-function failureOf(e: unknown): string {
+export function failureOf(e: unknown): string {
   if (e instanceof Anthropic.APIConnectionTimeoutError) return "APIConnectionTimeoutError";
   if (!(e instanceof Error)) return "unknown error";
   const name = e.name !== "Error" ? e.name : e.constructor.name;
