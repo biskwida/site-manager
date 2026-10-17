@@ -176,3 +176,22 @@ describe("validateForPublish", () => {
     expect(bothLangs(" a ", " b ")).toEqual({ bg: "a", en: "b" });
   });
 });
+
+describe("Randevue fields on a draft item", () => {
+  it("accepts an https image url and an ISO sold-out date, refuses http, junk and over-long values, and publishes without them", () => {
+    const d = full();
+    const item = d.categories[0].items[0];
+    const ok = WizardDraftSchema.safeParse({ ...d, categories: [{ ...d.categories[0], items: [{ ...item, image_url: "https://x.supabase.co/storage/v1/object/public/a.png", sold_out_until: "2026-10-16T00:00:00+00:00" }] }] });
+    expect(ok.success).toBe(true);
+    expect(validateForPublish(ok.data!)).toEqual({ ok: true });
+    const bad = (patch: Record<string, unknown>) => WizardDraftSchema.safeParse({ ...d, categories: [{ ...d.categories[0], items: [{ ...item, ...patch }] }] }).success;
+    expect(bad({ image_url: "http://x.supabase.co/a.png" })).toBe(false);
+    expect(bad({ image_url: "not a url" })).toBe(false);
+    expect(bad({ image_url: `https://x.supabase.co/${"a".repeat(1000)}` })).toBe(false);
+    expect(bad({ sold_out_until: "tomorrow" })).toBe(false);
+    expect(bad({ sold_out_until: "2026-10-16" })).toBe(false);
+    expect(bad({ sold_out_until: null })).toBe(false);
+    // the fields are optional: an item without them still parses, and a patch may carry them
+    expect(WizardPatchSchema.safeParse({ categories: d.categories }).success).toBe(true);
+  });
+});

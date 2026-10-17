@@ -381,11 +381,14 @@ async function readCapped(res: Response, max: number): Promise<Uint8Array | null
   return out;
 }
 
-/** One stored CDN URL → image bytes. Redirects are followed by hand (at most 3), each hop back on an Instagram CDN host. */
-export async function downloadImage(f: typeof fetch, url: string): Promise<{ ok: true; bytes: Uint8Array; type: NonNullable<ReturnType<typeof sniffImageType>> } | { ok: false; code: IgFailCode }> {
+/**
+ * One stored CDN URL → image bytes. Redirects are followed by hand (at most 3), each hop checked against `allow`
+ * (Instagram's CDN by default; the Randevue import passes its Supabase bucket rule). Capped at WIZARD_MAX_IMAGE_BYTES.
+ */
+export async function downloadImage(f: typeof fetch, url: string, allow: (u: unknown) => u is string = isInstagramCdnUrl): Promise<{ ok: true; bytes: Uint8Array; type: NonNullable<ReturnType<typeof sniffImageType>> } | { ok: false; code: IgFailCode }> {
   let current = url;
   for (let hop = 0; hop <= 3; hop++) {
-    if (!isInstagramCdnUrl(current)) return { ok: false, code: "fetch_failed" };
+    if (!allow(current)) return { ok: false, code: "fetch_failed" };
     let res: Response;
     try {
       res = await f(current, { redirect: "manual", headers: { accept: "image/*" }, signal: AbortSignal.timeout(IG_FETCH_TIMEOUT_MS) });

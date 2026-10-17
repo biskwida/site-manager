@@ -25,6 +25,19 @@ describe("edit helpers", () => {
     expect(blankItem()).toMatchObject({ name_bg: "", name_en: "", desc_bg: "", desc_en: "", price_eur: 1, allergens: [], image_media_id: null });
     expect(blankCategory()).toMatchObject({ name_bg: "", name_en: "", items: [] });
   });
+  it("carries a Randevue image url and sold-out date onto the wizard item, and never the review-only hidden flag", () => {
+    const merged = mergeExtracted([], {
+      categories: [{ name_bg: "Кафе", name_en: "Coffee", items: [
+        { name_bg: "Лате", name_en: "Latte", desc_bg: "", desc_en: "", price_eur: 3.2, currency_seen: "EUR", allergens: [7], image_url: "https://x.supabase.co/storage/v1/object/public/a.png", sold_out_until: "2026-10-16T00:00:00+00:00", hidden: true },
+        { name_bg: "Чай", name_en: "Tea", desc_bg: "", desc_en: "", price_eur: 2, currency_seen: "EUR", allergens: [] },
+      ] }],
+      notes_bg: "", notes_en: "",
+    });
+    expect(merged[0].items[0]).toMatchObject({ name_en: "Latte", image_media_id: null, image_url: "https://x.supabase.co/storage/v1/object/public/a.png", sold_out_until: "2026-10-16T00:00:00+00:00" });
+    expect(merged[0].items[0]).not.toHaveProperty("hidden");
+    expect(merged[0].items[1]).not.toHaveProperty("image_url");
+    expect(merged[0].items[1]).not.toHaveProperty("sold_out_until");
+  });
   it("merges an extraction into existing categories by name and appends new ones", () => {
     const d = emptyDraft("classic");
     d.categories = [{ key: "c1", name_bg: "Кафе", name_en: "Coffee", items: [{ key: "i1", name_bg: "Еспресо", name_en: "Espresso", desc_bg: "", desc_en: "", price_eur: 1.8, allergens: [], image_media_id: null }] }];

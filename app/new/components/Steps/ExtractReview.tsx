@@ -12,13 +12,15 @@ type Cat = { name_bg: string; name_en: string; items: Row[] };
 /** The extraction as an editable checklist. Accept returns only the ticked rows, with edits applied. */
 export function ExtractReview({ result, onAccept, onDiscard }: { result: ExtractResult; onAccept: (r: ExtractResult) => void; onDiscard: () => void }) {
   const { t, lang } = useT();
-  const [cats, setCats] = useState<Cat[]>(() => result.categories.map((c) => ({ name_bg: c.name_bg, name_en: c.name_en, items: c.items.map((i) => ({ ...i, on: true })) })));
+  // A row Randevue does not show right now (`hidden`) starts unticked; the owner can still tick it.
+  const [cats, setCats] = useState<Cat[]>(() => result.categories.map((c) => ({ name_bg: c.name_bg, name_en: c.name_en, items: c.items.map((i) => ({ ...i, on: !i.hidden })) })));
+  const anyHidden = result.categories.some((c) => c.items.some((i) => i.hidden));
   const selected = cats.reduce((n, c) => n + c.items.filter((i) => i.on).length, 0);
   const total = cats.reduce((n, c) => n + c.items.length, 0);
   const patch = (ci: number, ii: number, p: Partial<Row>) => setCats(cats.map((c, x) => (x === ci ? { ...c, items: c.items.map((i, y) => (y === ii ? { ...i, ...p } : i)) } : c)));
   const accept = (all: boolean) =>
     // eslint-disable-next-line @typescript-eslint/no-unused-vars
-    onAccept({ notes_bg: result.notes_bg, notes_en: result.notes_en, categories: cats.map((c) => ({ name_bg: c.name_bg, name_en: c.name_en, items: c.items.filter((i) => all || i.on).map(({ on: _on, ...i }) => i) })).filter((c) => c.items.length > 0) });
+    onAccept({ notes_bg: result.notes_bg, notes_en: result.notes_en, categories: cats.map((c) => ({ name_bg: c.name_bg, name_en: c.name_en, items: c.items.filter((i) => all || i.on).map(({ on: _on, hidden: _hidden, ...i }) => i) })).filter((c) => c.items.length > 0) });
   const notes = lang === "bg" ? result.notes_bg : result.notes_en;
   const name = (c: { name_bg: string; name_en: string }) => (lang === "bg" ? c.name_bg : c.name_en) || c.name_bg || c.name_en;
   return (
@@ -28,6 +30,7 @@ export function ExtractReview({ result, onAccept, onDiscard }: { result: Extract
         <p className="mt-1 max-w-[60ch] text-fg-soft">{t("extract.lead")}</p>
       </div>
       {notes && <p className="rounded-xl bg-note-soft px-4 py-3 text-sm leading-snug text-fg"><span className="font-semibold">{t("extract.notes")}: </span>{notes}</p>}
+      {anyHidden && <p className="text-sm leading-snug text-fg-soft">{t("extract.hiddenHint")}</p>}
       {cats.map((c, ci) => (
         <section key={ci} aria-label={name(c)} className="grid gap-2">
           <h3 className="font-semibold">{name(c)}</h3>
@@ -36,7 +39,12 @@ export function ExtractReview({ result, onAccept, onDiscard }: { result: Extract
               <li key={ii} className={`grid gap-3 rounded-xl bg-panel p-3 ring-1 ring-line transition-opacity duration-150 ${it.on ? "" : "opacity-60"}`}>
                 <label className="flex min-h-11 items-center gap-3 font-semibold">
                   <input type="checkbox" checked={it.on} onChange={(e) => patch(ci, ii, { on: e.target.checked })} className="size-5 accent-brand" />
+                  {it.image_url && (
+                    // eslint-disable-next-line @next/next/no-img-element -- a Randevue product photo on its own CDN, copied at publish: not next/image material
+                    <img src={it.image_url} alt="" loading="lazy" referrerPolicy="no-referrer" className="size-11 shrink-0 rounded-lg bg-sunken object-cover" />
+                  )}
                   <span>{t("extract.include")}: {name(it)} · {formatPrice(it.price_eur, lang)}</span>
+                  {it.sold_out_until && <span className="rounded-full bg-note-soft px-2 py-0.5 text-xs font-semibold text-note">{t("extract.soldOut")}</span>}
                 </label>
                 <div className="grid gap-3 sm:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_6.5rem]">
                   <TextField label={t("menu.item.nameBg")} value={it.name_bg} onChange={(name_bg) => patch(ci, ii, { name_bg })} />

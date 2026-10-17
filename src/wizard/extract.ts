@@ -41,6 +41,14 @@ export interface ExtractResult {
       price_eur: number;
       currency_seen: "EUR" | "BGN" | "unknown";
       allergens: number[];
+      /**
+       * Set by the Randevue import only (src/wizard/randevue.ts), never by Claude: the tool schema below does not know these
+       * keys. A product photo to copy at publish, a sold-out date still in the future, and `hidden` for a product Randevue
+       * does not show right now (the review starts it unticked).
+       */
+      image_url?: string;
+      sold_out_until?: string;
+      hidden?: boolean;
     }[];
   }[];
   notes_bg: string;
@@ -123,6 +131,9 @@ export function postProcessExtract(r: ExtractResult): ExtractResult {
           price_eur: clampPrice(round2(eur)),
           currency_seen: it.currency_seen,
           allergens,
+          ...(it.image_url !== undefined ? { image_url: it.image_url } : {}),
+          ...(it.sold_out_until !== undefined ? { sold_out_until: it.sold_out_until } : {}),
+          ...(it.hidden !== undefined ? { hidden: it.hidden } : {}),
         };
       }),
     })),

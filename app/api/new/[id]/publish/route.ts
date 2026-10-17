@@ -11,5 +11,5 @@ export async function POST(req: Request, ctx: RouteContext<"/api/new/[id]/publis
   const deps = await getServerDeps((fn) => after(fn));
   const guard = await requireDraft(req, deps, id);
   if (guard instanceof Response) return guard;
-  return handlePublish({ store: deps.store, config: deps.config, now: () => new Date() }, guard.venue);
+  return handlePublish({ store: deps.store, config: deps.config, now: () => new Date(), fetch: deps.fetch, defer: (fn) => after(fn) }, guard.venue);
 }

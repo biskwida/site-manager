@@ -3,10 +3,12 @@ import { useState } from "react";
 import { ALLERGENS, allergenName } from "@/src/domain/allergens";
 import { blankCategory, blankItem, mergeExtracted, moveIndex } from "@/src/wizard/edit";
 import { EXTRACT_MAX_FILES, IMAGE_MEDIA_TYPES, type ExtractFile, type ExtractResult } from "@/src/wizard/extract";
+import { parseRandevueUrl } from "@/src/wizard/randevue";
 import type { WizardCategory, WizardItem } from "@/src/wizard/schema";
 import { aiUnavailable, api, EXTRACT_MAX_TOTAL_BYTES, fileToBase64 } from "../api";
 import { fieldError } from "../errors";
 import { Button, FileButton, Note, PriceField, Status, TextField } from "../Field";
+import { DEFAULT_HOURS } from "@/src/store/types";
 import { shrinkImage } from "../image";
 import type { StepProps } from "../types";
 import { useT } from "../useWizardText";
@@ -46,6 +48,9 @@ export function Menu({ id, draft, update, aiAvailable, fieldErrors }: StepProps)
   const [unavailable, setUnavailable] = useState(!aiAvailable);
   const [uploadError, setUploadError] = useState<string | null>(null);
   const [review, setReview] = useState<ExtractResult | null>(null);
+  const [rvUrl, setRvUrl] = useState("");
+  const [rvBusy, setRvBusy] = useState(false);
+  const [rvError, setRvError] = useState<string | null>(null);
   const active = cats.find((c) => c.key === activeKey) ?? cats[0] ?? null;
   const setCats = (categories: WizardCategory[]) => update({ categories });
   const patchCat = (key: string, patch: Partial<WizardCategory>) => setCats(cats.map((c) => (c.key === key ? { ...c, ...patch } : c)));
@@ -70,6 +75,22 @@ export function Menu({ id, draft, update, aiAvailable, fieldErrors }: StepProps)
     }
     if (r.data.categories.every((c) => c.items.length === 0)) { setUploadError(t("extract.empty")); return; }
     setReview(r.data);
+  }
+
+  async function onRandevue() {
+    setRvError(null);
+    if (!parseRandevueUrl(rvUrl)) { setRvError(t("menu.randevue.badUrl")); return; }
+    setRvBusy(true);
+    const r = await api.randevue(id, rvUrl.trim());
+    setRvBusy(false);
+    if (!r.ok) { setRvError(r.status === 400 || r.status === 429 || r.status === 502 ? (lang === "bg" ? r.error.bg : r.error.en) : t("menu.randevue.failed")); return; }
+    if (r.data.menu.categories.every((c) => c.items.length === 0)) { setRvError(t("extract.empty")); return; }
+    // The venue's name fills an empty Basics name; its hours replace the defaults only while the owner has not touched them.
+    const patch: Partial<typeof draft> = {};
+    if (!draft.name.trim() && r.data.venue.name) patch.name = r.data.venue.name;
+    if (r.data.venue.hours && JSON.stringify(draft.hours) === JSON.stringify(DEFAULT_HOURS)) patch.hours = r.data.venue.hours;
+    if (Object.keys(patch).length) update(patch);
+    setReview(r.data.menu);
   }
 
   if (review) {
@@ -168,6 +189,16 @@ export function Menu({ id, draft, update, aiAvailable, fieldErrors }: StepProps)
           </ol>
         )}
         {active && <div><Button onClick={() => patchCat(active.key, { items: [...active.items, blankItem()] })}>+ {t("menu.addItem")}</Button></div>}
+      </section>
+
+      <section aria-labelledby="menu-randevue" className="grid gap-3 border-t border-line pt-8">
+        <h2 id="menu-randevue" className="text-lg font-semibold leading-tight">{t("menu.randevue.title")}</h2>
+        <p className="max-w-[60ch] text-sm leading-snug text-fg-soft">{t("menu.randevue.hint")}</p>
+        <div className="grid gap-3 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-end">
+          <TextField label={t("menu.randevue.url")} value={rvUrl} inputMode="url" autoComplete="off" spellCheck={false} placeholder="https://randevue.app/bg-BG/…" disabled={rvBusy} onChange={(v) => { setRvUrl(v); setRvError(null); }} onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); void onRandevue(); } }} />
+          <Button variant="primary" disabled={rvBusy || !rvUrl.trim()} onClick={() => void onRandevue()}>{rvBusy ? t("menu.randevue.working") : t("menu.randevue.import")}</Button>
+        </div>
+        <Status tone={rvError ? "danger" : "soft"}>{rvBusy ? t("menu.randevue.working") : rvError ?? ""}</Status>
       </section>
 
       <section aria-labelledby="menu-upload" className="grid gap-3 border-t border-line pt-8">

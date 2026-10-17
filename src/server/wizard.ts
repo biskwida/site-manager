@@ -15,6 +15,7 @@ import type { Store, VenuePatch } from "../store/types";
 import { bothLangs, DRAFT_SLUG_PREFIX, emptyDraft, slugError, WIZARD_MAX_IMAGE_BYTES, validateForPublish, WizardPatchSchema, type PublishError, type WizardDraft } from "../wizard/schema";
 import { connectedApps, newOwnerCode, type AppsConfig, type ConnectedApp, type OwnerCode } from "./connect-apps";
 import { readDraftFromRequest, serializeDraftCookie } from "./draft-cookie";
+import { importItemImages, type ItemImageSource } from "./item-images";
 import { newDraftToken, sha256Hex } from "./hash";
 
 /** Error codes the wizard client can branch on. `ai_*` and `refused` come from the Claude-backed routes (src/server/wizard-ai.ts). */
@@ -45,7 +46,9 @@ export type WizardErrorCode =
   /** 502: none of the picked images could be downloaded from Instagram's CDN. */
   | "instagram_error"
   /** 409: the action needs a published (live) venue. */
-  | "not_live";
+  | "not_live"
+  /** 502: the Randevue page could not be fetched or carries no menu (src/server/wizard-randevue.ts). */
+  | "randevue_error";
 
 /** Every wizard failure the client can show: a code, both languages, an HTTP status and optional field errors. */
 export class WizardError extends Error {
@@ -150,7 +153,13 @@ export async function updateDraft(store: Store, venue: Venue, patch: Partial<Wiz
  *   4. owner invite (INVITE_TTL_MS) and the admin token.
  * The draft token hash is kept (R10: the done page and /status authenticate with the cookie). Does not start a deploy.
  */
-export async function publishDraft(store: Store, venue: Venue, now: Date): Promise<{ venue: Venue; inviteCode: string; adminToken: string }> {
+/** What publish needs to copy product photos the Randevue import left as urls: outbound fetch and a way to run after the response. */
+export interface PublishImageDeps {
+  fetch: typeof fetch;
+  defer: (fn: () => Promise<void>) => void;
+}
+
+export async function publishDraft(store: Store, venue: Venue, now: Date, images?: PublishImageDeps): Promise<{ venue: Venue; inviteCode: string; adminToken: string }> {
   if (venue.status !== "draft") throw ALREADY_PUBLISHED(venue.slug);
   const d = venue.wizard_draft ?? emptyDraft(venue.template);
   const v = validateForPublish(d);
@@ -160,14 +169,14 @@ export async function publishDraft(store: Store, venue: Venue, now: Date): Promi
   // R24: one publisher at a time; a crashed publish releases itself after PUBLISH_CLAIM_TTL_MS, a failed one right away (below).
   if (!(await store.claimPublish(venue.id, nowIso))) throw PUBLISH_IN_PROGRESS();
   try {
-    return await publishClaimed(store, venue, d, now);
+    return await publishClaimed(store, venue, d, now, images);
   } catch (e) {
     await store.releasePublish(venue.id).catch(() => {});
     throw e;
   }
 }
 
-async function publishClaimed(store: Store, venue: Venue, d: WizardDraft, now: Date): Promise<{ venue: Venue; inviteCode: string; adminToken: string }> {
+async function publishClaimed(store: Store, venue: Venue, d: WizardDraft, now: Date, images?: PublishImageDeps): Promise<{ venue: Venue; inviteCode: string; adminToken: string }> {
   const nowIso = now.toISOString();
 
   // Only media uploaded to this draft may be referenced (media rows key on the venue id, so uploads made before the slug was chosen count).
@@ -222,7 +231,17 @@ async function publishClaimed(store: Store, venue: Venue, d: WizardDraft, now: D
   );
   const texts: SeedTexts = { welcome: bothLangs(d.texts.welcome.bg, d.texts.welcome.en), footer_note: bothLangs(d.texts.footer_note.bg, d.texts.footer_note.en) };
   const filled = Object.fromEntries(Object.entries(texts).filter(([, t]) => t.bg || t.en)) as SeedTexts;
-  await seedMenuFrom(store, venue.id, cats, items, filled);
+  const seeded = await seedMenuFrom(store, venue.id, cats, items, filled);
+  // The Randevue import leaves a sold-out date and a photo url on an item; the seeder inserted the items in `items` order.
+  const wizardItems = d.categories.flatMap((c) => c.items);
+  const soldOutOps: ChangeOp[] = [];
+  const photoSources: ItemImageSource[] = [];
+  seeded.items.forEach((row, i) => {
+    const w = wizardItems[i];
+    if (!w) return;
+    if (w.sold_out_until && Date.parse(w.sold_out_until) > now.getTime()) soldOutOps.push({ op: "set_sold_out", item_id: row.id, until: w.sold_out_until });
+    if (w.image_url && !row.image_media_id) photoSources.push({ item_id: row.id, url: w.image_url });
+  });
 
   // 2b. Logo, cover and gallery go through one auto-applied change set, so the log explains where the images came from.
   //     A set left proposed by a failed attempt is expired; ops already in place (an earlier attempt applied them) are skipped.
@@ -231,7 +250,7 @@ async function publishClaimed(store: Store, venue: Venue, d: WizardDraft, now: D
   for (const stale of await store.listChangeSets(venue.id, { status: ["proposed"] })) await store.expireChangeSet(stale.id, nowIso);
   const site = await store.getSite(venue.id);
   const inGallery = new Set(site.media.filter((m) => m.is_gallery).map((m) => m.id));
-  const ops: ChangeOp[] = [];
+  const ops: ChangeOp[] = [...soldOutOps];
   const logo = mediaOrNull(d.logo_media_id);
   const cover = mediaOrNull(d.cover_media_id);
   if (logo && site.venue.logo_media_id !== logo) ops.push({ op: "set_logo_image", media_id: logo });
@@ -242,8 +261,8 @@ async function publishClaimed(store: Store, venue: Venue, d: WizardDraft, now: D
     const cs = await store.createChangeSet({
       venue_id: venue.id,
       chat_ref: null,
-      summary_bg: "Първоначални снимки",
-      summary_en: "Initial photos",
+      summary_bg: soldOutOps.length ? "Първоначални снимки и изчерпани продукти" : "Първоначални снимки",
+      summary_en: soldOutOps.length ? "Initial photos and sold-out items" : "Initial photos",
       preview_bg: renderPreview(site, changes, "bg", updated.tz),
       preview_en: renderPreview(site, changes, "en", updated.tz),
       source: "auto",
@@ -263,6 +282,16 @@ async function publishClaimed(store: Store, venue: Venue, d: WizardDraft, now: D
   //    The list is checked on a fresh read: the Instagram callback may have stored one after this request read the venue.
   const latest = await store.getVenue(venue.id);
   await store.updateVenue(venue.id, { status: "live", wizard_draft: null, ...(latest.instagram_import ? { instagram_import: null } : {}) });
+
+  // 3b. Product photos from Randevue are copied after the response (165 downloads for a full menu): the site is live now and the
+  //     photos follow within a minute through an "auto" change set. Without the deps (tests, scripts) the urls are simply dropped.
+  if (photoSources.length && images) {
+    const { fetch: f, defer } = images;
+    defer(async () => {
+      const r = await importItemImages({ store, fetch: f, now: () => new Date() }, venue.id, photoSources);
+      console.log(`[wizard] randevue photos for venue ${venue.id}: ${r.saved} saved, ${r.failed} failed`);
+    });
+  }
 
   // 4. Owner invite and admin token. A failure here leaves a live venue without a code; the done page issues a fresh invite.
   const inviteCode = await store.createInvite(venue.id, "owner", new Date(now.getTime() + INVITE_TTL_MS).toISOString());
@@ -291,6 +320,9 @@ export interface WizardDeps {
   store: Store;
   config: Pick<Config, "publicBaseUrl" | "rateSalt" | "maxSitesPerDay" | "telegramBotUsername">;
   now: () => Date;
+  /** For publish only (PublishImageDeps): the publish route passes the server's outbound fetch and next/server's after(). */
+  fetch?: typeof fetch;
+  defer?: (fn: () => Promise<void>) => void;
 }
 
 const HOUR_MS = 3_600_000;
@@ -397,7 +429,7 @@ export async function handleMedia(req: Request, d: WizardDeps, venue: Venue): Pr
 
 export async function handlePublish(d: WizardDeps, venue: Venue): Promise<Response> {
   try {
-    const r = await publishDraft(d.store, venue, d.now());
+    const r = await publishDraft(d.store, venue, d.now(), d.fetch && d.defer ? { fetch: d.fetch, defer: d.defer } : undefined);
     const bot = d.config.telegramBotUsername;
     return Response.json(
       {
