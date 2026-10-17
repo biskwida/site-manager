@@ -53,6 +53,9 @@ export interface AgentDeps {
   sentPhotos?: Set<string>;
 }
 
+/** AgentDeps as the tools use them: makeTools gives them the turn's set of sent pictures (an empty one when the caller passes none). */
+export type ToolDeps = AgentDeps & { sentPhotos: Set<string> };
+
 /** The store as the tools see it: every change set they create is recorded in `created`. Other methods pass through, bound to the real store. */
 function recordingStore(store: Store, created: Set<string>): Store {
   return new Proxy(store, {
@@ -130,7 +133,7 @@ const NEXT_STEP: Record<ChangeSet["status"], string> = {
 
 export function makeTools(deps: AgentDeps) {
   const turnSets = deps.turnSets ?? new Set<string>();
-  const d: AgentDeps = { ...deps, turnSets, sentPhotos: deps.sentPhotos ?? new Set<string>(), store: recordingStore(deps.store, turnSets) };
+  const d: ToolDeps = { ...deps, turnSets, sentPhotos: deps.sentPhotos ?? new Set<string>(), store: recordingStore(deps.store, turnSets) };
   // Tools run one at a time per turn, even if the runner calls several at once.
   let queue: Promise<unknown> = Promise.resolve();
   const attempt = (fn: () => Promise<unknown>): Promise<string> => {

@@ -10,7 +10,7 @@ import { previewPictures } from "../domain/social-preview";
 import { SOCIAL_TARGETS, type Change, type SocialPostRow, type SocialTarget } from "../domain/types";
 import type { Store } from "../store/types";
 import { igFeedImage, storyImage } from "./social-image";
-import { proposalText, type AgentDeps, type ToolKit } from "./tools";
+import { proposalText, type ToolDeps, type ToolKit } from "./tools";
 
 export const IG_CAPTION_MAX = 2200;
 export const IG_HASHTAGS_MAX = 30;
@@ -49,7 +49,7 @@ function isJpeg(m: { storage_path: string; public_url: string }): boolean {
   return /\.jpe?g$/i.test(m.storage_path) || /\.jpe?g(\?|$)/i.test(m.public_url);
 }
 
-export function socialTools(d: AgentDeps, k: ToolKit) {
+export function socialTools(d: ToolDeps, k: ToolKit) {
   const social = d.social;
   if (!social || (!social.facebook && !social.instagram)) return [];
 
@@ -116,7 +116,6 @@ export function socialTools(d: AgentDeps, k: ToolKit) {
         const cs = await d.store.createChangeSet({ venue_id: d.venueId, chat_ref: d.chatRef, summary_bg: input.summary_bg, summary_en: input.summary_en, ...p, source: d.source ?? "text", status: "proposed", changes: [change] });
         // The exact picture for each place, labelled, above the buttons. One already in the chat from this turn (make_visual's) is not
         // sent again; one that cannot be sent (Meta's 24-hour window, a network error) never holds back the proposal.
-        d.sentPhotos ??= new Set<string>();
         for (const pic of previewPictures(row, k.lang)) {
           if (!d.sentPhotos.has(pic.url) && (await d.messenger.sendPhoto(d.chatRef, pic.url, pic.label)) !== null) d.sentPhotos.add(pic.url);
         }

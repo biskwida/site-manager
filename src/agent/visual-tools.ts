@@ -6,7 +6,7 @@ import { betaZodTool } from "@anthropic-ai/sdk/helpers/beta/zod";
 import { z } from "zod";
 import { BACKDROPS } from "../visual/palette";
 import type { Format } from "../visual/template";
-import type { AgentDeps, ToolKit } from "./tools";
+import type { ToolDeps, ToolKit } from "./tools";
 
 const NAME_MAX = 40;
 /** The caption of each picture in the chat: its format, in the owner's language. */
@@ -21,7 +21,7 @@ export const MakeVisualSchema = z.object({
   formats: z.array(z.enum(["post", "story"])).describe('"post" (feed, 4:5) and/or "story" (9:16). "и като стори", "и стори" → both; "само стори" → ["story"]; otherwise ["post"].'),
 });
 
-export function visualTools(d: AgentDeps, k: ToolKit) {
+export function visualTools(d: ToolDeps, k: ToolKit) {
   const visual = d.visual;
   if (!visual) return [];
   const make = betaZodTool({
@@ -40,7 +40,7 @@ export function visualTools(d: AgentDeps, k: ToolKit) {
         // Each picture carries its format as its label, and each one that reaches the chat is recorded, so the social_post that
         // follows in this turn does not send it again.
         for (const p of r.pictures) {
-          if ((await d.messenger.sendPhoto(d.chatRef, p.url, FORMAT_LABEL[p.format][k.lang])) !== null) (d.sentPhotos ??= new Set<string>()).add(p.url);
+          if ((await d.messenger.sendPhoto(d.chatRef, p.url, FORMAT_LABEL[p.format][k.lang])) !== null) d.sentPhotos.add(p.url);
         }
         d.notes?.push(`visual from photo ${input.media_id}: ${r.pictures.map((p) => `${p.format} ${p.media_id}`).join(", ")} (backdrop ${r.backdrop}${r.kind === "photo" ? ", photo in a card: no clean cut-out" : ""})`);
         const social = d.social;
