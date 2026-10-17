@@ -43,6 +43,13 @@ const withoutLinks = (text: string) => text.replace(LINKS, " ");
 const CLASSIFY_MIN_WORDS = 4;
 /** Words a voice transcript needs before it can switch the language: on a silent or noisy clip Whisper invents short phrases ("Thank you.", "Продолжение следует…") in any language. */
 const VOICE_LANG_MIN_WORDS = 4;
+/**
+ * The languages a voice note can switch to, and the words each needs. Over background music Whisper invents whole sentences in other
+ * languages and labels them so (seen live 2026-10-17: "Hello everyone, welcome to my channel." as Javanese, a Korean YouTube intro as
+ * Korean), so any other language switches only by typed words. English needs four words ("Thank you." over silence); Bulgarian, the
+ * owners' language, three ("Колко струва капучиното?" must bring an owner back; "Продолжение следует" over silence must not). The transcript itself still reaches the agent.
+ */
+const VOICE_SWITCH_MIN_WORDS: Record<string, number> = { bg: 3, en: VOICE_LANG_MIN_WORDS };
 
 /**
  * Whether the classifier, not the letters, names the language of these words (links removed):
@@ -380,9 +387,10 @@ async function handleVoice(d: BotDeps, member: Member, m: InboundMessage) {
     await d.messenger.send(member.chat_ref, c.voiceFailed);
     return;
   }
-  // The language is the transcriber's (Whisper's label, placed by the member's stored language), but a note shorter than four words
-  // keeps the stored one. A transcript never goes to the classifier.
-  const speaker = await followLanguage(d, member, countWords(text) >= VOICE_LANG_MIN_WORDS ? spoken : null);
+  // The language is the transcriber's (Whisper's label, placed by the member's stored language), but only Bulgarian (3+ words) and
+  // English (4+ words) switch it; anything else keeps the stored one (VOICE_SWITCH_MIN_WORDS). A transcript never goes to the classifier.
+  const needs = spoken === null ? undefined : VOICE_SWITCH_MIN_WORDS[spoken];
+  const speaker = await followLanguage(d, member, needs !== undefined && countWords(text) >= needs ? spoken : null);
   d.startRun({ venueId: member.venue_id, chatRef: member.chat_ref, member: speaker, text, source: "voice", replyTo: m.messageRef });
   // The transcript is the owner's own words: quoted as heard in any language (kept).
   await d.messenger.send(member.chat_ref, copy(baseLang(speaker.lang)).heard(keep(text)));

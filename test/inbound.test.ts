@@ -692,13 +692,32 @@ describe("handleInbound: any conversation language", () => {
     expect(saves).toEqual([]);
   });
 
-  it("a voice note the transcriber heard in German saves de, the run has it, and the heard line is English for now", async () => {
+  it("a voice note the transcriber heard in German keeps the stored language: only typed words switch to a language other than bg/en", async () => {
     const { d, runs, messenger, store } = await setup({ transcribe: async () => ({ text: "Ich möchte den Preis ändern", lang: "de" }) });
     await handleInbound(d, { chatRef: "tg:1001", kind: "voice", media: voice }); // stored bg
-    expect(await langOf(store, "tg:1001")).toBe("de");
+    expect(await langOf(store, "tg:1001")).toBe("bg");
     expect(runs[0]).toMatchObject({ source: "voice", text: "Ich möchte den Preis ändern" });
-    expect(runs[0].member.lang).toBe("de");
-    expect(texts(messenger).at(-1)).toBe("🎤 Heard: “Ich möchte den Preis ändern”"); // no hand-written German texts yet
+    expect(runs[0].member.lang).toBe("bg");
+    expect(texts(messenger).at(-1)).toBe("🎤 Чух: „Ich möchte den Preis ändern“");
+  });
+
+  it("over background music Whisper's invented intros never switch the language (seen live 2026-10-17)", async () => {
+    for (const [text, lang] of [["Hello everyone, welcome to my channel.", "jv"], ["안녕하세요. 오늘은 한국에서 가장 유명한", "ko"]] as const) {
+      const { d, store } = await setup({ transcribe: async () => ({ text, lang }) });
+      const saves = langSaves(store);
+      await handleInbound(d, { chatRef: "tg:1001", kind: "voice", media: voice }); // stored bg
+      expect(saves, text).toEqual([]);
+    }
+  });
+
+  it("a three-word Bulgarian question brings an owner back to Bulgarian; two words do not", async () => {
+    for (const [text, saved] of [["Колко струва капучиното?", true], ["Да, добре", false]] as const) {
+      const { d, store, venue } = await setup({ transcribe: async () => ({ text, lang: "bg" }) });
+      await store.upsertMember({ venue_id: venue.id, chat_ref: "tg:8990", role: "owner", lang: "ko" });
+      const saves = langSaves(store);
+      await handleInbound(d, { chatRef: "tg:8990", kind: "voice", media: voice });
+      expect(saves, text).toEqual(saved ? ["tg:8990=bg"] : []);
+    }
   });
 
   it("the transcriber is told the member's stored language itself, not its Bulgarian or English reduction", async () => {
@@ -775,17 +794,17 @@ describe("handleInbound: any conversation language", () => {
         ["make it story", "en", false], // three
         ["make it a story", "en", true], // four
         ["Ich möchte Preis", "de", false],
-        ["Ich möchte den Preis", "de", true],
+        ["Ich möchte den Preis", "de", false], // not bg/en: typed words only,
         ["Добавь пиццу сегодня", "ru", false],
-        ["Добавь пиццу в меню", "ru", true],
-        ["Ο καφές είναι έτοιμος", "el", true],
+        ["Добавь пиццу в меню", "ru", false],
+        ["Ο καφές είναι έτοιμος", "el", false],
         ["make it a 4.20 😀", "en", false], // three words and two things that are not
         // Scripts written without spaces: a real sentence is many words, a thank-you is one.
-        ["我想把卡布奇诺的价格改成四欧元", "zh", true],
+        ["我想把卡布奇诺的价格改成四欧元", "zh", false],
         ["谢谢", "zh", false],
-        ["カプチーノの値段を四ユーロに変更してください", "ja", true],
+        ["カプチーノの値段を四ユーロに変更してください", "ja", false],
         ["ありがとう", "ja", false],
-        ["ฉันต้องการเปลี่ยนราคากาแฟเป็นสี่ยูโร", "th", true],
+        ["ฉันต้องการเปลี่ยนราคากาแฟเป็นสี่ยูโร", "th", false],
         ["ขอบคุณ", "th", false],
       ];
       for (const [text, lang, saved] of cases) {
