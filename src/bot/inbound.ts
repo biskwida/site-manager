@@ -214,15 +214,15 @@ export async function followLanguage(d: BotDeps, member: Member, detected: ChatL
   return { ...member, lang: detected };
 }
 
-/** `previous` is the chat's membership before the redeem (null for a new chat). */
+/** `previous` is the chat's membership before the redeem (null for a new chat). The venue's name is kept: a translation leaves it as written. */
 async function welcome(d: BotDeps, member: Member, previous: Member | null) {
   const venue = await d.store.getVenue(member.venue_id);
   const c = copy(baseLang(member.lang));
-  if (previous && previous.venue_id !== member.venue_id) await d.messenger.send(member.chat_ref, c.switched(venue.name));
+  if (previous && previous.venue_id !== member.venue_id) await d.messenger.send(member.chat_ref, c.switched(keep(venue.name)));
   // An own site (built and hosted elsewhere, reads our feed) is the site the owner and staff know.
   const site = venue.site_url || publicUrl(d.baseUrl, venue.slug);
   if (member.role === "owner") {
-    await d.messenger.send(member.chat_ref, c.welcome(venue.name, adminUrl(d.baseUrl, venue.slug, await d.store.getAdminToken(venue.id)), site, channelOf(member.chat_ref)));
+    await d.messenger.send(member.chat_ref, c.welcome(keep(venue.name), adminUrl(d.baseUrl, venue.slug, await d.store.getAdminToken(venue.id)), site, channelOf(member.chat_ref)));
     if (venue.site_url) await d.messenger.send(member.chat_ref, c.ownSite(venue.site_url));
     if (d.onOwnerJoined) {
       // The first owner join is the human check that publishes the site; startDeploy ignores venues that already have one
@@ -234,14 +234,14 @@ async function welcome(d: BotDeps, member: Member, previous: Member | null) {
         console.error("[bot] onOwnerJoined failed:", e instanceof Error ? e.message : e);
       }
     }
-  } else await d.messenger.send(member.chat_ref, c.welcomeStaff(venue.name, site));
+  } else await d.messenger.send(member.chat_ref, c.welcomeStaff(keep(venue.name), site));
 }
 
 async function welcomeBack(d: BotDeps, member: Member) {
   const venue = await d.store.getVenue(member.venue_id);
   const c = copy(baseLang(member.lang));
-  if (member.role === "owner") await d.messenger.send(member.chat_ref, c.welcomeBack(venue.name, adminUrl(d.baseUrl, venue.slug, await d.store.getAdminToken(venue.id))));
-  else await d.messenger.send(member.chat_ref, c.welcomeStaff(venue.name, publicUrl(d.baseUrl, venue.slug)));
+  if (member.role === "owner") await d.messenger.send(member.chat_ref, c.welcomeBack(keep(venue.name), adminUrl(d.baseUrl, venue.slug, await d.store.getAdminToken(venue.id))));
+  else await d.messenger.send(member.chat_ref, c.welcomeStaff(keep(venue.name), publicUrl(d.baseUrl, venue.slug)));
 }
 
 async function runCommand(d: BotDeps, member: Member, channel: Channel, cmd: string) {
@@ -286,7 +286,7 @@ async function runCommand(d: BotDeps, member: Member, channel: Channel, cmd: str
         return;
       }
       const r = await d.connect(member.venue_id, siteUrl, code);
-      await d.messenger.send(member.chat_ref, r.ok ? c.connectOk(r.site.name, String(r.destination.config.site_url)) : c.connectFailed(lang === "bg" ? r.reason.bg : r.reason.en));
+      await d.messenger.send(member.chat_ref, r.ok ? c.connectOk(keep(r.site.name), String(r.destination.config.site_url)) : c.connectFailed(lang === "bg" ? r.reason.bg : r.reason.en));
       return;
     }
     case "members": {
@@ -297,7 +297,7 @@ async function runCommand(d: BotDeps, member: Member, channel: Channel, cmd: str
       }
       const venue = await d.store.getVenue(member.venue_id);
       const [members, invites] = await Promise.all([d.store.listMembers(venue.id), d.store.listInvites(venue.id, d.now().toISOString())]);
-      await d.messenger.send(member.chat_ref, c.members(venue.name, memberViews(members, lang, venue.tz, member.chat_ref), openInviteViews(invites, lang, venue.tz)));
+      await d.messenger.send(member.chat_ref, c.members(keep(venue.name), memberViews(members, lang, venue.tz, member.chat_ref), openInviteViews(invites, lang, venue.tz)));
       return;
     }
     case "undo":

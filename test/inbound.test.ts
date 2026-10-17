@@ -48,6 +48,10 @@ describe("handleInbound: opening the chat again", () => {
     await store.upsertMember({ venue_id: venue.id, chat_ref: "fb:801", role: "owner", lang: "bg" });
     await handleInbound(d, { chatRef: "fb:801", kind: "text", text: "" });
     expect(texts(messenger).at(-1)).toMatch(/^Вече сте свързани/);
+    expect(messenger.raw.at(-1)).toMatch(/^Вече сте свързани с ⟦Кафене „Ъгъла“⟧\. /); // the venue's name stays as written in any language
+    await store.upsertMember({ venue_id: venue.id, chat_ref: "fb:803", role: "staff", lang: "bg" });
+    await handleInbound(d, { chatRef: "fb:803", kind: "text", text: "" });
+    expect(messenger.raw.at(-1)).toMatch(/^Свързахте се като персонал на ⟦Кафене „Ъгъла“⟧\. /);
     expect(runs).toHaveLength(0);
   });
   it("sends a linked member's text to the agent even when the message carries the deep-link referral", async () => {
@@ -79,6 +83,7 @@ describe("handleInbound", () => {
     const code = await store.createInvite(venue.id, "staff", "2026-10-10T00:00:00.000Z");
     await handleInbound(d, { chatRef: "ig:700", kind: "text", text: "", referralCode: code });
     expect(texts(messenger)[1]).toMatch(/^Свързахте се като персонал/);
+    expect(messenger.raw[1]).toMatch(/^Свързахте се като персонал на ⟦Кафене „Ъгъла“⟧\. /);
     expect(await store.findMember("ig:700")).toMatchObject({ role: "staff" });
   });
   it("keeps Telegram's command edges: unknown commands stay silent, known ones tell a stranger to link, /start@bot works", async () => {
@@ -281,6 +286,7 @@ describe("handleInbound: WordPress /connect and venue switching on Meta channels
     await handleInbound(d, { chatRef: "wa:359888123456", kind: "text", text: "/connect https://cafe.example/ GOOD" });
     expect(calls).toEqual([[venue.id, "https://cafe.example/", "GOOD"]]);
     expect(texts(messenger).at(-1)).toMatch(/^✅ Свързах WordPress сайта „Smoke Café“/);
+    expect(messenger.raw.at(-1)).toMatch(/^✅ Свързах WordPress сайта „⟦Smoke Café⟧“ \(https:\/\/cafe\.example\)\. /); // the site's name, kept
     await store.upsertMember({ venue_id: venue.id, chat_ref: "fb:900", role: "staff", lang: "en" });
     await handleInbound(d, { chatRef: "fb:900", kind: "text", text: "/connect https://cafe.example GOOD" });
     expect(texts(messenger).at(-1)).toBe("Only the owner can connect the site.");
@@ -298,6 +304,7 @@ describe("handleInbound: WordPress /connect and venue switching on Meta channels
     await handleInbound(d, { chatRef: "fb:902", kind: "text", text: "", referralCode: code });
     expect(texts(messenger)[0]).toBe("Вече управлявате Бар Нощ.");
     expect(texts(messenger)[1]).toMatch(/^Свързахте се като собственик на Бар Нощ/);
+    expect(messenger.raw.slice(0, 2).map((t) => t.split("\n")[0])).toEqual(["Вече управлявате ⟦Бар Нощ⟧.", "Свързахте се като собственик на ⟦Бар Нощ⟧."]);
     expect(joined).toEqual([other.id]);
     expect(await store.findMember("fb:902")).toMatchObject({ venue_id: other.id, role: "owner" });
   });
@@ -321,6 +328,7 @@ describe("handleInbound: /members and removed members", () => {
     const bg = texts(messenger).at(-1) as string;
     const lines = bg.split("\n");
     expect(lines[0]).toBe("Достъп до Кафене „Ъгъла“:");
+    expect(messenger.raw.at(-1)?.split("\n")[0]).toBe("Достъп до ⟦Кафене „Ъгъла“⟧:");
     expect(lines[1]).toMatch(/^• Собственик \(вие\) · Telegram 1001 · BG · последно писал 09\.10\.2026, 12:00 · добавен \d\d\.\d\d\.\d{4}, \d\d:\d\d$/);
     expect(lines[2]).toMatch(/^• Персонал · Telegram 1002 · EN · още не е писал · добавен /);
     expect(lines[3]).toMatch(/^• Персонал · WhatsApp …3456 · BG · още не е писал · добавен /);

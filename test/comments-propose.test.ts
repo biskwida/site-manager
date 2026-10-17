@@ -101,7 +101,8 @@ describe("createCommentSet", () => {
     expect(r.deferred).toBe(false);
     expect(r.sent.sort()).toEqual(["fb:900", "tg:1001"]);
     const cs = r.set!;
-    expect(cs).toMatchObject({ source: "comment", status: "proposed", chat_ref: "tg:1001", summary_bg: "Отговор на коментар от Мария", summary_en: "Reply to Мария's comment", apply_at: null });
+    // The customer's name is kept in the summaries too (the dashboard's undo line sends one to the chat); every reader strips it.
+    expect(cs).toMatchObject({ source: "comment", status: "proposed", chat_ref: "tg:1001", summary_bg: "Отговор на коментар от ⟦Мария⟧", summary_en: "Reply to ⟦Мария⟧'s comment", apply_at: null });
     expect(cs.changes).toEqual([{ position: 0, op: "social_reply", entity: "social_reply", entity_id: "c1", before: null, after: { network: "instagram", comment_id: "c1", post_ref: "media-1", author_name: "Мария", comment_text: "Имате ли безглутенови?", reply_text: "Да, имаме.", permalink: null } }]);
     expect(cs.preview_bg).toBe("• Отговор на коментар от ⟦Мария⟧ (Instagram): „⟦Имате ли безглутенови?⟧“ → „⟦Да, имаме.⟧“"); // a chat text: kept parts marked
     const proposals = messenger.sent.filter((m) => m.setId === cs.id);
@@ -156,7 +157,7 @@ describe("proposeForComments", () => {
     expect(calls[0].menu.some((m) => m.name === "Капучино" && m.price_eur === 2.9)).toBe(true);
     expect(calls[0].postCaption).toBe("Днешното предложение: тиквена супа");
     expect(r.sets[1].changes[0]).toMatchObject({ entity: "social_moderate", entity_id: "c2", after: { action: "hide", network: "instagram", author_name: "bot" } });
-    expect(r.sets[1].summary_bg).toBe("Скриване на коментар от bot");
+    expect(r.sets[1].summary_bg).toBe("Скриване на коментар от ⟦bot⟧");
     expect(messenger.sent.map((m) => m.text.slice(0, 2))).toEqual(["💬", "⚠️"]);
     expect(await store.getComment(s.id)).toMatchObject({ status: "proposed", draft_kind: "spam", draft_text: null });
     expect(await store.getComment(a.id)).toMatchObject({ status: "proposed", draft_kind: "praise", draft_text: "Благодарим, Мария!" });

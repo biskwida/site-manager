@@ -2,6 +2,7 @@
 import { describe, expect, it } from "vitest";
 import { createBot, type BotDeps, type RunRequest } from "@/src/bot/bot";
 import { TelegramMessenger } from "@/src/bot/messenger";
+import { withTranslation } from "@/src/bot/translate";
 import { planChanges } from "@/src/domain/changes";
 import { FakeMessenger, makeDemo } from "./helpers";
 import { BOT_INFO, callbackUpdate, captureApi, textUpdate } from "./tg";
@@ -16,7 +17,7 @@ async function setup() {
     startRun: (r) => runs.push(r), transcribe: null, download: async () => ({ bytes: new Uint8Array([1]), contentType: "image/jpeg" }), botInfo: BOT_INFO,
   };
   const bot = createBot(deps);
-  deps.messenger = new TelegramMessenger(bot.api); // as in src/server/deps.ts
+  deps.messenger = withTranslation(new TelegramMessenger(bot.api), { store: demo.store, translate: null }); // as in src/server/deps.ts
   const api = captureApi(bot);
   return { ...demo, runs, bot, api, deps };
 }

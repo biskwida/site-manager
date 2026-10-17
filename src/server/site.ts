@@ -1,6 +1,6 @@
 // src/server/site.ts
 import { applyChanges } from "../domain/changes";
-import { unkeep } from "../domain/format";
+import { unkeepTexts } from "../domain/format";
 import type { DraftInfo, SiteState, Venue } from "../domain/types";
 import type { Store } from "../store/types";
 import { sha256Hex } from "./hash";
@@ -34,7 +34,7 @@ export async function loadSite(store: Store, slug: string, opts: LoadSiteOptions
         const cs = await store.getChangeSet(opts.draftId);
         if (cs.venue_id === venue.id) {
           // The banner shows what the chat said, without its keep markers (src/domain/format.ts keep).
-          draft = { id: cs.id, status: cs.status, summary_bg: unkeep(cs.summary_bg), summary_en: unkeep(cs.summary_en), preview_bg: unkeep(cs.preview_bg), preview_en: unkeep(cs.preview_en), key: opts.key };
+          draft = unkeepTexts({ id: cs.id, status: cs.status, summary_bg: cs.summary_bg, summary_en: cs.summary_en, preview_bg: cs.preview_bg, preview_en: cs.preview_en, key: opts.key });
           if (cs.status === "proposed" || cs.status === "scheduled") {
             try {
               state = applyChanges(state, cs.changes);

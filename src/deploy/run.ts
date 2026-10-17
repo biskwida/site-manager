@@ -3,7 +3,7 @@
 import { copy } from "../bot/copy";
 import type { Messenger } from "../bot/messenger";
 import { maskRef } from "../channels/ref";
-import { baseLang } from "../domain/format";
+import { baseLang, keep } from "../domain/format";
 import type { DeployInfo, Lang, Venue } from "../domain/types";
 import type { Store } from "../store/types";
 import type { Deployer, DeployInput, DeployStatusResult } from "./types";
@@ -125,11 +125,12 @@ export async function pollDeployments(d: PollDeps): Promise<{ ready: string[]; f
       const redeploy = dep.url !== null;
       if (!(await claim({ ...dep, status: "ready", url, error: null, updated_at }))) continue;
       report.ready.push(v.id);
-      await notify(d, v, (lang) => (redeploy ? copy(lang).designLive(url ?? "") : copy(lang).siteLive(v.name, url ?? "")));
+      // The venue's name is kept: a translation (src/bot/translate.ts) leaves it as written.
+      await notify(d, v, (lang) => (redeploy ? copy(lang).designLive(url ?? "") : copy(lang).siteLive(keep(v.name), url ?? "")));
     } else if (result.state === "error") {
       if (!(await claim({ ...dep, status: "error", error: mask(result.error ?? "error").slice(0, ERROR_MAX), updated_at }))) continue;
       report.failed.push(v.id);
-      await notify(d, v, (lang) => copy(lang).siteFailed(v.name));
+      await notify(d, v, (lang) => copy(lang).siteFailed(keep(v.name)));
     } else if (result.state !== dep.status) {
       await claim({ ...dep, status: result.state, updated_at });
     }

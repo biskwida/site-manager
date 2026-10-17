@@ -3,6 +3,8 @@
 import Anthropic from "@anthropic-ai/sdk";
 import { describe, expect, it } from "vitest";
 import { proposalText } from "@/src/agent/tools";
+import type { BotDeps } from "@/src/bot/bot";
+import { handleInbound } from "@/src/bot/inbound";
 import type { Messenger, ProposalLabels, SendOpts } from "@/src/bot/messenger";
 import { makeTranslator, withTranslation, type Translator } from "@/src/bot/translate";
 import { commentProposalText, type CommentSetItem } from "@/src/social/comments-propose";
@@ -73,6 +75,8 @@ const GERMAN: [RegExp, string][] = [
   [/New comment under the post/g, "Neuer Kommentar unter dem Beitrag"], [/Suggested reply/g, "Vorgeschlagene Antwort"], [/Reply\?/g, "Antworten?"],
   [/\bby\b/g, "von"], [/Post\b/g, "Beitrag"], [/stories are published without text/g, "Storys erscheinen ohne Text"],
   [/Working on it…/g, "Ich arbeite daran…"], [/Reading the menu…/g, "Ich lese die Speisekarte…"], [/Applied/g, "Angewendet"], [/Expired/g, "Abgelaufen"],
+  [/You are already linked to/g, "Schon verbunden mit"], [/QR code and dashboard/g, "QR-Code und Übersicht"], [/Dashboard/g, "Übersicht"], [/Site:/g, "Seite:"], [/Menu:/g, "Speisekarte:"],
+  [/You are linked as the owner of/g, "Du bist Inhaber von"],
 ];
 const german = (t: string) => GERMAN.reduce((s, [re, to]) => s.replace(re, to), t);
 
@@ -280,6 +284,51 @@ describe("withTranslation", () => {
   });
 });
 
+/** BotDeps for handleInbound with the given messenger (no agent runs, no voice). */
+function inboundDeps(store: Store, messenger: Messenger): BotDeps {
+  return { token: "t", store, messenger, baseUrl: "https://site.example", now: () => new Date(NOW), startRun: () => undefined, transcribe: null, download: async () => ({ bytes: new Uint8Array(), contentType: "" }) };
+}
+
+describe("venue names and links never reach the model", () => {
+  it("a German owner's welcome back and /menu: the venue name, the links and the dashboard key arrive byte for byte, and neither the model nor the cache holds them", async () => {
+    const { store, venue } = await makeDemo();
+    await store.setMemberLang(venue.id, "tg:1001", "de");
+    const { client, calls } = fakeClient(german);
+    const r = recorder();
+    const d = inboundDeps(store, withTranslation(r.m, { store, translate: makeTranslator(client, "m", store) }));
+    await handleInbound(d, { chatRef: "tg:1001", kind: "text", text: "" }); // opened the chat again: welcome back with the dashboard link
+    await handleInbound(d, { chatRef: "tg:1001", kind: "text", text: "/menu" });
+    const admin = `https://site.example/admin/agala?key=${await store.getAdminToken(venue.id)}`;
+    expect(r.calls.map((c) => (c.method === "send" ? c.text : ""))).toEqual([
+      `Schon verbunden mit Кафене „Ъгъла“. Übersicht: ${admin}`,
+      `Seite: https://site.example/agala\nSpeisekarte: https://site.example/agala/menu\nQR-Code und Übersicht: ${admin}`,
+    ]);
+    expect(calls.map(asked).join("\n")).not.toMatch(/Ъгъла|key=|https?:|site\.example/);
+    expect([...store.translations.values()].join("\n")).not.toMatch(/Ъгъла|key=|https?:/);
+  });
+
+  it("a welcome for two venues shares one cache row per language: one model call for both German owners", async () => {
+    const store = new InMemoryStore();
+    const alpha = await store.createVenue({ slug: "alpha", name: "Café Alpha" });
+    const beta = await store.createVenue({ slug: "beta", name: "Bistro Beta" });
+    const { client, calls } = fakeClient(german);
+    const r = recorder();
+    const d = inboundDeps(store, withTranslation(r.m, { store, translate: makeTranslator(client, "m", store) }));
+    for (const [v, chatRef] of [[alpha, "tg:501"], [beta, "tg:502"]] as const) {
+      const code = await store.createInvite(v.id, "owner", "2099-01-01T00:00:00.000Z");
+      await handleInbound(d, { chatRef, kind: "text", text: `/start ${code}`, langHint: "de" });
+    }
+    expect(calls).toHaveLength(1);
+    expect([...store.translations.keys()]).toHaveLength(1);
+    const sent = r.calls.map((c) => (c.method === "send" ? c.text : ""));
+    expect(sent).toHaveLength(2);
+    expect(sent[0]).toMatch(/^Du bist Inhaber von Café Alpha\./);
+    expect(sent[0]).toContain(`Übersicht (keep this link, it is your key): https://site.example/admin/alpha?key=${await store.getAdminToken(alpha.id)}`);
+    expect(sent[1]).toMatch(/^Du bist Inhaber von Bistro Beta\./);
+    expect(sent[1]).toContain(`https://site.example/admin/beta?key=${await store.getAdminToken(beta.id)}`);
+  });
+});
+
 describe("makeTranslator", () => {
   it("asks the small model once with thinking off, the kept parts as numbered markers, and restores them", async () => {
     const { client, calls, options } = fakeClient(() => "Preis ⟦1⟧ → €4.20 (⟦2⟧)");
@@ -319,7 +368,7 @@ describe("makeTranslator", () => {
     ["a marker is missing", "Preis → €4.20 (⟦2⟧)"],
     ["a marker is added", "Preis ⟦1⟧ → €4.20 (⟦2⟧) ⟦3⟧"],
     ["a marker is repeated", "Preis ⟦1⟧ → ⟦1⟧ (⟦2⟧)"],
-    ["the markers are reordered", "(⟦2⟧) Preis ⟦1⟧ → €4.20"],
+    ["a marker is doubled in place of another, with the right count", "Preis ⟦1⟧ → €4.20 (⟦1⟧)"],
     ["a marker holds the name instead of its number", "Preis ⟦Cappuccino⟧ → €4.20 (⟦2⟧)"],
     ["a stray marker is left", "Preis ⟦1⟧ → €4.20 (⟦2⟧) ⟧"],
   ])("rejects a translation where %s: the English input comes back and nothing is cached", async (_why, reply) => {
@@ -346,6 +395,28 @@ describe("makeTranslator", () => {
     expect(out).toBe("Price ⟦Cappuccino⟧");
     expect(log).toContain("RateLimitError");
     expect(log).not.toMatch(/Price|Cappuccino/);
+  });
+
+  it("accepts the parts in another order (a verb-final language moves names) and puts each one back by its number", async () => {
+    const store = new InMemoryStore();
+    const input = "Price ⟦Cappuccino⟧ → €4.20 (⟦Café⟧)";
+    const out = await makeTranslator(fakeClient(() => "(⟦2⟧) ⟦1⟧ の価格 → €4.20").client, "m", store)(input, "ja");
+    expect(out).toBe("(⟦Café⟧) ⟦Cappuccino⟧ の価格 → €4.20");
+    expect(await store.getTranslation("ja", sha256Hex("Price ⟦1⟧ → €4.20 (⟦2⟧)"))).toBe("(⟦2⟧) ⟦1⟧ の価格 → €4.20");
+  });
+
+  it("links travel as numbered parts and come back byte for byte; the punctuation after a link stays text", async () => {
+    const store = new InMemoryStore();
+    const { client, calls } = fakeClient((t) => t.replace("Dashboard", "Übersicht").replace("Menu", "Speisekarte"));
+    const text = "Dashboard: https://site.example/admin/agala?key=SECRET-123. Menu (https://site.example/agala/menu), www.agala.bg! ⟦Кафене⟧";
+    const out = await makeTranslator(client, "m", store)(text, "de");
+    expect(asked(calls[0])).toBe("Dashboard: ⟦1⟧. Menu (⟦2⟧), ⟦3⟧! ⟦4⟧");
+    expect(out).toBe("Übersicht: https://site.example/admin/agala?key=SECRET-123. Speisekarte (https://site.example/agala/menu), www.agala.bg! ⟦Кафене⟧");
+    expect([...store.translations.values()]).toEqual(["Übersicht: ⟦1⟧. Speisekarte (⟦2⟧), ⟦3⟧! ⟦4⟧"]);
+    // A WordPress preview link carries its own key (sm_preview): the model never sees it either.
+    const wp = await makeTranslator(client, "m", store)("• WordPress: page “⟦About⟧”\n  Preview: https://cafe.example/about/?sm_preview=abc123", "de");
+    expect(asked(calls[1])).toBe("• WordPress: page “⟦1⟧”\n  Preview: ⟦2⟧");
+    expect(wp).toBe("• WordPress: page “⟦About⟧”\n  Preview: https://cafe.example/about/?sm_preview=abc123");
   });
 
   it("a failed cache read still translates; a failed cache write still returns the translation", async () => {

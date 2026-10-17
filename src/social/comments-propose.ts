@@ -85,7 +85,7 @@ export function commentChanges(items: CommentSetItem[]): Change[] {
 }
 
 // In the proposal text the customer's name and words, the post's caption and the drafted reply stay as written in any language
-// (kept, src/bot/translate.ts). commentSetSummary writes the set's summaries without markers.
+// (kept, src/bot/translate.ts); so does the name in the set's summaries (commentSetSummary), which every reader strips.
 const author = (c: SocialComment, lang: Lang) => keep(c.author_name) || tr(lang, "клиент", "a customer");
 const captionOf = (c: SocialComment, lang: Lang) => (c.post_caption.trim() ? keep(excerpt(c.post_caption)) : tr(lang, "(без текст)", "(no caption)"));
 const networkName = (c: SocialComment) => NETWORK_NAMES[c.network] ?? c.network;
@@ -137,8 +137,9 @@ export function commentProposalText(items: CommentSetItem[], lang: Lang, o: { ba
 export function commentSetSummary(items: CommentSetItem[]): { summary_bg: string; summary_en: string } {
   if (items.length === 1) {
     const it = items[0];
-    const name = it.comment.author_name || "клиент";
-    const nameEn = it.comment.author_name || "a customer";
+    // Kept: the dashboard's undo line (src/server/admin.ts) sends a summary to the chat.
+    const name = keep(it.comment.author_name) || "клиент";
+    const nameEn = keep(it.comment.author_name) || "a customer";
     if (it.moderate === "delete") return { summary_bg: `Изтриване на коментар от ${name}`, summary_en: `Delete a comment by ${nameEn}` };
     if (it.moderate) return { summary_bg: `Скриване на коментар от ${name}`, summary_en: `Hide a comment by ${nameEn}` };
     return { summary_bg: `Отговор на коментар от ${name}`, summary_en: `Reply to ${nameEn}'s comment` };

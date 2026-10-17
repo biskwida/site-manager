@@ -3,7 +3,7 @@ import { limitReachedLine, usageLine } from "../bot/limit";
 import type { Messenger } from "../bot/messenger";
 import { invertChanges } from "../domain/changes";
 import { isSoldOut } from "../domain/effective";
-import { baseLang, unkeep } from "../domain/format";
+import { baseLang, unkeep, unkeepTexts } from "../domain/format";
 import { renderPreview } from "../domain/preview";
 import { TEMPLATE_IDS, type ChangeSet, type DeployInfo, type TemplateId, type Venue, type VenueStatus } from "../domain/types";
 import type { Deployer, DeployInput, DomainInstructions } from "../deploy/types";
@@ -51,11 +51,6 @@ export interface AdminOverview {
 /** How many proposed sets the generic pending list shows. */
 const PENDING_MAX = 20;
 
-/** A change set as the dashboard shows it: summaries and previews without the keep markers its chat texts carry (src/domain/format.ts keep). */
-function plainSet(cs: ChangeSet): ChangeSet {
-  return { ...cs, summary_bg: unkeep(cs.summary_bg), summary_en: unkeep(cs.summary_en), preview_bg: unkeep(cs.preview_bg), preview_en: unkeep(cs.preview_en) };
-}
-
 export async function adminOverview(store: Store, venue: Venue, now: Date, baseUrl = "", opts: { hosted?: boolean; social?: { facebook: boolean; instagram: boolean } } = {}): Promise<AdminOverview> {
   const [pending, scheduled, log, site, members] = await Promise.all([
     // Comment sets are decided in the Comments card or the chat only: fetched wider, then left out of the generic list.
@@ -83,9 +78,10 @@ export async function adminOverview(store: Store, venue: Venue, now: Date, baseU
     site_url: ownSite ? (venue.site_url as string) : deploy?.status === "ready" && deploy.url ? deploy.url : `${baseUrl}/${venue.slug}`,
     custom_domain: deploy?.custom_domain ?? null,
     domain_verified: deploy?.custom_domain ? (deploy.domain_verified ?? false) : null,
-    pending: pending.filter((cs) => cs.source !== "comment").slice(0, PENDING_MAX).map(plainSet),
-    scheduled: [...scheduled].sort((a, b) => (a.apply_at ?? "").localeCompare(b.apply_at ?? "")).map(plainSet),
-    log: log.map(plainSet),
+    // Summaries and previews without the keep markers their chat copies carry (src/domain/format.ts keep).
+    pending: pending.filter((cs) => cs.source !== "comment").slice(0, PENDING_MAX).map(unkeepTexts),
+    scheduled: [...scheduled].sort((a, b) => (a.apply_at ?? "").localeCompare(b.apply_at ?? "")).map(unkeepTexts),
+    log: log.map(unkeepTexts),
     sold_out: site.items.filter((i) => i.active && isSoldOut(i, nowMs)).map((i) => ({ id: i.id, name_bg: i.name_bg, name_en: i.name_en, sold_out_until: i.sold_out_until as string })),
     wordpress: await wordPressOverview(store, venue.id),
     connected_apps: connectedApps(members),

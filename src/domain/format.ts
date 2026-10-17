@@ -159,6 +159,11 @@ export function unkeep(text: string): string {
   return text.replace(KEEP_MARKERS, "");
 }
 
+/** A change set's summaries and previews without keep markers, as the dashboard and the draft banner show them; the stored chat texts keep theirs. */
+export function unkeepTexts<T extends Record<"summary_bg" | "summary_en" | "preview_bg" | "preview_en", string>>(cs: T): T {
+  return { ...cs, summary_bg: unkeep(cs.summary_bg), summary_en: unkeep(cs.summary_en), preview_bg: unkeep(cs.preview_bg), preview_en: unkeep(cs.preview_en) };
+}
+
 /** "2,90 €" (bg) / "€2.90" (en). */
 export function formatPrice(eur: number, lang: Lang): string {
   const fixed = eur.toFixed(2);
