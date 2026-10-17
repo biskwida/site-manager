@@ -50,9 +50,9 @@ describe("voice", () => {
     expect(api.texts()[0]).toBe("🎤 Чух: „heard in bg“");
   });
   it("runs the turn in Bulgarian when an English-speaking member speaks Bulgarian, and remembers it", async () => {
-    const { bot, api, runs, store } = await setup({ transcribe: async () => ({ text: "Баницата свърши", lang: "bg" }) });
+    const { bot, api, runs, store } = await setup({ transcribe: async () => ({ text: "Баницата свърши, останаха само сладките", lang: "bg" }) });
     await bot.handleUpdate(voiceUpdate(1002, "en"));
-    expect(runs[0]).toMatchObject({ source: "voice", text: "Баницата свърши" });
+    expect(runs[0]).toMatchObject({ source: "voice", text: "Баницата свърши, останаха само сладките" });
     expect(runs[0].member.lang).toBe("bg");
     expect(api.texts()[0]).toMatch(/^🎤 Чух/);
     expect((await store.findMember("tg:1002"))?.lang).toBe("bg");

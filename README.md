@@ -126,7 +126,7 @@ npm run env:set -- ANTHROPIC_API_KEY   # asks for the value with echo off, write
 | `TELEGRAM_WEBHOOK_SECRET` | Any random string: `openssl rand -hex 32` | Yes |
 | `STT_API_KEY` | console.groq.com → API keys (free tier) or an OpenAI key | No: without it, voice notes get a polite "please type it" |
 | `STT_BASE_URL` | Default `https://api.groq.com/openai/v1`; OpenAI: `https://api.openai.com/v1` | No |
-| `STT_MODEL` | Default `whisper-large-v3`; OpenAI: `whisper-1` | No |
+| `STT_MODEL` | Default `whisper-large-v3`; OpenAI: `whisper-1`. Must be a Whisper model that returns `verbose_json` with the language it heard (`whisper-large-v3-turbo` works too): that label is how a voice note in any language is told apart. OpenAI's gpt-4o transcribe models answer `json` only and are not supported | No |
 | `NEXT_PUBLIC_SUPABASE_URL` | Supabase project → Settings → API → Project URL | Yes |
 | `NEXT_PUBLIC_SUPABASE_ANON_KEY` | Supabase project → Settings → API → anon public key | Yes |
 | `SUPABASE_SERVICE_ROLE_KEY` | Supabase project → Settings → API → service_role key (server only) | Yes |

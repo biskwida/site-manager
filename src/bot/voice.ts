@@ -68,7 +68,7 @@ export function whisperLang(name: string | undefined): ChatLang | null {
   return isChatLang(code) && languageName(code) !== code ? code : null;
 }
 
-/** Whisper often labels Bulgarian speech with one of its neighbours; these are the languages detectScriptLang tells from Bulgarian only by letters of their own. */
+/** The languages Whisper takes Bulgarian speech for; detectScriptLang tells them from Bulgarian only by letters of their own. */
 const BULGARIAN_FAMILY: ReadonlySet<ChatLang> = new Set(["ru", "uk", "be", "mk", "sr"]);
 
 interface SttClient {
@@ -82,13 +82,13 @@ const defaultFactory = (cfg: { apiKey: string; baseURL: string }): SttClient => 
  * names no language: Whisper listens and labels what it heard (whisperLang). A label outside the Bulgarian family is the note's
  * language, and that one request is all; with no label, or one that cannot be mapped, the transcript's letters decide.
  *
- * Whisper often labels Bulgarian speech Russian, Macedonian, Serbian, Ukrainian or Belarusian, and Bulgarian has no letter those
- * lack, so for those labels the letters decide too (detectScriptLang with the stored language):
- * - Bulgarian (Cyrillic with no letter of its own, from a member not stored in that family): transcribed again with language "bg",
- *   because a transcript made in Russian mode is poor Bulgarian; if that request fails, the first transcript stays;
- * - no language (the same Cyrillic from a member stored as ru, who may well be Russian): the first transcript, no switch;
- * - a letter of the family: Whisper's label stands (ј љ њ џ are Macedonian letters too);
- * - anything else (English words, Greek letters): that language.
+ * Whisper often labels Bulgarian speech Russian, Macedonian, Serbian, Ukrainian or Belarusian, and in Russian mode it writes Russian
+ * words (ы, э), so for those labels the transcript's letters cannot tell Bulgarian from Russian: the member's stored language decides.
+ * - Stored outside that family (bg, en, any other): the note is transcribed again with language "bg" and is Bulgarian, whatever
+ *   letters the first transcript had, so a voice note never moves a Bulgarian owner into Russian (many have Telegram in English).
+ *   If that second request fails, the first transcript stays.
+ * - Stored inside it: the first transcript stands, no second request. The label is their language when the letters also show one of
+ *   the family (ј љ њ џ are Macedonian letters too, so the label picks), otherwise no language: no switch.
  */
 export function makeTranscriber(cfg: { apiKey: string; baseUrl: string; model: string }, factory: (c: { apiKey: string; baseURL: string }) => SttClient = defaultFactory): Transcriber {
   const client = factory({ apiKey: cfg.apiKey, baseURL: cfg.baseUrl });
@@ -100,9 +100,10 @@ export function makeTranscriber(cfg: { apiKey: string; baseUrl: string; model: s
     const heard = whisperLang(first.language);
     if (!heard) return { text, lang: detectScriptLang(text, stored) };
     if (!BULGARIAN_FAMILY.has(heard)) return { text, lang: heard };
-    const letters = detectScriptLang(text, stored);
-    if (letters === null) return { text, lang: null };
-    if (letters !== "bg") return { text, lang: BULGARIAN_FAMILY.has(letters) ? heard : letters };
+    if (BULGARIAN_FAMILY.has(stored)) {
+      const letters = detectScriptLang(text, stored);
+      return { text, lang: letters !== null && BULGARIAN_FAMILY.has(letters) ? heard : null };
+    }
     try {
       const second = await client.audio.transcriptions.create({ file, model: cfg.model, response_format: "verbose_json", language: "bg" });
       return { text: (second.text ?? "").trim(), lang: "bg" };

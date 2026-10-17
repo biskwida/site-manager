@@ -41,6 +41,8 @@ const withoutLinks = (text: string) => text.replace(LINKS, " ");
 const CLASSIFY_MIN_WORDS = 4;
 /** The classifier gets at most this many characters of a message: enough to name its language. */
 const CLASSIFY_MAX_CHARS = 300;
+/** Words a voice transcript needs before it can switch the language: on a silent or noisy clip Whisper invents short phrases ("Thank you.", "Продолжение следует…") in any language. */
+const VOICE_LANG_MIN_WORDS = 4;
 
 /**
  * Whether the classifier, not the letters, names the language of these words (links removed):
@@ -359,7 +361,7 @@ async function handleVoice(d: BotDeps, member: Member, m: InboundMessage) {
   try {
     if (!m.media) throw new Error("no media");
     const dl = await m.media.download();
-    // The stored language goes in as it is: the transcriber only uses it to place Cyrillic that has no letter of its own, and never forces it on the speech.
+    // The stored language goes in as it is: the transcriber places a Russian-family label by it, and never forces it on the speech.
     const said = await d.transcribe(dl.bytes, member.lang, audioContentType(dl.contentType, dl.name));
     text = said.text.trim();
     spoken = said.lang;
@@ -372,8 +374,9 @@ async function handleVoice(d: BotDeps, member: Member, m: InboundMessage) {
     await d.messenger.send(member.chat_ref, c.voiceFailed);
     return;
   }
-  // The language is the transcriber's: Whisper's label checked against the transcript's letters. A transcript never goes to the classifier.
-  const speaker = await followLanguage(d, member, spoken);
+  // The language is the transcriber's (Whisper's label, placed by the member's stored language), but a note shorter than four words
+  // keeps the stored one. A transcript never goes to the classifier.
+  const speaker = await followLanguage(d, member, countWords(text) >= VOICE_LANG_MIN_WORDS ? spoken : null);
   d.startRun({ venueId: member.venue_id, chatRef: member.chat_ref, member: speaker, text, source: "voice", replyTo: m.messageRef });
   await d.messenger.send(member.chat_ref, copy(baseLang(speaker.lang)).heard(text));
 }

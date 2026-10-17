@@ -27,7 +27,12 @@
 - English: no Cyrillic and at least 2 different words from this list, matched whole and case-insensitively: the, an, is, was, to, for, of, and, or, in, on, at, with, from, it, this, that, my, our, we, you, please, can, could, would, will, make, add, remove, change, put, show, price, today, tomorrow, closed, open, sold, out, what, how, when, why. (Ruling 2026-10-16: a, i, be, are, post and set removed because Bulgarian typed in Latin letters uses them.) Anything else is `null` and keeps the current language (prices, emoji, dish names, Bulgarian written in Latin letters such as "kafeto e 4.20").
 - A detected language different from `member.lang` is saved (`setMemberLang`) before the run starts.
 - `/lang bg|en` still sets the language; the next message that shows the other language switches it again.
-- Speech-to-text: no forced language; Bulgarian or English from the transcriber's `language` field; Russian, Macedonian, Serbian, Ukrainian or Belarusian → transcribe again with `bg`; any other language → transcribe again with the stored language; no `language` field → `detectLang(text)`.
+- Speech-to-text (rulings 2026-10-16): the first request names no language and asks for `verbose_json`; the stored language is never forced on the speech.
+  - Whisper's `language` label is mapped to a conversation language by `whisperLang`. A label outside ru, uk, be, mk, sr is the note's language, in that one request. No label, or one that cannot be mapped → `detectScriptLang(text, stored)`.
+  - A label in ru, uk, be, mk, sr is placed by where the member is stored. Stored outside that family (bg, en or any other language): always transcribe again with `bg`; the second transcript is returned with lang `bg`, whatever letters the first had (Russian-mode text of Bulgarian speech often has ы and э; a voice note never moves a bg or en owner into Russian). Stored inside it: keep the first transcript, no second request; lang is Whisper's label when `detectScriptLang(text, stored)` also shows a language of the family, otherwise null (no switch).
+  - A failed second request keeps the first transcript with lang `bg`. A transcript never goes to the classifier.
+  - A voice note switches the stored language only when its transcript has at least 4 words (`countWords`, any script); a shorter one keeps it (Whisper invents short phrases on silent or noisy clips: "Thank you.").
+  - `STT_MODEL` must be a Whisper model that answers `verbose_json` with its language (whisper-large-v3, whisper-large-v3-turbo, whisper-1); OpenAI's gpt-4o transcribe models answer json only and are not supported.
 
 ## Review Focus
 
@@ -154,19 +159,21 @@ it("languageName", () => { expect(languageName("de")).toBe("German"); expect(lan
 **Files:** Modify `src/bot/voice.ts`, `src/bot/inbound.ts`; Test `test/voice.test.ts`, `test/inbound.test.ts` (fake transcribers move to the new result shape)
 
 **Interfaces:**
-- Produces: `type Transcriber = (bytes: Uint8Array, fallback: Lang, contentType?: string) => Promise<{ text: string; lang: ChatLang | null }>`; `whisperLang(name: string | undefined): ChatLang | null` (Whisper language names or codes → ISO 639-1; "bulgarian" → "bg", "german" → "de", "greek" → "el"; unknown → null).
+- Produces: `type Transcriber = (bytes: Uint8Array, stored: ChatLang, contentType?: string) => Promise<{ text: string; lang: ChatLang | null }>` (`stored` is the member's stored language; it is never sent to the service); `whisperLang(name: string | undefined): ChatLang | null` (Whisper language names, alias names or codes → ISO 639-1, any case; "bulgarian" → "bg", "german" → "de", "greek" → "el"; unknown → null).
 
 - [ ] **Step 1: Failing tests**
 
 ```ts
 it("asks without a language and maps the language it heard", async () => { /* no `language` param, response_format "verbose_json"; { language: "german" } → { lang: "de" } and no second call */ });
-it("Russian-labelled speech with no Russian-only letters is transcribed again as Bulgarian", async () => { /* { language: "russian", text: "кафето е готово" } → second call language "bg" → lang "bg" */ });
-it("Russian speech with ы stays Russian", async () => { /* { language: "russian", text: "мы открыты" } → lang "ru", one call */ });
+it("Russian-labelled speech with no Russian-only letters is transcribed again as Bulgarian", async () => { /* { language: "russian", text: "кафето е готово" }, member stored en → second call language "bg" → lang "bg" */ });
+it("a bg or en member is never moved into Russian", async () => { /* { language: "russian", text: "Вы можете забрать кофе" }, member stored bg, then en → second call "bg" → lang "bg" */ });
+it("Russian speech with ы stays Russian for a ru member", async () => { /* { language: "russian", text: "мы открыты" }, stored ru → lang "ru", one call; marker-less Cyrillic, stored ru → lang null, one call; { language: "ukrainian", text with і }, stored uk → lang "uk", one call */ });
 it("no language field → detect from the text", async () => { /* { text: "make it a story please" } → "en" */ });
 // inbound: transcriber { text: "Ich möchte…", lang: "de" } → member saved "de"
+// inbound: fewer than 4 words never switch: bg member { text: "Thank you.", lang: "en" } → no save; en member { text: "Продолжение следует", lang: "bg" } → no save; bg member { text: "make it a story please", lang: "en" } → saved en
 ```
 
-- [ ] **Step 2–4:** run `npx vitest run test/voice.test.ts test/inbound.test.ts`, implement (the Cyrillic family check reuses `detectScriptLang` on the transcript), run the full suite.
+- [ ] **Step 2–4:** run `npx vitest run test/voice.test.ts test/inbound.test.ts`, implement (a label in ru, uk, be, mk, sr is placed by the member's stored language, see Global Constraints; `handleVoice` passes the transcriber's lang to `followLanguage` only for a transcript of at least 4 words, counted with `countWords`), run the full suite.
 - [ ] **Step 5: Commit** `git commit -m "Voice: transcribed in the language spoken, any language"`
 
 ### Task 5: Translation of Claudia's fixed texts

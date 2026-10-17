@@ -55,48 +55,67 @@ describe("makeTranscriber", () => {
     expect(calls[0]).not.toHaveProperty("language");
   });
 
-  it("Russian-labelled speech with no Russian-only letters is transcribed again as Bulgarian", async () => {
-    const { calls, transcribe } = fakeStt({ language: "russian", text: "кафето е готово" }, { language: "bulgarian", text: " Кафето е готово. " });
-    expect(await transcribe(bytes, "en", "audio/mp4")).toEqual({ text: "Кафето е готово.", lang: "bg" });
-    expect(calls).toHaveLength(2);
-    expect(calls[0]).not.toHaveProperty("language");
-    expect(calls[1]).toMatchObject({ model: "whisper-large-v3", language: "bg" });
-    expect([(calls[0].file as File).name, (calls[1].file as File).name]).toEqual(["voice.m4a", "voice.m4a"]); // the same note, twice
-  });
+  describe("a label in the Bulgarian family (ru, uk, be, mk, sr) is placed by where the member is stored", () => {
+    it("Russian-labelled speech with no Russian-only letters is transcribed again as Bulgarian", async () => {
+      const { calls, transcribe } = fakeStt({ language: "russian", text: "кафето е готово" }, { language: "bulgarian", text: " Кафето е готово. " });
+      expect(await transcribe(bytes, "en", "audio/mp4")).toEqual({ text: "Кафето е готово.", lang: "bg" });
+      expect(calls).toHaveLength(2);
+      expect(calls[0]).not.toHaveProperty("language");
+      expect(calls[1]).toMatchObject({ model: "whisper-large-v3", language: "bg" });
+      expect([(calls[0].file as File).name, (calls[1].file as File).name]).toEqual(["voice.m4a", "voice.m4a"]); // the same note, twice
+    });
 
-  it.each(["ukrainian", "belarusian", "macedonian", "serbian"])("%s-labelled speech with no letter of its own is Bulgarian too: the second transcript, saved bg", async (label) => {
-    const { calls, transcribe } = fakeStt({ language: label, text: "кафето е готово" }, { language: "bulgarian", text: "Кафето е готово." });
-    expect(await transcribe(bytes, "bg")).toEqual({ text: "Кафето е готово.", lang: "bg" });
-    expect(calls.map((c) => c.language)).toEqual([undefined, "bg"]);
-  });
+    it.each(["bg", "en", "de"])("a member stored as %s is never moved into Russian: even with ы the note is transcribed again as Bulgarian", async (stored) => {
+      const { calls, transcribe } = fakeStt({ language: "russian", text: "Вы можете забрать кофе" }, { language: "bulgarian", text: "Можете да вземете кафето." });
+      expect(await transcribe(bytes, stored)).toEqual({ text: "Можете да вземете кафето.", lang: "bg" });
+      expect(calls.map((c) => c.language)).toEqual([undefined, "bg"]);
+    });
 
-  it("Russian speech with ы stays Russian", async () => {
-    const { calls, transcribe } = fakeStt({ language: "russian", text: "мы открыты" });
-    expect(await transcribe(bytes, "bg")).toEqual({ text: "мы открыты", lang: "ru" });
-    expect(calls).toHaveLength(1);
-  });
+    it.each(["ukrainian", "belarusian", "macedonian", "serbian"])("%s-labelled speech from a bg member is transcribed again as Bulgarian too", async (label) => {
+      const { calls, transcribe } = fakeStt({ language: label, text: "кафето е готово" }, { language: "bulgarian", text: "Кафето е готово." });
+      expect(await transcribe(bytes, "bg")).toEqual({ text: "Кафето е готово.", lang: "bg" });
+      expect(calls.map((c) => c.language)).toEqual([undefined, "bg"]);
+    });
 
-  it.each(["ru", "uk", "be", "mk", "sr"])("a member stored as %s who speaks marker-less Cyrillic keeps the first transcript and no language switch", async (stored) => {
-    const { calls, transcribe } = fakeStt({ language: "russian", text: "добавь пиццу в меню" });
-    expect(await transcribe(bytes, stored)).toEqual({ text: "добавь пиццу в меню", lang: null });
-    expect(calls).toHaveLength(1); // never forced to Bulgarian: the speaker may well be Russian
-  });
+    it("whatever letters the first transcript has, a member stored outside the family gets Bulgarian: Latin, Greek or numbers too", async () => {
+      for (const text of ["make it a story please", "Ο καφές είναι έτοιμος", "4.20"]) {
+        const { calls, transcribe } = fakeStt({ language: "russian", text }, { language: "bulgarian", text: "Направи го история." });
+        expect(await transcribe(bytes, "bg")).toEqual({ text: "Направи го история.", lang: "bg" });
+        expect(calls).toHaveLength(2);
+      }
+    });
 
-  it("Macedonian-labelled speech with ј (a letter Serbian shares) is Macedonian: the label wins inside the family", async () => {
-    const { calls, transcribe } = fakeStt({ language: "macedonian", text: "јас сум тука" });
-    expect(await transcribe(bytes, "bg")).toEqual({ text: "јас сум тука", lang: "mk" });
-    expect(calls).toHaveLength(1);
-  });
+    it("Russian speech with ы stays Russian for a member stored as ru: the first transcript, one call", async () => {
+      const { calls, transcribe } = fakeStt({ language: "russian", text: "мы открыты" });
+      expect(await transcribe(bytes, "ru")).toEqual({ text: "мы открыты", lang: "ru" });
+      expect(calls).toHaveLength(1);
+    });
 
-  it("a label in the Bulgarian family over text of another language is that language by its letters", async () => {
-    const { calls, transcribe } = fakeStt({ language: "russian", text: "make it a story please" });
-    expect(await transcribe(bytes, "bg")).toEqual({ text: "make it a story please", lang: "en" });
-    expect(calls).toHaveLength(1);
-  });
+    it.each([["ru", "russian"], ["uk", "ukrainian"], ["be", "belarusian"], ["mk", "macedonian"], ["sr", "serbian"]])("a member stored as %s, label %s, speaking Cyrillic with no letter of its own: no switch, the first transcript, one call", async (stored, label) => {
+      const { calls, transcribe } = fakeStt({ language: label, text: "добавь пиццу в меню" });
+      expect(await transcribe(bytes, stored)).toEqual({ text: "добавь пиццу в меню", lang: null }); // never forced to Bulgarian: the speaker may well be Russian
+      expect(calls).toHaveLength(1);
+    });
 
-  it("a label in the Bulgarian family over text that shows no language is no switch", async () => {
-    const { transcribe } = fakeStt({ language: "serbian", text: "4.20" });
-    expect(await transcribe(bytes, "bg")).toEqual({ text: "4.20", lang: null });
+    it("a member stored as uk, label ukrainian, speaking with і: Ukrainian, one call", async () => {
+      const { calls, transcribe } = fakeStt({ language: "ukrainian", text: "Додай піцу до меню" });
+      expect(await transcribe(bytes, "uk")).toEqual({ text: "Додай піцу до меню", lang: "uk" });
+      expect(calls).toHaveLength(1);
+    });
+
+    it("a member stored as mk, label macedonian, speaking with ј (a letter Serbian shares): Macedonian, the label wins inside the family", async () => {
+      const { calls, transcribe } = fakeStt({ language: "macedonian", text: "јас сум тука" });
+      expect(await transcribe(bytes, "mk")).toEqual({ text: "јас сум тука", lang: "mk" });
+      expect(calls).toHaveLength(1);
+    });
+
+    it("a member stored in the family whose note shows no family language, English words or a price, is no switch either", async () => {
+      for (const text of ["make it a story please", "4.20"]) {
+        const { calls, transcribe } = fakeStt({ language: "russian", text });
+        expect(await transcribe(bytes, "ru")).toEqual({ text, lang: null });
+        expect(calls).toHaveLength(1);
+      }
+    });
   });
 
   it("Bulgarian, English and every other mapped label is that language, in one call, even capitalised (Groq)", async () => {
@@ -124,18 +143,18 @@ describe("makeTranscriber", () => {
     }
   });
 
-  it("a second request that fails keeps the first transcript, still Bulgarian by its letters, and logs no words", async () => {
+  it("a second request that fails keeps the first transcript, still Bulgarian and never Russian, and logs no words", async () => {
     const errs: string[] = [];
     const orig = console.error;
     console.error = (...a: unknown[]) => { errs.push(a.join(" ")); };
     try {
-      const { calls, transcribe } = fakeStt({ language: "russian", text: "кафето е готово" }, new Error("429 Too Many Requests"));
-      expect(await transcribe(bytes, "bg")).toEqual({ text: "кафето е готово", lang: "bg" });
+      const { calls, transcribe } = fakeStt({ language: "russian", text: "Вы можете забрать кофе" }, new Error("429 Too Many Requests"));
+      expect(await transcribe(bytes, "bg")).toEqual({ text: "Вы можете забрать кофе", lang: "bg" });
       expect(calls).toHaveLength(2);
     } finally { console.error = orig; }
     expect(errs).toHaveLength(1);
     expect(errs[0]).toMatch(/^\[bot\] .*429 Too Many Requests$/);
-    expect(errs[0]).not.toContain("кафето"); // the log says why, never what was said
+    expect(errs[0]).not.toContain("кофе"); // the log says why, never what was said
   });
 
   it("a failing first request rejects, so the owner gets the usual voice-failed line", async () => {
