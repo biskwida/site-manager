@@ -131,7 +131,7 @@ describe("recentPostStats", () => {
     const out = await recentPostStats(client, "17841", SINCE);
     const list = new URL(calls.find((c) => c.includes("/media?"))!);
     expect(list.pathname).toBe("/v25.0/17841/media");
-    expect(list.searchParams.get("fields")).toBe("id,caption,media_type,media_product_type,timestamp,permalink");
+    expect(list.searchParams.get("fields")).toBe("id,caption,media_type,media_product_type,timestamp,permalink,media_url,thumbnail_url");
     expect(list.searchParams.get("limit")).toBe("25");
     const ins = new URL(calls.find((c) => c.includes("/m1/insights"))!);
     expect(ins.searchParams.get("metric")).toBe("reach,saved,shares,views");
@@ -139,6 +139,16 @@ describe("recentPostStats", () => {
     expect(out[0]).toEqual({ id: "m1", caption: "Брънч", type: "image", at: new Date(Date.parse(ago(3).replace("+0000", "Z"))).toISOString(), permalink: "https://instagram.com/p/1", reach: 400, saved: 20, shares: 8, views: 900 });
     expect(out[1].type).toBe("video");
     expect(out[2].type).toBe("carousel");
+  });
+  it("keeps the post's https picture: media_url, or a video's thumbnail_url", async () => {
+    const data = [
+      { ...MEDIA.data[0], media_url: "https://cdn.example/1.jpg" },
+      { ...MEDIA.data[1], media_url: "https://cdn.example/2.mp4", thumbnail_url: "https://cdn.example/2.jpg" },
+      { ...MEDIA.data[4], media_url: "http://cdn.example/4.jpg" },
+    ];
+    const { client } = fakeGraph([["/media?", { body: { data } }]]);
+    const out = await recentPostStats(client, "17841", SINCE);
+    expect(out.map((p) => p.image_url)).toEqual(["https://cdn.example/1.jpg", "https://cdn.example/2.jpg", undefined]);
   });
   it("leaves a metric the API refuses undefined and keeps the rest", async () => {
     const { client, calls } = fakeGraph([

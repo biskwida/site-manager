@@ -113,3 +113,17 @@ describe("SYSTEM_PROMPT: website photos", () => {
     expect(nums).toEqual(nums.map((_, i) => i + 1));
   });
 });
+
+describe("SYSTEM_PROMPT: ads go to propose_boost", () => {
+  it("is a numbered rule: boost requests call propose_boost, never social_post, and ✏️ re-runs it with the owner's numbers", () => {
+    const rule = SYSTEM_PROMPT.split("\n").find((l) => /^\d+\. Ads: /.test(l)) ?? "";
+    expect(rule).toMatch(/^17\. Ads: /);
+    for (const words of ["\"пусни поста с реклама\"", "\"рекламирай\"", "\"boost\"", "\"ad\""]) expect(rule).toContain(words);
+    expect(rule).toContain("call propose_boost, never social_post for an ad");
+    expect(rule).toContain("call propose_boost again with the owner's numbers");
+    expect(rule).toContain("Never state reach, cost or results");
+    expect(rule).toContain("for now ✅ only saves the plan");
+    const nums = [...SYSTEM_PROMPT.matchAll(/^(\d+)\. /gm)].map((m) => Number(m[1]));
+    expect(nums).toEqual(nums.map((_, i) => i + 1));
+  });
+});

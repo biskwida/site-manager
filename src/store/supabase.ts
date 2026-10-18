@@ -1,7 +1,7 @@
 // src/store/supabase.ts
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import { COMMENT_LIMIT_DEFAULT, countsTowardLimit } from "../domain/limits";
-import { isChatLang, isExternalEntity, type CommentMode, type SocialEntity, type WpEntity } from "../domain/types";
+import { isChatLang, isExternalEntity, isRecordOnlyEntity, type BoostEntity, type CommentMode, type SocialEntity, type WpEntity } from "../domain/types";
 import type { Announcement, BusinessType, Category, Change, ChangeSet, ChatLang, Conversation, DeployInfo, DeployStatus, Holiday, InstagramImport, Item, Lang, Media, Member, Role, SiteState, SiteText, SiteTextKey, TemplateId, Venue, VenueStatus } from "../domain/types";
 import type { Place } from "../geo/osm";
 import type { WizardDraft } from "../wizard/schema";
@@ -146,7 +146,7 @@ const SET_SELECT = "*, changes(*)";
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 /** A venue filter that is not a uuid can match nothing (and Postgres would reject it). */
 const badVenue = (venueId?: string) => Boolean(venueId) && !UUID.test(venueId as string);
-const TABLE: Record<Exclude<Change["entity"], WpEntity | SocialEntity>, string> = { venue: "venues", category: "categories", item: "items", holiday: "holidays", announcement: "announcements", media: "media", site_text: "site_texts" };
+const TABLE: Record<Exclude<Change["entity"], WpEntity | SocialEntity | BoostEntity>, string> = { venue: "venues", category: "categories", item: "items", holiday: "holidays", announcement: "announcements", media: "media", site_text: "site_texts" };
 
 export class SupabaseStore implements Store {
   private db: SupabaseClient;
@@ -476,6 +476,7 @@ export class SupabaseStore implements Store {
 
   private async writeEntity(venueId: string, c: Change) {
     if (isExternalEntity(c.entity)) return; // lives on the owner's WordPress site or social accounts; the destination push writes it
+    if (isRecordOnlyEntity(c.entity)) return; // a saved ad plan: the change row is the whole record
     const table = TABLE[c.entity];
     if (c.entity === "site_text") {
       if (c.after === null) {

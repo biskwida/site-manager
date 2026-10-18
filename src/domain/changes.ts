@@ -3,7 +3,7 @@ import { bestInkContrast, isReadableBackground, READABLE_BACKGROUND_MIN } from "
 import { isValidHours } from "./hours";
 import { PRICE_MAX, PRICE_MIN, round2 } from "./pricing";
 import {
-  COMMENT_MODES, isExternalEntity, MONO_TEXT_KEYS, SITE_TEXT_KEYS, VENUE_TEXT_KEYS,
+  COMMENT_MODES, isExternalEntity, isRecordOnlyEntity, MONO_TEXT_KEYS, SITE_TEXT_KEYS, VENUE_TEXT_KEYS,
   type Announcement, type Change, type ChangeOp, type Entity, type Holiday, type Item, type Row, type SiteState, type SiteText, type TextKey,
 } from "./types";
 
@@ -301,6 +301,7 @@ function writeList<T extends { id: string }>(list: T[], id: string, before: Row 
 /** Pure entity write. Inserts are idempotent by id; updates merge the patch; deletes remove by id. */
 export function applyChange(s: SiteState, c: Change): SiteState {
   if (isExternalEntity(c.entity)) return s; // lives on the owner's WordPress site or social accounts; the destination push writes it
+  if (isRecordOnlyEntity(c.entity)) return s; // a saved ad plan: the change row is the whole record
   switch (c.entity) {
     case "venue":
       if (c.after === null || c.before === null) throw new Error("venue rows are only updated");

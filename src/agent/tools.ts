@@ -18,6 +18,7 @@ import { usageLine } from "../bot/limit";
 import { changeUsage } from "../store/usage";
 import { countsTowardLimit } from "../domain/limits";
 import { BulkSchema, CancelSchema, CheckAllergensSchema, ListSchema, ProposeSchema, ScheduleSchema, UndoSchema, type ChangeInput } from "./tool-schemas";
+import { boostTools, type InstagramAccess } from "./boost-tools";
 import { commentTools, isCommentReplySet } from "./comment-tools";
 import { socialTools } from "./social-tools";
 import { visualTools } from "./visual-tools";
@@ -44,7 +45,9 @@ export interface AgentDeps {
   social?: { facebook: boolean; instagram: boolean } | null;
   /** Reads Instagram and Facebook comments right now (list_comments runs it first); absent = list_comments answers from the saved comments only. */
   liveComments?: LiveComments | null;
-  /** Outbound HTTP for reading the owner's photo (social_post reads it for Instagram's 4:5..1.91:1 check and to make the 9:16 story picture); default the global fetch. */
+  /** The venue's Instagram account for propose_boost's follower and post numbers; absent, null or resolving null = those inputs are missing. */
+  instagramInsights?: ((venueId: string) => Promise<InstagramAccess | null>) | null;
+  /** Outbound HTTP for reading the owner's photo (social_post reads it for Instagram's 4:5..1.91:1 check and to make the 9:16 story picture) and for OpenStreetMap (propose_boost's surroundings); default the global fetch. */
   fetch?: typeof fetch;
   /** The picture service (photo → Instagram picture); registers make_visual when present. */
   visual?: VisualClient | null;
@@ -336,7 +339,7 @@ export function makeTools(deps: AgentDeps) {
 
   // Task 11 appends schedule_changes, propose_bulk_price_change, check_allergens, undo here.
   const kit: ToolKit = { attempt, site, ctx, previews, mine, propose, getSet, ensureNoPending, ensureWithinLimit, lang };
-  return [getSite, getMenu, proposeChanges, cancelChangeSet, listChanges, ...extraTools(d, kit), ...wpTools(d, kit), ...socialTools(d, kit), ...commentTools(d, kit), ...visualTools(d, kit)];
+  return [getSite, getMenu, proposeChanges, cancelChangeSet, listChanges, ...extraTools(d, kit), ...wpTools(d, kit), ...socialTools(d, kit), ...commentTools(d, kit), ...visualTools(d, kit), ...boostTools(d, kit)];
 }
 
 /** What the shared helpers of makeTools expose to the second group of tools. */

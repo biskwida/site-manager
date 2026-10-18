@@ -21,7 +21,7 @@ export const PROFILE_TIMEOUT_MS = 8_000;
 const CONCURRENCY = 5;
 /** `timeframe` is documented for follower_demographics (one of last_14_days … this_week); last_90_days is the widest. */
 const TIMEFRAME = "last_90_days";
-const MEDIA_FIELDS = "id,caption,media_type,media_product_type,timestamp,permalink";
+const MEDIA_FIELDS = "id,caption,media_type,media_product_type,timestamp,permalink,media_url,thumbnail_url";
 const METRICS = ["reach", "saved", "shares", "views"] as const;
 type Metric = (typeof METRICS)[number];
 const DAY_MS = 86_400_000;
@@ -43,6 +43,8 @@ export interface PostStat {
   /** ISO. */
   at: string;
   permalink: string;
+  /** The post's picture (https): media_url, or a video's thumbnail_url. Absent when Meta gives none. */
+  image_url?: string;
   reach?: number;
   saved?: number;
   shares?: number;
@@ -230,7 +232,9 @@ export async function recentPostStats(client: GraphClient, igUserId: string, sin
       const id = str(raw.id);
       if (!id || !Number.isFinite(ms) || ms < since) continue;
       if (stats.length >= MAX_POSTS) break;
-      stats.push({ id, caption: str(raw.caption), type: typeOf(raw), at: new Date(ms).toISOString(), permalink: str(raw.permalink) });
+      const type = typeOf(raw);
+      const picture = str(type === "video" ? raw.thumbnail_url : raw.media_url);
+      stats.push({ id, caption: str(raw.caption), type, at: new Date(ms).toISOString(), permalink: str(raw.permalink), ...(/^https:\/\//.test(picture) ? { image_url: picture } : {}) });
     }
     const queue = [...stats];
     const lane = async () => {

@@ -32,6 +32,7 @@ import type { SyncDeps } from "../destinations/sync";
 import { draftReply, type DraftFn } from "../social/comments-draft";
 import { makeLiveComments } from "../social/comments-poll";
 import { connectWordPress, wordPressClientFor } from "../destinations/connect";
+import { instagramAccess } from "../agent/boost-tools";
 import { socialConnections } from "../agent/social-tools";
 import { httpVisualClient } from "../visual/client";
 
@@ -182,7 +183,7 @@ export async function makeServerDeps(o: DepsOptions): Promise<ServerDeps> {
     const social = sync ? await socialConnections(s, r.venueId).catch(() => null) : null;
     try {
       await runTurn(
-        { store: store2, venueId: r.venueId, chatRef: r.chatRef, member: r.member, messenger, now: () => new Date(), baseUrl: config.publicBaseUrl, wordpress: wp?.client ?? null, social, visual, liveComments: sync ? makeLiveComments(sync, () => new Date()) : null },
+        { store: store2, venueId: r.venueId, chatRef: r.chatRef, member: r.member, messenger, now: () => new Date(), baseUrl: config.publicBaseUrl, wordpress: wp?.client ?? null, social, visual, liveComments: sync ? makeLiveComments(sync, () => new Date()) : null, instagramInsights: sync ? (venueId) => instagramAccess(sync, venueId) : null },
         { text: r.text, source: r.source, image: r.image, mediaId: r.mediaId, replyTo: r.replyTo },
         { model: config.agentModel, effort: config.agentEffort, apiKey: config.anthropicApiKey || undefined },
         o.client,

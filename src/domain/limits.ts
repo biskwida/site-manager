@@ -9,6 +9,7 @@
 //   so they only record what the owner already decided.
 // - Sets with source "comment" never count (replies to customer comments are reactions with their own cap, Venue.comment_limit),
 //   and neither does a set made only of set_comment_mode rows: choosing how to hear about comments is not a site change.
+// - A set made only of boost_plan rows never counts either: in phase 1 ✅ only saves an ad plan, nothing changes anywhere.
 // - Rejected, expired and cancelled sets never reached `applied`, so they do not count.
 // - The month is the calendar month in the venue's time zone (venue.tz, e.g. Europe/Sofia).
 // - Venue.change_limit null = unlimited (the default).
@@ -42,11 +43,13 @@ export const COMMENT_LIMIT_DEFAULT = 300;
 
 /**
  * Whether an applied set of this source (and, when given, these rows) uses up one change of the month. Comment replies are
- * reactions, not changes (they have their own cap); a set whose every row is set_comment_mode keeps its source and is exempt.
+ * reactions, not changes (they have their own cap); a set whose every row is set_comment_mode, or every row boost_plan (a saved
+ * ad plan), keeps its source and is exempt.
  */
 export function countsTowardLimit(source: ChangeSource, rows?: readonly Pick<Change, "op">[]): boolean {
   if (source === "undo" || source === "auto" || source === "comment") return false;
-  return !(rows && rows.length > 0 && rows.every((r) => r.op === "set_comment_mode"));
+  if (!rows || rows.length === 0) return true;
+  return !(rows.every((r) => r.op === "set_comment_mode") || rows.every((r) => r.op === "boost_plan"));
 }
 
 /** Parses a --change-limit argument: "none" (or "null", "unlimited") clears the limit, a whole number >= 0 sets it; anything else is an Error. */

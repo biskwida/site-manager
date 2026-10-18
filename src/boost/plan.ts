@@ -131,6 +131,9 @@ function surroundingsReason(s: Surroundings): BoostReason {
   return { kind: "fact", bg: `в радиус ${km} км: ${bg.join(", ")}${staleBg}`, en: `within ${km} km: ${en.join(", ")}${staleEn}` };
 }
 
+/** Meta names cities in English; the Bulgarian line names the largest ones in Bulgarian, any other as Meta gave it. */
+export const CITY_BG: Readonly<Record<string, string>> = { Sofia: "София", Plovdiv: "Пловдив", Varna: "Варна", Burgas: "Бургас", Ruse: "Русе", "Stara Zagora": "Стара Загора" };
+
 const pct = (share: number) => `${Math.round(share * 100)}%`;
 const top = (rec: Record<string, number>) => Object.entries(rec).reduce<[string, number] | null>((best, e) => (e[1] > 0 && (!best || e[1] > best[1]) ? e : best), null);
 
@@ -156,7 +159,7 @@ function followersReason(f: FollowerProfile | null): BoostReason {
   const city = f.cities.find((c) => c.share > 0);
   if (city) {
     const name = city.name.split(",")[0].trim();
-    bg.push(`${pct(city.share)} от ${name}`);
+    bg.push(`${pct(city.share)} от ${CITY_BG[name] ?? name}`);
     en.push(`${pct(city.share)} from ${name}`);
   }
   if (bg.length === 0) {

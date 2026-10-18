@@ -1,5 +1,6 @@
 import { formatDate, formatDateTime, hhmm, localTime } from "../time";
 import { allergenName } from "./allergens";
+import { boostPreviewLines } from "./boost-preview";
 import { colorName, inkFor, INK_LIGHT } from "./color";
 import { commentModeLabel, commentPreviewLines } from "./comment-preview";
 import { categoryName, formatPrice, itemName, keep, quote, tr, weekdayLabel } from "./format";
@@ -225,6 +226,9 @@ export function renderPreview(s: SiteState, changes: Change[], lang: Lang, tz: s
       case "social_reply":
       case "social_moderate":
         lines.push(...commentPreviewLines(c, lang));
+        break;
+      case "boost_plan":
+        lines.push(...boostPreviewLines(c, lang));
         break;
       case "set_comment_mode": {
         const label = (row: Row) => commentModeLabel(row.comment_mode, row.comment_digest_hour, lang);

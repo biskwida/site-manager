@@ -137,9 +137,16 @@ describe("reasons", () => {
     expect(r.map((x) => x.kind)).toEqual(["fact", "fact", "hypothesis"]);
     expect(r[0].bg).toBe("в радиус 1 км: Софийски университет (400 м), 3 държавни институции, 2 парка");
     expect(r[0].en).toBe("within 1 km: Софийски университет (400 m), 3 government buildings, 2 parks");
-    expect(r[1].bg).toBe("62% от последователите са жени, най-много 25–34 г., 71% от Sofia");
+    expect(r[1].bg).toBe("62% от последователите са жени, най-много 25–34 г., 71% от София");
     expect(r[1].en).toBe("62% of followers are women, most are 25–34, 71% from Sofia");
     expect(r[2].bg).toContain("по-широката аудитория обикновено е по-евтина");
+  });
+  it("names Meta's English city names in Bulgarian in the Bulgarian line; any other city as Meta gave it", () => {
+    const city = (name: string) => plan({ followers: { followers: 300, age: {}, gender: {}, cities: [{ name, share: 0.5 }] } }).reasons[1];
+    expect(city("Stara Zagora, Stara Zagora").bg).toBe("50% от Стара Загора");
+    expect(city("Stara Zagora, Stara Zagora").en).toBe("50% from Stara Zagora");
+    expect(city("Ruse, Ruse").bg).toBe("50% от Русе");
+    expect(city("Gabrovo, Gabrovo").bg).toBe("50% от Gabrovo");
   });
   it("adds the variant hypothesis last, only when chosen", () => {
     const r = plan({ ownerWords: "закуска" }).reasons;
