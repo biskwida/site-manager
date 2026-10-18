@@ -797,7 +797,7 @@ describe("propose_boost: final fix wave", () => {
     expect(cs.preview_bg.replace("Бюджет: 30 € ✎", "")).not.toContain("✎");
   });
 
-  it("a cancelled plan of long ago, or one that was saved, carries nothing", async () => {
+  it("a saved plan carries nothing", async () => {
     const s = await setup();
     const first = await call(s.tools, "propose_boost", { media_id: s.photo.id, radius_km: 5 });
     await handleDecision({ store: s.store, messenger: new FakeMessenger(), now: () => T0 }, "tg:1001", "apply", first.change_set_id as string);
