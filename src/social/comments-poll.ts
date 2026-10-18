@@ -15,6 +15,10 @@ import type { DestinationPatch, DestinationWithSecrets, NewSocialComment, Social
 import { fetchFacebookComments, fetchInstagramComments, listFacebookPosts, listInstagramMedia, type AccountPost, type IncomingComment } from "./comments-graph";
 
 export const COMMENT_POLL_EVERY_MS = 15 * 60_000;
+/** An owner's question about comments reads Meta right then, but not again within this long after the last read of the venue. */
+export const COMMENT_ON_DEMAND_MIN_GAP_MS = 60_000;
+/** The overall cap of that live read (list_comments answers from the saved comments when it runs out). */
+export const COMMENT_ON_DEMAND_TIMEOUT_MS = 10_000;
 export const COMMENT_POST_WINDOW_MS = 14 * 24 * 3_600_000;
 export const COMMENT_RETENTION_MS = 30 * 24 * 3_600_000;
 /** The blanked rows stay this long (the monthly comment count reads replied_at), then they are deleted. */
@@ -37,9 +41,9 @@ export interface PollReport {
 const log = (d: SyncDeps, s: string) => (d.log ?? ((x: string) => console.log(x)))(s);
 const codeOf = (e: unknown) => (e instanceof MetaApiError ? e.code : e instanceof Error ? e.name : "error");
 
-function isDue(dest: DestinationWithSecrets, now: Date): boolean {
+function isDue(dest: DestinationWithSecrets, now: Date, minGapMs: number): boolean {
   const last = Date.parse(String(dest.config.last_comment_poll_at ?? ""));
-  return !Number.isFinite(last) || now.getTime() - last >= COMMENT_POLL_EVERY_MS;
+  return !Number.isFinite(last) || now.getTime() - last >= minGapMs;
 }
 
 /** A post whose comments are read: what toRow needs of a published target or of a listed account post. */
@@ -117,9 +121,11 @@ async function markPolled(d: SyncDeps, venueId: string, network: CommentNetwork,
  * One venue's poll: each connected network at most every 15 min. A token/permission error (or a destination saved without its
  * token or account id) marks the destination `error`
  * (the owner reconnects); any other error is logged and the network is tried again on the next tick (no last_comment_poll_at).
- * Never throws.
+ * Never throws. `o.onDemand` (the owner asked about comments, src/agent/comment-tools.ts) uses the same reads and the same storing but
+ * ignores the 15-minute throttle: a network is skipped only when it was read less than COMMENT_ON_DEMAND_MIN_GAP_MS ago.
  */
-export async function pollVenueComments(d: SyncDeps, venue: Venue, now: Date): Promise<PollReport> {
+export async function pollVenueComments(d: SyncDeps, venue: Venue, now: Date, o: { onDemand?: boolean } = {}): Promise<PollReport> {
+  const minGap = o.onDemand ? COMMENT_ON_DEMAND_MIN_GAP_MS : COMMENT_POLL_EVERY_MS;
   const report: PollReport = { polled: [], inserted: [], errors: [] };
   if (!d.secretKey) return report;
   let targets: PublishedTarget[] | null = null;
@@ -131,7 +137,7 @@ export async function pollVenueComments(d: SyncDeps, venue: Venue, now: Date): P
       log(d, `[comments] ${network} destination read for venue ${venue.id} failed: ${codeOf(e)}`);
       continue;
     }
-    if (!dest || dest.status !== "connected" || !isDue(dest, now)) continue;
+    if (!dest || dest.status !== "connected" || !isDue(dest, now, minGap)) continue;
     try {
       targets ??= await publishedTargets(d.store, venue.id, new Date(now.getTime() - COMMENT_POST_WINDOW_MS).toISOString());
       const mine = targets.filter((t) => t.network === network);
@@ -164,4 +170,38 @@ export async function purgeOldComments(store: Pick<Store, "purgeComments" | "red
   await store.redactComments(before);
   await store.redactCommentSets(before);
   return store.purgeComments(new Date(now.getTime() - COMMENT_ROW_RETENTION_MS).toISOString());
+}
+
+/** What list_comments needs to read Meta right then (AgentDeps.liveComments). */
+export interface LiveComments {
+  /** One on-demand poll of the venue; aborting `signal` stops its Graph calls. Never throws. */
+  poll(venueId: string, signal: AbortSignal): Promise<Pick<PollReport, "polled" | "errors">>;
+  /** When the venue's connected networks were last read successfully (the oldest of them), or null. */
+  lastCheckedAt(venueId: string): Promise<string | null>;
+}
+
+/** The on-demand poll over the same deps as the tick: every Graph call also stops when the caller's signal aborts. */
+export function makeLiveComments(d: SyncDeps, now: () => Date): LiveComments {
+  return {
+    async poll(venueId, signal) {
+      const base = d.fetch ?? fetch;
+      const f: typeof fetch = (input, init) => base(input, { ...init, signal: init?.signal ? AbortSignal.any([init.signal, signal]) : signal });
+      try {
+        return await pollVenueComments({ ...d, fetch: f }, await d.store.getVenue(venueId), now(), { onDemand: true });
+      } catch (e) {
+        log(d, `[comments] on-demand poll for venue ${venueId} failed: ${codeOf(e)}`);
+        return { polled: [], errors: [{ network: "instagram", code: codeOf(e) }] };
+      }
+    },
+    async lastCheckedAt(venueId) {
+      const times: number[] = [];
+      for (const network of NETWORKS) {
+        const dest = await d.store.getDestination(venueId, network);
+        if (!dest || dest.status !== "connected") continue; // an `error` destination's stamp is the failed attempt
+        const t = Date.parse(String(dest.config.last_comment_poll_at ?? ""));
+        if (Number.isFinite(t)) times.push(t);
+      }
+      return times.length ? new Date(Math.min(...times)).toISOString() : null;
+    },
+  };
 }

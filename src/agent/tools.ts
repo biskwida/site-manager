@@ -21,6 +21,7 @@ import { BulkSchema, CancelSchema, CheckAllergensSchema, ListSchema, ProposeSche
 import { commentTools, isCommentReplySet } from "./comment-tools";
 import { socialTools } from "./social-tools";
 import { visualTools } from "./visual-tools";
+import type { LiveComments } from "../social/comments-poll";
 import type { VisualClient } from "../visual/client";
 import { wpTools } from "./wp-tools";
 
@@ -41,6 +42,8 @@ export interface AgentDeps {
   wordpress?: WordPressClient | null;
   /** Networks connected for posting (registers social_post when either is true). */
   social?: { facebook: boolean; instagram: boolean } | null;
+  /** Reads Instagram and Facebook comments right now (list_comments runs it first); absent = list_comments answers from the saved comments only. */
+  liveComments?: LiveComments | null;
   /** Outbound HTTP for reading the owner's photo (social_post reads it for Instagram's 4:5..1.91:1 check and to make the 9:16 story picture); default the global fetch. */
   fetch?: typeof fetch;
   /** The picture service (photo → Instagram picture); registers make_visual when present. */
