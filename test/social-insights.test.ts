@@ -82,9 +82,23 @@ describe("followerProfile", () => {
     const { client } = fakeGraph(demographics([["fields=followers_count", { body: { followers_count: 80 } }]]));
     expect(await followerProfile(client, "17841")).toBeNull();
   });
-  it("falls back to the age total as the follower count when followers_count cannot be read", async () => {
+  it("never infers the follower count: null when followers_count cannot be read or is missing", async () => {
     const { client } = fakeGraph([["breakdown=age", { body: AGE }], ["breakdown=gender", { body: GENDER }], ["breakdown=city", { body: CITY }]]);
-    expect((await followerProfile(client, "17841"))!.followers).toBe(100);
+    expect(await followerProfile(client, "17841")).toBeNull();
+    const noCount = fakeGraph(demographics([["fields=followers_count", { body: { id: "17841" } }]]));
+    expect(await followerProfile(noCount.client, "17841")).toBeNull();
+  });
+  it("is null when the 8 s overall cap (here shortened) is hit, and asks nothing more", async () => {
+    const { client, calls } = fakeGraph([["breakdown=", "hang"], ["fields=followers_count", { body: { followers_count: 500 } }]]);
+    const t0 = Date.now();
+    expect(await followerProfile(client, "17841", undefined, { totalMs: 40 })).toBeNull();
+    expect(Date.now() - t0).toBeLessThan(1000);
+    await new Promise((r) => setTimeout(r, 30));
+    expect(calls.some((c) => c.includes("followers_count"))).toBe(false);
+  });
+  it("has an 8 s default overall cap", async () => {
+    const { PROFILE_TIMEOUT_MS } = await import("@/src/social/insights-graph");
+    expect(PROFILE_TIMEOUT_MS).toBe(8000);
   });
   it("never throws, even when the network does", async () => {
     const client = new GraphClient(IG_GRAPH, "t", (async () => { throw new Error("boom"); }) as typeof fetch);
@@ -183,6 +197,58 @@ describe("recentPostStats", () => {
     expect(Date.now() - t0).toBeLessThan(1000);
     expect(out).toHaveLength(3);
   });
+  it("starts no request once the total cap has fired: the lanes take no more posts", async () => {
+    const many = Array.from({ length: 12 }, (_, i) => ({ id: `p${i}`, caption: "", media_type: "IMAGE", media_product_type: "FEED", timestamp: ago(2), permalink: `https://instagram.com/p/${i}` }));
+    const { client, calls } = fakeGraph([["/insights", "hang"], ["/media?", { body: { data: many } }]]);
+    const insightCalls = () => calls.filter((c) => c.includes("/insights")).length;
+    // 5 lanes; a hung post frees its lane after 25 ms, so a second wave of 5 starts before the cap (40 ms) and the last 2 posts
+    // would be asked at ~50 ms if nothing stopped the lanes.
+    const out = await recentPostStats(client, "17841", SINCE, { perPostMs: 25, totalMs: 40 });
+    expect(out).toHaveLength(12);
+    const atCap = insightCalls();
+    expect(atCap).toBeLessThan(12);
+    await new Promise((r) => setTimeout(r, 150));
+    expect(insightCalls()).toBe(atCap);
+  });
+  it("starts no per-metric retry once that post's cap has fired", async () => {
+    const calls: string[] = [];
+    const f = (async (input: RequestInfo | URL) => {
+      const url = String(input);
+      calls.push(url);
+      if (url.includes("/media?")) return new Response(JSON.stringify({ data: [MEDIA.data[0]] }), { status: 200 });
+      await new Promise((r) => setTimeout(r, 60)); // slower than the 20 ms post cap, then refuses with code 100
+      return new Response(JSON.stringify({ error: { message: "unsupported", code: 100 } }), { status: 400 });
+    }) as typeof fetch;
+    const out = await recentPostStats(new GraphClient(IG_GRAPH, "t", f), "17841", SINCE, { perPostMs: 20, totalMs: 1000 });
+    expect(out[0].reach).toBeUndefined();
+    await new Promise((r) => setTimeout(r, 150));
+    expect(calls.filter((c) => c.includes("/insights"))).toHaveLength(1); // the combined request only, no retry per metric
+  });
+  it("reads the total_value.value shape and ignores metric names it did not ask for", async () => {
+    const { client } = fakeGraph([
+      ["/m1/insights", { body: { data: [{ name: "reach", total_value: { value: 77 } }, { name: "impressions", values: [{ value: 999 }] }, { name: "saved", values: [{ value: 6 }] }, { name: "profile_visits", total_value: { value: 5 } }, { name: "shares", values: [{ value: "x" }] }] } }],
+      ["/media?", { body: { data: [MEDIA.data[0]] } }],
+    ]);
+    const [p] = await recentPostStats(client, "17841", SINCE);
+    expect(p.reach).toBe(77);
+    expect(p.saved).toBe(6);
+    expect(p.shares).toBeUndefined();
+    expect(p).not.toHaveProperty("impressions");
+    expect(p).not.toHaveProperty("profile_visits");
+  });
+  it("logs only error codes, never messages, tokens, ids or data", async () => {
+    const logs: string[] = [];
+    const { client } = fakeGraph([
+      ["breakdown=age", { status: 400, body: { error: { message: "SECRET-MESSAGE for 17841", code: 100 } } }],
+      ["/m1/insights", { status: 400, body: { error: { message: "SECRET-MESSAGE", code: 100 } } }],
+      ["/media?", { body: { data: [MEDIA.data[0]] } }],
+    ]);
+    await followerProfile(client, "17841", (l) => logs.push(l));
+    await recentPostStats(client, "17841", SINCE, {}, (l) => logs.push(l));
+    expect(logs.length).toBeGreaterThan(0);
+    for (const l of logs) expect(l).toMatch(/^insights [a-z_ ]+: [a-z_0-9]+$/);
+    expect(logs.join("\n")).not.toMatch(/SECRET|TOKEN|17841|m1/);
+  });
   it("exposes the default caps of 4 s per post and 12 s overall", async () => {
     const { POST_TIMEOUT_MS, TOTAL_TIMEOUT_MS } = await import("@/src/social/insights-graph");
     expect([POST_TIMEOUT_MS, TOTAL_TIMEOUT_MS]).toEqual([4000, 12000]);
@@ -213,16 +279,21 @@ describe("bestPost", () => {
     expect(bestPost([stat("one", 1, { reach: 100, saved: 5, shares: 0 })], NOW)?.id).toBe("one");
     expect(bestPost([stat("fourteen", 14, { reach: 100, saved: 5, shares: 0 })], NOW)?.id).toBe("fourteen");
   });
-  it("is null without data: empty list, no reach, or neither saves nor shares known", () => {
+  it("is null without data: empty list, no reach, or saved or shares unknown", () => {
     expect(bestPost([], NOW)).toBeNull();
     expect(bestPost([stat("a", 3), stat("b", 4, { saved: 3 })], NOW)).toBeNull();
     expect(bestPost([stat("c", 3, { reach: 200 })], NOW)).toBeNull();
   });
-  it("treats one missing of saved and shares as zero when the other is known", () => {
-    expect(bestPost([stat("a", 3, { reach: 100, saved: 10 })], NOW)?.id).toBe("a");
+  it("never reads an unknown metric as 0: a post missing saved or shares is not scored, even if it would win", () => {
+    const stats = [stat("unknown-shares", 3, { reach: 100, saved: 90 }), stat("unknown-saved", 3, { reach: 100, shares: 90 }), stat("known", 4, { reach: 1000, saved: 1, shares: 1 })];
+    expect(bestPost(stats, NOW)?.id).toBe("known");
+    expect(bestPost(stats.slice(0, 2), NOW)).toBeNull();
+  });
+  it("needs a score above 0: a post nobody saved or shared is not worth boosting", () => {
+    expect(bestPost([stat("flat", 3, { reach: 500, saved: 0, shares: 0 })], NOW)).toBeNull();
   });
   it("breaks a tie by the newer post and ignores an unreadable date", () => {
-    const stats = [stat("older", 6, { reach: 100, saved: 10, shares: 0 }), stat("newer", 2, { reach: 100, saved: 10, shares: 0 }), { ...stat("bad", 3, { reach: 100, saved: 99 }), at: "nonsense" }];
+    const stats = [stat("older", 6, { reach: 100, saved: 10, shares: 0 }), stat("newer", 2, { reach: 100, saved: 10, shares: 0 }), { ...stat("bad", 3, { reach: 100, saved: 99, shares: 0 }), at: "nonsense" }];
     expect(bestPost(stats, NOW)?.id).toBe("newer");
   });
 });

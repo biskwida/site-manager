@@ -15,6 +15,8 @@ export const POST_WINDOW_DAYS = 30;
 export const MAX_POSTS = 25;
 export const POST_TIMEOUT_MS = 4_000;
 export const TOTAL_TIMEOUT_MS = 12_000;
+/** The whole follower profile (four requests) gets this long. */
+export const PROFILE_TIMEOUT_MS = 8_000;
 /** Posts whose insights are read at the same time. */
 const CONCURRENCY = 5;
 /** `timeframe` is documented for follower_demographics (one of last_14_days … this_week); last_90_days is the widest. */
@@ -59,8 +61,7 @@ const num = (v: unknown): number | undefined => (typeof v === "number" && Number
 const enc = encodeURIComponent;
 
 /** Logs the error code only: Meta's own code, or the fixed name of what went wrong. Never the message, URL or data. */
-function logCode(what: string, e: unknown, log: (s: string) => void): void {
-  const code = e instanceof MetaApiError ? e.code : "unexpected";
+function logCode(what: string, e: unknown, log: (s: string) => void, code = e instanceof MetaApiError ? e.code : "unexpected"): void {
   try {
     log(`insights ${what}: ${code}`);
   } catch {
@@ -68,10 +69,18 @@ function logCode(what: string, e: unknown, log: (s: string) => void): void {
   }
 }
 
-/** Resolves to `fallback` when `p` has not settled within `ms` (the late result is dropped). */
-function within<T>(p: Promise<T>, ms: number, fallback: T): Promise<T> {
+/** A cap that has fired: work checks it before every request and starts nothing more. */
+interface Stop {
+  on: boolean;
+}
+
+/** Resolves to `fallback` when `p` has not settled within `ms` (the late result is dropped); `onTimeout` runs first, to stop the work. */
+function within<T>(p: Promise<T>, ms: number, fallback: T, onTimeout?: () => void): Promise<T> {
   return new Promise<T>((resolve) => {
-    const t = setTimeout(() => resolve(fallback), ms);
+    const t = setTimeout(() => {
+      onTimeout?.();
+      resolve(fallback);
+    }, ms);
     p.then(
       (v) => {
         clearTimeout(t);
@@ -112,7 +121,15 @@ const shares = (pairs: [string, number][]): Record<string, number> => {
  * The café's followers by age, gender and top 3 cities, from Meta's follower_demographics. Null on any error (under 100 followers,
  * a missing permission, an expired token, no network) or when Meta returns nothing to break down. Never throws.
  */
-export async function followerProfile(client: GraphClient, igUserId: string, log: (s: string) => void = () => undefined): Promise<FollowerProfile | null> {
+export async function followerProfile(client: GraphClient, igUserId: string, log: (s: string) => void = () => undefined, opts: { totalMs?: number } = {}): Promise<FollowerProfile | null> {
+  const stop: Stop = { on: false };
+  return within(readFollowerProfile(client, igUserId, log, stop), opts.totalMs ?? PROFILE_TIMEOUT_MS, null, () => {
+    stop.on = true;
+    logCode("follower_demographics", new Error("timeout"), log, "timeout");
+  });
+}
+
+async function readFollowerProfile(client: GraphClient, igUserId: string, log: (s: string) => void, stop: Stop): Promise<FollowerProfile | null> {
   try {
     const id = enc(igUserId);
     const ask = (b: "age" | "gender" | "city") =>
@@ -122,16 +139,17 @@ export async function followerProfile(client: GraphClient, igUserId: string, log
     const gender = breakdownRows(genderReply);
     const city = breakdownRows(cityReply);
     if (!age && !gender && !city) return null;
-    // The follower count: the account's own number; failing that, the people the age breakdown covers (a lower bound).
+    if (stop.on) return null;
+    // The follower count is the account's own number; it is never inferred from the breakdowns (they cover fewer people).
     let followers = 0;
     try {
       const u = await client.get<{ followers_count?: unknown }>(`/${id}?fields=followers_count`);
       followers = num(u.followers_count) ?? 0;
     } catch (e) {
       logCode("followers_count", e, log);
+      return null;
     }
-    if (followers === 0) followers = sum(age ?? gender ?? city ?? []);
-    if (followers < MIN_FOLLOWERS) return null;
+    if (stop.on || followers < MIN_FOLLOWERS) return null;
     const cityShares = city ? shares(city) : {};
     const cities = Object.entries(cityShares)
       .sort((a, b) => b[1] - a[1])
@@ -166,8 +184,11 @@ function metricValues(reply: unknown): Partial<Record<Metric, number>> {
 /** True when the error says the account may not (or cannot) be read at all, so asking again per metric is pointless. */
 const hopeless = (e: unknown) => !(e instanceof MetaApiError) || e.code !== "meta_100";
 
-async function mediaMetrics(client: GraphClient, mediaId: string, log: (s: string) => void): Promise<Partial<Record<Metric, number>>> {
+/** `stops` are the caps that can fire (this post's, the whole call's): once one has, no further request is started. */
+async function mediaMetrics(client: GraphClient, mediaId: string, log: (s: string) => void, stops: Stop[]): Promise<Partial<Record<Metric, number>>> {
   const path = `/${enc(mediaId)}/insights?metric=`;
+  const stopped = () => stops.some((s) => s.on);
+  if (stopped()) return {};
   try {
     return metricValues(await client.get<unknown>(path + METRICS.join(",")));
   } catch (e) {
@@ -177,6 +198,7 @@ async function mediaMetrics(client: GraphClient, mediaId: string, log: (s: strin
   // One metric is refused for this media type (code 100 fails the whole request): ask one by one, keep what is given.
   const out: Partial<Record<Metric, number>> = {};
   for (const m of METRICS) {
+    if (stopped()) break;
     try {
       Object.assign(out, metricValues(await client.get<unknown>(path + m)));
     } catch (e) {
@@ -190,12 +212,14 @@ async function mediaMetrics(client: GraphClient, mediaId: string, log: (s: strin
 /**
  * The account's posts of the last 30 days (since `sinceIso`, newest first, at most 25, no stories) with reach, saved, shares and
  * views. A metric the API refuses stays undefined; a post gets 4 s and the whole call 12 s (then the posts so far, without the
- * numbers still missing). Empty on any listing error. Never throws.
+ * numbers still missing). Once a cap fires its work stops too: the lane loop takes no more posts and no further request starts.
+ * Empty on any listing error. Never throws.
  */
 export async function recentPostStats(client: GraphClient, igUserId: string, sinceIso: string, opts: PostStatsOptions = {}, log: (s: string) => void = () => undefined): Promise<PostStat[]> {
   const perPostMs = opts.perPostMs ?? POST_TIMEOUT_MS;
   const totalMs = opts.totalMs ?? TOTAL_TIMEOUT_MS;
   const stats: PostStat[] = [];
+  const total: Stop = { on: false };
   const work = (async () => {
     const parsed = Date.parse(sinceIso);
     const since = Number.isFinite(parsed) ? parsed : Date.now() - POST_WINDOW_DAYS * DAY_MS;
@@ -210,24 +234,29 @@ export async function recentPostStats(client: GraphClient, igUserId: string, sin
     }
     const queue = [...stats];
     const lane = async () => {
-      for (let post = queue.shift(); post; post = queue.shift()) {
-        const m = await within(mediaMetrics(client, post.id, log), perPostMs, {} as Partial<Record<Metric, number>>);
-        Object.assign(post, m);
+      for (let post = queue.shift(); post && !total.on; post = queue.shift()) {
+        const mine: Stop = { on: false };
+        const m = await within(mediaMetrics(client, post.id, log, [mine, total]), perPostMs, {} as Partial<Record<Metric, number>>, () => {
+          mine.on = true;
+        });
+        if (!total.on) Object.assign(post, m);
       }
     };
     await Promise.all(Array.from({ length: Math.min(CONCURRENCY, queue.length) }, lane));
   })().catch((e) => {
     logCode("media list", e, log);
   });
-  await within(work, totalMs, undefined);
+  await within(work, totalMs, undefined, () => {
+    total.on = true;
+  });
   // Copies, so a lane still running after the cap cannot change what the caller holds.
   return stats.map((s) => ({ ...s }));
 }
 
 /**
  * The post worth boosting: among posts 1 to 14 days old with a reach of at least 50, the highest (saved + shares) / reach.
- * A post needs a reach and at least one of saved / shares from Meta; the other counts as 0. Ties go to the newer post.
- * Null when no post qualifies.
+ * A post needs reach, saved and shares all known from Meta and a score above 0; an unknown metric is never read as 0, so
+ * such a post is not scored. Ties go to the newer post. Null when no post qualifies.
  */
 export function bestPost(stats: PostStat[], now: Date): PostStat | null {
   let best: { post: PostStat; score: number; at: number } | null = null;
@@ -237,8 +266,9 @@ export function bestPost(stats: PostStat[], now: Date): PostStat | null {
     const age = now.getTime() - at;
     if (age < DAY_MS || age > 14 * DAY_MS) continue;
     if (p.reach === undefined || p.reach < 50) continue;
-    if (p.saved === undefined && p.shares === undefined) continue;
-    const score = ((p.saved ?? 0) + (p.shares ?? 0)) / p.reach;
+    if (p.saved === undefined || p.shares === undefined) continue;
+    const score = (p.saved + p.shares) / p.reach;
+    if (score <= 0) continue;
     if (!best || score > best.score || (score === best.score && at > best.at)) best = { post: p, score, at };
   }
   return best ? best.post : null;
