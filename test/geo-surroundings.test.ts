@@ -293,6 +293,11 @@ describe("venue_surroundings in SQL", () => {
     expect(table).toBeDefined();
     for (const c of ["venue_id uuid primary key references public.venues(id) on delete cascade", "address text not null", "lat double precision", "lng double precision", "places jsonb not null default '[]'", "fetched_at timestamptz", "failed_at timestamptz"]) expect(table).toContain(c);
   });
+  it.each(["schema.sql", MIGRATION])("%s leaves fetched_at nullable (a row that only records a failure has none)", (file) => {
+    const table = read(file).find((s) => s.startsWith("create table if not exists public.venue_surroundings"))!;
+    expect(table).toMatch(/fetched_at timestamptz[,)]/);
+    expect(table).not.toMatch(/fetched_at timestamptz not null/);
+  });
   it.each(["policies.sql", MIGRATION])("%s makes it server-only: RLS on, nothing granted, no policy", (file) => {
     const s = read(file);
     expect(s).toContain("alter table public.venue_surroundings enable row level security");

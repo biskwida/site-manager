@@ -123,6 +123,7 @@ describe("SYSTEM_PROMPT: ads go to propose_boost", () => {
     expect(rule).toContain("call propose_boost again with the owner's numbers");
     expect(rule).toContain("Never state reach, cost or results");
     expect(rule).toContain("for now ✅ only saves the plan");
+    expect(rule).toContain("A photo that is not posted yet is proposed with social_post first; the ad comes after it is published.");
     const nums = [...SYSTEM_PROMPT.matchAll(/^(\d+)\. /gm)].map((m) => Number(m[1]));
     expect(nums).toEqual(nums.map((_, i) => i + 1));
   });

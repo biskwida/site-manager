@@ -111,6 +111,21 @@ describe("variants", () => {
   it("does not match keywords inside other words", () => {
     expect(plan({ ownerWords: "deliver and alive" }).variant).toBe("default");
   });
+  it("\"event\" and \"live\" count only as whole words (\"events\" too), never inside eventually, liver or lively", () => {
+    expect(plan({ ownerWords: "events this week" }).variant).toBe("weekend");
+    expect(plan({ ownerWords: "an event on Friday" }).variant).toBe("weekend");
+    expect(plan({ ownerWords: "live music" }).variant).toBe("weekend");
+    for (const words of ["eventually we open earlier", "chicken liver pâté", "a lively place"]) expect(plan({ ownerWords: words }).variant).toBe("default");
+    // Bulgarian stems still match as prefixes.
+    expect(plan({ ownerWords: "в събота и неделята" }).variant).toBe("weekend");
+    expect(plan({ ownerWords: "сутринта" }).variant).toBe("morning");
+  });
+  it("morning drops the day with the least room first, wherever it is in the week", () => {
+    // Thursday opens at 10:00 (60 min to 11:00), Friday closes at 08:45 (45 min): Friday is the tightest, so it goes, not Monday.
+    const hours = { ...HOURS, thu: { open: "10:00", close: "18:00" }, fri: { open: "08:00", close: "08:45" } };
+    const p = plan({ venue: { name: "К", hours, tz: TZ }, ownerWords: "сутрин" });
+    expect(p.schedule).toEqual({ days: ["mon", "tue", "wed", "thu"], from: "10:00", to: "11:00" });
+  });
 });
 
 describe("owner limits", () => {
@@ -177,7 +192,8 @@ describe("reasons", () => {
   it("a checked area with nothing in it is a fact that says nothing was found", () => {
     const r = plan({ surroundings: { status: "ok", places: [] } }).reasons[0];
     expect(r.kind).toBe("fact");
-    expect(r.bg).toContain("не откри");
+    expect(r.bg).toBe("в радиус 2 км OpenStreetMap не показва университети, институции, паркове или други обекти");
+    expect(r.en).toBe("OpenStreetMap shows no universities, institutions, parks or other landmarks within 2 km");
     expect(r.bg).not.toMatch(/\d+ (парка|университета)/);
   });
   it("followers with no breakdown: states only the count, as missing demographics", () => {
@@ -190,6 +206,10 @@ describe("reasons", () => {
     const line = r.find((x) => x.kind === "fact" && x.bg.includes("запазвания"));
     expect(line?.bg).toBe("този пост има 12 запазвания и 3 споделяния при обхват 400");
     expect(r.indexOf(line!)).toBe(2);
+  });
+  it("a stat whose reach, saves and shares are all 0 adds no post line", () => {
+    const post = { id: "p", caption: "x", type: "image" as const, stat: { id: "p", caption: "x", type: "image" as const, at: "2026-10-10T00:00:00Z", permalink: "u", reach: 0, saved: 0, shares: 0 } };
+    expect(plan({ post }).reasons.some((r) => r.bg.startsWith("този пост"))).toBe(false);
   });
   it("a stat with only some metrics states only those", () => {
     const post = { id: "p", caption: "x", type: "image" as const, stat: { id: "p", caption: "x", type: "image" as const, at: "2026-10-10T00:00:00Z", permalink: "u", saved: 7 } };

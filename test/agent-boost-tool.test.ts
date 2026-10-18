@@ -9,6 +9,7 @@ import { GraphClient, IG_GRAPH } from "@/src/destinations/meta-graph";
 import { encryptSecrets, parseSecretKey } from "@/src/destinations/secrets";
 import { withDestinationSync } from "@/src/destinations/store-hook";
 import type { BoostPlanRow, Change, SocialPostRow } from "@/src/domain/types";
+import type { Store } from "@/src/store/types";
 import { changeUsage } from "@/src/store/usage";
 import { FakeMessenger, makeDemo } from "./helpers";
 import { call } from "./tool-call";
@@ -61,11 +62,34 @@ const PLACES = [
 ];
 
 interface Opts {
-  /** "ok": cached places; "osm": OpenStreetMap failed a moment ago (the pin is known); "geocode": the address is not on the map. */
-  area?: "ok" | "osm" | "geocode" | "none";
+  /**
+   * "ok": cached places; "osm": OpenStreetMap failed a moment ago (the pin is known); "geocode": the address is not on the map;
+   * "none": the café has no address; "fresh": nothing cached, so a lookup would call OpenStreetMap (through fetchSpy).
+   */
+  area?: "ok" | "osm" | "geocode" | "none" | "fresh";
   /** Faked Instagram replies; absent = Instagram is not connected. */
   graph?: [string, Reply][];
   member?: "tg:1001" | "tg:1002";
+  /** false: the owner's photo was never posted. Default: it was posted on Instagram two days ago (an applied social_post with Meta's id). */
+  posted?: boolean;
+}
+
+/**
+ * An applied social_post set (on the plain store, so fetchSpy stays untouched) and, unless `published` is false, Meta's Instagram
+ * post for it in a done sync row, as the push leaves it. The post's id is "ig-<media id>".
+ */
+async function publishPost(store: Store, venueId: string, media: { id: string; public_url: string }, caption: string, at: Date, chatRef = "tg:1001", published = true) {
+  const row: SocialPostRow = { media_id: media.id, image_url: media.public_url, caption, targets: ["instagram_post"] };
+  const change: Change = { position: 0, op: "social_post", entity: "social_post", entity_id: media.id, before: null, after: row as unknown as Change["after"] };
+  const cs = await store.createChangeSet({ venue_id: venueId, chat_ref: chatRef, summary_bg: "Пост", summary_en: "Post", preview_bg: "", preview_en: "", source: "text", status: "proposed", changes: [change] });
+  await store.applyChangeSet(cs.id, at.toISOString());
+  const post_ref = published ? `ig-${media.id}` : null;
+  if (post_ref) {
+    const dest = (await store.getDestination(venueId, "instagram"))!;
+    const sync = await store.createSync({ venue_id: venueId, destination_id: dest.id, change_set_id: cs.id, payload: { kind: "instagram", changes: 1 }, next_at: at.toISOString() });
+    await store.updateSync(sync.id, { status: "done", result: { published: [{ target: "instagram_post", media_id: media.id, state: "published", id: post_ref, permalink: `https://instagram.com/p/${media.id}` }] } });
+  }
+  return { cs, row, media, post_ref };
 }
 
 async function setup(o: Opts = {}, over: Partial<AgentDeps> = {}) {
@@ -96,19 +120,18 @@ async function setup(o: Opts = {}, over: Partial<AgentDeps> = {}) {
     ...over,
   };
   const photo = await store.saveMedia(demo.venue.id, new Uint8Array([1, 2, 3]), "image/jpeg");
-  return { ...demo, plain: demo.store, store, messenger, deps, photo, outbound, graph, tools: makeTools(deps) };
+  const post = o.posted === false ? null : await publishPost(demo.store, demo.venue.id, photo, "", new Date(T0.getTime() - 2 * DAY));
+  return { ...demo, plain: demo.store, store, messenger, deps, photo, post, outbound, graph, tools: makeTools(deps) };
 }
 
-/** An applied social_post set of this chat (or another), as the owner's ✅ left it. */
-async function postedBefore(s: Awaited<ReturnType<typeof setup>>, caption: string, at: Date, chatRef = "tg:1001") {
-  const m = await s.store.saveMedia(s.venue.id, new Uint8Array([4, 5, 6]), "image/jpeg");
-  const row: SocialPostRow = { media_id: m.id, image_url: `https://media.example/${m.id}.jpg`, caption, targets: ["instagram_post"] };
-  const change: Change = { position: 0, op: "social_post", entity: "social_post", entity_id: m.id, before: null, after: row as unknown as Change["after"] };
-  const cs = await s.store.createChangeSet({ venue_id: s.venue.id, chat_ref: chatRef, summary_bg: "Пост", summary_en: "Post", preview_bg: "", preview_en: "", source: "text", status: "proposed", changes: [change] });
-  // The plain store: this test is about the boost, not about publishing the post (and fetchSpy must stay untouched).
-  await s.plain.applyChangeSet(cs.id, at.toISOString());
-  return { cs, row, media: m };
+/** A newer post of this chat (or another), published on Instagram unless `published` is false. */
+async function postedBefore(s: Awaited<ReturnType<typeof setup>>, caption: string, at: Date, chatRef = "tg:1001", published = true) {
+  const m = await s.plain.saveMedia(s.venue.id, new Uint8Array([4, 5, 6]), "image/jpeg");
+  return publishPost(s.plain, s.venue.id, { id: m.id, public_url: `https://media.example/${m.id}.jpg` }, caption, at, chatRef, published);
 }
+
+/** The venue's ad plan sets (other sets, like the published post, are fixtures). */
+const boostSets = async (s: Awaited<ReturnType<typeof setup>>) => (await s.store.listChangeSets(s.venue.id, {})).filter((cs) => cs.changes.some((c) => c.op === "boost_plan"));
 
 const lastSet = async (s: Awaited<ReturnType<typeof setup>>) => (await s.store.listChangeSets(s.venue.id, { limit: 1 }))[0];
 const rowOf = (cs: { changes: Change[] }) => cs.changes[0].after as unknown as BoostPlanRow;
@@ -128,7 +151,7 @@ describe("propose_boost: a given photo, with the defaults", () => {
     expect(cs.changes[0]).toMatchObject({ op: "boost_plan", entity: "boost_plan", before: null });
     const row = rowOf(cs);
     expect(row.plan).toMatchObject({ variant: "default", radiusKm: 2, ageMin: 18, schedule: null, budgetEur: 20, days: 5, placements: "automatic", goal: "profile_visits" });
-    expect(row).toMatchObject({ media_id: s.photo.id, post_ref: null, permalink: null, image_url: s.photo.public_url, lat: 42.69, lng: 23.33 });
+    expect(row).toMatchObject({ media_id: s.photo.id, post_ref: `ig-${s.photo.id}`, permalink: `https://instagram.com/p/${s.photo.id}`, image_url: s.photo.public_url, lat: 42.69, lng: 23.33 });
     expect(s.outbound).toEqual([]); // the area came from the cache; nothing else was asked
   });
 
@@ -163,12 +186,12 @@ describe("propose_boost: which post", () => {
     await postedBefore(s, "От друг чат", new Date(T0.getTime() - 3_600_000), "tg:1002");
     const r = await call(s.tools, "propose_boost", {});
     const row = rowOf(await s.store.getChangeSet(r.change_set_id as string));
-    expect(row).toMatchObject({ media_id: recent.media.id, caption: "Тиквена супа днес 🎃", image_url: recent.row.image_url });
+    expect(row).toMatchObject({ media_id: recent.media.id, post_ref: recent.post_ref, caption: "Тиквена супа днес 🎃", image_url: recent.row.image_url });
     expect(s.messenger.photos[0]).toMatchObject({ url: recent.row.image_url, caption: "Пост за реклама" });
   });
 
   it("then the best recent Instagram post (bestPost), with its permalink and picture", async () => {
-    const s = await setup({ graph: [...MEDIA] });
+    const s = await setup({ graph: [...MEDIA], posted: false });
     const r = await call(s.tools, "propose_boost", {});
     const row = rowOf(await s.store.getChangeSet(r.change_set_id as string));
     expect(row).toMatchObject({ post_ref: "m1", permalink: "https://instagram.com/p/1", caption: "Брънч в неделя", image_url: "https://cdn.example/m1.jpg", media_id: null });
@@ -188,15 +211,52 @@ describe("propose_boost: which post", () => {
     const s = await setup({ graph: [...MEDIA] });
     const r = await call(s.tools, "propose_boost", { post_ref: "m404" });
     expect(String(r.error)).toMatch(/post_ref "m404" not found/);
-    expect(await s.store.listChangeSets(s.venue.id, {})).toEqual([]);
+    expect(await boostSets(s)).toEqual([]);
   });
 
   it("with no post at all, asks which post", async () => {
-    const s = await setup();
+    const s = await setup({ posted: false });
     const r = await call(s.tools, "propose_boost", {});
     expect(r.error).toBe("Which post should I boost? Send it or name it.");
     expect(s.messenger.photos).toEqual([]);
     expect(s.messenger.sent).toEqual([]);
+  });
+});
+
+describe("propose_boost: only a published post can be boosted", () => {
+  const UNPUBLISHED = /not published yet.*social_post first.*propose_boost/;
+  it("a fresh photo (never posted) is not proposed: the error says to post it with social_post first", async () => {
+    const s = await setup({ posted: false, area: "fresh" });
+    const r = await call(s.tools, "propose_boost", { media_id: s.photo.id });
+    expect(String(r.error)).toMatch(UNPUBLISHED);
+    expect(s.messenger.photos).toEqual([]);
+    expect(s.messenger.sent).toEqual([]);
+    expect(await boostSets(s)).toEqual([]);
+    expect(s.outbound).toEqual([]); // refused before OpenStreetMap is asked
+  });
+
+  it("the owner's last post whose publishing never went through is not proposed either", async () => {
+    const s = await setup({ posted: false });
+    await postedBefore(s, "Не стигна до Instagram", new Date(T0.getTime() - DAY), "tg:1001", false);
+    const r = await call(s.tools, "propose_boost", {});
+    expect(String(r.error)).toMatch(UNPUBLISHED);
+    expect(await boostSets(s)).toEqual([]);
+  });
+});
+
+describe("propose_boost: ✏️ keeps the post", () => {
+  it("a correction with only a new budget keeps the corrected plan's post, even when a newer post exists", async () => {
+    const s = await setup();
+    const first = await call(s.tools, "propose_boost", {});
+    expect(rowOf(await s.store.getChangeSet(first.change_set_id as string)).post_ref).toBe(`ig-${s.photo.id}`);
+    await postedBefore(s, "По-нов пост", new Date(T0.getTime() - 3_600_000));
+    const again = makeTools({ ...s.deps, turnSets: new Set(), correctionFor: first.change_set_id as string });
+    const r = await call(again, "propose_boost", { budget_eur: 30 });
+    expect(r.status).toBe("proposed");
+    const row = rowOf(await s.store.getChangeSet(r.change_set_id as string));
+    expect(row).toMatchObject({ post_ref: `ig-${s.photo.id}`, media_id: s.photo.id, caption: "", image_url: s.photo.public_url, permalink: `https://instagram.com/p/${s.photo.id}` });
+    expect(row.plan.budgetEur).toBe(30);
+    expect((await s.store.getChangeSet(first.change_set_id as string)).status).toBe("cancelled"); // replaced
   });
 });
 
@@ -257,7 +317,7 @@ describe("propose_boost: refusals", () => {
     expect(String(long.error)).toMatch(/1–14 days/);
     expect(s.messenger.photos).toEqual([]);
     expect(s.messenger.sent).toEqual([]);
-    expect(await s.store.listChangeSets(s.venue.id, {})).toEqual([]);
+    expect(await boostSets(s)).toEqual([]);
   });
 
   it("staff are refused", async () => {
@@ -265,15 +325,17 @@ describe("propose_boost: refusals", () => {
     const r = await call(s.tools, "propose_boost", { media_id: s.photo.id });
     expect(String(r.error)).toMatch(/only the owner's decision/);
     expect(s.messenger.photos).toEqual([]);
-    expect(await s.store.listChangeSets(s.venue.id, {})).toEqual([]);
+    expect(await boostSets(s)).toEqual([]);
   });
 
-  it("an earlier pending proposal blocks it, as for any proposal", async () => {
-    const s = await setup();
+  it("an earlier pending proposal blocks it before OpenStreetMap or Instagram is read", async () => {
+    const s = await setup({ area: "fresh", graph: [...DEMOGRAPHICS, ...MEDIA] });
     await call(s.tools, "propose_changes", { summary_bg: "Цена", summary_en: "Price", changes: [{ op: "set_price", item_id: Object.values(s.items)[0].id, price_eur: 3.3 }] });
     const again = makeTools({ ...s.deps, turnSets: new Set() });
     const r = await call(again, "propose_boost", { media_id: s.photo.id });
     expect(String(r.error)).toMatch(/already waiting for a decision/);
+    expect(s.outbound).toEqual([]);
+    expect(s.graph!.calls).toEqual([]);
   });
 });
 
@@ -328,7 +390,8 @@ describe("propose_boost: the preview", () => {
 describe("propose_boost: ✅ only saves the plan", () => {
   it("apply makes no external call and uses no change of the month; undo removes it", async () => {
     const s = await setup();
-    await s.store.setChangeLimit(s.venue.id, 1);
+    // Two changes a month: the published post (a fixture) used one; the price change below uses the other.
+    await s.store.setChangeLimit(s.venue.id, 2);
     const r = await call(s.tools, "propose_boost", { media_id: s.photo.id });
     const before = await changeUsage(s.store, await s.store.getVenue(s.venue.id), T0);
     const decided = await handleDecision({ store: s.store, messenger: new FakeMessenger(), now: () => T0 }, "tg:1001", "apply", r.change_set_id as string);
@@ -339,7 +402,7 @@ describe("propose_boost: ✅ only saves the plan", () => {
     expect(decided.edit!.full).not.toMatch(/Приложено|Промени този месец/);
     expect((await s.store.getChangeSet(r.change_set_id as string)).status).toBe("applied");
     expect(s.outbound).toEqual([]);
-    expect(await s.store.listSyncs({ venueId: s.venue.id })).toEqual([]);
+    expect(await s.store.listSyncs({ changeSetId: r.change_set_id as string })).toEqual([]);
     const after = await changeUsage(s.store, await s.store.getVenue(s.venue.id), T0);
     expect(after.used).toBe(before.used);
     expect(after.reached).toBe(false);
@@ -361,8 +424,19 @@ describe("propose_boost: ✅ only saves the plan", () => {
     const undoTools = makeTools({ ...s.deps, turnSets: new Set() });
     const u = await call(undoTools, "undo", { change_set_id: r.change_set_id });
     expect(String(u.preview)).toBe("• Премахва плана за реклама: (пост без текст)");
-    expect(await s.store.applyChangeSet(u.change_set_id as string, T0.toISOString())).toBe("applied");
+    // ✅ on the undo says the plan is removed: no "applied", no usage line.
+    const removed = await handleDecision({ store: s.store, messenger: new FakeMessenger(), now: () => T0 }, "tg:1001", "apply", u.change_set_id as string);
+    expect(removed.toast).toBe("✅ Планът е премахнат.");
+    expect(removed.edit!.short).toBe("✅ Планът е премахнат.");
+    expect(removed.edit!.full).not.toMatch(/Приложено|Промени този месец/);
     expect((await s.store.getChangeSet(r.change_set_id as string)).status).toBe("reverted");
+
+    // The second plan's undo, approved on the dashboard: removed, no "applied", no usage line.
+    const undo2 = await call(makeTools({ ...s.deps, turnSets: new Set() }), "undo", { change_set_id: second.change_set_id });
+    const chat2 = new FakeMessenger();
+    expect(await adminAction({ store: s.store, messenger: chat2, now: () => T0, baseUrl: "https://site.example" }, await s.store.getVenue(s.venue.id), "apply", undo2.change_set_id as string)).toMatchObject({ ok: true, status: "applied" });
+    expect(chat2.concluded.at(-1)!.short).toBe("✅ Планът е премахнат от таблото.");
+    expect((await s.store.getChangeSet(second.change_set_id as string)).status).toBe("reverted");
     expect(s.outbound).toEqual([]);
   });
 });

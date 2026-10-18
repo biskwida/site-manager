@@ -29,6 +29,8 @@ export interface InstagramAccess {
 export const VARIANT_WORDS = 'variant "morning" when the owner says сутрин / закуска / до 11 / morning / breakfast; variant "weekend" when the owner says уикенд / събота / неделя / бранч / концерт / weekend / brunch / event / live music.';
 
 export const NO_POST = "Which post should I boost? Send it or name it.";
+/** A photo (or a post whose publishing never went through) has no post on Instagram or Facebook to put the ad on. */
+export const UNPUBLISHED = "This photo is not published yet, so there is no post to boost: nothing was proposed. Propose it with social_post first (when the owner wants it posted), and offer the ad (propose_boost with that post) after it is published.";
 const DAY_MS = 86_400_000;
 
 /** The connected Instagram account of a venue, or null (not connected, an `error` connection, no key, unreadable secrets). Never throws. */
@@ -83,22 +85,13 @@ export function boostTools(d: ToolDeps, k: ToolKit) {
         const photo = input.media_id !== undefined ? await d.store.getMedia(input.media_id) : null;
         if (input.media_id !== undefined && (!photo || photo.venue_id !== d.venueId)) throw new Error(`media_id "${input.media_id}" not found for this venue; use the id of a photo you received.`);
 
-        // The area, the followers and the recent posts are read at once; each is best effort (missing, never an error).
-        const ig = d.instagramInsights ? await d.instagramInsights(d.venueId).catch(() => null) : null;
         const since = new Date(now.getTime() - POST_WINDOW_DAYS * DAY_MS).toISOString();
-        const [surroundings, followers, stats] = await Promise.all([
-          loadSurroundings({ store: d.store, fetch: d.fetch }, venue, now.toISOString()),
-          ig ? followerProfile(ig.client, ig.igUserId, ig.log).catch((): FollowerProfile | null => null) : Promise.resolve(null),
-          ig ? recentPostStats(ig.client, ig.igUserId, since, {}, ig.log).catch((): PostStat[] => []) : Promise.resolve([] as PostStat[]),
-        ]);
-
         let published: PublishedTarget[] | null = null;
         const publishedPosts = async () => (published ??= await publishedTargets(d.store, d.venueId, since).catch(() => []));
-        /** Meta's id and link of a post Claudia published from this set (Instagram first), with its numbers when Meta gave them. */
+        /** Meta's id and link of a post Claudia published from this set (Instagram first); its numbers are attached after the reads. */
         const fromSocialSet = async (cs: ChangeSet, row: SocialPostRow): Promise<Chosen> => {
           const mine = (await publishedPosts()).filter((t) => t.change_set_id === cs.id).sort((a, b) => (a.network === b.network ? 0 : a.network === "instagram" ? -1 : 1))[0];
-          const stat = mine ? stats.find((p) => p.id === mine.post_ref) : undefined;
-          return { post_ref: mine?.post_ref ?? null, permalink: mine?.permalink ?? null, media_id: row.media_id, caption: row.caption, image_url: row.ig_feed_image_url ?? row.image_url, type: "image", stat };
+          return { post_ref: mine?.post_ref ?? null, permalink: mine?.permalink ?? null, media_id: row.media_id, caption: row.caption, image_url: row.ig_feed_image_url ?? row.image_url, type: "image" };
         };
         const fromStat = (p: PostStat): Chosen => ({ post_ref: p.id, permalink: p.permalink || null, media_id: null, caption: p.caption, image_url: p.image_url ?? null, type: p.type, stat: p });
         const appliedPosts = async () =>
@@ -107,11 +100,36 @@ export function boostTools(d: ToolDeps, k: ToolKit) {
             .filter((x): x is { cs: ChangeSet; row: SocialPostRow } => x.row !== null)
             .sort((a, b) => (b.cs.applied_at ?? b.cs.created_at).localeCompare(a.cs.applied_at ?? a.cs.created_at));
 
-        // Which post: the given photo or post; else the owner's last published post in this chat; else the best recent Instagram post.
+        // Which post, from our own records first (no read of Meta or OpenStreetMap yet): the given photo, or on ✏️ without a named
+        // post the post of the plan being corrected (the owner changes the numbers, not the post).
         let chosen: Chosen | null = null;
         if (photo) {
           const posted = (await appliedPosts()).find((x) => x.row.media_id === photo.id);
           chosen = posted ? await fromSocialSet(posted.cs, posted.row) : { post_ref: null, permalink: null, media_id: photo.id, caption: "", image_url: photo.public_url, type: "image" };
+        } else if (input.post_ref === undefined && d.correctionFor) {
+          const corrected = await d.store.getChangeSet(d.correctionFor).catch(() => null);
+          const old = corrected && corrected.venue_id === d.venueId ? corrected.changes.find((c) => c.op === "boost_plan" && c.after !== null) : undefined;
+          const r = old ? (old.after as unknown as BoostPlanRow) : null;
+          if (r) chosen = { post_ref: r.post_ref, permalink: r.permalink, media_id: r.media_id, caption: r.caption, image_url: r.image_url, type: "image" };
+        }
+        if (chosen && chosen.post_ref === null) throw new Error(UNPUBLISHED);
+
+        // Proposals from earlier messages block this one before anything is read (the ✏️ one is replaced).
+        await k.ensureNoPending();
+
+        // The area, the followers and the recent posts are read at once; each is best effort (missing, never an error).
+        const ig = d.instagramInsights ? await d.instagramInsights(d.venueId).catch(() => null) : null;
+        const [surroundings, followers, stats] = await Promise.all([
+          loadSurroundings({ store: d.store, fetch: d.fetch }, venue, now.toISOString()),
+          ig ? followerProfile(ig.client, ig.igUserId, ig.log).catch((): FollowerProfile | null => null) : Promise.resolve(null),
+          ig ? recentPostStats(ig.client, ig.igUserId, since, {}, ig.log).catch((): PostStat[] => []) : Promise.resolve([] as PostStat[]),
+        ]);
+
+        // Else: the named post; else the owner's last published post in this chat; else the best recent Instagram post.
+        if (chosen) {
+          const ref = chosen.post_ref;
+          chosen.stat = stats.find((p) => p.id === ref);
+          if (chosen.stat) chosen.type = chosen.stat.type;
         } else if (input.post_ref !== undefined) {
           const ref = input.post_ref.trim();
           const stat = stats.find((p) => p.id === ref || (p.permalink !== "" && p.permalink === ref));
@@ -126,6 +144,7 @@ export function boostTools(d: ToolDeps, k: ToolKit) {
           chosen = last ? await fromSocialSet(last.cs, last.row) : best ? fromStat(best) : null;
         }
         if (!chosen) throw new Error(NO_POST);
+        if (chosen.post_ref === null) throw new Error(UNPUBLISHED);
 
         const plan = rangeCheck(planBoost({ ...base, surroundings, followers, post: { id: chosen.post_ref ?? chosen.media_id ?? "", caption: chosen.caption, type: chosen.type, stat: chosen.stat } }));
         const pinned = surroundings.lat !== undefined && surroundings.lng !== undefined;
@@ -135,7 +154,6 @@ export function boostTools(d: ToolDeps, k: ToolKit) {
           plan.reasons.push({ kind: "missing", bg: "местоположението на кафенето трябва да се провери: адресът не беше намерен на картата", en: "the café's location needs checking: its address wasn't found on the map" });
         }
 
-        await k.ensureNoPending();
         const row: BoostPlanRow = {
           plan, post_ref: chosen.post_ref, permalink: chosen.permalink, media_id: chosen.media_id, caption: chosen.caption, image_url: chosen.image_url,
           lat: pinned ? (surroundings.lat as number) : null, lng: pinned ? (surroundings.lng as number) : null,

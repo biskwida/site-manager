@@ -2,7 +2,7 @@
 // The boost recommendation: what ad Claudia proposes for a café's post, and why. Pure, no IO.
 // Every reason is a fact (from the café's own data, OpenStreetMap or Meta), a hypothesis, or missing. Nothing here estimates
 // reach, cost or results: those numbers exist only once ads are connected, and a number appears in a reason only when it was measured.
-import { PLACE_KINDS, type PlaceKind } from "../geo/osm";
+import { PLACE_KINDS, SEARCH_RADIUS_M, type PlaceKind } from "../geo/osm";
 import { summarise, type Surroundings } from "../geo/surroundings";
 import type { FollowerProfile, PostStat } from "../social/insights-graph";
 import { keep } from "../domain/format";
@@ -50,9 +50,18 @@ const WEEKEND = { radiusKm: 3, days: ["fri", "sat", "sun"] as Weekday[], from: "
 const MORNING_WORDS = ["сутрин", "закуска", "до 11", "morning", "breakfast"];
 const WEEKEND_WORDS = ["уикенд", "събота", "неделя", "бранч", "концерт", "weekend", "brunch", "event", "live"];
 
-/** A keyword counts at the start of a word (so "сутринта" and "events" match, "alive" does not) and "до 11" not inside "до 110". */
+/** English words that count only whole (a plural allowed where given): "events" is an event, "eventually", "liver" and "lively" are not. */
+const WHOLE_WORDS: Readonly<Record<string, string>> = { event: "events?", live: "live" };
+
+/**
+ * A keyword counts at the start of a word (so the Bulgarian stems match "сутринта" and "неделята", "alive" does not), "до 11" not
+ * inside "до 110", and the words in WHOLE_WORDS only as whole words.
+ */
 function mentions(text: string, words: readonly string[]): boolean {
-  return words.some((w) => new RegExp(`(?<![\\p{L}\\p{N}])${w}${/\d$/.test(w) ? "(?!\\d)" : ""}`, "iu").test(text));
+  return words.some((w) => {
+    const body = WHOLE_WORDS[w] ? `${WHOLE_WORDS[w]}(?![\\p{L}\\p{N}])` : `${w}${/\d$/.test(w) ? "(?!\\d)" : ""}`;
+    return new RegExp(`(?<![\\p{L}\\p{N}])${body}`, "iu").test(text);
+  });
 }
 
 /** The variant the words call for. A weekend word wins over a morning word ("неделя сутрин" is a weekend offer). */
@@ -61,6 +70,9 @@ function variantFrom(text: string): BoostVariant {
   if (mentions(text, MORNING_WORDS)) return "morning";
   return "default";
 }
+
+/** "07:30" → 450. */
+const minutes = (hhmm: string) => Number(hhmm.slice(0, 2)) * 60 + Number(hhmm.slice(3, 5));
 
 /** Monday to Friday 07:30-11:00 cut to the hours the café is open; null when it is never open in that window. */
 function morningSchedule(hours: BoostInput["venue"]["hours"]): NonNullable<BoostPlan["schedule"]> | null {
@@ -74,7 +86,8 @@ function morningSchedule(hours: BoostInput["venue"]["hours"]): NonNullable<Boost
     const from = kept.reduce((m, x) => (x.from > m ? x.from : m), "00:00");
     const to = kept.reduce((m, x) => (x.to < m ? x.to : m), "23:59");
     if (from < to) return { days: kept.map((x) => x.d), from, to };
-    const tightest = kept.reduce((a, b) => (a.to.localeCompare(a.from) <= b.to.localeCompare(b.from) ? a : b));
+    const room = (x: { from: string; to: string }) => minutes(x.to) - minutes(x.from);
+    const tightest = kept.reduce((a, b) => (room(a) <= room(b) ? a : b));
     kept = kept.filter((x) => x !== tightest);
   }
   return null;
@@ -126,8 +139,8 @@ function surroundingsReason(s: Surroundings): BoostReason {
   if (bg.length === 0) {
     return {
       kind: "fact",
-      bg: `в радиус 2 км не откри университети, институции, паркове или други обекти в OpenStreetMap${staleBg}`,
-      en: `OpenStreetMap shows no universities, institutions, parks or other landmarks within 2 km${staleEn}`,
+      bg: `в радиус ${SEARCH_RADIUS_M / 1000} км OpenStreetMap не показва университети, институции, паркове или други обекти${staleBg}`,
+      en: `OpenStreetMap shows no universities, institutions, parks or other landmarks within ${SEARCH_RADIUS_M / 1000} km${staleEn}`,
     };
   }
   return { kind: "fact", bg: `в радиус ${km} км: ${bg.join(", ")}${staleBg}`, en: `within ${km} km: ${en.join(", ")}${staleEn}` };
@@ -173,6 +186,9 @@ function followersReason(f: FollowerProfile | null): BoostReason {
 /** Only the numbers Meta reported for this post; there is no account average to compare with, so nothing is a multiple of it. */
 function postReason(stat: PostStat | undefined): BoostReason | null {
   if (!stat) return null;
+  // Nothing measured yet (every known number is 0) says nothing about the post: no line.
+  const known = [stat.reach, stat.saved, stat.shares].filter((n): n is number => n !== undefined);
+  if (known.length > 0 && known.every((n) => n === 0)) return null;
   const bg: string[] = [];
   const en: string[] = [];
   if (stat.saved !== undefined) {

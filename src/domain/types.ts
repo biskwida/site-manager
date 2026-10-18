@@ -414,6 +414,10 @@ export function isRecordOnlyEntity(e: string): e is BoostEntity {
 export function isBoostPlanSet(changes: readonly Pick<Change, "op" | "after">[]): boolean {
   return changes.length > 0 && changes.every((c) => c.op === "boost_plan" && c.after !== null);
 }
+/** The undo of saved ad plans: every row is boost_plan with after null. ✅ on it removes the plan, so it never says "applied". */
+export function isBoostPlanUndoSet(changes: readonly Pick<Change, "op" | "after">[]): boolean {
+  return changes.length > 0 && changes.every((c) => c.op === "boost_plan" && c.after === null);
+}
 /** One reason in a plan: a fact (the café's own data, OpenStreetMap or Meta), a hypothesis, or an input that is missing. */
 export interface BoostReasonRow {
   kind: "fact" | "hypothesis" | "missing";
