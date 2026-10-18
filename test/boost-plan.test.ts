@@ -263,7 +263,15 @@ describe("analysis: the radius from the area", () => {
     expect(reasons(AREA(5))).toContain("смесен район — 3 км");
     expect(reasons(AREA(1))).toContain("малко обекти наоколо — по-широк радиус, 5 км");
     expect(plan({ surroundings: AREA(1) }).reasons.find((r) => r.bg.startsWith("малко"))?.en).toBe("few places around — a wider radius, 5 km");
-    expect(plan({ surroundings: MISSING }).reasons.some((r) => /км/.test(r.bg) && r.kind === "hypothesis" && /район/.test(r.bg))).toBe(false);
+    expect(plan({ surroundings: MISSING }).reasons.some((r) => r.kind === "hypothesis" && /район|обекти наоколо/.test(r.bg))).toBe(false);
+  });
+  it("the area line states the radius after the variant scaled it, so the owner sees one radius", () => {
+    const line = (s: Surroundings, words: string) => plan({ surroundings: s, ownerWords: words }).reasons.find((r) => /район|обекти наоколо/.test(r.bg))!;
+    expect(line(AREA(12), "уикенд")).toMatchObject({ bg: "гъст район — 3 км стигат", en: "a busy area — 3 km is enough" });
+    expect(line(AREA(12), "закуска")).toMatchObject({ bg: "гъст район — 1,5 км стигат", en: "a busy area — 1.5 km is enough" });
+    expect(line(AREA(0), "закуска")).toMatchObject({ bg: "малко обекти наоколо — по-широк радиус, 4 км", en: "few places around — a wider radius, 4 km" });
+    expect(line(AREA(5), "уикенд")).toMatchObject({ bg: "смесен район — 4,5 км", en: "a mixed area — 4.5 km" });
+    expect(line(AREA(5), "закуска")).toMatchObject({ bg: "смесен район — 2,5 км", en: "a mixed area — 2.5 km" });
   });
   it("morning and weekend scale the base: busy area 1.5 / 3, sparse area 4 / 7.5", () => {
     expect(km(AREA(12), { ownerWords: "закуска" })).toBe(1.5);
@@ -282,8 +290,9 @@ describe("analysis: age and gender from the followers", () => {
     expect(line?.bg).toBe("най-много от последователите са 25–44 → предлагам 25–44 на Meta");
     expect(line?.en).toBe("most followers are 25–44 → suggesting 25–44 to Meta");
   });
-  it("13-17 is left out, the minimum is 18, and a run ending in 65+ has no maximum", () => {
+  it("13-17 is left out, and a run ending in 65+ has no maximum", () => {
     const p = plan({ followers: followers({ "13-17": 0.5, "18-24": 0.05, "45-54": 0.1, "55-64": 0.15, "65+": 0.2 }) });
+    // 55-64 + 65+ = 0.35 of 0.5: 70%.
     expect(p).toMatchObject({ ageMin: 55, ageMax: null });
     expect(p.reasons.find((r) => r.bg.includes("→ предлагам"))?.bg).toBe("най-много от последователите са 55+ → предлагам 55+ на Meta");
   });
@@ -292,10 +301,23 @@ describe("analysis: age and gender from the followers", () => {
     const p = plan({ followers: followers({ "18-24": 0.2, "25-34": 0.4, "35-44": 0.25, "45-54": 0.15 }) });
     expect(p).toMatchObject({ ageMin: 25, ageMax: 44 });
   });
-  it("when the run covers every band there is no suggestion: 18 / none, no age line", () => {
-    const p = plan({ followers: followers({ "18-24": 0.5, "25-34": 0.5 }) });
+  it("uniform shares are no concentration: 18 / none, no age line", () => {
+    const p = plan({ followers: followers({ "18-24": 1 / 6, "25-34": 1 / 6, "35-44": 1 / 6, "45-54": 1 / 6, "55-64": 1 / 6, "65+": 1 / 6 }) });
     expect(p).toMatchObject({ ageMin: 18, ageMax: null });
     expect(p.reasons.some((r) => r.bg.includes("→ предлагам"))).toBe(false);
+  });
+  it("a run of more than 3 bands is no concentration either", () => {
+    const p = plan({ followers: followers({ "18-24": 0.2, "25-34": 0.15, "35-44": 0.15, "45-54": 0.15, "55-64": 0.15, "65+": 0.2 }) });
+    expect(p).toMatchObject({ ageMin: 18, ageMax: null });
+  });
+  it("a band with no followers inside a run is a member of it", () => {
+    const p = plan({ followers: followers({ "18-24": 0.05, "25-34": 0.4, "35-44": 0, "45-54": 0.4, "55-64": 0.05, "65+": 0.1 }) });
+    expect(p).toMatchObject({ ageMin: 25, ageMax: 54 });
+  });
+  it("keys Meta might add (U, Unknown) are ignored, not counted in the total", () => {
+    const p = plan({ followers: followers({ U: 0.9, Unknown: 0.9, "25-34": 0.5, "35-44": 0.3, "45-54": 0.2 }) });
+    expect(p).toMatchObject({ ageMin: 25, ageMax: 44 });
+    expect(plan({ followers: followers({ U: 1, Unknown: 1 }) })).toMatchObject({ ageMin: 18, ageMax: null });
   });
   it("no followers → 18 / none, everyone, and no age or gender hypothesis", () => {
     const p = plan({ followers: null });
@@ -361,10 +383,44 @@ describe("owner choices on top of the analysis", () => {
     expect(p.radiusKm).toBe(3);
     expect(plan({ owner: { variant: "weekend" }, surroundings: AREA(12) }).schedule?.days).toEqual(["fri", "sat", "sun"]);
   });
-  it("an owner minimum above a suggested maximum drops the maximum; an owner maximum under a suggested minimum drops the minimum", () => {
+  it("one owner age bound leaves the other plain (18 / none), with no age suggestion", () => {
     const f: FollowerProfile = { followers: 300, age: { "18-24": 0.1, "25-34": 0.5, "35-44": 0.3, "45-54": 0.1 }, gender: {}, cities: [] };
-    expect(plan({ followers: f, owner: { ageMin: 50 } })).toMatchObject({ ageMin: 50, ageMax: null });
-    expect(plan({ followers: f, owner: { ageMax: 22 } })).toMatchObject({ ageMin: 18, ageMax: 22 });
+    expect(plan({ followers: f })).toMatchObject({ ageMin: 25, ageMax: 44 });
+    const min = plan({ followers: f, owner: { ageMin: 30 } });
+    expect(min).toMatchObject({ ageMin: 30, ageMax: null });
+    const max = plan({ followers: f, owner: { ageMax: 40 } });
+    expect(max).toMatchObject({ ageMin: 18, ageMax: 40 });
+    for (const p of [min, max]) expect(p.reasons.some((r) => r.bg.includes("→ предлагам"))).toBe(false);
+  });
+  it("an owner radius is not scaled by a variant, and the area line is gone", () => {
+    const p = plan({ owner: { radiusKm: 2, variant: "weekend" }, surroundings: AREA(12) });
+    expect(p.radiusKm).toBe(2);
+    expect(p.reasons.some((r) => r.kind === "hypothesis" && /район|обекти наоколо/.test(r.bg))).toBe(false);
+  });
+  it("the morning variant keeps its cut to the opening hours (and the smaller radius)", () => {
+    const p = plan({ owner: { variant: "morning" }, surroundings: AREA(12) });
+    expect(p).toMatchObject({ variant: "morning", radiusKm: 1.5, schedule: { days: ["mon", "tue", "wed", "thu", "fri"], from: "08:00", to: "11:00" } });
+  });
+  it("an owner morning variant with an owner schedule keeps variant morning and the 0.75 radius; the schedule wins, even when the café is closed all morning", () => {
+    const sched = { days: ["sat" as const], from: "09:00", to: "12:00" };
+    const closed = { ...HOURS, mon: null, tue: null, wed: null, thu: null, fri: null };
+    const p = plan({ venue: { name: "К", hours: closed, tz: TZ }, owner: { variant: "morning", schedule: sched }, surroundings: AREA(12) });
+    expect(p).toMatchObject({ variant: "morning", radiusKm: 1.5, schedule: sched });
+    expect(p.reasons.some((r) => r.bg.includes("делнични сутрини"))).toBe(false);
+  });
+  it("plan.owner is a copy, not the caller's object", () => {
+    const owner: BoostOwnerChoices = { budgetEur: 30 };
+    const p = plan({ owner });
+    expect(p.owner).toEqual(owner);
+    expect(p.owner).not.toBe(owner);
+  });
+  it("an owner schedule's days are listed once", () => {
+    const p = plan({ owner: { schedule: { days: ["mon", "mon", "tue"], from: "09:00", to: "12:00" } } });
+    expect(p.schedule?.days).toEqual(["mon", "tue"]);
+  });
+  it("venue hours that are missing are no open-days limit, and do not throw", () => {
+    expect(plan({ venue: { name: "К", hours: undefined as never, tz: TZ } }).schedule).toBeNull();
+    expect(plan({ venue: { name: "К", hours: undefined as never, tz: TZ }, ownerWords: "закуска" }).variant).toBe("default");
   });
 });
 

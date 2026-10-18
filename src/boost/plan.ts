@@ -79,7 +79,7 @@ const minutes = (hhmm: string) => Number(hhmm.slice(0, 2)) * 60 + Number(hhmm.sl
 /** Monday to Friday 07:30-11:00 cut to the hours the café is open; null when it is never open in that window. */
 function morningSchedule(hours: BoostInput["venue"]["hours"]): NonNullable<BoostPlan["schedule"]> | null {
   let kept = MORNING.days
-    .map((d) => ({ d, open: hours[d]?.open ?? "", close: hours[d]?.close ?? "" }))
+    .map((d) => ({ d, open: (hours ?? {})[d]?.open ?? "", close: (hours ?? {})[d]?.close ?? "" }))
     .filter((x) => x.open !== "")
     .map((x) => ({ d: x.d, from: x.open > MORNING.from ? x.open : MORNING.from, to: x.close < MORNING.to ? x.close : MORNING.to }))
     .filter((x) => x.from < x.to);
@@ -216,37 +216,50 @@ function areaDensity(s: Surroundings): number | null {
   return PLACE_KINDS.reduce((n, k) => n + sum.counts[k].km1, 0);
 }
 
-/** The base radius from the density, with its hypothesis reason (none when the area is unknown). */
-function radiusFromArea(s: Surroundings): { km: number; reason: BoostReason | null } {
+/** The base radius from the density, and the tier that says why (null when the area is unknown). */
+function radiusFromArea(s: Surroundings): { km: number; tier: "busy" | "mixed" | "sparse" | null } {
   const density = areaDensity(s);
-  if (density === null) return { km: UNKNOWN_AREA_RADIUS_KM, reason: null };
-  if (density >= 10) return { km: 2, reason: { kind: "hypothesis", bg: "гъст район — 2 км стигат", en: "a busy area — 2 km is enough" } };
-  if (density >= 3) return { km: 3, reason: { kind: "hypothesis", bg: "смесен район — 3 км", en: "a mixed area — 3 km" } };
-  return { km: 5, reason: { kind: "hypothesis", bg: "малко обекти наоколо — по-широк радиус, 5 км", en: "few places around — a wider radius, 5 km" } };
+  if (density === null) return { km: UNKNOWN_AREA_RADIUS_KM, tier: null };
+  if (density >= 10) return { km: 2, tier: "busy" };
+  if (density >= 3) return { km: 3, tier: "mixed" };
+  return { km: 5, tier: "sparse" };
+}
+
+/** The density line, stating the radius the plan really has (after a variant scaled it): "2,5 км" in Bulgarian, "2.5 km" in English. */
+function areaReason(tier: "busy" | "mixed" | "sparse", radiusKm: number): BoostReason {
+  const bg = `${String(radiusKm).replace(".", ",")} км`;
+  const en = `${radiusKm} km`;
+  if (tier === "busy") return { kind: "hypothesis", bg: `гъст район — ${bg} стигат`, en: `a busy area — ${en} is enough` };
+  if (tier === "mixed") return { kind: "hypothesis", bg: `смесен район — ${bg}`, en: `a mixed area — ${en}` };
+  return { kind: "hypothesis", bg: `малко обекти наоколо — по-широк радиус, ${bg}`, en: `few places around — a wider radius, ${en}` };
 }
 
 /** Nearest half kilometre. */
 const halfKm = (km: number) => Math.round(km * 2) / 2;
 
-/** "25-34" → 25; "65+" → 65. */
-const lower = (band: string) => Number.parseInt(band, 10);
+/** Meta's age bands in order (13-17 is left out: ads are for 18+). Every band counts as a place in a run, even with no followers. */
+const AGE_BANDS = ["18-24", "25-34", "35-44", "45-54", "55-64", "65+"] as const;
+/** A suggestion is a concentration: at most half the bands. */
+const MAX_AGE_RUN = Math.ceil(AGE_BANDS.length / 2);
 
 interface AgeSuggestion { ageMin: number; ageMax: number | null; reason: BoostReason | null }
 
-/** The shortest run of neighbouring age bands holding 60% of the followers (the higher sum on a tie); 18+ when nothing stands out. */
+/** The shortest run of neighbouring bands holding 60% of followers (the higher sum on a tie), if it is at most 3 bands; else 18+. */
 function ageFromFollowers(f: FollowerProfile | null): AgeSuggestion {
   const none: AgeSuggestion = { ageMin: MIN_AGE, ageMax: null, reason: null };
   if (!f) return none;
-  const bands = Object.entries(f.age)
-    .filter(([band, share]) => band !== "13-17" && Number.isFinite(lower(band)) && share > 0)
-    .sort((a, b) => lower(a[0]) - lower(b[0]));
-  const total = bands.reduce((n, [, share]) => n + share, 0);
-  if (bands.length === 0 || total <= 0) return none;
+  // Keys Meta might add ("U", "Unknown", "13-17") are ignored; a band with no followers is a zero.
+  const share = AGE_BANDS.map((b) => {
+    const v = f.age[b];
+    return typeof v === "number" && Number.isFinite(v) && v > 0 ? v : 0;
+  });
+  const total = share.reduce((n, v) => n + v, 0);
+  if (total <= 0) return none;
   let best: { from: number; to: number; sum: number } | null = null;
-  for (let from = 0; from < bands.length; from++) {
+  for (let from = 0; from < share.length; from++) {
     let sum = 0;
-    for (let to = from; to < bands.length; to++) {
-      sum += bands[to][1];
+    for (let to = from; to < share.length; to++) {
+      sum += share[to];
       if (sum >= AGE_SHARE * total - 1e-9) {
         const len = to - from;
         if (!best || len < best.to - best.from || (len === best.to - best.from && sum > best.sum + 1e-9)) best = { from, to, sum };
@@ -254,12 +267,11 @@ function ageFromFollowers(f: FollowerProfile | null): AgeSuggestion {
       }
     }
   }
-  if (!best || (best.from === 0 && best.to === bands.length - 1)) return none;
-  const first = bands[best.from][0];
-  const last = bands[best.to][0];
-  const ageMin = Math.max(MIN_AGE, lower(first));
-  const ageMax = last.endsWith("+") ? null : Number.parseInt(last.split("-")[1] ?? "", 10);
-  if (ageMax !== null && !Number.isFinite(ageMax)) return none;
+  if (!best || best.to - best.from + 1 > MAX_AGE_RUN) return none;
+  const first = AGE_BANDS[best.from];
+  const last = AGE_BANDS[best.to];
+  const ageMin = Math.max(MIN_AGE, Number.parseInt(first, 10));
+  const ageMax = last.endsWith("+") ? null : Number.parseInt(last.split("-")[1], 10);
   const range = ageMax === null ? `${ageMin}+` : `${ageMin}–${ageMax}`;
   return {
     ageMin,
@@ -287,7 +299,7 @@ function genderFromFollowers(f: FollowerProfile | null): { gender: BoostPlan["ge
 
 /** The days the business is open when that is some days of the week (1–6); null when it is open every day or the hours are unknown. */
 function openDays(hours: BoostInput["venue"]["hours"]): Weekday[] | null {
-  const open = WEEKDAYS.filter((d) => (hours[d]?.open ?? "") !== "");
+  const open = WEEKDAYS.filter((d) => ((hours ?? {})[d]?.open ?? "") !== "");
   return open.length >= 1 && open.length <= 6 ? [...open] : null;
 }
 
@@ -309,7 +321,8 @@ export function planBoost(input: BoostInput): BoostPlan | { error: BoostPlanErro
   // The owner's words decide first; the caption only when they say nothing about it.
   let variant: BoostVariant = o.variant ?? (variantFrom(input.ownerWords) !== "default" ? variantFrom(input.ownerWords) : variantFrom(input.post?.caption ?? ""));
   let schedule: BoostPlan["schedule"] = null;
-  if (variant === "morning") {
+  // An owner schedule wins, so a morning variant keeps its name and its smaller radius without the cut to the open hours.
+  if (variant === "morning" && o.schedule === undefined) {
     schedule = morningSchedule(input.venue.hours);
     if (!schedule) variant = "default";
   }
@@ -319,18 +332,16 @@ export function planBoost(input: BoostInput): BoostPlan | { error: BoostPlanErro
   const area = radiusFromArea(input.surroundings);
   const scale = variant === "morning" ? MORNING.scale : variant === "weekend" ? WEEKEND.scale : 1;
   const radiusKm = o.radiusKm ?? (scale === 1 ? area.km : halfKm(area.km * scale));
-  const ageSuggestion = ageFromFollowers(input.followers);
-  let ageMin = o.ageMin ?? ageSuggestion.ageMin;
-  let ageMax = o.ageMax !== undefined ? o.ageMax : ageSuggestion.ageMax;
-  // An owner bound beside a suggested one that no longer fits it: the suggestion gives way.
-  if (o.ageMax === undefined && ageMax !== null && ageMax < ageMin) ageMax = null;
-  if (o.ageMin === undefined && o.ageMax != null && ageMin > o.ageMax) ageMin = MIN_AGE;
+  // The owner setting one age bound leaves the other at its plain value: a suggestion beside an owner bound could contradict it.
   const ageOwned = o.ageMin !== undefined || o.ageMax !== undefined;
+  const ageSuggestion = ageOwned ? { ageMin: MIN_AGE, ageMax: null, reason: null } : ageFromFollowers(input.followers);
+  const ageMin = o.ageMin ?? ageSuggestion.ageMin;
+  const ageMax = o.ageMax !== undefined ? o.ageMax : ageSuggestion.ageMax;
   const genderSuggestion = genderFromFollowers(input.followers);
   const gender = o.gender ?? genderSuggestion.gender;
 
   let weekdays: Weekday[] | null = null;
-  if (o.schedule !== undefined) schedule = o.schedule;
+  if (o.schedule !== undefined) schedule = o.schedule && { ...o.schedule, days: [...new Set(o.schedule.days)] };
   else if (variant === "default") {
     weekdays = openDays(input.venue.hours);
     if (weekdays) schedule = { days: weekdays, from: "00:00", to: "23:59" };
@@ -344,8 +355,8 @@ export function planBoost(input: BoostInput): BoostPlan | { error: BoostPlanErro
     bg: "по-широката аудитория обикновено е по-евтина; Meta сама намира кой да види рекламата в радиуса",
     en: "a broader audience is usually cheaper; Meta itself finds who sees the ad within the radius",
   });
-  if (o.radiusKm === undefined && area.reason) reasons.push(area.reason);
-  if (!ageOwned && ageSuggestion.reason) reasons.push(ageSuggestion.reason);
+  if (o.radiusKm === undefined && area.tier) reasons.push(areaReason(area.tier, radiusKm));
+  if (ageSuggestion.reason) reasons.push(ageSuggestion.reason);
   if (o.gender === undefined && genderSuggestion.reason) reasons.push(genderSuggestion.reason);
   if (weekdays) reasons.push({ kind: "hypothesis", bg: "в дните, в които сте отворени", en: "on the days you're open" });
   if (o.budgetEur === undefined && o.days === undefined) {
@@ -372,6 +383,6 @@ export function planBoost(input: BoostInput): BoostPlan | { error: BoostPlanErro
     placements: o.placements ?? "automatic",
     goal: o.goal ?? (input.hasFacebookPage ? "reach" : "profile_visits"),
     reasons,
-    owner: o,
+    owner: { ...o },
   };
 }
