@@ -12,7 +12,7 @@ import { decryptSecrets } from "../destinations/secrets";
 import { publishedTargets, type PublishedTarget } from "../destinations/social-common";
 import type { SyncDeps } from "../destinations/sync";
 import { formatPrice, tr } from "../domain/format";
-import type { BoostPlanRow, Change, ChangeSet, SocialPostRow } from "../domain/types";
+import type { BoostOwnerChoices, BoostPlanRow, Change, ChangeSet, SocialPostRow } from "../domain/types";
 import { loadSurroundings, type Surroundings } from "../geo/surroundings";
 import { bestPost, followerProfile, POST_WINDOW_DAYS, recentPostStats, type FollowerProfile, type PostStat } from "../social/insights-graph";
 import { BoostSchema } from "./tool-schemas";
@@ -77,7 +77,7 @@ export function boostTools(d: ToolDeps, k: ToolKit) {
         const venue = s.venue;
         const now = d.now();
         const base: Omit<BoostInput, "surroundings" | "followers" | "post"> = {
-          venue, ownerWords: "", budgetEur: input.budget_eur, days: input.days, variant: input.variant, hasFacebookPage: d.social?.facebook === true,
+          venue, ownerWords: "", owner: ownerChoices(input), hasFacebookPage: d.social?.facebook === true,
         };
         // The owner's numbers first: a budget or duration out of range is refused before anything is read.
         const unread: Surroundings = { status: "missing", places: [] };
@@ -188,5 +188,17 @@ export function boostTools(d: ToolDeps, k: ToolKit) {
 function rangeCheck(r: ReturnType<typeof planBoost>) {
   if (!("error" in r)) return r;
   if (r.error === "budget_range") throw new Error("The ad budget must be 5–200 € in total; nothing was proposed. Tell the owner the allowed range in one short sentence.");
+  if (r.error === "radius_range") throw new Error("The ad radius must be 1–50 km, in steps of half a kilometre; nothing was proposed. Tell the owner the allowed range in one short sentence.");
+  if (r.error === "age_range") throw new Error("The minimum age must be 18–65 and the maximum from the minimum up to 65 (or none); nothing was proposed. Tell the owner the allowed range in one short sentence.");
+  if (r.error === "schedule") throw new Error("An ad schedule needs at least one weekday and a start time before the end time (HH:MM); nothing was proposed. Tell the owner the allowed range in one short sentence.");
   throw new Error("An ad runs 1–14 days; nothing was proposed. Tell the owner the allowed range in one short sentence.");
+}
+
+/** What the owner said in this call, as the plan's owner choices; fields they did not give are left out. */
+function ownerChoices(input: { budget_eur?: number; days?: number; variant?: "default" | "morning" | "weekend" }): BoostOwnerChoices {
+  const owner: BoostOwnerChoices = {};
+  if (input.budget_eur !== undefined) owner.budgetEur = input.budget_eur;
+  if (input.days !== undefined) owner.days = input.days;
+  if (input.variant !== undefined) owner.variant = input.variant;
+  return owner;
 }

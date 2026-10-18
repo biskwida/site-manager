@@ -298,7 +298,7 @@ describe("renderPreview: the reader's language only", () => {
 
 describe("renderPreview: boost_plan (an ad plan; ✅ only saves it)", () => {
   const plan = (over: Partial<BoostPlanRow["plan"]> = {}): BoostPlanRow["plan"] => ({
-    variant: "default", radiusKm: 2, ageMin: 18, schedule: null, budgetEur: 20, days: 5, placements: "automatic", goal: "reach",
+    variant: "default", radiusKm: 2, place: null, ageMin: 18, ageMax: null, gender: "all", audience: null, schedule: null, budgetEur: 20, days: 5, placements: "automatic", goal: "reach", owner: {},
     reasons: [
       { kind: "missing", bg: "не успях да проверя района", en: "I couldn't check the area" },
       { kind: "hypothesis", bg: "сутрешна оферта → делнични сутрини", en: "a morning offer → weekday mornings" },

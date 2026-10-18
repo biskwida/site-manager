@@ -137,7 +137,7 @@ const lastSet = async (s: Awaited<ReturnType<typeof setup>>) => (await s.store.l
 const rowOf = (cs: { changes: Change[] }) => cs.changes[0].after as unknown as BoostPlanRow;
 
 describe("propose_boost: a given photo, with the defaults", () => {
-  it("sends the picture first, then one boost_plan proposal: 2 km, 18+, 20 € over 5 days, all day, automatic placements", async () => {
+  it("sends the picture first, then one boost_plan proposal: 3 km, 18+, 20 € over 5 days, all day, automatic placements", async () => {
     const s = await setup();
     const r = await call(s.tools, "propose_boost", { media_id: s.photo.id });
     expect(r.status).toBe("proposed");
@@ -150,7 +150,7 @@ describe("propose_boost: a given photo, with the defaults", () => {
     expect(cs.changes).toHaveLength(1);
     expect(cs.changes[0]).toMatchObject({ op: "boost_plan", entity: "boost_plan", before: null });
     const row = rowOf(cs);
-    expect(row.plan).toMatchObject({ variant: "default", radiusKm: 2, ageMin: 18, schedule: null, budgetEur: 20, days: 5, placements: "automatic", goal: "profile_visits" });
+    expect(row.plan).toMatchObject({ variant: "default", radiusKm: 3, ageMin: 18, schedule: { days: ["mon", "tue", "wed", "thu", "fri", "sat"], from: "00:00", to: "23:59" }, budgetEur: 20, days: 5, placements: "automatic", goal: "profile_visits" });
     expect(row).toMatchObject({ media_id: s.photo.id, post_ref: `ig-${s.photo.id}`, permalink: `https://instagram.com/p/${s.photo.id}`, image_url: s.photo.public_url, lat: 42.69, lng: 23.33 });
     expect(s.outbound).toEqual([]); // the area came from the cache; nothing else was asked
   });
@@ -165,7 +165,7 @@ describe("propose_boost: a given photo, with the defaults", () => {
     const s = await setup();
     const r = await call(s.tools, "propose_boost", { media_id: s.photo.id, budget_eur: 12.5, days: 3, variant: "weekend" });
     const cs = await s.store.getChangeSet(r.change_set_id as string);
-    expect(rowOf(cs).plan).toMatchObject({ budgetEur: 12.5, days: 3, variant: "weekend", radiusKm: 3 });
+    expect(rowOf(cs).plan).toMatchObject({ budgetEur: 12.5, days: 3, variant: "weekend", radiusKm: 4.5, owner: { budgetEur: 12.5, days: 3, variant: "weekend" } });
     expect(cs.summary_bg).toBe("План за реклама: 12,50 €, 3 дни");
     expect(cs.summary_en).toBe("Ad plan: €12.50, 3 days");
   });
@@ -283,7 +283,7 @@ describe("propose_boost: the inputs it could not read are missing, never invente
     const cs = await s.store.getChangeSet(r.change_set_id as string);
     expect(cs.preview_bg).toContain("— не успях да проверя района");
     expect(cs.preview_en).toContain("— I couldn't check the area");
-    expect(rowOf(cs).plan).toMatchObject({ radiusKm: 2, budgetEur: 20, days: 5 });
+    expect(rowOf(cs).plan).toMatchObject({ radiusKm: 3, budgetEur: 20, days: 5 });
     expect(cs.preview_bg).not.toContain("местоположението");
   });
 
@@ -348,11 +348,14 @@ describe("propose_boost: the preview", () => {
     const cs = await s.store.getChangeSet(r.change_set_id as string);
     expect(cs.preview_bg).toBe([
       "📣 Реклама: ⟦Тиквена супа с джинджифил и печени семки, само тази седмица…⟧",
-      "Къде: до 2 км от кафенето · Кой: 18+ · Кога: 5 дни, по цял ден",
+      "Къде: до 3 км от кафенето · Кой: 18+ · Кога: 5 дни, пон–съб, по цял ден",
       "Бюджет: 20 € общо · Обхват: ще го видите, щом рекламите са свързани",
       "Защо:",
       "• в радиус 1 км: ⟦Софийски университет⟧ (400 м), 2 парка",
       "• по-широката аудитория обикновено е по-евтина; Meta сама намира кой да види рекламата в радиуса",
+      "• смесен район — 3 км",
+      "• в дните, в които сте отворени",
+      "• 20 € за 5 дни е малък тест — достатъчен Meta да научи кой реагира",
       "— демографията на последователите ще се вижда при 100+ последователи и свързан Instagram",
       "(Сега само записвам плана — ще може да се пусне, щом Meta одобри рекламите в Claudia.)",
     ].join("\n"));
@@ -366,11 +369,14 @@ describe("propose_boost: the preview", () => {
     const cs = await s.store.getChangeSet(r.change_set_id as string);
     expect(cs.preview_en).toBe([
       "📣 Ad: ⟦Тиквена супа с джинджифил и печени семки, само тази седмица…⟧",
-      "Where: within 2 km of the café · Who: 18+ · When: 5 days, all day",
+      "Where: within 3 km of the café · Who: 18+ · When: 5 days, Mon–Sat, all day",
       "Budget: 20 € total · Reach: you'll see it once ads are connected",
       "Why:",
       "• within 1 km: ⟦Софийски университет⟧ (400 m), 2 parks",
       "• a broader audience is usually cheaper; Meta itself finds who sees the ad within the radius",
+      "• a mixed area — 3 km",
+      "• on the days you're open",
+      "• 20 € over 5 days is a small test — enough for Meta to learn who responds",
       "— follower demographics will show with 100+ followers and a connected Instagram",
       "(For now I only save the plan — it can run once Meta approves ads in Claudia.)",
     ].join("\n"));

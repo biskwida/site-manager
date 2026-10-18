@@ -424,18 +424,47 @@ export interface BoostReasonRow {
   bg: string;
   en: string;
 }
+/**
+ * What the owner set by hand, field by field (src/boost/plan.ts reads it). A field that is absent is Claudia's analysis; null in
+ * `ageMax` means "65+", null in `schedule` means every day, all day. Kept in the plan so a later change keeps every earlier choice.
+ */
+export interface BoostOwnerChoices {
+  radiusKm?: number;
+  place?: string;
+  ageMin?: number;
+  ageMax?: number | null;
+  gender?: "all" | "women" | "men";
+  audience?: string;
+  schedule?: { days: Weekday[]; from: string; to: string } | null;
+  budgetEur?: number;
+  days?: number;
+  goal?: "reach" | "profile_visits" | "website_visits";
+  placements?: "automatic" | "instagram" | "facebook";
+  variant?: "default" | "morning" | "weekend";
+}
 /** The plan as src/boost/plan.ts makes it (BoostPlan), restated here: src/domain goes into every venue's site and must not import it. */
 export interface BoostPlanData {
   variant: "default" | "morning" | "weekend";
   radiusKm: number;
+  /** The centre of the radius when the owner named another place; null = the business itself. */
+  place: string | null;
+  /** Only the minimum age is a hard limit. */
   ageMin: number;
+  /** A suggestion to Meta; null = no upper age (65+). */
+  ageMax: number | null;
+  /** A suggestion to Meta. */
+  gender: "all" | "women" | "men";
+  /** The owner's own words about who the customers are, as written; null when they said nothing. */
+  audience: string | null;
   /** null = every day, all day. */
   schedule: null | { days: Weekday[]; from: string; to: string };
   budgetEur: number;
   days: number;
-  placements: "automatic";
-  goal: "reach" | "profile_visits";
+  placements: "automatic" | "instagram" | "facebook";
+  goal: "reach" | "profile_visits" | "website_visits";
   reasons: BoostReasonRow[];
+  /** What the owner set; drives the carry-over of earlier choices and the "your choice" marks. */
+  owner: BoostOwnerChoices;
 }
 /** `after` of a boost_plan row (entity_id = a new id); undo swaps it into `before`. */
 export interface BoostPlanRow {
