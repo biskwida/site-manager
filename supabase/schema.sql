@@ -285,3 +285,14 @@ create table if not exists public.translations (
   created_at timestamptz not null default now(),
   primary key (lang, source_hash)
 );
+
+-- What is around the café (2026-10-18): the address geocoded with OpenStreetMap Nominatim plus the places Overpass finds within 2 km,
+-- cached 30 days; places is [{kind, name, meters}] (src/geo/osm.ts). Server-only (policies.sql).
+create table if not exists public.venue_surroundings (
+  venue_id uuid primary key references public.venues(id) on delete cascade,
+  address text not null,
+  lat double precision,
+  lng double precision,
+  places jsonb not null default '[]',
+  fetched_at timestamptz not null
+);

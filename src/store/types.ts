@@ -3,6 +3,7 @@ import type {
   BusinessType, Category, Change, ChangeSet, ChangeSetStatus, ChangeSource, ChatLang, CommentMode, CommentNetwork, Conversation, DeployInfo, DeployStatus, Item, Lang, Media, Member, Role, SiteState, SiteTextKey, TemplateId, Venue, VenueStatus, WeekHours,
 } from "../domain/types";
 import { isChatLang } from "../domain/types";
+import type { Place } from "../geo/osm";
 import type { WizardDraft } from "../wizard/schema";
 
 /** How long a publish claim (claimPublish) blocks a second publish of the same draft; a publish that died keeps nobody out for longer. */
@@ -445,6 +446,24 @@ export interface Store {
   getTranslation(lang: ChatLang, sourceHash: string): Promise<string | null>;
   /** Stores a translation; a second write for the same language and text replaces the first. `lang` must pass checkMemberLang (translations.lang check). */
   putTranslation(lang: ChatLang, sourceHash: string, text: string): Promise<void>;
+}
+
+// --- Venue surroundings (appended 2026-10-18; src/geo/surroundings.ts) ---
+/** What is around a café, cached 30 days (table venue_surroundings, server-only): the geocoded address and the places within 2 km. */
+export interface VenueSurroundings {
+  venue_id: string;
+  /** The address that was geocoded; a different venue address means the row is stale. */
+  address: string;
+  lat: number | null;
+  lng: number | null;
+  places: Place[];
+  fetched_at: string;
+}
+export interface Store {
+  /** The venue's cached surroundings; null when there are none. */
+  getSurroundings(venueId: string): Promise<VenueSurroundings | null>;
+  /** Saves the venue's surroundings, replacing the row it had (one row per venue); it goes with the venue. */
+  putSurroundings(row: VenueSurroundings): Promise<void>;
 }
 
 /** What a comment set says once its customer text is gone (redactCommentSets). */

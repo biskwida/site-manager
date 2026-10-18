@@ -47,6 +47,10 @@ revoke all on public.data_deletion_requests from anon, authenticated;
 alter table public.translations enable row level security;
 revoke all on public.translations from anon, authenticated;
 
+-- What is around the café (2026-10-18): server-only, like the tables above (RLS on, no policies, no grants).
+alter table public.venue_surroundings enable row level security;
+revoke all on public.venue_surroundings from anon, authenticated;
+
 -- 2. No RPCs: the owner dashboard and the public site read through the app's server (service-role key, never in the browser).
 
 -- 3. Realtime for the public site and the dashboard.
