@@ -77,3 +77,12 @@ export const CheckAllergensSchema = z.object({ name: z.string(), desc: z.string(
 export const UndoSchema = z.object({ change_set_id: z.string().describe('An id from list_changes, or "last" for the most recent applied set') });
 export const ListSchema = z.object({ limit: z.number().int().min(1).max(50).default(10) });
 export const CancelSchema = z.object({ change_set_id: Id });
+
+/** propose_boost (src/agent/boost-tools.ts). The budget and days ranges are checked by planBoost, which names the allowed range. */
+export const BoostSchema = z.object({
+  media_id: z.string().min(1).optional().describe("The media_id of the photo to boost, when the owner sent or named one (this message or the conversation)."),
+  post_ref: z.string().min(1).optional().describe("A published Instagram or Facebook post the owner names: Meta's post id or its link. Omit both media_id and post_ref to boost the owner's last published post (else the best recent Instagram post)."),
+  budget_eur: z.number().optional().describe("Total budget in EUR, only when the owner says one (allowed 5–200). Omit for the recommended 20 €."),
+  days: z.number().int().optional().describe("How many days the ad runs, only when the owner says it (allowed 1–14). Omit for the recommended 5."),
+  variant: z.enum(["default", "morning", "weekend"]).optional().describe('"morning" only when the owner says сутрин / закуска / до 11 / morning / breakfast; "weekend" only when the owner says уикенд / събота / неделя / бранч / концерт / weekend / brunch / event / live music; "default" when the owner asks for neither. Omit to let the caption decide.'),
+});

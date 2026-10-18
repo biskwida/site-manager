@@ -33,11 +33,12 @@ create index if not exists destination_syncs_due_idx on public.destination_syncs
 create index if not exists destination_syncs_set_idx on public.destination_syncs (change_set_id);
 create index if not exists destination_syncs_venue_idx on public.destination_syncs (venue_id, created_at);
 
--- Change rows may now point at entities that live on the owner's WordPress site or social accounts (social_post, 2026-10-11).
--- One constraint for both: a second add with a narrower list would fail on a database that already has social_post rows.
+-- Change rows may now point at entities that live on the owner's WordPress site or social accounts (social_post, 2026-10-11),
+-- and at saved ad plans (boost_plan, 2026-10-18: the row is the whole record; migrations/2026-10-18-boost-plan-entity.sql).
+-- One constraint for all: a second add with a narrower list would fail on a database that already has those rows.
 alter table public.changes drop constraint if exists changes_entity_check;
 alter table public.changes add constraint changes_entity_check
-  check (entity in ('venue', 'category', 'item', 'holiday', 'announcement', 'media', 'site_text', 'wp_page', 'wp_media', 'wp_option', 'wp_menu', 'wp_product', 'social_post', 'social_reply', 'social_moderate'));
+  check (entity in ('venue', 'category', 'item', 'holiday', 'announcement', 'media', 'site_text', 'wp_page', 'wp_media', 'wp_option', 'wp_menu', 'wp_product', 'social_post', 'social_reply', 'social_moderate', 'boost_plan'));
 
 -- Social posting (2026-10-11): the venue's Facebook Page and Instagram account as destinations (the social_post entity is in
 -- changes_entity_check above). Apply only this file live: npm run db:apply -- schema-integrations.sql

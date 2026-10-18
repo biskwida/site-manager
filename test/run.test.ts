@@ -60,7 +60,7 @@ describe("runTurn", () => {
     expect(out).toBe("Готово, върнах я.");
     const p = calls[0];
     expect(p).toMatchObject({ model: "claude-opus-5-5", max_tokens: 16000, output_config: { effort: "high" }, tool_choice: { type: "auto", disable_parallel_tool_use: true }, betas: ["server-side-fallback-2026-07-01"], fallbacks: "default" });
-    expect((p.tools as unknown[]).length).toBe(9);
+    expect((p.tools as unknown[]).length).toBe(10);
     const msg = (p.messages as { content: { type: string; text?: string; source?: { data: string } }[] }[])[0];
     expect(msg.content[0]).toMatchObject({ type: "image", source: { type: "base64", media_type: "image/jpeg", data: "AAAA" } });
     expect(msg.content[1].text).toContain("Owner: здравей");

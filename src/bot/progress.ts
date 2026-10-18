@@ -25,6 +25,7 @@ const LABELS: Record<string, [string, string]> = {
   list_comments: ["💬 Чета коментарите…", "💬 Reading the comments…"],
   reply_to_comments: ["💬 Подготвям отговора…", "💬 Preparing the reply…"],
   set_comment_mode: ["💬 Подготвям предложението…", "💬 Preparing the proposal…"],
+  propose_boost: ["📣 Подготвям рекламата…", "📣 Preparing the ad…"],
 };
 const WORDPRESS: [string, string] = ["🌐 Работя по WordPress сайта…", "🌐 Working on the WordPress site…"];
 

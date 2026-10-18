@@ -18,6 +18,7 @@ import { usageLine } from "../bot/limit";
 import { changeUsage } from "../store/usage";
 import { countsTowardLimit } from "../domain/limits";
 import { BulkSchema, CancelSchema, CheckAllergensSchema, ListSchema, ProposeSchema, ScheduleSchema, UndoSchema, type ChangeInput } from "./tool-schemas";
+import { boostTools, type InstagramAccess } from "./boost-tools";
 import { commentTools, isCommentReplySet } from "./comment-tools";
 import { socialTools } from "./social-tools";
 import { visualTools } from "./visual-tools";
@@ -44,7 +45,9 @@ export interface AgentDeps {
   social?: { facebook: boolean; instagram: boolean } | null;
   /** Reads Instagram and Facebook comments right now (list_comments runs it first); absent = list_comments answers from the saved comments only. */
   liveComments?: LiveComments | null;
-  /** Outbound HTTP for reading the owner's photo (social_post reads it for Instagram's 4:5..1.91:1 check and to make the 9:16 story picture); default the global fetch. */
+  /** The venue's Instagram account for propose_boost's follower and post numbers; absent, null or resolving null = those inputs are missing. */
+  instagramInsights?: ((venueId: string) => Promise<InstagramAccess | null>) | null;
+  /** Outbound HTTP for reading the owner's photo (social_post reads it for Instagram's 4:5..1.91:1 check and to make the 9:16 story picture) and for OpenStreetMap (propose_boost's surroundings); default the global fetch. */
   fetch?: typeof fetch;
   /** The picture service (photo → Instagram picture); registers make_visual when present. */
   visual?: VisualClient | null;
@@ -118,10 +121,12 @@ export function resolveTokens(ops: ProposeInput["changes"], site: SiteState, now
  */
 export type ProposeInput = Omit<z.infer<typeof ProposeSchema>, "changes"> & { changes: (ChangeInput | Extract<ChangeOp, { op: "set_comment_mode" }>)[] };
 
-/** The Telegram message for a proposal: preview, optional schedule line, and the question. */
-export function proposalText(preview: string, lang: Lang, applyAt: string | null, tz: string): string {
+/** The Telegram message for a proposal: preview, optional schedule line, and the question ("save" for an ad plan). */
+export function proposalText(preview: string, lang: Lang, applyAt: string | null, tz: string, opts: { save?: boolean } = {}): string {
   const when = applyAt ? `\n\n${tr(lang, "⏰ Ще се приложи на", "⏰ Will be applied on")} ${formatDateTime(applyAt, lang, tz)}` : "";
-  return `${preview}${when}\n\n${tr(lang, "Да приложа ли?", "Apply this?")}`;
+  // A saved ad plan (propose_boost) is saved, not applied.
+  const question = opts.save ? tr(lang, "Да запазя ли плана?", "Save the plan?") : tr(lang, "Да приложа ли?", "Apply this?");
+  return `${preview}${when}\n\n${question}`;
 }
 
 const NEXT_STEP: Record<ChangeSet["status"], string> = {
@@ -336,7 +341,7 @@ export function makeTools(deps: AgentDeps) {
 
   // Task 11 appends schedule_changes, propose_bulk_price_change, check_allergens, undo here.
   const kit: ToolKit = { attempt, site, ctx, previews, mine, propose, getSet, ensureNoPending, ensureWithinLimit, lang };
-  return [getSite, getMenu, proposeChanges, cancelChangeSet, listChanges, ...extraTools(d, kit), ...wpTools(d, kit), ...socialTools(d, kit), ...commentTools(d, kit), ...visualTools(d, kit)];
+  return [getSite, getMenu, proposeChanges, cancelChangeSet, listChanges, ...extraTools(d, kit), ...wpTools(d, kit), ...socialTools(d, kit), ...commentTools(d, kit), ...visualTools(d, kit), ...boostTools(d, kit)];
 }
 
 /** What the shared helpers of makeTools expose to the second group of tools. */

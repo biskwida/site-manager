@@ -2,7 +2,7 @@
 import { applyChanges } from "../domain/changes";
 import { COMMENT_LIMIT_DEFAULT, countsTowardLimit } from "../domain/limits";
 import type { Category, ChangeSet, ChatLang, Conversation, DeployInfo, DeployStatus, Item, Media, Member, Role, SiteState, SiteTextKey, Venue, VenueStatus } from "../domain/types";
-import { DEFAULT_HOURS, extensionFor, newInviteCode, newToken, PUBLISH_CLAIM_TTL_MS, type ChangeSetPatch, type ExpiredTimer, type NewCategory, type NewChangeSet, type NewItem, type NewVenue, type Store, type VenuePatch, type Destination, type DestinationKind, type DestinationPatch, type DestinationSync, type DestinationWithSecrets, type NewDestination, type NewSync, type SyncPatch, type ListSyncsOpts, type ApplyResult, checkLimitValue, checkMemberLang, CONFIG_KEY_RE, newConfirmationCode, type DataDeletionRequest, type DeletionProvider, type ListCommentsOpts, type NewSocialComment, type SocialComment, type SocialCommentPatch, COMMENT_REDACTED, redactCommentRow } from "./types";
+import { DEFAULT_HOURS, extensionFor, newInviteCode, newToken, PUBLISH_CLAIM_TTL_MS, type ChangeSetPatch, type ExpiredTimer, type NewCategory, type NewChangeSet, type NewItem, type NewVenue, type Store, type VenuePatch, type Destination, type DestinationKind, type DestinationPatch, type DestinationSync, type DestinationWithSecrets, type NewDestination, type NewSync, type SyncPatch, type ListSyncsOpts, type ApplyResult, checkLimitValue, checkMemberLang, CONFIG_KEY_RE, newConfirmationCode, type DataDeletionRequest, type DeletionProvider, type ListCommentsOpts, type NewSocialComment, type SocialComment, type SocialCommentPatch, COMMENT_REDACTED, redactCommentRow, type VenueSurroundings } from "./types";
 import { limitBlocks } from "./usage";
 
 const clone = <T>(v: T): T => structuredClone(v);
@@ -148,6 +148,7 @@ export class InMemoryStore implements Store {
     for (const [did, d] of this.destinations) if (d.venue_id === id) this.destinations.delete(did);
     for (const [sid, s] of this.syncs) if (s.venue_id === id) this.syncs.delete(sid);
     for (const [cid, c] of this.comments) if (c.venue_id === id) this.comments.delete(cid);
+    this.surroundings.delete(id);
   }
   async getSite(venueId: string) {
     return clone(this.site(venueId));
@@ -635,5 +636,17 @@ export class InMemoryStore implements Store {
   async putTranslation(lang: ChatLang, sourceHash: string, text: string) {
     checkMemberLang(lang); // translations.lang has the same check as venue_members.lang
     this.translations.set(`${lang}:${sourceHash}`, text);
+  }
+
+  // --- Venue surroundings (appended 2026-10-18) ---
+  /** By venue id. */
+  surroundings = new Map<string, VenueSurroundings>();
+  async getSurroundings(venueId: string) {
+    const row = this.surroundings.get(venueId);
+    return row ? clone(row) : null;
+  }
+  async putSurroundings(row: VenueSurroundings) {
+    this.site(row.venue_id); // the table's foreign key: the venue must exist
+    this.surroundings.set(row.venue_id, clone(row));
   }
 }

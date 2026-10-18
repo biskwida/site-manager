@@ -2,7 +2,9 @@ import { describe, expect, it } from "vitest";
 import { applyChanges, invertChanges, planChanges, type PlanContext } from "@/src/domain/changes";
 import { isLiveSpecial, isSoldOut, visibleItems } from "@/src/domain/effective";
 import { detectLang, formatPrice } from "@/src/domain/format";
+import { countsTowardLimit } from "@/src/domain/limits";
 import { renderPreview } from "@/src/domain/preview";
+import type { BoostPlanRow, Change } from "@/src/domain/types";
 import { HOURS, NOW, TZ, item, state } from "./fixtures";
 
 const ctx = (): PlanContext => ({ newId: () => "new-1", now: NOW });
@@ -291,5 +293,71 @@ describe("renderPreview: the reader's language only", () => {
     const s = state();
     const changes = planChanges(s, [{ op: "update_item", item_id: "i-cap", patch: { name_en: "Cappuccino XL" } }], ctx());
     expect(renderPreview(s, changes, "bg", TZ)).toBe("• ⟦Капучино⟧: име (EN): „⟦Cappuccino⟧“ → „⟦Cappuccino XL⟧“");
+  });
+});
+
+describe("renderPreview: boost_plan (an ad plan; ✅ only saves it)", () => {
+  const plan = (over: Partial<BoostPlanRow["plan"]> = {}): BoostPlanRow["plan"] => ({
+    variant: "default", radiusKm: 2, ageMin: 18, schedule: null, budgetEur: 20, days: 5, placements: "automatic", goal: "reach",
+    reasons: [
+      { kind: "missing", bg: "не успях да проверя района", en: "I couldn't check the area" },
+      { kind: "hypothesis", bg: "сутрешна оферта → делнични сутрини", en: "a morning offer → weekday mornings" },
+      { kind: "fact", bg: "този пост има 4 запазвания", en: "this post has 4 saves" },
+    ],
+    ...over,
+  });
+  const row = (p: BoostPlanRow["plan"], caption = "Закуска до 11 ч."): Change => ({
+    position: 0, op: "boost_plan", entity: "boost_plan", entity_id: "b-1", before: null,
+    after: { plan: p, post_ref: "m1", permalink: "https://instagram.com/p/1", media_id: null, caption, image_url: null, lat: 42.69, lng: 23.33 } as unknown as Change["after"],
+  });
+
+  it("groups the reasons facts → hypotheses → missing, missing marked with —", () => {
+    expect(renderPreview(state(), [row(plan())], "bg", TZ).split("\n").slice(3, 7)).toEqual([
+      "Защо:",
+      "• този пост има 4 запазвания",
+      "• сутрешна оферта → делнични сутрини",
+      "— не успях да проверя района",
+    ]);
+  });
+
+  it("a morning plan: 1.5 km, weekdays 07:30–11:00, one day, a budget with cents", () => {
+    const p = plan({ variant: "morning", radiusKm: 1.5, schedule: { days: ["mon", "tue", "wed", "thu", "fri"], from: "07:30", to: "11:00" }, days: 1, budgetEur: 12.5 });
+    const [, whereBg, budgetBg] = renderPreview(state(), [row(p)], "bg", TZ).split("\n");
+    expect(whereBg).toBe("Къде: до 1,5 км от кафенето · Кой: 18+ · Кога: 1 ден, пон–пет 07:30–11:00");
+    expect(budgetBg).toBe("Бюджет: 12,50 € общо · Обхват: ще го видите, щом рекламите са свързани");
+    const [, whereEn, budgetEn] = renderPreview(state(), [row(p)], "en", TZ).split("\n");
+    expect(whereEn).toBe("Where: within 1.5 km of the café · Who: 18+ · When: 1 day, Mon–Fri 07:30–11:00");
+    expect(budgetEn).toBe("Budget: 12.50 € total · Reach: you'll see it once ads are connected");
+  });
+
+  it("a weekend plan: 3 km, Friday to Sunday all day; a morning clipped to some days lists them", () => {
+    const weekend = plan({ variant: "weekend", radiusKm: 3, schedule: { days: ["fri", "sat", "sun"], from: "00:00", to: "23:59" } });
+    expect(renderPreview(state(), [row(weekend)], "bg", TZ).split("\n")[1]).toBe("Къде: до 3 км от кафенето · Кой: 18+ · Кога: 5 дни, пет–нед, по цял ден");
+    expect(renderPreview(state(), [row(weekend)], "en", TZ).split("\n")[1]).toBe("Where: within 3 km of the café · Who: 18+ · When: 5 days, Fri–Sun, all day");
+    const gaps = plan({ variant: "morning", radiusKm: 1.5, schedule: { days: ["mon", "wed", "fri"], from: "08:00", to: "11:00" } });
+    expect(renderPreview(state(), [row(gaps)], "en", TZ).split("\n")[1]).toBe("Where: within 1.5 km of the café · Who: 18+ · When: 5 days, Mon, Wed, Fri 08:00–11:00");
+  });
+
+  it("never shows a reach or price estimate, and ends with the save-only line", () => {
+    for (const lang of ["bg", "en"] as const) {
+      const text = renderPreview(state(), [row(plan())], lang, TZ);
+      expect(text).not.toMatch(/\d+\s*[–-]\s*\d+\s*(души|people)/);
+      expect(text.split("\n").at(-1)).toBe(lang === "bg" ? "(Сега само записвам плана — ще може да се пусне, щом Meta одобри рекламите в Claudia.)" : "(For now I only save the plan — it can run once Meta approves ads in Claudia.)");
+    }
+  });
+
+  it("keeps the caption as written (first 60 characters) and reads an inverted row as a removal", () => {
+    const long = "а".repeat(70);
+    expect(renderPreview(state(), [row(plan(), long)], "en", TZ).split("\n")[0]).toBe(`📣 Ad: ⟦${"а".repeat(60)}…⟧`);
+    const [inverted] = invertChanges([row(plan())]);
+    expect(renderPreview(state(), [inverted], "bg", TZ, { restore: true })).toBe("• Премахва плана за реклама: ⟦Закуска до 11 ч.⟧");
+    expect(renderPreview(state(), [inverted], "en", TZ, { restore: true })).toBe("• Removes the ad plan: ⟦Закуска до 11 ч.⟧");
+  });
+
+  it("applying it changes nothing on the site, and it never counts toward the monthly limit", () => {
+    const s = state();
+    expect(applyChanges(s, [row(plan())])).toEqual(s);
+    expect(countsTowardLimit("text", [{ op: "boost_plan" }])).toBe(false);
+    expect(countsTowardLimit("text", [{ op: "boost_plan" }, { op: "set_price" }])).toBe(true);
   });
 });

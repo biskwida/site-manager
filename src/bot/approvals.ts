@@ -2,7 +2,7 @@
 import { setCorrection } from "../agent/memory";
 import { syncLines } from "../destinations/sync";
 import { baseLang } from "../domain/format";
-import type { ChangeSetStatus, Lang } from "../domain/types";
+import { isBoostPlanSet, isBoostPlanUndoSet, type ChangeSetStatus, type Lang } from "../domain/types";
 import { cancelCommentSet, commentsOfSet, concludeCommentOwners, decidedLine, proposalTtlHours } from "../social/comments-propose";
 import type { Store } from "../store/types";
 import { commentUsage } from "../store/usage";
@@ -90,6 +90,9 @@ export async function handleDecision(d: DecisionDeps, chatRef: string, decision:
   }
   if (result === "skipped") return settled((await d.store.getChangeSet(cs.id)).status);
   if (isComment) await concludeCommentOwners(d, cs, (l) => decidedLine(l, "apply", chatRef), { except: chatRef });
+  // A saved ad plan changed nothing and used no change: it says so, with no "applied" and no usage line.
+  if (isBoostPlanSet(cs.changes)) return { edit: { full: `${preview}\n\n${c.planSaved}`, short: c.planSaved }, toast: c.planSaved };
+  if (isBoostPlanUndoSet(cs.changes)) return { edit: { full: `${preview}\n\n${c.planRemoved}`, short: c.planRemoved }, toast: c.planRemoved };
   const lines = await syncLines(d.store, cs.id, lang);
   // Comment sets do not use up changes, so the change usage line would mislead there.
   const usage = isComment ? null : await usageLine(d.store, cs.venue_id, now, lang);

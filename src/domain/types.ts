@@ -258,7 +258,7 @@ export const OP_NAMES: readonly OpName[] = [
   "set_text", "set_theme", "set_comment_mode",
 ];
 
-export type Entity = "venue" | "category" | "item" | "holiday" | "announcement" | "media" | "site_text" | WpEntity | SocialEntity;
+export type Entity = "venue" | "category" | "item" | "holiday" | "announcement" | "media" | "site_text" | WpEntity | SocialEntity | BoostEntity;
 export type Row = Record<string, unknown>;
 
 /**
@@ -268,7 +268,7 @@ export type Row = Record<string, unknown>;
  */
 export interface Change {
   position: number;
-  op: OpName | WpOpName | SocialOpName;
+  op: OpName | WpOpName | SocialOpName | BoostOpName;
   entity: Entity;
   entity_id: string;
   before: Row | null;
@@ -397,4 +397,58 @@ export interface SocialModerateRow {
   author_name: string;
   comment_text: string;
   action: ModerateAction;
+}
+
+// --- Boost proposals (2026-10-18, docs/superpowers/plans/2026-10-18-boost-proposals.md) ---
+/**
+ * The ad plan propose_boost makes for one post (src/agent/boost-tools.ts); never by planChange. Phase 1 only records it: the plan
+ * lives in the change row itself, so applying it writes nothing, pushes nothing and calls nobody, and its undo removes the record.
+ */
+export type BoostOpName = "boost_plan";
+export type BoostEntity = "boost_plan";
+/** An entity whose whole content is its change row (a saved plan): applied as a no-op, never pushed to a destination. */
+export function isRecordOnlyEntity(e: string): e is BoostEntity {
+  return e === "boost_plan";
+}
+/** A set made only of saved ad plans (not their undo): ✅ saves it, so it is asked and confirmed as "save", never "apply". */
+export function isBoostPlanSet(changes: readonly Pick<Change, "op" | "after">[]): boolean {
+  return changes.length > 0 && changes.every((c) => c.op === "boost_plan" && c.after !== null);
+}
+/** The undo of saved ad plans: every row is boost_plan with after null. ✅ on it removes the plan, so it never says "applied". */
+export function isBoostPlanUndoSet(changes: readonly Pick<Change, "op" | "after">[]): boolean {
+  return changes.length > 0 && changes.every((c) => c.op === "boost_plan" && c.after === null);
+}
+/** One reason in a plan: a fact (the café's own data, OpenStreetMap or Meta), a hypothesis, or an input that is missing. */
+export interface BoostReasonRow {
+  kind: "fact" | "hypothesis" | "missing";
+  bg: string;
+  en: string;
+}
+/** The plan as src/boost/plan.ts makes it (BoostPlan), restated here: src/domain goes into every venue's site and must not import it. */
+export interface BoostPlanData {
+  variant: "default" | "morning" | "weekend";
+  radiusKm: number;
+  ageMin: number;
+  /** null = every day, all day. */
+  schedule: null | { days: Weekday[]; from: string; to: string };
+  budgetEur: number;
+  days: number;
+  placements: "automatic";
+  goal: "reach" | "profile_visits";
+  reasons: BoostReasonRow[];
+}
+/** `after` of a boost_plan row (entity_id = a new id); undo swaps it into `before`. */
+export interface BoostPlanRow {
+  plan: BoostPlanData;
+  /** Meta's id of the published post (Instagram media id or Facebook post id); null for a photo that is not published yet. */
+  post_ref: string | null;
+  permalink: string | null;
+  /** Our media id when the post is a photo the owner sent (or the photo of a post Claudia published). */
+  media_id: string | null;
+  caption: string;
+  /** The picture shown above the proposal; null when there is none. */
+  image_url: string | null;
+  /** The café's pin, the centre of the radius; null when its address was not found on the map. */
+  lat: number | null;
+  lng: number | null;
 }

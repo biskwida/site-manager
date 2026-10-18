@@ -1,11 +1,12 @@
 // src/store/supabase.ts
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import { COMMENT_LIMIT_DEFAULT, countsTowardLimit } from "../domain/limits";
-import { isChatLang, isExternalEntity, type CommentMode, type SocialEntity, type WpEntity } from "../domain/types";
+import { isChatLang, isExternalEntity, isRecordOnlyEntity, type BoostEntity, type CommentMode, type SocialEntity, type WpEntity } from "../domain/types";
 import type { Announcement, BusinessType, Category, Change, ChangeSet, ChatLang, Conversation, DeployInfo, DeployStatus, Holiday, InstagramImport, Item, Lang, Media, Member, Role, SiteState, SiteText, SiteTextKey, TemplateId, Venue, VenueStatus } from "../domain/types";
+import type { Place } from "../geo/osm";
 import type { WizardDraft } from "../wizard/schema";
 import { legacyTelegramId } from "../channels/ref";
-import { DEFAULT_HOURS, extensionFor, newInviteCode, newToken, PUBLISH_CLAIM_TTL_MS, type ChangeSetPatch, type ExpiredTimer, type NewCategory, type NewChangeSet, type NewItem, type NewVenue, type Store, type VenuePatch, type Destination, type DestinationKind, type DestinationPatch, type DestinationSync, type DestinationWithSecrets, type NewDestination, type NewSync, type SyncPatch, type SyncStatus, type ListSyncsOpts, type ApplyResult, checkLimitValue, checkMemberLang, CONFIG_KEY_RE, newConfirmationCode, type DataDeletionRequest, type DeletionProvider, type DeletionStatus, type CommentStatus, type ListCommentsOpts, type NewSocialComment, type SocialComment, type SocialCommentPatch, COMMENT_REDACTED, redactCommentRow } from "./types";
+import { DEFAULT_HOURS, extensionFor, newInviteCode, newToken, PUBLISH_CLAIM_TTL_MS, type ChangeSetPatch, type ExpiredTimer, type NewCategory, type NewChangeSet, type NewItem, type NewVenue, type Store, type VenuePatch, type Destination, type DestinationKind, type DestinationPatch, type DestinationSync, type DestinationWithSecrets, type NewDestination, type NewSync, type SyncPatch, type SyncStatus, type ListSyncsOpts, type ApplyResult, checkLimitValue, checkMemberLang, CONFIG_KEY_RE, newConfirmationCode, type DataDeletionRequest, type DeletionProvider, type DeletionStatus, type CommentStatus, type ListCommentsOpts, type NewSocialComment, type SocialComment, type SocialCommentPatch, COMMENT_REDACTED, redactCommentRow, type VenueSurroundings } from "./types";
 import { limitBlocks } from "./usage";
 
 type Row = Record<string, unknown>;
@@ -145,7 +146,7 @@ const SET_SELECT = "*, changes(*)";
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 /** A venue filter that is not a uuid can match nothing (and Postgres would reject it). */
 const badVenue = (venueId?: string) => Boolean(venueId) && !UUID.test(venueId as string);
-const TABLE: Record<Exclude<Change["entity"], WpEntity | SocialEntity>, string> = { venue: "venues", category: "categories", item: "items", holiday: "holidays", announcement: "announcements", media: "media", site_text: "site_texts" };
+const TABLE: Record<Exclude<Change["entity"], WpEntity | SocialEntity | BoostEntity>, string> = { venue: "venues", category: "categories", item: "items", holiday: "holidays", announcement: "announcements", media: "media", site_text: "site_texts" };
 
 export class SupabaseStore implements Store {
   private db: SupabaseClient;
@@ -475,6 +476,7 @@ export class SupabaseStore implements Store {
 
   private async writeEntity(venueId: string, c: Change) {
     if (isExternalEntity(c.entity)) return; // lives on the owner's WordPress site or social accounts; the destination push writes it
+    if (isRecordOnlyEntity(c.entity)) return; // a saved ad plan: the change row is the whole record
     const table = TABLE[c.entity];
     if (c.entity === "site_text") {
       if (c.after === null) {
@@ -774,6 +776,17 @@ export class SupabaseStore implements Store {
   async putTranslation(lang: ChatLang, sourceHash: string, text: string) {
     checkMemberLang(lang); // the column check would refuse it anyway; this fails before the round trip
     await must(this.db.from("translations").upsert({ lang, source_hash: sourceHash, text }, { onConflict: "lang,source_hash" }).select("lang"), "putTranslation");
+  }
+
+  // --- Venue surroundings (appended 2026-10-18) ---
+  async getSurroundings(venueId: string) {
+    const { data, error } = await this.db.from("venue_surroundings").select("*").eq("venue_id", venueId).maybeSingle();
+    if (error) throw new Error(`getSurroundings: ${error.message}`);
+    if (!data) return null;
+    return { venue_id: str(data.venue_id), address: str(data.address), lat: data.lat === null ? null : num(data.lat), lng: data.lng === null ? null : num(data.lng), places: (data.places ?? []) as Place[], fetched_at: isoOrNull(data.fetched_at), failed_at: isoOrNull(data.failed_at) };
+  }
+  async putSurroundings(row: VenueSurroundings) {
+    await must(this.db.from("venue_surroundings").upsert(row, { onConflict: "venue_id" }).select("venue_id"), "putSurroundings");
   }
 }
 
