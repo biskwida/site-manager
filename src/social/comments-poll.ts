@@ -88,8 +88,10 @@ async function readNetwork(d: SyncDeps, dest: DestinationWithSecrets, network: C
   try {
     listed = network === "instagram" ? await listInstagramMedia(client, ownId, windowStart) : await listFacebookPosts(client, ownId, windowStart);
   } catch (e) {
-    if (e instanceof MetaApiError && CONNECTION_CODES.has(e.code)) throw e; // token/permission: the destination is marked
-    log(d, `[comments] ${network} post list for venue ${dest.venue_id} failed: ${codeOf(e)}`); // read the posts we published
+    // token/permission: the destination is marked; transient (or an abort/timeout): the network is retried, never stamped as polled
+    // with nothing read. Any other refusal of the list falls back to the posts we published.
+    if (e instanceof MetaApiError && (CONNECTION_CODES.has(e.code) || e.retryable)) throw e;
+    log(d, `[comments] ${network} post list for venue ${dest.venue_id} failed: ${codeOf(e)}`);
   }
   const targets = mergeTargets(published, listed);
   const rows: NewSocialComment[] = [];
@@ -174,10 +176,13 @@ export async function purgeOldComments(store: Pick<Store, "purgeComments" | "red
 
 /** What list_comments needs to read Meta right then (AgentDeps.liveComments). */
 export interface LiveComments {
-  /** One on-demand poll of the venue; aborting `signal` stops its Graph calls. Never throws. */
-  poll(venueId: string, signal: AbortSignal): Promise<Pick<PollReport, "polled" | "errors">>;
-  /** When the venue's connected networks were last read successfully (the oldest of them), or null. */
-  lastCheckedAt(venueId: string): Promise<string | null>;
+  /** One on-demand poll of the venue; aborting `signal` stops its Graph calls. Never throws. An error without a network is not one network's. */
+  poll(venueId: string, signal: AbortSignal): Promise<{ polled: CommentNetwork[]; errors: { network: CommentNetwork | null; code: string }[] }>;
+  /**
+   * When the venue's connected networks were last read successfully: `at` is the oldest of those that ever were (null when none),
+   * `never` the connected networks that never were.
+   */
+  lastCheckedAt(venueId: string): Promise<{ at: string | null; never: CommentNetwork[] }>;
 }
 
 /** The on-demand poll over the same deps as the tick: every Graph call also stops when the caller's signal aborts. */
@@ -190,18 +195,20 @@ export function makeLiveComments(d: SyncDeps, now: () => Date): LiveComments {
         return await pollVenueComments({ ...d, fetch: f }, await d.store.getVenue(venueId), now(), { onDemand: true });
       } catch (e) {
         log(d, `[comments] on-demand poll for venue ${venueId} failed: ${codeOf(e)}`);
-        return { polled: [], errors: [{ network: "instagram", code: codeOf(e) }] };
+        return { polled: [], errors: [{ network: null, code: codeOf(e) }] };
       }
     },
     async lastCheckedAt(venueId) {
       const times: number[] = [];
+      const never: CommentNetwork[] = [];
       for (const network of NETWORKS) {
         const dest = await d.store.getDestination(venueId, network);
         if (!dest || dest.status !== "connected") continue; // an `error` destination's stamp is the failed attempt
         const t = Date.parse(String(dest.config.last_comment_poll_at ?? ""));
         if (Number.isFinite(t)) times.push(t);
+        else never.push(network);
       }
-      return times.length ? new Date(Math.min(...times)).toISOString() : null;
+      return { at: times.length ? new Date(Math.min(...times)).toISOString() : null, never };
     },
   };
 }

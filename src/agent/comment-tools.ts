@@ -10,7 +10,7 @@ import { betaZodTool } from "@anthropic-ai/sdk/helpers/beta/zod";
 import { z } from "zod";
 import { copy } from "../bot/copy";
 import { commentModeLabel } from "../domain/comment-preview";
-import { COMMENT_MODES, type ChangeSet, type CommentMode } from "../domain/types";
+import { COMMENT_MODES, type ChangeSet, type CommentMode, type CommentNetwork } from "../domain/types";
 import { REPLY_MAX } from "../social/comments-draft";
 import { COMMENT_ON_DEMAND_TIMEOUT_MS } from "../social/comments-poll";
 import { cancelCommentSet, commentLimitState, createCommentSet, previewLength, splitCommentItems, type CommentSetItem } from "../social/comments-propose";
@@ -97,19 +97,22 @@ export function commentTools(d: AgentDeps, k: ToolKit) {
       });
       const r = await Promise.race([live.poll(d.venueId, ctl.signal), timeout]);
       if (r.errors.length === 0) return { failed: false };
-      const names = [...new Set(r.errors.map((e) => (e.network === "instagram" ? "Instagram" : "Facebook")))].join(" and ");
-      return { failed: true, ...(await failure(`${names} could not be checked`)) };
+      const named = [...new Set(r.errors.map((e) => e.network).filter((n): n is CommentNetwork => n !== null))].map(networkLabel);
+      const unnamed = r.errors.some((e) => e.network === null);
+      return { failed: true, ...(await failure(`${unnamed || named.length === 0 ? "The comments" : named.join(" and ")} could not be checked just now`)) };
     } catch {
-      return { failed: true, ...(await failure("Instagram and Facebook could not be checked in time")) };
+      return { failed: true, ...(await failure("The comments could not be checked in time")) };
     } finally {
       clearTimeout(timer);
     }
   }
+  const networkLabel = (n: CommentNetwork) => (n === "instagram" ? "Instagram" : "Facebook");
   async function failure(what: string): Promise<{ note: string; last_checked_at: string | null }> {
-    const last = await d.liveComments?.lastCheckedAt(d.venueId).catch(() => null);
+    const last = (await d.liveComments?.lastCheckedAt(d.venueId).catch(() => null)) ?? { at: null, never: [] };
+    const never = last.never.length ? ` ${last.never.map(networkLabel).join(" and ")} ${last.never.length > 1 ? "have" : "has"} not been checked yet.` : "";
     return {
-      last_checked_at: last ?? null,
-      note: `LIVE CHECK FAILED: ${what} just now, so these are only the comments saved at the last successful check${last ? ` (${last})` : " (no successful check yet)"}. Tell the owner this in one sentence${last ? " with that time in the venue's time zone" : ""}; never say there are no new comments, and offer to try again in a minute.`,
+      last_checked_at: last.at,
+      note: `LIVE CHECK FAILED: ${what}, so these are only the comments saved at the last successful check${last.at ? ` (${last.at})` : " (no successful check yet)"}.${never} Tell the owner this in one sentence${last.at ? " with that time in the venue's time zone" : ""}; never say there are no new comments, and offer to try again in a minute.`,
     };
   }
 

@@ -140,7 +140,8 @@ describe("list_comments: the live read", () => {
     expect(COMMENT_ON_DEMAND_TIMEOUT_MS).toBe(10_000);
     expect(aborted).toBeGreaterThan(0);
     expect((r.comments as { id: string }[]).map((c) => c.id)).toHaveLength(1);
-    expect(r.live_check_failed).toMatch(/could not be checked in time/);
+    expect(r.live_check_failed).toMatch(/The comments could not be checked in time/); // no network is named: none is known to have failed
+    expect(r.live_check_failed).not.toMatch(/Instagram|Facebook/);
     expect(r.last_checked_at).toBe(at(-20 * MIN).toISOString());
   });
 
@@ -175,7 +176,94 @@ describe("list_comments: the live read", () => {
   });
 });
 
+describe("list_comments: an aborted or failed read is never a check", () => {
+  /** A connected venue with no posts of ours (no published targets) whose list calls hang until aborted. */
+  async function bare() {
+    const v = await connectedVenue();
+    const clock = { t: T0 };
+    const member = (await v.store.findMember("tg:1001"))!;
+    const make = (d = v.d) => makeTools({ store: v.store, venueId: v.venue.id, chatRef: "tg:1001", member, messenger: v.messenger, now: () => clock.t, baseUrl: "https://site.example", social: { facebook: true, instagram: true }, liveComments: makeLiveComments(d, () => clock.t) });
+    const stamps = async () => [(await v.store.getDestination(v.venue.id, "instagram"))?.config.last_comment_poll_at, (await v.store.getDestination(v.venue.id, "facebook"))?.config.last_comment_poll_at];
+    return { ...v, make, stamps };
+  }
+
+  it("an abort during the post list, with nothing published, does not stamp the networks as polled", async () => {
+    const t = await bare();
+    t.d.fetch = (_url, init) => new Promise((_resolve, reject) => init?.signal?.addEventListener("abort", () => reject(new DOMException("aborted", "AbortError"))));
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    const pending = call(t.make(), "list_comments", {});
+    await vi.advanceTimersByTimeAsync(COMMENT_ON_DEMAND_TIMEOUT_MS);
+    const r = await pending;
+    vi.useRealTimers();
+    await new Promise((resolve) => setTimeout(resolve, 20)); // the aborted poll finishes in the background
+    expect(r.live_check_failed).toMatch(/LIVE CHECK FAILED/);
+    expect(r.last_checked_at).toBeNull();
+    expect(await t.stamps()).toEqual([undefined, undefined]);
+    expect(t.logs.join("\n")).toMatch(/instagram poll for venue .* failed: sm_meta_unreachable/);
+  });
+
+  it("an unreachable Meta (the post list fails at once) reports both networks and stamps neither", async () => {
+    const t = await bare();
+    t.meta.unreachable = true;
+    const r = await call(t.make(), "list_comments", {});
+    expect(r.live_check_failed).toMatch(/Instagram and Facebook could not be checked just now/);
+    expect(await t.stamps()).toEqual([undefined, undefined]);
+    t.meta.unreachable = false;
+    expect((await pollVenueComments(t.d, t.venue, at(MIN))).polled).toEqual(["instagram", "facebook"]); // the tick still reads them
+  });
+
+  it("a failure before any network was tried (the venue cannot be read) is not blamed on Instagram", async () => {
+    const t = await bare();
+    const broken = { ...t.d, store: new Proxy(t.store, { get: (target, prop) => (prop === "getVenue" ? async () => { throw new Error("db down"); } : Reflect.get(target, prop, target)) }) };
+    const r = await call(t.make(broken), "list_comments", {});
+    expect(r.live_check_failed).toMatch(/The comments could not be checked just now/);
+    expect(String(r.live_check_failed).split(", so these")[0]).not.toMatch(/Instagram|Facebook/); // (the never-checked sentence may name them)
+  });
+
+  it("the note says which connected network has never been checked, and the time only of the one that was", async () => {
+    const t = await bare();
+    t.meta.failOn = (c) => (c.host === "graph.facebook.com" ? { status: 500, code: 2, message: "Service temporarily unavailable", transient: true } : null);
+    await pollVenueComments(t.d, t.venue, at(-20 * MIN)); // Instagram read; Facebook failed
+    t.meta.failOn = null;
+    t.meta.unreachable = true;
+    const r = await call(t.make(), "list_comments", {});
+    expect(r.last_checked_at).toBe(at(-20 * MIN).toISOString());
+    expect(r.live_check_failed).toContain(at(-20 * MIN).toISOString());
+    expect(r.live_check_failed).toMatch(/Facebook has not been checked yet/);
+    expect(r.live_check_failed).not.toMatch(/Instagram has not/);
+  });
+});
+
 describe("the tick after an on-demand read", () => {
+  it("re-reads each comment's status before proposing: one the agent proposed after the tick listed it gets no second proposal", async () => {
+    const t = await setup();
+    t.meta.addInstagramComment(t.igMediaId, { text: "Имате ли безглутенови?", from_id: "1784", username: "maria.k", created: at(-2 * MIN) });
+    const id = ((await call(t.tools, "list_comments", {})).comments as { id: string }[])[0].id;
+    let raced = false;
+    const racing = new Proxy(t.store, {
+      get(target, prop) {
+        const v = Reflect.get(target, prop, target);
+        if (prop !== "listComments") return typeof v === "function" ? v.bind(target) : v;
+        return async (...a: Parameters<typeof target.listComments>) => {
+          const rows = await target.listComments(...a); // the tick has now read the comment as new
+          if (!raced && a[1]?.status?.[0] === "new" && rows.length > 0) {
+            raced = true;
+            await call(t.tools, "reply_to_comments", { replies: [{ comment_id: id, reply_text: "Да, имаме." }] }); // the owner's agent turn lands here
+          }
+          return rows;
+        };
+      },
+    });
+    const draft = vi.fn(async (): Promise<ReplyDraft> => ({ reply: "Благодарим!", kind: "praise", fallback: false }));
+    const tick = await runTick({ store: racing, messenger: t.messenger, now: at(COMMENT_POLL_EVERY_MS), sync: t.d, comments: { draft } });
+    expect(raced).toBe(true);
+    expect(tick.comments_proposed).toBe(0);
+    expect(draft).not.toHaveBeenCalled();
+    expect(t.messenger.sent.filter((m) => m.setId)).toHaveLength(1);
+    expect(await t.store.getComment(id)).toMatchObject({ status: "proposed", draft_text: "Да, имаме." });
+  });
+
+
   it("does not propose again the comments the agent already proposed; it proposes only what is newer", async () => {
     const t = await setup();
     t.meta.addInstagramComment(t.igMediaId, { text: "Имате ли безглутенови?", from_id: "1784", username: "maria.k", created: at(-2 * MIN) });
