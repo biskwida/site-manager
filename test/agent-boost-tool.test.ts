@@ -784,6 +784,19 @@ describe("propose_boost: final fix wave", () => {
     expect((await s.store.getChangeSet(first.change_set_id as string)).status).toBe("cancelled");
   });
 
+  it("a plan the owner rejected with ❌ carries nothing into the next ad", async () => {
+    const s = await setup();
+    const first = await call(s.tools, "propose_boost", { media_id: s.photo.id, radius_km: 5, gender: "women" });
+    await handleDecision({ store: s.store, messenger: new FakeMessenger(), now: () => T0 }, "tg:1001", "cancel", first.change_set_id as string);
+    expect((await s.store.getChangeSet(first.change_set_id as string)).status).toBe("cancelled");
+    const newer = await postedBefore(s, "Нов пост", new Date(T0.getTime() - 3_600_000));
+    const r = await call(makeTools({ ...s.deps, turnSets: new Set() }), "propose_boost", { budget_eur: 30 });
+    const cs = await s.store.getChangeSet(r.change_set_id as string);
+    expect(rowOf(cs).plan).toMatchObject({ radiusKm: 3, gender: "all", owner: { budgetEur: 30 } });
+    expect(rowOf(cs).post_ref).toBe(newer.post_ref); // chosen fresh: the owner's latest post
+    expect(cs.preview_bg.replace("Бюджет: 30 € ✎", "")).not.toContain("✎");
+  });
+
   it("a cancelled plan of long ago, or one that was saved, carries nothing", async () => {
     const s = await setup();
     const first = await call(s.tools, "propose_boost", { media_id: s.photo.id, radius_km: 5 });

@@ -178,8 +178,11 @@ export function makeTools(deps: AgentDeps) {
     }
   };
 
+  /** The sets this turn cancelled itself (not the owner's ❌): propose_boost carries such a plan's choices into the replacement. */
+  const cancelledThisTurn = new Set<string>();
   /** Cancels a pending proposal (because the owner asked to change it) and concludes its message. */
   const cancelPending = async (cs: ChangeSet, mark: string) => {
+    cancelledThisTurn.add(cs.id);
     await d.store.updateChangeSet(cs.id, { status: "cancelled", decided_at: d.now().toISOString() });
     if (cs.chat_ref !== null) await d.messenger.conclude(cs.chat_ref, cs.message_ref, `${mine(cs)}\n\n${mark}`, mark);
   };
@@ -340,7 +343,7 @@ export function makeTools(deps: AgentDeps) {
   });
 
   // Task 11 appends schedule_changes, propose_bulk_price_change, check_allergens, undo here.
-  const kit: ToolKit = { attempt, site, ctx, previews, mine, propose, getSet, ensureNoPending, ensureWithinLimit, lang };
+  const kit: ToolKit = { attempt, site, ctx, previews, mine, propose, getSet, ensureNoPending, ensureWithinLimit, cancelledThisTurn, lang };
   return [getSite, getMenu, proposeChanges, cancelChangeSet, listChanges, ...extraTools(d, kit), ...wpTools(d, kit), ...socialTools(d, kit), ...commentTools(d, kit), ...visualTools(d, kit), ...boostTools(d, kit)];
 }
 
@@ -356,6 +359,8 @@ export interface ToolKit {
   ensureNoPending: () => Promise<void>;
   /** Throws the owner's limit line when the venue's monthly change limit is reached; call before creating any non-undo set. */
   ensureWithinLimit: () => Promise<void>;
+  /** Ids of the sets this turn cancelled itself (per makeTools call); an owner's ❌ in an earlier turn is not in it. */
+  cancelledThisTurn: ReadonlySet<string>;
   lang: Lang;
 }
 const ISO_WITH_OFFSET = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(:\d{2}(\.\d+)?)?(Z|[+-]\d{2}:?\d{2})$/i;

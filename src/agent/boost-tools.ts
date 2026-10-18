@@ -33,8 +33,6 @@ export const NO_POST = "Which post should I boost? Send it or name it.";
 /** A photo (or a post whose publishing never went through) has no post on Instagram or Facebook to put the ad on. */
 export const UNPUBLISHED = "This photo is not published yet, so there is no post to boost: nothing was proposed. Propose it with social_post first (when the owner wants it posted), and offer the ad (propose_boost with that post) after it is published.";
 const DAY_MS = 86_400_000;
-/** A plan the agent cancelled this long ago still carries its choices into the next plan of that chat. */
-const RECENT_CANCEL_MS = 15 * 60_000;
 
 /** The connected Instagram account of a venue, or null (not connected, an `error` connection, no key, unreadable secrets). Never throws. */
 export async function instagramAccess(d: Pick<SyncDeps, "store" | "secretKey" | "fetch" | "log">, venueId: string): Promise<InstagramAccess | null> {
@@ -80,7 +78,7 @@ export function boostTools(d: ToolDeps, k: ToolKit) {
         const venue = s.venue;
         const now = d.now();
         // The plan being replaced carries its post and the owner's earlier choices over: the one ✏️ names, else (a change by text) the
-        // owner's last plan in this chat that is still waiting or was cancelled a moment ago (the agent cancels it before proposing again).
+        // owner's last plan in this chat that is still waiting or that the agent itself cancelled in this turn (it cancels the pending plan before proposing again). The owner's ❌ never carries.
         // Read here, before ensureNoPending cancels it.
         let earlier: BoostPlanRow | null = null;
         const boostRowOf = (cs: ChangeSet | null): BoostPlanRow | null => {
@@ -91,7 +89,7 @@ export function boostTools(d: ToolDeps, k: ToolKit) {
           earlier = boostRowOf(await d.store.getChangeSet(d.correctionFor).catch(() => null));
         } else {
           const latest = (await d.store.listChangeSets(d.venueId, { limit: 50 })).find((cs) => cs.chat_ref === d.chatRef && !d.turnSets?.has(cs.id) && cs.changes.some((c) => c.op === "boost_plan"));
-          const recent = latest && (latest.status === "proposed" || (latest.status === "cancelled" && latest.decided_at !== null && now.getTime() - Date.parse(latest.decided_at) <= RECENT_CANCEL_MS));
+          const recent = latest && (latest.status === "proposed" || (latest.status === "cancelled" && k.cancelledThisTurn.has(latest.id)));
           if (latest && recent) earlier = boostRowOf(latest);
         }
         const owner = ownerChoices(input, earlier?.plan.owner ?? {}, earlier?.plan.schedule ?? null);
