@@ -85,7 +85,7 @@ const BG = {
   photoTooBig: "Снимката е над 5 MB. Изпратете по-малка или я пратете като снимка, а не като файл.",
   photoWaiting: "📷 Получих снимката. Какво да направя с нея? Напишете или изпратете гласово съобщение.",
   error: "Възникна грешка. Опитайте отново.",
-  connectUsage: "Свържете сайта си на WordPress: инсталирайте плъгина Site Manager, отворете Настройки → Site Manager, натиснете „Генерирай код“ и изпратете тук реда, който плъгинът показва:\n/connect https://вашият-сайт.bg КОД",
+  connectUsage: "Свържете сайта си на WordPress: инсталирайте плъгина Claudia, отворете Настройки → Claudia, натиснете „Генерирай код“ и изпратете тук реда, който плъгинът показва:\n/connect https://вашият-сайт.bg КОД",
   connectOwnerOnly: "Само собственикът може да свързва сайта.",
   membersOwnerOnly: "Само собственикът може да вижда кой има достъп.",
   members: (name: string, members: MemberView[], invites: InviteView[]) =>
@@ -146,7 +146,7 @@ const EN: typeof BG = {
   photoTooBig: "The photo is over 5 MB. Send a smaller one, or send it as a photo rather than a file.",
   photoWaiting: "📷 Got the photo. What should I do with it? Type it or send a voice note.",
   error: "Something went wrong. Please try again.",
-  connectUsage: "Connect your WordPress site: install the Site Manager plugin, open Settings → Site Manager, press “Generate code” and send me the line the plugin shows:\n/connect https://your-site.com CODE",
+  connectUsage: "Connect your WordPress site: install the Claudia plugin, open Settings → Claudia, press “Generate code” and send me the line the plugin shows:\n/connect https://your-site.com CODE",
   connectOwnerOnly: "Only the owner can connect the site.",
   membersOwnerOnly: "Only the owner can see who has access.",
   members: (name, members, invites) =>

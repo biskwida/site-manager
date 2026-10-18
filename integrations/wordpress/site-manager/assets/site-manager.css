@@ -1,4 +1,4 @@
-/* Site Manager blocks: inherit the theme's fonts and colours; the venue's accent arrives as --sm-accent. */
+/* Claudia blocks: inherit the theme's fonts and colours; the venue's accent arrives as --sm-accent. */
 .sm { --sm-ink: inherit; --sm-soft: color-mix(in srgb, currentColor 65%, transparent); --sm-line: color-mix(in srgb, currentColor 12%, transparent); --sm-accent: #2f6b4f; --sm-accent-soft: color-mix(in srgb, var(--sm-accent) 14%, transparent); --sm-warn: #a85a2a; --sm-warn-soft: color-mix(in srgb, var(--sm-warn) 14%, transparent); font-size: 1rem; line-height: 1.5; }
 .sm *, .sm *::before, .sm *::after { box-sizing: border-box; }
 .sm ul, .sm ol { list-style: none; margin: 0; padding: 0; }

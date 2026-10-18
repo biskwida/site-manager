@@ -1,12 +1,12 @@
 <?php
 /**
- * Plugin Name:       Site Manager
+ * Plugin Name:       Claudia
  * Plugin URI:        https://github.com/biskwida/site-manager
- * Description:       Shows your café's menu, specials, opening hours, announcements and photos from Site Manager, and lets the Site Manager agent edit this site once you connect it from Telegram.
+ * Description:       Shows your café's menu, specials, opening hours, announcements and photos from Claudia, and lets the Claudia agent edit this site once you connect it from Telegram.
  * Version:           0.1.0
  * Requires at least: 6.5
  * Requires PHP:      8.1
- * Author:            Site Manager
+ * Author:            Claudia
  * License:           GPL-2.0-or-later
  * License URI:       https://www.gnu.org/licenses/gpl-2.0.html
  * Text Domain:       site-manager

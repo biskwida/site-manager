@@ -141,7 +141,7 @@ $GLOBALS['sm_test_remote'] = ['response' => ['code' => 404], 'body' => '{"error"
 SM_Client::clear_cache(); // also ends the failure window of the previous case
 $err404 = SM_Client::fetch();
 check('404 is an error that names the slug', is_wp_error($err404) && has($err404->get_error_message(), 'agala'));
-check('unavailable comment is safe', has(SM_Render::unavailable($err404), '<!-- Site Manager:') && !has(SM_Render::unavailable($err404), '<script'));
+check('unavailable comment is safe', has(SM_Render::unavailable($err404), '<!-- Claudia:') && !has(SM_Render::unavailable($err404), '<script'));
 
 // Outage protection: one remote call per request for the same URL
 $failKey = 'site_manager_feed_fail_' . md5((string) SM_Client::feed_url());
@@ -188,7 +188,7 @@ $broken['now'] = 'not a date';
 $GLOBALS['sm_test_remote'] = ['response' => ['code' => 200], 'body' => json_encode($broken)];
 SM_Client::clear_cache();
 $rendered = SM_Shortcodes::render('hours', []);
-check('a malformed feed date yields the safe comment, not an exception', has($rendered, '<!-- Site Manager: Site Manager could not render this block. -->'), $rendered);
+check('a malformed feed date yields the safe comment, not an exception', has($rendered, '<!-- Claudia: Claudia could not render this block. -->'), $rendered);
 
 // Write-channel cases (Task 10) run after the helpers and the counter exist, so their failures count.
 foreach (glob(__DIR__ . '/cases/*.php') ?: [] as $extra) {

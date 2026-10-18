@@ -69,7 +69,7 @@ export async function connectWordPress(d: ConnectDeps, venueId: string, rawSiteU
   return { ok: true, site: hs.site, destination };
 }
 
-const NO_PLUGIN = { bg: "На този адрес няма активен плъгин Site Manager.", en: "There is no active Site Manager plugin at that address." } as const;
+const NO_PLUGIN = { bg: "На този адрес няма активен плъгин Claudia.", en: "There is no active Claudia plugin at that address." } as const;
 
 function handshakeReason(e: unknown): { bg: string; en: string } {
   if (e instanceof WordPressApiError) {

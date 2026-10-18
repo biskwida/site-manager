@@ -1,4 +1,4 @@
-/* Site Manager blocks for the WordPress editor. Plain script, no build step: uses the wp.* globals. */
+/* Claudia blocks for the WordPress editor. Plain script, no build step: uses the wp.* globals. */
 (function (wp) {
   'use strict';
   var registerBlockType = wp.blocks.registerBlockType;
@@ -49,7 +49,7 @@
         }));
       }
       return el(Fragment, null,
-        el(InspectorControls, null, el(PanelBody, { title: __('Site Manager', 'site-manager') }, controls)),
+        el(InspectorControls, null, el(PanelBody, { title: __('Claudia', 'site-manager') }, controls)),
         el('div', wp.blockEditor.useBlockProps(), el(ServerSideRender, { block: 'site-manager/' + name, attributes: props.attributes }))
       );
     };

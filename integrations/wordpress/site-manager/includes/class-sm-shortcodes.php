@@ -36,11 +36,11 @@ final class SM_Shortcodes
                 ? SM_Render::text($feed['state'], sanitize_key((string) $atts['key']), $lang)
                 : SM_Render::{$block}($feed['state'], $feed['now'], $lang);
             if (!empty($feed['stale'])) {
-                $html = '<!-- Site Manager: feed unavailable, showing the last good copy -->' . $html;
+                $html = '<!-- Claudia: feed unavailable, showing the last good copy -->' . $html;
             }
             return $html;
         } catch (\Throwable $e) {
-            return SM_Render::unavailable(new WP_Error('site_manager_render_failed', __('Site Manager could not render this block.', 'site-manager')));
+            return SM_Render::unavailable(new WP_Error('site_manager_render_failed', __('Claudia could not render this block.', 'site-manager')));
         }
     }
 }

@@ -1,5 +1,5 @@
 <?php
-// Settings → Site Manager: the feed settings, a "Check connection" button and a shortcode cheat-sheet.
+// Settings → Claudia: the feed settings, a "Check connection" button and a shortcode cheat-sheet.
 // Task 10 appends the connect box and the API log through the `site_manager_settings_after_form` action.
 declare(strict_types=1);
 
@@ -13,16 +13,16 @@ final class SM_Settings
 
     public static function add_page(): void
     {
-        add_options_page(__('Site Manager', 'site-manager'), __('Site Manager', 'site-manager'), 'manage_options', self::PAGE, [self::class, 'page']);
+        add_options_page(__('Claudia', 'site-manager'), __('Claudia', 'site-manager'), 'manage_options', self::PAGE, [self::class, 'page']);
     }
 
     public static function register(): void
     {
         register_setting('site_manager', SM_Client::OPTION, ['type' => 'array', 'sanitize_callback' => [self::class, 'sanitize'], 'default' => []]);
-        add_settings_section('site_manager_feed', __('Your venue in Site Manager', 'site-manager'), static function (): void {
-            echo '<p>' . esc_html__('Copy both values from your Site Manager dashboard (the "WordPress" card).', 'site-manager') . '</p>';
+        add_settings_section('site_manager_feed', __('Your venue in Claudia', 'site-manager'), static function (): void {
+            echo '<p>' . esc_html__('Copy both values from your Claudia dashboard (the "WordPress" card).', 'site-manager') . '</p>';
         }, self::PAGE);
-        self::field('base_url', __('Site Manager address', 'site-manager'), 'url', 'https://site-manager.example');
+        self::field('base_url', __('Claudia address', 'site-manager'), 'url', 'https://site-manager.example');
         self::field('slug', __('Venue code', 'site-manager'), 'text', 'my-cafe');
         self::field('cache_seconds', __('Refresh every (seconds)', 'site-manager'), 'number', '30');
         add_settings_field('lang', __('Language of the blocks', 'site-manager'), static function (): void {
@@ -81,7 +81,7 @@ final class SM_Settings
             return;
         }
         $s = SM_Client::settings();
-        echo '<div class="wrap"><h1>' . esc_html__('Site Manager', 'site-manager') . '</h1>';
+        echo '<div class="wrap"><h1>' . esc_html__('Claudia', 'site-manager') . '</h1>';
         if (isset($_GET['sm_check'], $_GET['sm_msg'])) { // phpcs:ignore WordPress.Security.NonceVerification.Recommended -- display only
             $type = $_GET['sm_check'] === 'success' ? 'success' : 'error';
             echo '<div class="notice notice-' . esc_attr($type) . ' is-dismissible"><p>' . esc_html(rawurldecode(sanitize_text_field(wp_unslash((string) $_GET['sm_msg'])))) . '</p></div>';
@@ -97,7 +97,7 @@ final class SM_Settings
         submit_button(__('Check connection', 'site-manager'), 'secondary', 'submit', false);
         echo '</form>';
         echo '<h2>' . esc_html__('Shortcodes and blocks', 'site-manager') . '</h2>';
-        echo '<p>' . esc_html__('Add a "Site Manager" block in the editor, or paste a shortcode anywhere:', 'site-manager') . '</p><ul>';
+        echo '<p>' . esc_html__('Add a "Claudia" block in the editor, or paste a shortcode anywhere:', 'site-manager') . '</p><ul>';
         foreach (['menu' => __('the full menu with prices, allergens and sold-out marks', 'site-manager'), 'specials' => __('today\'s specials', 'site-manager'), 'hours' => __('open-now status, opening hours, upcoming closures and contact', 'site-manager'), 'announcements' => __('current announcements', 'site-manager'), 'photos' => __('the photo gallery', 'site-manager')] as $block => $what) {
             echo '<li><code>[site_manager_' . esc_html($block) . ']</code> — ' . esc_html($what) . '</li>';
         }
@@ -134,7 +134,7 @@ final class SM_Settings
     {
         $conn = SM_Auth::connection();
         $code = get_transient('site_manager_show_code_' . get_current_user_id());
-        echo '<h2 id="connect">' . esc_html__('Let the Site Manager agent edit this site', 'site-manager') . '</h2>';
+        echo '<h2 id="connect">' . esc_html__('Let the Claudia agent edit this site', 'site-manager') . '</h2>';
         if ($conn) {
             $user = get_user_by('id', $conn['user_id']);
             echo '<p>' . esc_html(sprintf(__('Connected to venue "%1$s" since %2$s, acting as %3$s (token %4$s…).', 'site-manager'), $conn['venue_slug'], wp_date(get_option('date_format') . ' ' . get_option('time_format'), $conn['connected_at']), $user ? $user->user_login : '?', $conn['prefix'])) . '</p>';
@@ -144,7 +144,7 @@ final class SM_Settings
             submit_button(__('Disconnect', 'site-manager'), 'delete', 'submit', false);
             echo '</form>';
         } else {
-            echo '<p>' . esc_html__('Generate a one-time code, then send the line below to the Site Manager bot in Telegram. The code is valid for 15 minutes. Nothing changes on this site until you approve each edit in Telegram.', 'site-manager') . '</p>';
+            echo '<p>' . esc_html__('Generate a one-time code, then send the line below to the Claudia bot in Telegram. The code is valid for 15 minutes. Nothing changes on this site until you approve each edit in Telegram.', 'site-manager') . '</p>';
             if (is_string($code) && $code !== '' && SM_Auth::code_info() !== null) {
                 $line = '/connect ' . home_url('/') . ' ' . $code;
                 echo '<p><input type="text" readonly class="large-text code" id="sm-connect-line" value="' . esc_attr($line) . '" onclick="this.select()"> ';

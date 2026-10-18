@@ -5,7 +5,7 @@ import { LangProvider } from "@/src/i18n";
 import { DICTS } from "@/src/i18n/dicts";
 import { pageLang, privacyContactEmail } from "@/src/server/legal";
 
-export const metadata: Metadata = { title: `${DICTS.bg["privacy.title"]} · ${DICTS.en["privacy.title"]} · Site Manager` };
+export const metadata: Metadata = { title: `${DICTS.bg["privacy.title"]} · ${DICTS.en["privacy.title"]} · Claudia` };
 
 export default async function Page(props: PageProps<"/privacy">) {
   const sp = await props.searchParams;

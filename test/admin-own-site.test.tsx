@@ -27,7 +27,7 @@ describe("SiteCard for an own site", () => {
     const html = card("en", own);
     expect(html).toContain("Your site");
     expect(html).toContain('href="https://coffique.vercel.app"');
-    expect(html).toContain("We built and manage this site; it reads your menu, hours and texts from Site Manager.");
+    expect(html).toContain("We built and manage this site; it reads your menu, hours and texts from Claudia.");
     expect(html).not.toContain("<select");
     expect(html).not.toContain("Change template");
     expect(html).not.toContain("Classic");
@@ -39,7 +39,7 @@ describe("SiteCard for an own site", () => {
     const html = card("bg", own);
     expect(html).toContain("Вашият сайт");
     expect(html).toContain('href="https://coffique.vercel.app"');
-    expect(html).toContain("Този сайт е изграден и поддържан от нас; менюто, часовете и текстовете идват от Site Manager.");
+    expect(html).toContain("Този сайт е изграден и поддържан от нас; менюто, часовете и текстовете идват от Claudia.");
     expect(html).not.toContain("<select");
   });
 

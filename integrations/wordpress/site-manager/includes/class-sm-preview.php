@@ -1,5 +1,5 @@
 <?php
-// Renders a page with its pending Site Manager edit when ?sm_preview=<key> matches; never affects normal visitors.
+// Renders a page with its pending Claudia edit when ?sm_preview=<key> matches; never affects normal visitors.
 declare(strict_types=1);
 
 if (!defined('ABSPATH')) {
@@ -41,7 +41,7 @@ final class SM_Preview
         });
         add_action('wp_body_open', static function (): void {
             wp_enqueue_style('site-manager');
-            echo '<div class="sm-preview-banner">' . esc_html('Предварителен преглед от Site Manager · Preview from Site Manager, not published') . '</div>';
+            echo '<div class="sm-preview-banner">' . esc_html('Предварителен преглед от Claudia · Preview from Claudia, not published') . '</div>';
         });
     }
 

@@ -20,7 +20,7 @@ export function wpErrorMessage(e: WordPressApiError): string {
     case "sm_replace_failed":
       return `"${String(e.data.find)}" occurs ${String(e.data.count)} times on the page; choose a longer unique anchor copied verbatim from wp_read_page content.`;
     case "sm_builder_unsupported":
-      return e.data.builder === "elementor" ? "This page is built with Elementor; send replacements instead of full content." : `This page is built with an unsupported editor (${String(e.data.builder)}); it cannot be edited here. Offer the hosted Site Manager page instead.`;
+      return e.data.builder === "elementor" ? "This page is built with Elementor; send replacements instead of full content." : `This page is built with an unsupported editor (${String(e.data.builder)}); it cannot be edited here. Offer the hosted Claudia page instead.`;
     case "sm_unreachable":
       return "The WordPress site did not answer; tell the owner the site seems down and try again later.";
     case "sm_unauthorized":
