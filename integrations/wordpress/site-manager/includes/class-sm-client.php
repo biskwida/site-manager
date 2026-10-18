@@ -1,5 +1,5 @@
 <?php
-// Reads the public Site Manager feed with a transient cache and a 24-hour "last good copy" fallback. Never throws.
+// Reads the public Claudia feed with a transient cache and a 24-hour "last good copy" fallback. Never throws.
 declare(strict_types=1);
 
 if (!defined('ABSPATH')) {
@@ -90,7 +90,7 @@ final class SM_Client
     {
         $url = self::feed_url();
         if ($url === null) {
-            return new WP_Error('site_manager_unconfigured', __('Site Manager is not configured yet: set the address and the venue code under Settings → Site Manager.', 'site-manager'));
+            return new WP_Error('site_manager_unconfigured', __('Claudia is not configured yet: set the address and the venue code under Settings → Claudia.', 'site-manager'));
         }
         if ($bypass_cache) {
             return self::fetch_uncached($url, true);
@@ -119,14 +119,14 @@ final class SM_Client
         $res = wp_remote_get($url, ['timeout' => self::TIMEOUT, 'headers' => ['Accept' => 'application/json'], 'user-agent' => 'SiteManagerWP/' . SITE_MANAGER_VERSION]);
         $error = null;
         if (is_wp_error($res)) {
-            $error = new WP_Error('site_manager_unavailable', sprintf(__('Site Manager did not answer: %s', 'site-manager'), $res->get_error_message()));
+            $error = new WP_Error('site_manager_unavailable', sprintf(__('Claudia did not answer: %s', 'site-manager'), $res->get_error_message()));
         } else {
             $code = wp_remote_retrieve_response_code($res);
             $body = json_decode(wp_remote_retrieve_body($res), true);
             if ($code === 404) {
-                $error = new WP_Error('site_manager_unavailable', sprintf(__('Site Manager has no venue with the code "%s".', 'site-manager'), $s['slug']));
+                $error = new WP_Error('site_manager_unavailable', sprintf(__('Claudia has no venue with the code "%s".', 'site-manager'), $s['slug']));
             } elseif ($code !== 200 || !is_array($body) || !isset($body['state']['venue'], $body['now'])) {
-                $error = new WP_Error('site_manager_unavailable', sprintf(__('Site Manager answered with an unexpected response (HTTP %d).', 'site-manager'), (int) $code));
+                $error = new WP_Error('site_manager_unavailable', sprintf(__('Claudia answered with an unexpected response (HTTP %d).', 'site-manager'), (int) $code));
             } else {
                 $value = ['state' => $body['state'], 'now' => (string) $body['now']];
                 $stored = $value + ['fetched_at' => time()];

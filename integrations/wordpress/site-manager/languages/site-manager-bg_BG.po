@@ -1,6 +1,6 @@
 msgid ""
 msgstr ""
-"Project-Id-Version: Site Manager 0.1.0\n"
+"Project-Id-Version: Claudia 0.1.0\n"
 "Language: bg_BG\n"
 "MIME-Version: 1.0\n"
 "Content-Type: text/plain; charset=UTF-8\n"
@@ -11,17 +11,17 @@ msgstr ""
 msgid "Settings"
 msgstr "Настройки"
 
-msgid "Site Manager"
-msgstr "Site Manager"
+msgid "Claudia"
+msgstr "Claudia"
 
-msgid "Your venue in Site Manager"
-msgstr "Вашето заведение в Site Manager"
+msgid "Your venue in Claudia"
+msgstr "Вашето заведение в Claudia"
 
-msgid "Copy both values from your Site Manager dashboard (the \"WordPress\" card)."
-msgstr "Копирайте двете стойности от таблото на Site Manager (картата „WordPress“)."
+msgid "Copy both values from your Claudia dashboard (the \"WordPress\" card)."
+msgstr "Копирайте двете стойности от таблото на Claudia (картата „WordPress“)."
 
-msgid "Site Manager address"
-msgstr "Адрес на Site Manager"
+msgid "Claudia address"
+msgstr "Адрес на Claudia"
 
 msgid "Venue code"
 msgstr "Код на заведението"
@@ -50,8 +50,8 @@ msgstr "Провери връзката"
 msgid "Shortcodes and blocks"
 msgstr "Шорткодове и блокове"
 
-msgid "Add a \"Site Manager\" block in the editor, or paste a shortcode anywhere:"
-msgstr "Добавете блок „Site Manager“ в редактора или поставете шорткод където пожелаете:"
+msgid "Add a \"Claudia\" block in the editor, or paste a shortcode anywhere:"
+msgstr "Добавете блок „Claudia“ в редактора или поставете шорткод където пожелаете:"
 
 msgid "the full menu with prices, allergens and sold-out marks"
 msgstr "цялото меню с цени, алергени и отбелязани изчерпани продукти"
@@ -74,20 +74,20 @@ msgstr "един текст: welcome, footer_note, tagline, about, address, phon
 msgid "Add lang=\"bg\" or lang=\"en\" to any of them to force the language."
 msgstr "Добавете lang=\"bg\" или lang=\"en\" към всеки от тях, за да зададете езика."
 
-msgid "Site Manager is not configured yet: set the address and the venue code under Settings → Site Manager."
-msgstr "Site Manager още не е настроен: въведете адреса и кода на заведението в Настройки → Site Manager."
+msgid "Claudia is not configured yet: set the address and the venue code under Settings → Claudia."
+msgstr "Claudia още не е настроена: въведете адреса и кода на заведението в Настройки → Claudia."
 
-msgid "Site Manager did not answer: %s"
-msgstr "Site Manager не отговори: %s"
+msgid "Claudia did not answer: %s"
+msgstr "Claudia не отговори: %s"
 
-msgid "Site Manager has no venue with the code \"%s\"."
-msgstr "В Site Manager няма заведение с код „%s“."
+msgid "Claudia has no venue with the code \"%s\"."
+msgstr "В Claudia няма заведение с код „%s“."
 
-msgid "Site Manager answered with an unexpected response (HTTP %d)."
-msgstr "Site Manager отговори неочаквано (HTTP %d)."
+msgid "Claudia answered with an unexpected response (HTTP %d)."
+msgstr "Claudia отговори неочаквано (HTTP %d)."
 
-msgid "Site Manager could not render this block."
-msgstr "Site Manager не успя да покаже този блок."
+msgid "Claudia could not render this block."
+msgstr "Claudia не успя да покаже този блок."
 
 msgid "Nothing to show right now; the block is hidden on the site."
 msgstr "Няма какво да се покаже в момента; блокът не се вижда на сайта."
@@ -100,8 +100,8 @@ msgstr "Текст"
 
 # Settings page: connect box and the API log (Task 10)
 
-msgid "Let the Site Manager agent edit this site"
-msgstr "Позволете на агента на Site Manager да редактира този сайт"
+msgid "Let the Claudia agent edit this site"
+msgstr "Позволете на агента на Claudia да редактира този сайт"
 
 msgid "Connected to venue \"%1$s\" since %2$s, acting as %3$s (token %4$s…)."
 msgstr "Свързано със заведение „%1$s“ от %2$s, като потребител %3$s (токен %4$s…)."
@@ -109,8 +109,8 @@ msgstr "Свързано със заведение „%1$s“ от %2$s, кат�
 msgid "Disconnect"
 msgstr "Прекъсни връзката"
 
-msgid "Generate a one-time code, then send the line below to the Site Manager bot in Telegram. The code is valid for 15 minutes. Nothing changes on this site until you approve each edit in Telegram."
-msgstr "Генерирайте еднократен код и изпратете реда по-долу на бота на Site Manager в Telegram. Кодът важи 15 минути. Нищо на този сайт не се променя, докато не одобрите всяка редакция в Telegram."
+msgid "Generate a one-time code, then send the line below to the Claudia bot in Telegram. The code is valid for 15 minutes. Nothing changes on this site until you approve each edit in Telegram."
+msgstr "Генерирайте еднократен код и изпратете реда по-долу на бота на Claudia в Telegram. Кодът важи 15 минути. Нищо на този сайт не се променя, докато не одобрите всяка редакция в Telegram."
 
 msgid "Copy"
 msgstr "Копирай"

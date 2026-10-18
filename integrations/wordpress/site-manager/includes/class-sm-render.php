@@ -153,7 +153,7 @@ final class SM_Render
     public static function unavailable(WP_Error $e): string
     {
         $msg = wp_strip_all_tags($e->get_error_message());
-        $out = '<!-- Site Manager: ' . str_replace('--', '- -', esc_html($msg)) . ' -->';
+        $out = '<!-- Claudia: ' . str_replace('--', '- -', esc_html($msg)) . ' -->';
         if (current_user_can('manage_options')) {
             $out .= '<p class="sm sm-notice">' . esc_html($msg) . '</p>';
         }

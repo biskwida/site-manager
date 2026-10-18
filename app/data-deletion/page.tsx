@@ -10,7 +10,7 @@ import { pageLang, privacyContactEmail } from "@/src/server/legal";
 import { deletionStatus } from "@/src/server/meta-deletion";
 
 export const dynamic = "force-dynamic";
-export const metadata: Metadata = { title: `${DICTS.bg["deletion.title"]} · ${DICTS.en["deletion.title"]} · Site Manager`, robots: { index: true, follow: true } };
+export const metadata: Metadata = { title: `${DICTS.bg["deletion.title"]} · ${DICTS.en["deletion.title"]} · Claudia`, robots: { index: true, follow: true } };
 
 async function lookup(raw: string | string[] | undefined): Promise<DeletionStatusProps | null> {
   const code = (Array.isArray(raw) ? raw[0] : raw)?.trim().slice(0, 32);

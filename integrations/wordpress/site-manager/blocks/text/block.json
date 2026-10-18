@@ -2,7 +2,7 @@
   "$schema": "https://schemas.wp.org/trunk/block.json",
   "apiVersion": 3,
   "name": "site-manager/text",
-  "title": "Site Manager: Text",
+  "title": "Claudia: Text",
   "category": "widgets",
   "icon": "editor-quote",
   "description": "One text managed from Telegram: welcome, footer note, tagline, about, address, phone, Instagram or the venue name.",

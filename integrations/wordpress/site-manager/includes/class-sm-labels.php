@@ -30,7 +30,7 @@ final class SM_Labels
         'allergens' => 'Алергени',
         'allergenLegend' => 'Кодове на алергените (ЕС 1169/2011)',
         'noItems' => 'Менюто се подготвя.',
-        'poweredBy' => 'Сайт от Site Manager',
+        'poweredBy' => 'Сайт от Claudia',
         'unavailable' => 'Менюто не може да се зареди в момента.',
     ];
     private const EN = [
@@ -54,7 +54,7 @@ final class SM_Labels
         'allergens' => 'Allergens',
         'allergenLegend' => 'Allergen codes (EU 1169/2011)',
         'noItems' => 'The menu is being prepared.',
-        'poweredBy' => 'Site by Site Manager',
+        'poweredBy' => 'Site by Claudia',
         'unavailable' => 'The menu cannot be loaded right now.',
     ];
     private const WEEKDAYS = [

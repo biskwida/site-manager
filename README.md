@@ -1,4 +1,4 @@
-# Site Manager
+# Claudia (repo: site-manager)
 
 A website for a small café or restaurant that the owner runs from Telegram. The owner never logs into anything: they message a bot, in Bulgarian or English, by text, voice note or photo ("Капучиното става 3,20", a photo of today's specials board, "баницата свърши", "затворени сме на 24 и 25 декември"), and the site changes. Claude does the understanding: casual Bulgarian, speech, handwriting on a whiteboard, which dish is meant, which allergen is missing, the translation into the other language. The app does what the model cannot do on its own: the website, the content model, a preview the owner approves with one tap, a scheduler, a change log with undo, and the multi-venue plumbing that makes it sellable. One deployment serves many venues, each with its own slug, owner chat and admin link.
 

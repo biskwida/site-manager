@@ -3,7 +3,7 @@
 import type { Lang } from "../domain/types";
 
 const bg = {
-  "brand": "Site Manager",
+  "brand": "Claudia",
   "chooser.title": "Създайте сайта на заведението си",
   "chooser.h1": "Изберете как да изглежда сайтът ви",
   "chooser.lead": "Шест дизайна, показани с примерно кафене. Избирате един, попълвате данните си и за минути сайтът е онлайн. После го управлявате от Telegram.",
@@ -218,7 +218,7 @@ const bg = {
 export type WizardKey = keyof typeof bg;
 
 const en: Record<WizardKey, string> = {
-  "brand": "Site Manager",
+  "brand": "Claudia",
   "chooser.title": "Create your venue's website",
   "chooser.h1": "Choose how your site should look",
   "chooser.lead": "Six designs, shown with a sample café. Pick one, fill in your details, and your site is online in minutes. After that you run it from Telegram.",

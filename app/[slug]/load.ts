@@ -17,7 +17,7 @@ export async function loadPage(slug: string, sp: Search) {
 
 export async function pageMetadata(slug: string, sp: Search): Promise<Metadata> {
   const site = await loadPage(slug, {});
-  if (!site) return { title: "Site Manager" };
+  if (!site) return { title: "Claudia" };
   const v = site.state.venue;
   return {
     title: v.name,

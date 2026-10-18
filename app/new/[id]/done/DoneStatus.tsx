@@ -152,7 +152,7 @@ export function DoneStatus({ id, slug, code, links, apps, adminKey, baseUrl, ini
   return (
     <main className="mx-auto w-full max-w-2xl px-4 py-5 sm:px-6 sm:py-10">
       <div className="flex items-center justify-between gap-3">
-        <span className="font-display text-base font-semibold tracking-tight text-ink/80">Site Manager</span>
+        <span className="font-display text-base font-semibold tracking-tight text-ink/80">Claudia</span>
         <LangToggle />
       </div>
       <h1 className="mt-6 text-3xl font-semibold leading-tight text-balance sm:mt-8 sm:text-4xl">{t("done.title")}</h1>

@@ -5,11 +5,11 @@
 //
 // Prepare the site (a throwaway one, e.g. a free TasteWP or InstaWP site):
 //   1. Upload public/wp/site-manager.zip under Plugins → Add New → Upload Plugin and activate it.
-//   2. Settings → Site Manager: address https://site-manager-lovat.vercel.app, venue code agala, Save.
+//   2. Settings → Claudia: address https://site-manager-lovat.vercel.app, venue code agala, Save.
 //   3. Create a published page titled "Site Manager test" with exactly this paragraph and shortcode:
 //        Site Manager test: we bake banitsa every morning.
 //        [site_manager_menu]
-//   4. Settings → Site Manager → Generate code (valid 15 minutes).
+//   4. Settings → Claudia → Generate code (valid 15 minutes).
 // Run:  npm run wp:live -- --site https://your-site.example --code ABCDEFGHJK [--page "Site Manager test"]
 import { makeTools } from "../src/agent/tools";
 import type { Messenger } from "../src/bot/messenger";

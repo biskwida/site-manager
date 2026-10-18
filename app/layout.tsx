@@ -6,7 +6,7 @@ const literata = Literata({ subsets: ["latin", "cyrillic"], variable: "--font-li
 const onest = Onest({ subsets: ["latin", "cyrillic"], variable: "--font-onest", display: "swap" });
 
 export const metadata: Metadata = {
-  title: "Site Manager",
+  title: "Claudia",
   description: "A café website its owner runs from Telegram.",
 };
 

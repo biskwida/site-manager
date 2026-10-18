@@ -1,5 +1,5 @@
 // test/fake-wordpress.ts
-// In-memory stand-in for the Site Manager WordPress plugin's REST namespace (see the plan's "Plugin REST contract").
+// In-memory stand-in for the Claudia WordPress plugin's REST namespace (see the plan's "Plugin REST contract").
 // Serves /wp-json/site-manager/v1/* and page HTML (permalinks, with ?sm_preview=<key>) through `fetch`.
 import { createHash, randomBytes } from "node:crypto";
 import { WordPressClient } from "@/src/destinations/wordpress-client";
@@ -114,7 +114,7 @@ export class FakeWordPress {
     if (!p) return "<h1>Not found</h1>";
     const pend = previewKey ? this.pending.get(id) : undefined;
     const show = pend && pend.key === previewKey && pend.expires > this.now() ? pend.after : p;
-    const banner = show !== p ? '<div class="sm-preview-banner">Предварителен преглед от Site Manager · Preview from Site Manager, not published</div>' : "";
+    const banner = show !== p ? '<div class="sm-preview-banner">Предварителен преглед от Claudia · Preview from Claudia, not published</div>' : "";
     return `<!doctype html><html><body>${banner}<h1>${show.title}</h1><main>${show.content}</main></body></html>`;
   }
   permalink(p: FakePage): string {
