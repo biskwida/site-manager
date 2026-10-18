@@ -4,6 +4,7 @@ import { describe, expect, it } from "vitest";
 import { instagramAccess } from "@/src/agent/boost-tools";
 import { makeTools, type AgentDeps } from "@/src/agent/tools";
 import { handleDecision } from "@/src/bot/approvals";
+import { adminAction } from "@/src/server/admin";
 import { GraphClient, IG_GRAPH } from "@/src/destinations/meta-graph";
 import { encryptSecrets, parseSecretKey } from "@/src/destinations/secrets";
 import { withDestinationSync } from "@/src/destinations/store-hook";
@@ -61,7 +62,7 @@ const PLACES = [
 
 interface Opts {
   /** "ok": cached places; "osm": OpenStreetMap failed a moment ago (the pin is known); "geocode": the address is not on the map. */
-  area?: "ok" | "osm" | "geocode";
+  area?: "ok" | "osm" | "geocode" | "none";
   /** Faked Instagram replies; absent = Instagram is not connected. */
   graph?: [string, Reply][];
   member?: "tg:1001" | "tg:1002";
@@ -73,6 +74,7 @@ async function setup(o: Opts = {}, over: Partial<AgentDeps> = {}) {
   const address = demo.venue.address.trim();
   if (area === "ok") await demo.store.putSurroundings({ venue_id: demo.venue.id, address, lat: 42.69, lng: 23.33, places: PLACES, fetched_at: T0.toISOString(), failed_at: null });
   if (area === "osm") await demo.store.putSurroundings({ venue_id: demo.venue.id, address, lat: 42.69, lng: 23.33, places: [], fetched_at: null, failed_at: T0.toISOString() });
+  if (area === "none") await demo.store.updateVenue(demo.venue.id, { address: "" });
   if (area === "geocode") await demo.store.putSurroundings({ venue_id: demo.venue.id, address, lat: null, lng: null, places: [], fetched_at: null, failed_at: T0.toISOString() });
   // Every outbound call is recorded and refused: the proposal must not need one (the area is cached) and ✅ must make none.
   const outbound: string[] = [];
@@ -136,10 +138,13 @@ describe("propose_boost: a given photo, with the defaults", () => {
     expect(rowOf(await s.store.getChangeSet(r.change_set_id as string)).plan.goal).toBe("reach");
   });
 
-  it("passes the owner's budget, days and variant to the plan", async () => {
+  it("passes the owner's budget, days and variant to the plan; the summary prints the money like the preview", async () => {
     const s = await setup();
-    const r = await call(s.tools, "propose_boost", { media_id: s.photo.id, budget_eur: 30, days: 3, variant: "weekend" });
-    expect(rowOf(await s.store.getChangeSet(r.change_set_id as string)).plan).toMatchObject({ budgetEur: 30, days: 3, variant: "weekend", radiusKm: 3 });
+    const r = await call(s.tools, "propose_boost", { media_id: s.photo.id, budget_eur: 12.5, days: 3, variant: "weekend" });
+    const cs = await s.store.getChangeSet(r.change_set_id as string);
+    expect(rowOf(cs).plan).toMatchObject({ budgetEur: 12.5, days: 3, variant: "weekend", radiusKm: 3 });
+    expect(cs.summary_bg).toBe("План за реклама: 12,50 €, 3 дни");
+    expect(cs.summary_en).toBe("Ad plan: €12.50, 3 days");
   });
 
   it("refuses a photo of another venue or an unknown id", async () => {
@@ -222,6 +227,16 @@ describe("propose_boost: the inputs it could not read are missing, never invente
     expect(cs.preview_bg).not.toContain("местоположението");
   });
 
+  it("a café with no address is told to add it", async () => {
+    const s = await setup({ area: "none" });
+    const r = await call(s.tools, "propose_boost", { media_id: s.photo.id });
+    const cs = await s.store.getChangeSet(r.change_set_id as string);
+    expect(cs.preview_bg).toContain("— липсва адрес на кафенето — добавете го, за да проверя района");
+    expect(cs.preview_en).toContain("— the café has no address — add it so I can check the area");
+    expect(cs.preview_bg).not.toContain("не беше намерен на картата");
+    expect(s.outbound).toEqual([]);
+  });
+
   it("when the address is not on the map, the proposal also says the location needs checking", async () => {
     const s = await setup({ area: "geocode" });
     const r = await call(s.tools, "propose_boost", { media_id: s.photo.id });
@@ -274,12 +289,12 @@ describe("propose_boost: the preview", () => {
       "Къде: до 2 км от кафенето · Кой: 18+ · Кога: 5 дни, по цял ден",
       "Бюджет: 20 € общо · Обхват: ще го видите, щом рекламите са свързани",
       "Защо:",
-      "• в радиус 1 км: Софийски университет (400 м), 2 парка",
+      "• в радиус 1 км: ⟦Софийски университет⟧ (400 м), 2 парка",
       "• по-широката аудитория обикновено е по-евтина; Meta сама намира кой да види рекламата в радиуса",
       "— демографията на последователите ще се вижда при 100+ последователи и свързан Instagram",
       "(Сега само записвам плана — ще може да се пусне, щом Meta одобри рекламите в Claudia.)",
     ].join("\n"));
-    expect(s.messenger.sent.at(-1)!.text).toBe(`${cs.preview_bg.replace(/[⟦⟧]/g, "")}\n\nДа приложа ли?`);
+    expect(s.messenger.sent.at(-1)!.text).toBe(`${cs.preview_bg.replace(/[⟦⟧]/g, "")}\n\nДа запазя ли плана?`);
   });
 
   it("is exact in English", async () => {
@@ -292,7 +307,7 @@ describe("propose_boost: the preview", () => {
       "Where: within 2 km of the café · Who: 18+ · When: 5 days, all day",
       "Budget: 20 € total · Reach: you'll see it once ads are connected",
       "Why:",
-      "• within 1 km: Софийски университет (400 m), 2 parks",
+      "• within 1 km: ⟦Софийски университет⟧ (400 m), 2 parks",
       "• a broader audience is usually cheaper; Meta itself finds who sees the ad within the radius",
       "— follower demographics will show with 100+ followers and a connected Instagram",
       "(For now I only save the plan — it can run once Meta approves ads in Claudia.)",
@@ -306,6 +321,7 @@ describe("propose_boost: the preview", () => {
     const r = await call(tools, "propose_boost", { media_id: s.photo.id });
     expect(s.messenger.photos[0].caption).toBe("Post to boost");
     expect(String(r.preview)).toMatch(/^📣 Ad: \(post without text\)\n/);
+    expect(s.messenger.sent.at(-1)!.text).toMatch(/\n\nSave the plan\?$/);
   });
 });
 
@@ -316,7 +332,11 @@ describe("propose_boost: ✅ only saves the plan", () => {
     const r = await call(s.tools, "propose_boost", { media_id: s.photo.id });
     const before = await changeUsage(s.store, await s.store.getVenue(s.venue.id), T0);
     const decided = await handleDecision({ store: s.store, messenger: new FakeMessenger(), now: () => T0 }, "tg:1001", "apply", r.change_set_id as string);
-    expect(decided.toast).toBe("✅ Приложено");
+    // Saved, not applied, and no usage line: the plan used no change.
+    const saved = "✅ Планът е запазен — ще може да се пусне, щом рекламите са свързани.";
+    expect(decided.toast).toBe(saved);
+    expect(decided.edit).toEqual({ full: expect.stringMatching(/\n\n✅ Планът е запазен — ще може да се пусне, щом рекламите са свързани\.$/), short: saved });
+    expect(decided.edit!.full).not.toMatch(/Приложено|Промени този месец/);
     expect((await s.store.getChangeSet(r.change_set_id as string)).status).toBe("applied");
     expect(s.outbound).toEqual([]);
     expect(await s.store.listSyncs({ venueId: s.venue.id })).toEqual([]);
@@ -331,7 +351,11 @@ describe("propose_boost: ✅ only saves the plan", () => {
     const tools = makeTools({ ...s.deps, turnSets: new Set() });
     const second = await call(tools, "propose_boost", { media_id: s.photo.id, budget_eur: 30, days: 3 });
     expect(second.status).toBe("proposed");
-    expect(await s.store.applyChangeSet(second.change_set_id as string, T0.toISOString())).toBe("applied");
+    expect(second.change_set_id).toBeTruthy();
+    // From the dashboard: saved, no "applied", no usage line, on the owner's chat message.
+    const chat = new FakeMessenger();
+    expect(await adminAction({ store: s.store, messenger: chat, now: () => T0, baseUrl: "https://site.example" }, await s.store.getVenue(s.venue.id), "apply", second.change_set_id as string)).toEqual({ ok: true, status: "applied", change_set_id: second.change_set_id });
+    expect(chat.concluded.at(-1)!.short).toBe("✅ Планът е запазен от таблото — ще може да се пусне, щом рекламите са свързани.");
 
     // Undo the first plan: the inverse removes it.
     const undoTools = makeTools({ ...s.deps, turnSets: new Set() });

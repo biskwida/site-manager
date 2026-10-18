@@ -84,5 +84,5 @@ export const BoostSchema = z.object({
   post_ref: z.string().min(1).optional().describe("A published Instagram or Facebook post the owner names: Meta's post id or its link. Omit both media_id and post_ref to boost the owner's last published post (else the best recent Instagram post)."),
   budget_eur: z.number().optional().describe("Total budget in EUR, only when the owner says one (allowed 5–200). Omit for the recommended 20 €."),
   days: z.number().int().optional().describe("How many days the ad runs, only when the owner says it (allowed 1–14). Omit for the recommended 5."),
-  variant: z.enum(["default", "morning", "weekend"]).optional().describe('"morning" when the owner\'s words make it a morning or breakfast offer ("сутрин", "закуска", "до 11"); "weekend" for brunch, an event, live music or the weekend ("уикенд", "събота", "неделя"); "default" when the owner asks for neither. Omit to let the caption decide.'),
+  variant: z.enum(["default", "morning", "weekend"]).optional().describe('"morning" only when the owner says сутрин / закуска / до 11 / morning / breakfast; "weekend" only when the owner says уикенд / събота / неделя / бранч / концерт / weekend / brunch / event / live music; "default" when the owner asks for neither. Omit to let the caption decide.'),
 });

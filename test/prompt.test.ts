@@ -127,3 +127,20 @@ describe("SYSTEM_PROMPT: ads go to propose_boost", () => {
     expect(nums).toEqual(nums.map((_, i) => i + 1));
   });
 });
+
+describe("propose_boost: the variant words", () => {
+  const MORNING = "сутрин / закуска / до 11 / morning / breakfast";
+  const WEEKEND = "уикенд / събота / неделя / бранч / концерт / weekend / brunch / event / live music";
+  it("rule 17 and the tool description list the same morning and weekend words", async () => {
+    const { makeTools } = await import("@/src/agent/tools");
+    const { FakeMessenger, makeDemo } = await import("./helpers");
+    const demo = await makeDemo();
+    const member = (await demo.store.findMember("tg:1001"))!;
+    const tool = makeTools({ store: demo.store, venueId: demo.venue.id, chatRef: "tg:1001", member, messenger: new FakeMessenger(), now: () => new Date(), baseUrl: "https://x" }).find((t) => t.name === "propose_boost")!;
+    const rule = SYSTEM_PROMPT.split("\n").find((l) => /^17\. Ads: /.test(l)) ?? "";
+    for (const text of [rule, (tool as { description?: string }).description ?? ""]) {
+      expect(text).toContain(`"morning" ${text === rule ? "only " : ""}when the owner says ${MORNING}`);
+      expect(text).toContain(`"weekend" ${text === rule ? "only " : ""}when the owner says ${WEEKEND}`);
+    }
+  });
+});

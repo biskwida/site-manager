@@ -410,6 +410,10 @@ export type BoostEntity = "boost_plan";
 export function isRecordOnlyEntity(e: string): e is BoostEntity {
   return e === "boost_plan";
 }
+/** A set made only of saved ad plans (not their undo): ✅ saves it, so it is asked and confirmed as "save", never "apply". */
+export function isBoostPlanSet(changes: readonly Pick<Change, "op" | "after">[]): boolean {
+  return changes.length > 0 && changes.every((c) => c.op === "boost_plan" && c.after !== null);
+}
 /** One reason in a plan: a fact (the café's own data, OpenStreetMap or Meta), a hypothesis, or an input that is missing. */
 export interface BoostReasonRow {
   kind: "fact" | "hypothesis" | "missing";

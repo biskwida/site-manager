@@ -47,6 +47,8 @@ const BG = {
   changePrompt: "Напишете какво да променя в предложението.",
   notYours: "Това предложение не е от този чат.",
   applied: "✅ Приложено",
+  /** ✅ on a boost_plan set: phase 1 only saves the ad plan. */
+  planSaved: "✅ Планът е запазен — ще може да се пусне, щом рекламите са свързани.",
   scheduled: (when: string) => `⏰ Насрочено за ${when}`,
   cancelled: "❌ Отказано",
   /** Monthly change limit (src/domain/limits.ts); `resetsOn` is YYYY-MM-DD, the 1st of next month. */
@@ -117,6 +119,7 @@ const EN: typeof BG = {
   changePrompt: "Tell me what to change in the proposal.",
   notYours: "That proposal is not from this chat.",
   applied: "✅ Applied",
+  planSaved: "✅ Plan saved — it can run once ads are connected.",
   scheduled: (when) => `⏰ Scheduled for ${when}`,
   cancelled: "❌ Cancelled",
   limitReached: (limit, used, resetsOn) => `This month's limit of ${limit} changes is reached (${used}/${limit}). New changes from ${dayMonth(resetsOn, MONTHS_EN)}.`,

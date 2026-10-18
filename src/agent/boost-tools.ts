@@ -11,7 +11,7 @@ import { GraphClient, IG_GRAPH } from "../destinations/meta-graph";
 import { decryptSecrets } from "../destinations/secrets";
 import { publishedTargets, type PublishedTarget } from "../destinations/social-common";
 import type { SyncDeps } from "../destinations/sync";
-import { tr } from "../domain/format";
+import { formatPrice, tr } from "../domain/format";
 import type { BoostPlanRow, Change, ChangeSet, SocialPostRow } from "../domain/types";
 import { loadSurroundings, type Surroundings } from "../geo/surroundings";
 import { bestPost, followerProfile, POST_WINDOW_DAYS, recentPostStats, type FollowerProfile, type PostStat } from "../social/insights-graph";
@@ -24,6 +24,9 @@ export interface InstagramAccess {
   igUserId: string;
   log?: (s: string) => void;
 }
+
+/** The words that make a plan a morning or a weekend one: the same lists as src/boost/plan.ts reads in a caption. */
+export const VARIANT_WORDS = 'variant "morning" when the owner says сутрин / закуска / до 11 / morning / breakfast; variant "weekend" when the owner says уикенд / събота / неделя / бранч / концерт / weekend / brunch / event / live music.';
 
 export const NO_POST = "Which post should I boost? Send it or name it.";
 const DAY_MS = 86_400_000;
@@ -63,7 +66,7 @@ const socialRowOf = (cs: ChangeSet): SocialPostRow | null => {
 export function boostTools(d: ToolDeps, k: ToolKit) {
   const boost = betaZodTool({
     name: "propose_boost",
-    description: "Propose an ad (boost) for one of the venue's posts: who sees it (18+, within a radius of the café), when, the budget and the reasons, with the post's picture above the ✅ / ✏️ / ❌ buttons. For now ✅ only saves the plan: nothing is spent and nothing is published until Meta approves ads in Claudia. Never use social_post for an ad.",
+    description: `Propose an ad (boost) for one of the venue's posts: who sees it (18+, within a radius of the café), when, the budget and the reasons, with the post's picture above the ✅ / ✏️ / ❌ buttons. For now ✅ only saves the plan: nothing is spent and nothing is published until Meta approves ads in Claudia. Never use social_post for an ad. ${VARIANT_WORDS}`,
     inputSchema: BoostSchema,
     run: (input) =>
       k.attempt(async () => {
@@ -126,7 +129,9 @@ export function boostTools(d: ToolDeps, k: ToolKit) {
 
         const plan = rangeCheck(planBoost({ ...base, surroundings, followers, post: { id: chosen.post_ref ?? chosen.media_id ?? "", caption: chosen.caption, type: chosen.type, stat: chosen.stat } }));
         const pinned = surroundings.lat !== undefined && surroundings.lng !== undefined;
-        if (!pinned && surroundings.reason !== "osm_unavailable") {
+        if (surroundings.reason === "no_address") {
+          plan.reasons.push({ kind: "missing", bg: "липсва адрес на кафенето — добавете го, за да проверя района", en: "the café has no address — add it so I can check the area" });
+        } else if (!pinned && surroundings.reason !== "osm_unavailable") {
           plan.reasons.push({ kind: "missing", bg: "местоположението на кафенето трябва да се провери: адресът не беше намерен на картата", en: "the café's location needs checking: its address wasn't found on the map" });
         }
 
@@ -147,11 +152,12 @@ export function boostTools(d: ToolDeps, k: ToolKit) {
         const change: Change = { position: 0, op: "boost_plan", entity: "boost_plan", entity_id: k.ctx().newId(), before: null, after: row as unknown as Change["after"] };
         const p = k.previews(s, [change]);
         const days = (n: number, l: "bg" | "en") => (n === 1 ? tr(l, "1 ден", "1 day") : `${n} ${tr(l, "дни", "days")}`);
+        const money = (l: "bg" | "en") => formatPrice(plan.budgetEur, l);
         const cs = await d.store.createChangeSet({
-          venue_id: d.venueId, chat_ref: d.chatRef, summary_bg: `План за реклама: ${plan.budgetEur} €, ${days(plan.days, "bg")}`, summary_en: `Ad plan: ${plan.budgetEur} €, ${days(plan.days, "en")}`,
+          venue_id: d.venueId, chat_ref: d.chatRef, summary_bg: `План за реклама: ${money("bg")}, ${days(plan.days, "bg")}`, summary_en: `Ad plan: ${money("en")}, ${days(plan.days, "en")}`,
           ...p, source: d.source ?? "text", status: "proposed", changes: [change],
         });
-        const messageRef = await d.messenger.sendProposal(d.chatRef, proposalText(k.mine(p), k.lang, null, venue.tz), cs.id, k.lang);
+        const messageRef = await d.messenger.sendProposal(d.chatRef, proposalText(k.mine(p), k.lang, null, venue.tz, { save: true }), cs.id, k.lang);
         if (messageRef !== null) await d.store.updateChangeSet(cs.id, { message_ref: messageRef });
         d.notes?.push(`ad plan ${cs.id} for ${chosen.post_ref ? `post ${chosen.post_ref}` : `photo ${chosen.media_id}`}`);
         return { change_set_id: cs.id, status: "proposed", preview: k.mine(p), next: "The owner decides with the buttons; for now ✅ only saves the plan (nothing is spent). Reply with at most one short sentence, or nothing. Never state reach, cost or results." };

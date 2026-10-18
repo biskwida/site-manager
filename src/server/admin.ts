@@ -5,7 +5,7 @@ import { invertChanges } from "../domain/changes";
 import { isSoldOut } from "../domain/effective";
 import { baseLang, unkeep, unkeepTexts } from "../domain/format";
 import { renderPreview } from "../domain/preview";
-import { TEMPLATE_IDS, type ChangeSet, type DeployInfo, type TemplateId, type Venue, type VenueStatus } from "../domain/types";
+import { isBoostPlanSet, TEMPLATE_IDS, type ChangeSet, type DeployInfo, type TemplateId, type Venue, type VenueStatus } from "../domain/types";
 import type { Deployer, DeployInput, DomainInstructions } from "../deploy/types";
 import { normalizeDomain } from "../deploy/vercel-domains";
 import type { DestinationStatus, Store, SyncStatus } from "../store/types";
@@ -168,6 +168,11 @@ export async function adminAction(d: AdminDeps, venue: Venue, action: AdminActio
     return { ok: false, status: "cancelled", change_set_id: cs.id, error: line.en };
   }
   if (r === "skipped") return { ok: false, error: `Change set is "${(await d.store.getChangeSet(cs.id)).status}".` };
+  if (isBoostPlanSet(cs.changes)) {
+    // A saved ad plan changed nothing and used no change: no "applied", no usage line.
+    await concludeOnChannel(d, cs, { bg: "✅ Планът е запазен от таблото — ще може да се пусне, щом рекламите са свързани.", en: "✅ Plan saved from the dashboard — it can run once ads are connected." });
+    return { ok: true, status: "applied", change_set_id: cs.id };
+  }
   const usage = { bg: await usageLine(d.store, venue.id, now, "bg"), en: await usageLine(d.store, venue.id, now, "en") };
   const withUsage = (mark: string, line: string | null) => (line ? `${mark}\n${line}` : mark);
   await concludeOnChannel(d, cs, { bg: withUsage("✅ Приложено от таблото.", usage.bg), en: withUsage("✅ Applied from the dashboard.", usage.en) });

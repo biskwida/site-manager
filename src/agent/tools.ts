@@ -121,10 +121,12 @@ export function resolveTokens(ops: ProposeInput["changes"], site: SiteState, now
  */
 export type ProposeInput = Omit<z.infer<typeof ProposeSchema>, "changes"> & { changes: (ChangeInput | Extract<ChangeOp, { op: "set_comment_mode" }>)[] };
 
-/** The Telegram message for a proposal: preview, optional schedule line, and the question. */
-export function proposalText(preview: string, lang: Lang, applyAt: string | null, tz: string): string {
+/** The Telegram message for a proposal: preview, optional schedule line, and the question ("save" for an ad plan). */
+export function proposalText(preview: string, lang: Lang, applyAt: string | null, tz: string, opts: { save?: boolean } = {}): string {
   const when = applyAt ? `\n\n${tr(lang, "⏰ Ще се приложи на", "⏰ Will be applied on")} ${formatDateTime(applyAt, lang, tz)}` : "";
-  return `${preview}${when}\n\n${tr(lang, "Да приложа ли?", "Apply this?")}`;
+  // A saved ad plan (propose_boost) is saved, not applied.
+  const question = opts.save ? tr(lang, "Да запазя ли плана?", "Save the plan?") : tr(lang, "Да приложа ли?", "Apply this?");
+  return `${preview}${when}\n\n${question}`;
 }
 
 const NEXT_STEP: Record<ChangeSet["status"], string> = {

@@ -5,6 +5,7 @@
 import { PLACE_KINDS, type PlaceKind } from "../geo/osm";
 import { summarise, type Surroundings } from "../geo/surroundings";
 import type { FollowerProfile, PostStat } from "../social/insights-graph";
+import { keep } from "../domain/format";
 import type { Venue, Weekday } from "../domain/types";
 
 export type BoostVariant = "default" | "morning" | "weekend";
@@ -112,8 +113,9 @@ function surroundingsReason(s: Surroundings): BoostReason {
     if (count === 0) continue;
     const named = sum.nearest[kind].find((p) => p.meters <= limit);
     if (count === 1 && named?.name) {
-      bg.push(`${named.name} (${Math.round(named.meters)} м)`);
-      en.push(`${named.name} (${Math.round(named.meters)} m)`);
+      // A place's own name is kept as written (keep markers: the translation wrapper leaves it alone).
+      bg.push(`${keep(named.name)} (${Math.round(named.meters)} м)`);
+      en.push(`${keep(named.name)} (${Math.round(named.meters)} m)`);
     } else {
       bg.push(pick(count, KIND_BG[kind]));
       en.push(pick(count, KIND_EN[kind]));

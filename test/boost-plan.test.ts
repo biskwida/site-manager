@@ -135,8 +135,9 @@ describe("reasons", () => {
   it("come in order: surroundings, followers, hypothesis, with the right kinds", () => {
     const r = plan().reasons;
     expect(r.map((x) => x.kind)).toEqual(["fact", "fact", "hypothesis"]);
-    expect(r[0].bg).toBe("в радиус 1 км: Софийски университет (400 м), 3 държавни институции, 2 парка");
-    expect(r[0].en).toBe("within 1 km: Софийски университет (400 m), 3 government buildings, 2 parks");
+    expect(r[0].bg).toBe("в радиус 1 км: ⟦Софийски университет⟧ (400 м), 3 държавни институции, 2 парка");
+    expect(r[0].en).toBe("within 1 km: ⟦Софийски университет⟧ (400 m), 3 government buildings, 2 parks");
+    // The place name is kept as written: the translation wrapper never translates it.
     expect(r[1].bg).toBe("62% от последователите са жени, най-много 25–34 г., 71% от София");
     expect(r[1].en).toBe("62% of followers are women, most are 25–34, 71% from Sofia");
     expect(r[2].bg).toContain("по-широката аудитория обикновено е по-евтина");
