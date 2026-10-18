@@ -1,6 +1,6 @@
 // src/boost/plan.ts
-// The boost recommendation: what ad Claudia proposes for a café's post, and why. Pure, no IO.
-// Every reason is a fact (from the café's own data, OpenStreetMap or Meta), a hypothesis, or missing. Nothing here estimates
+// The boost recommendation: what ad Claudia proposes for a business's post, and why. Pure, no IO.
+// Every reason is a fact (from the business's own data, OpenStreetMap or Meta), a hypothesis, or missing. Nothing here estimates
 // reach, cost or results: those numbers exist only once ads are connected, and a number appears in a reason only when it was measured.
 import { PLACE_KINDS, SEARCH_RADIUS_M, type PlaceKind } from "../geo/osm";
 import { summarise, type Surroundings } from "../geo/surroundings";

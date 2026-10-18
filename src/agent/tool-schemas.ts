@@ -97,5 +97,5 @@ export const BoostSchema = z.object({
   goal: z.enum(["reach", "profile_visits", "website_visits"]).optional().describe("What the ad is for, only when the owner says it."),
   placements: z.enum(["automatic", "instagram", "facebook"]).optional().describe("Where the ad shows, only when the owner says it."),
   reset: z.array(z.enum(BOOST_RESETS)).optional().describe('Fields where the owner says "ти реши" ("you decide"): Claudia\'s analysis decides them again. "all" when the owner says "ти реши за всичко" ("decide everything"): every owner choice is dropped.'),
-  variant: z.enum(["default", "morning", "weekend"]).optional().describe('"morning" only when the owner says сутрин / закуска / до 11 / morning / breakfast; "weekend" only when the owner says уикенд / събота / неделя / бранч / концерт / weekend / brunch / event / live music; "default" when the owner asks for neither. Omit to let the caption decide.'),
+  variant: z.enum(["default", "morning", "weekend"]).optional().describe('"morning" only when the owner says сутрин / закуска / до 11 / morning / breakfast; "weekend" only when the owner says уикенд / събота / неделя / бранч / концерт / weekend / brunch / event / live music. Omit it when the owner asks for neither (the caption decides).'),
 });

@@ -362,7 +362,7 @@ describe("propose_boost: the preview", () => {
       "• в дните, в които сте отворени",
       "• 20 € за 5 дни е малък тест — достатъчен Meta да научи кой реагира",
       "— демографията на последователите ще се вижда при 100+ последователи и свързан Instagram",
-      "✏️ Всичко може да се промени: радиус, място, възраст, пол, клиенти, дни и часове, бюджет, цел, къде се показва.",
+      "✏️ Всичко може да се промени: радиус, място, възраст, пол, клиенти, дни и часове, продължителност, бюджет, цел, къде се показва.",
       "(Сега само записвам плана — ще може да се пусне, щом Meta одобри рекламите в Claudia.)",
     ].join("\n"));
     expect(s.messenger.sent.at(-1)!.text).toBe(`${cs.preview_bg.replace(/[⟦⟧]/g, "")}\n\nДа запазя ли плана?`);
@@ -387,7 +387,7 @@ describe("propose_boost: the preview", () => {
       "• on the days you're open",
       "• 20 € over 5 days is a small test — enough for Meta to learn who responds",
       "— follower demographics will show with 100+ followers and a connected Instagram",
-      "✏️ You can change anything: radius, place, age, gender, customers, days and hours, budget, goal, where it shows.",
+      "✏️ You can change anything: radius, place, age, gender, customers, days and hours, length, budget, goal, where it shows.",
       "(For now I only save the plan — it can run once Meta approves ads in Claudia.)",
     ].join("\n"));
   });
@@ -493,7 +493,7 @@ function fakeNominatim() {
     const url = String(input);
     asked.push(new URL(url).searchParams.get("q") ?? "");
     const known = url.includes("%D0%9D%D0%94%D0%9A");
-    return new Response(JSON.stringify(known ? [{ lat: "42.6859", lon: "23.3188" }] : []), { status: 200 });
+    return new Response(JSON.stringify(known ? [{ lat: "42.6859", lon: "23.3188", display_name: "НДК, бул. България, София, България" }] : []), { status: 200 });
   }) as typeof fetch;
   return { f, asked };
 }
@@ -648,7 +648,7 @@ describe("propose_boost: the preview shows the analysis and marks the owner's ch
     expect(lines[1]).toBe("Where: within 2 km ✎ of ⟦Кафене „Ъгъла“⟧");
     expect(lines[2]).toBe("Who: 18+ · suggested to Meta: 25–44, women ✎ · customers: ⟦students⟧ ✎");
     expect(lines[4]).toBe("Budget: 20 € total · Goal: people nearby ✎ · Shows on: Instagram only ✎");
-    expect(lines.at(-2)).toBe("✏️ You can change anything: radius, place, age, gender, customers, days and hours, budget, goal, where it shows.");
+    expect(lines.at(-2)).toBe("✏️ You can change anything: radius, place, age, gender, customers, days and hours, length, budget, goal, where it shows.");
   });
 
   it("the owner's audience reaches the chat message kept as written", async () => {
@@ -702,7 +702,7 @@ describe("propose_boost: fix round 1", () => {
   it("a ✏️ on another venue's plan carries nothing", async () => {
     const s = await setup();
     const other = await s.plain.createVenue({ ...DEMO_VENUE, slug: "drugo" });
-    const foreign: BoostPlanRow = { plan: { variant: "default", radiusKm: 7, place: null, ageMin: 40, ageMax: 50, suggestedAge: null, gender: "men", audience: "чужди", schedule: null, budgetEur: 99, days: 9, placements: "automatic", goal: "reach", reasons: [], owner: { radiusKm: 7, gender: "men", budgetEur: 99 } }, post_ref: "foreign-post", permalink: null, media_id: null, caption: "чужд", image_url: null, lat: 1, lng: 1, place_label: "Чуждо" };
+    const foreign: BoostPlanRow = { plan: { variant: "default", radiusKm: 7, place: null, ageMin: 40, ageMax: 50, suggestedAge: null, gender: "men", audience: "чужди", schedule: null, budgetEur: 99, days: 9, placements: "automatic", goal: "reach", reasons: [], owner: { radiusKm: 7, gender: "men", budgetEur: 99 } }, post_ref: "foreign-post", permalink: null, media_id: null, caption: "чужд", image_url: null, lat: 1, lng: 1, place_label: "Чуждо", place_display: null };
     const change: Change = { position: 0, op: "boost_plan", entity: "boost_plan", entity_id: "f-1", before: null, after: foreign as unknown as Change["after"] };
     const cs = await s.store.createChangeSet({ venue_id: other.id, chat_ref: "tg:9", summary_bg: "План", summary_en: "Plan", preview_bg: "", preview_en: "", source: "text", status: "proposed", changes: [change] });
     const r = await call(correcting(s, { change_set_id: cs.id }), "propose_boost", { budget_eur: 25 });
@@ -749,5 +749,76 @@ describe("propose_boost: fix round 1", () => {
     expect((await s.store.getChangeSet(plain.change_set_id as string)).preview_bg).toContain("Кой: 18+ · предложение към Meta: 25–44 г.");
     const owned = await call(correcting(s, plain), "propose_boost", { age_min: 30, age_max: 40 });
     expect((await s.store.getChangeSet(owned.change_set_id as string)).preview_bg).toContain("Кой: 30–40 ✎\n");
+  });
+});
+
+describe("propose_boost: final fix wave", () => {
+  const correcting = (s: Awaited<ReturnType<typeof setup>>, first: Record<string, unknown>) => makeTools({ ...s.deps, turnSets: new Set(), correctionFor: first.change_set_id as string });
+
+  it("a partial schedule change keeps the analysed days (the demo café is closed on Sunday) and the morning window", async () => {
+    const s = await setup();
+    const first = await call(s.tools, "propose_boost", { media_id: s.photo.id });
+    expect(rowOf(await s.store.getChangeSet(first.change_set_id as string)).plan.schedule).toEqual({ days: ["mon", "tue", "wed", "thu", "fri", "sat"], from: "00:00", to: "23:59" });
+    const second = await call(correcting(s, first), "propose_boost", { from: "09:00", to: "12:00" });
+    expect(rowOf(await s.store.getChangeSet(second.change_set_id as string)).plan.schedule).toEqual({ days: ["mon", "tue", "wed", "thu", "fri", "sat"], from: "09:00", to: "12:00" });
+    const morning = await call(correcting(s, second), "propose_boost", { reset: ["schedule"], variant: "morning" });
+    const m = rowOf(await s.store.getChangeSet(morning.change_set_id as string)).plan.schedule!;
+    const later = await call(correcting(s, morning), "propose_boost", { to: "12:00" });
+    expect(rowOf(await s.store.getChangeSet(later.change_set_id as string)).plan.schedule).toEqual({ ...m, to: "12:00" });
+  });
+
+  it("a text change after the owner's earlier proposal was cancelled keeps the earlier choices and the post, without ✏️", async () => {
+    const s = await setup();
+    const first = await call(s.tools, "propose_boost", { media_id: s.photo.id, radius_km: 5 });
+    // The pending proposal blocks a new one; the agent cancels it first, as its error says.
+    const blocked = await call(makeTools({ ...s.deps, turnSets: new Set() }), "propose_boost", { budget_eur: 30 });
+    expect(String(blocked.error)).toMatch(/already waiting/);
+    const tools = makeTools({ ...s.deps, turnSets: new Set() });
+    await call(tools, "cancel_change_set", { change_set_id: first.change_set_id });
+    await postedBefore(s, "По-нов пост", new Date(T0.getTime() - 3_600_000));
+    const r = await call(tools, "propose_boost", { budget_eur: 30 });
+    expect(r.status).toBe("proposed");
+    const row = rowOf(await s.store.getChangeSet(r.change_set_id as string));
+    expect(row.plan).toMatchObject({ radiusKm: 5, budgetEur: 30, owner: { radiusKm: 5, budgetEur: 30 } });
+    expect(row).toMatchObject({ post_ref: `ig-${s.photo.id}`, media_id: s.photo.id }); // the same post, not the newer one
+    expect((await s.store.getChangeSet(first.change_set_id as string)).status).toBe("cancelled");
+  });
+
+  it("a cancelled plan of long ago, or one that was saved, carries nothing", async () => {
+    const s = await setup();
+    const first = await call(s.tools, "propose_boost", { media_id: s.photo.id, radius_km: 5 });
+    await handleDecision({ store: s.store, messenger: new FakeMessenger(), now: () => T0 }, "tg:1001", "apply", first.change_set_id as string);
+    const r = await call(makeTools({ ...s.deps, turnSets: new Set() }), "propose_boost", { media_id: s.photo.id, budget_eur: 30 });
+    expect(rowOf(await s.store.getChangeSet(r.change_set_id as string)).plan.owner).toEqual({ budgetEur: 30 });
+  });
+
+  it("the owner sees where the place is on the map, fresh and carried", async () => {
+    const geo = fakeNominatim();
+    const s = await setup({}, { fetch: geo.f });
+    const first = await call(s.tools, "propose_boost", { media_id: s.photo.id, place: "НДК" });
+    const cs = await s.store.getChangeSet(first.change_set_id as string);
+    expect(rowOf(cs).place_display).toBe("НДК, бул. България, София, България");
+    expect(cs.preview_bg).toContain("• на картата: ⟦НДК, бул. България, София, България⟧");
+    expect(cs.preview_en).toContain("• on the map: ⟦НДК, бул. България, София, България⟧");
+    const asked = geo.asked.length;
+    const second = await call(correcting(s, first), "propose_boost", { budget_eur: 30 });
+    const again = await s.store.getChangeSet(second.change_set_id as string);
+    expect(geo.asked).toHaveLength(asked);
+    expect(rowOf(again).place_display).toBe("НДК, бул. България, София, България");
+    expect(again.preview_bg).toContain("• на картата: ⟦НДК, бул. България, София, България⟧");
+  });
+
+  it("an input variant \"default\" is not stored as an owner choice", async () => {
+    const s = await setup();
+    const r = await call(s.tools, "propose_boost", { media_id: s.photo.id, variant: "default", budget_eur: 25 });
+    expect(rowOf(await s.store.getChangeSet(r.change_set_id as string)).plan.owner).toEqual({ budgetEur: 25 });
+  });
+
+  it("an owner gender \"all\" shows as everyone ✎", async () => {
+    const s = await setup();
+    const r = await call(s.tools, "propose_boost", { media_id: s.photo.id, gender: "all" });
+    const cs = await s.store.getChangeSet(r.change_set_id as string);
+    expect(cs.preview_bg).toContain("Кой: 18+ · предложение към Meta: всички ✎");
+    expect(cs.preview_en).toContain("Who: 18+ · suggested to Meta: everyone ✎");
   });
 });

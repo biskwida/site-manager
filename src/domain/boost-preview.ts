@@ -66,6 +66,7 @@ function whoText(p: BoostPlanRow["plan"], lang: Lang, owner: BoostOwnerChoices):
   if (age) suggested.push(`${age.max === null ? `${age.min}+` : `${age.min}–${age.max}`}${tr(lang, " г.", "")}`);
   const gender = p.gender ?? "all";
   if (gender !== "all") suggested.push(`${GENDERS[gender][lang]}${mark(owner.gender !== undefined)}`);
+  else if (owner.gender === "all") suggested.push(`${tr(lang, "всички", "everyone")}${MARK}`);
   if (suggested.length) parts.push(`${tr(lang, "предложение към Meta", "suggested to Meta")}: ${suggested.join(", ")}`);
   if (p.audience) parts.push(`${tr(lang, "клиенти", "customers")}: ${keep(p.audience)}${mark(owner.audience !== undefined)}`);
   return parts.join(" · ");
@@ -103,8 +104,8 @@ export function boostPreviewLines(c: Change, lang: Lang): string[] {
     ...reasonLines(p.reasons ?? [], lang),
     tr(
       lang,
-      "✏️ Всичко може да се промени: радиус, място, възраст, пол, клиенти, дни и часове, бюджет, цел, къде се показва.",
-      "✏️ You can change anything: radius, place, age, gender, customers, days and hours, budget, goal, where it shows.",
+      "✏️ Всичко може да се промени: радиус, място, възраст, пол, клиенти, дни и часове, продължителност, бюджет, цел, къде се показва.",
+      "✏️ You can change anything: radius, place, age, gender, customers, days and hours, length, budget, goal, where it shows.",
     ),
     tr(lang, "(Сега само записвам плана — ще може да се пусне, щом Meta одобри рекламите в Claudia.)", "(For now I only save the plan — it can run once Meta approves ads in Claudia.)"),
   ];

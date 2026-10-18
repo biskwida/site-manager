@@ -395,7 +395,7 @@ describe("renderPreview: boost_plan (an ad plan; ✅ only saves it)", () => {
     for (const lang of ["bg", "en"] as const) {
       const text = renderPreview(state(), [row(plan())], lang, TZ);
       expect(text).not.toMatch(/\d+\s*[–-]\s*\d+\s*(души|people)/);
-      expect(text.split("\n").at(-2)).toBe(lang === "bg" ? "✏️ Всичко може да се промени: радиус, място, възраст, пол, клиенти, дни и часове, бюджет, цел, къде се показва." : "✏️ You can change anything: radius, place, age, gender, customers, days and hours, budget, goal, where it shows.");
+      expect(text.split("\n").at(-2)).toBe(lang === "bg" ? "✏️ Всичко може да се промени: радиус, място, възраст, пол, клиенти, дни и часове, продължителност, бюджет, цел, къде се показва." : "✏️ You can change anything: radius, place, age, gender, customers, days and hours, length, budget, goal, where it shows.");
       expect(text.split("\n").at(-1)).toBe(lang === "bg" ? "(Сега само записвам плана — ще може да се пусне, щом Meta одобри рекламите в Claudia.)" : "(For now I only save the plan — it can run once Meta approves ads in Claudia.)");
     }
   });

@@ -484,4 +484,6 @@ export interface BoostPlanRow {
   lng: number | null;
   /** The name of what the radius is around: the business's name, or the owner's place. Absent on rows saved before it existed. */
   place_label: string;
+  /** Nominatim's name for the owner's place, so the preview can show which place was found; null when there is no owner place or no name. Absent on older rows. */
+  place_display: string | null;
 }
