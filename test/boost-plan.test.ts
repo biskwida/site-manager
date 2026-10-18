@@ -1,7 +1,6 @@
-// test/domain-boost.test.ts — the boost recommendation: defaults, variants, limits, and reasons that are only ever fact, hypothesis or missing.
+// test/boost-plan.test.ts — the boost recommendation: defaults, variants, limits, and reasons that are only ever fact, hypothesis or missing.
 import { describe, expect, it } from "vitest";
-import { buildFiles } from "@/src/deploy/manifest";
-import { planBoost, type BoostInput, type BoostPlan } from "@/src/domain/boost";
+import { planBoost, type BoostInput, type BoostPlan } from "@/src/boost/plan";
 import type { Surroundings } from "@/src/geo/surroundings";
 import type { FollowerProfile } from "@/src/social/insights-graph";
 import { HOURS, TZ } from "./fixtures";
@@ -201,13 +200,5 @@ describe("reasons", () => {
       expect(r.bg.length).toBeGreaterThan(0);
       expect(r.en.length).toBeGreaterThan(0);
     }
-  });
-});
-
-describe("venue sites", () => {
-  it("do not ship the server-only recommendation (it imports geo and social code the thin site does not have)", async () => {
-    const files = await buildFiles("classic");
-    expect(files.some((f) => f.file === "src/domain/boost.ts")).toBe(false);
-    expect(files.some((f) => f.file === "src/domain/hours.ts")).toBe(true);
   });
 });

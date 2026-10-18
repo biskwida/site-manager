@@ -14,9 +14,7 @@ export const MANIFEST_DIRS = ["src/templates/shared", "src/domain", "src/time.ts
 
 const TEXT_EXT = /\.(ts|tsx|css|json|mjs|js|md|txt|svg)$/;
 const SKIP_DIR = new Set(["node_modules", ".next", "tests", "__tests__", ".git"]);
-/** Server-only modules that live in src/domain but import from outside it (geo, social): a venue's thin site neither needs nor can resolve them. */
-const SERVER_ONLY = new Set(["boost.ts"]);
-const skipFile = (name: string) => SERVER_ONLY.has(name) || name.startsWith(".env") || name === ".DS_Store" || /\.test\.tsx?$/.test(name) || name.endsWith(".tsbuildinfo") || name === "next-env.d.ts";
+const skipFile = (name: string) => name.startsWith(".env") || name === ".DS_Store" || /\.test\.tsx?$/.test(name) || name.endsWith(".tsbuildinfo") || name === "next-env.d.ts";
 
 async function walk(absDir: string, out: string[] = []): Promise<string[]> {
   for (const entry of await readdir(absDir, { withFileTypes: true })) {

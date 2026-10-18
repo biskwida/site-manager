@@ -1,11 +1,11 @@
-// src/domain/boost.ts
+// src/boost/plan.ts
 // The boost recommendation: what ad Claudia proposes for a café's post, and why. Pure, no IO.
 // Every reason is a fact (from the café's own data, OpenStreetMap or Meta), a hypothesis, or missing. Nothing here estimates
 // reach, cost or results: those numbers exist only once ads are connected, and a number appears in a reason only when it was measured.
 import { PLACE_KINDS, type PlaceKind } from "../geo/osm";
 import { summarise, type Surroundings } from "../geo/surroundings";
 import type { FollowerProfile, PostStat } from "../social/insights-graph";
-import type { Venue, Weekday } from "./types";
+import type { Venue, Weekday } from "../domain/types";
 
 export type BoostVariant = "default" | "morning" | "weekend";
 
