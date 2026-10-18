@@ -7,7 +7,7 @@ import type { Deployer } from "./deploy/types";
 import { planChange } from "./domain/changes";
 import { baseLang, itemName, keep, tr } from "./domain/format";
 import type { Lang, Venue } from "./domain/types";
-import type { ApplyResult, ExpiredTimer, Store } from "./store/types";
+import type { ApplyResult, ExpiredTimer, SocialComment, Store } from "./store/types";
 import { limitReachedLine, usageLine } from "./bot/limit";
 import { channelOf, isMetaChannel } from "./channels/ref";
 import { formatDateTime } from "./time";
@@ -199,7 +199,12 @@ export async function runTick(d: TickDeps): Promise<TickReport> {
         const fresh = (await d.store.listComments(venue.id, { status: ["new"], since })).filter((c) => c.parent_id === null && (!d.venueId || (c.deferred && c.draft_kind !== null)));
         if (fresh.length === 0) continue;
         const draft = d.venueId ? noDraftOnScopedTick : d.comments.draft;
-        const p = await proposeForComments({ store: d.store, messenger: d.messenger, now: () => d.now, draft, log: d.sync.log }, venue, fresh, { mode: "each" });
+        // Read the status again right before proposing: the owner's agent turn (list_comments, then reply_to_comments) may have
+        // proposed some of these meanwhile, and a second proposal for the same comment must not go out.
+        const current = await Promise.all(fresh.map((c) => d.store.getComment(c.id)));
+        const still = current.filter((c): c is SocialComment => c !== null && c.status === "new");
+        if (still.length === 0) continue;
+        const p = await proposeForComments({ store: d.store, messenger: d.messenger, now: () => d.now, draft, log: d.sync.log }, venue, still, { mode: "each" });
         report.comments_proposed += p.sets.length;
       } catch (e) {
         console.error(`[tick] comments for venue ${venue.id} failed:`, e instanceof Error ? e.name : "error");

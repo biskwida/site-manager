@@ -1,7 +1,8 @@
 // src/agent/comment-tools.ts
 // Agent tools for customer comments under the venue's Facebook/Instagram posts: how the owner is notified (set_comment_mode),
 // what is waiting (list_comments) and replying or moderating (reply_to_comments). Registered only when a network is connected;
-// owner only. set_comment_mode is an ordinary proposal through the agent's propose path (source of the turn, ✅/✏️/❌ buttons);
+// owner only. list_comments first reads Instagram and Facebook right then (AgentDeps.liveComments, src/social/comments-poll.ts), so a
+// comment from five minutes ago is not missed; the read is capped and any failure falls back to the saved comments. set_comment_mode is an ordinary proposal through the agent's propose path (source of the turn, ✅/✏️/❌ buttons);
 // a set made only of set_comment_mode rows never counts toward the monthly change limit (countsTowardLimit, src/domain/limits.ts).
 // reply_to_comments goes through src/social/comments-propose.ts (createCommentSet / cancelCommentSet): one set sent to every
 // owner, never blocked by a pending menu proposal and never blocking one. Nothing is posted by the agent itself.
@@ -9,8 +10,9 @@ import { betaZodTool } from "@anthropic-ai/sdk/helpers/beta/zod";
 import { z } from "zod";
 import { copy } from "../bot/copy";
 import { commentModeLabel } from "../domain/comment-preview";
-import { COMMENT_MODES, type ChangeSet, type CommentMode } from "../domain/types";
+import { COMMENT_MODES, type ChangeSet, type CommentMode, type CommentNetwork } from "../domain/types";
 import { REPLY_MAX } from "../social/comments-draft";
+import { COMMENT_ON_DEMAND_TIMEOUT_MS } from "../social/comments-poll";
 import { cancelCommentSet, commentLimitState, createCommentSet, previewLength, splitCommentItems, type CommentSetItem } from "../social/comments-propose";
 import type { CommentStatus, SocialComment } from "../store/types";
 import type { AgentDeps, ToolKit } from "./tools";
@@ -80,19 +82,57 @@ export function commentTools(d: AgentDeps, k: ToolKit) {
     if (d.member.role !== "owner") throw new Error("Comments on Facebook and Instagram are only the owner's decision; tell the owner to send this.");
   };
 
+  /** The live read before listing. Never throws; the answer is what list_comments tells the agent about it. */
+  async function liveCheck(): Promise<{ failed: boolean; note?: string; last_checked_at?: string | null }> {
+    const live = d.liveComments;
+    if (!live) return { failed: false };
+    const ctl = new AbortController();
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    try {
+      const timeout = new Promise<never>((_, reject) => {
+        timer = setTimeout(() => {
+          ctl.abort();
+          reject(new Error("timeout"));
+        }, COMMENT_ON_DEMAND_TIMEOUT_MS);
+      });
+      const r = await Promise.race([live.poll(d.venueId, ctl.signal), timeout]);
+      if (r.errors.length === 0) return { failed: false };
+      const named = [...new Set(r.errors.map((e) => e.network).filter((n): n is CommentNetwork => n !== null))].map(networkLabel);
+      const unnamed = r.errors.some((e) => e.network === null);
+      return { failed: true, ...(await failure(`${unnamed || named.length === 0 ? "The comments" : named.join(" and ")} could not be checked just now`)) };
+    } catch {
+      return { failed: true, ...(await failure("The comments could not be checked in time")) };
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+  const networkLabel = (n: CommentNetwork) => (n === "instagram" ? "Instagram" : "Facebook");
+  async function failure(what: string): Promise<{ note: string; last_checked_at: string | null }> {
+    const last = (await d.liveComments?.lastCheckedAt(d.venueId).catch(() => null)) ?? { at: null, never: [] };
+    const never = last.never.length ? ` ${last.never.map(networkLabel).join(" and ")} ${last.never.length > 1 ? "have" : "has"} not been checked yet.` : "";
+    return {
+      last_checked_at: last.at,
+      note: `LIVE CHECK FAILED: ${what}, so these are only the comments saved at the last successful check${last.at ? ` (${last.at})` : " (no successful check yet)"}.${never} Tell the owner this in one sentence${last.at ? " with that time in the venue's time zone" : ""}; never say there are no new comments, and offer to try again in a minute.`,
+    };
+  }
+
   const list = betaZodTool({
     name: "list_comments",
-    description: "Customer comments under the venue's Facebook/Instagram posts: id, network, author, text, the post's caption, status, the detected kind (question, praise, complaint, spam, abuse, other) and the drafted reply. Default: unanswered comments of the last 14 days, newest first. Call it before replying when the owner names a comment by author or content. Owner only.",
+    description: "Customer comments under the venue's Facebook/Instagram posts: id, network, author, text, the post's caption, status, the detected kind (question, praise, complaint, spam, abuse, other) and the drafted reply. Default: unanswered comments of the last 14 days, newest first. Reads Instagram and Facebook right then before answering (skipped when they were read less than a minute ago); if that fails it says so in live_check_failed and answers from the saved comments. Call it before replying when the owner names a comment by author or content. Owner only.",
     inputSchema: ListCommentsSchema,
     run: (input) =>
       k.attempt(async () => {
         requireOwner();
+        const live = await liveCheck();
         const since = new Date(d.now().getTime() - input.days * 24 * 3_600_000).toISOString();
         const rows = (await d.store.listComments(d.venueId, { status: [input.status ?? "new"], since, limit: 100 })).filter((c) => c.parent_id === null);
+        const unanswered = input.status === undefined || input.status === "new";
         return {
+          ...(live.failed ? { live_check_failed: live.note, last_checked_at: live.last_checked_at } : {}),
           count: rows.length,
           comments: rows.map((c) => ({ id: c.id, network: c.network, author: c.author_name, text: c.text, post_caption: c.post_caption, created_at: c.created_at, status: c.status, kind: c.draft_kind, draft: c.draft_text })),
-          note: input.status === undefined || input.status === "new" ? "Reply with reply_to_comments (one call for several comments). Nothing is posted before the owner's ✅." : undefined,
+          note: unanswered ? "Reply with reply_to_comments (one call for several comments). Nothing is posted before the owner's ✅." : undefined,
+          next: unanswered && rows.length > 0 ? "If the owner asked to check, see or answer the comments, propose replies for these now: one reply_to_comments call for the whole list, without asking first (nothing is posted before the owner's ✅). If they only asked how many are waiting, answer with the count." : undefined,
         };
       }),
   });

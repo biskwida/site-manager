@@ -308,7 +308,7 @@ describe("pollVenueComments on the account's own recent posts", () => {
     ]);
   });
 
-  it("a failing list (not a token or permission error) is logged and falls back to the published posts", async () => {
+  it("a list the post refuses (a 4xx) is logged and falls back to the published posts; a transient list failure retries the network instead of stamping it polled", async () => {
     const v = await connectedVenue();
     const ours = await v.publishPost(["facebook_post", "instagram_post"], "Нашият пост", at(-2 * HOUR));
     const manual = v.meta.addInstagramMedia(v.ig.user_id, { caption: "manual", timestamp: at(-HOUR) });
@@ -320,12 +320,14 @@ describe("pollVenueComments on the account's own recent posts", () => {
       : c.path === `/${v.page.id}/posts` ? { status: 500, code: 2, message: "Service temporarily unavailable", transient: true }
       : null;
     const r = await pollVenueComments(v.d, v.venue, T0);
-    expect(r.errors).toEqual([]);
-    expect(r.polled).toEqual(["instagram", "facebook"]);
-    expect(r.inserted.map((c) => c.text)).toEqual(["ig", "fb"]);
+    expect(r.errors).toEqual([{ network: "facebook", code: "meta_2" }]);
+    expect(r.polled).toEqual(["instagram"]);
+    expect(r.inserted.map((c) => c.text)).toEqual(["ig"]);
     expect(reads(v, manual.id)).toBe(0);
     expect(v.logs.some((l) => /\[comments\] instagram post list for venue .* failed: meta_100/.test(l))).toBe(true);
-    expect(v.logs.some((l) => /\[comments\] facebook post list for venue .* failed: meta_2/.test(l))).toBe(true);
+    expect((await v.store.getDestination(v.venue.id, "facebook"))?.config.last_comment_poll_at).toBeUndefined();
+    v.meta.failOn = null;
+    expect((await pollVenueComments(v.d, v.venue, at(MIN))).inserted.map((c) => c.text)).toEqual(["fb"]); // retried on the next tick
   });
 
   it("a token error on the list marks the destination error like any read", async () => {
