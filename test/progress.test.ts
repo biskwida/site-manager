@@ -67,5 +67,7 @@ describe("progressLabel", () => {
     expect(progressLabel("get_menu", "en")).toBe("📖 Reading the menu…");
     expect(progressLabel("wp_edit_page", "bg")).toBe("🌐 Работя по WordPress сайта…");
     expect(progressLabel("something_new", "bg")).toBeNull();
+    expect(progressLabel("propose_boost", "bg")).toBe("🔎 Анализирам района, последователите и постовете за най-добрия план…");
+    expect(progressLabel("propose_boost", "en")).toBe("🔎 Analysing your area, followers and posts for the best ad plan…");
   });
 });

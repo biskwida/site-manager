@@ -151,6 +151,16 @@ describe("loadSurroundings", () => {
     expect(await t.store.getSurroundings(t.venue.id)).toMatchObject({ address: venue.address, lat: 42.6934, lng: 23.3321, fetched_at: NOW, failed_at: null, places: r.places });
   });
 
+  it("saves only the table's columns: the geocoder's place name never reaches the row (Supabase would refuse an unknown column)", async () => {
+    const t = await setup({ geo: [{ lat: "42.6934", lon: "23.3321", display_name: "Пример 1, София, България" }], overpass });
+    const rows: object[] = [];
+    const put = t.store.putSurroundings.bind(t.store);
+    t.store.putSurroundings = async (row) => (rows.push(row), put(row));
+    await loadSurroundings(t.d, t.venue, NOW);
+    expect(rows).toHaveLength(1);
+    expect(Object.keys(rows[0]).sort()).toEqual(["address", "failed_at", "fetched_at", "lat", "lng", "places", "venue_id"]);
+  });
+
   it("uses the cache and makes no request under 30 days with the same address", async () => {
     const t = await setup();
     await loadSurroundings(t.d, t.venue, NOW);

@@ -122,6 +122,9 @@ describe("SYSTEM_PROMPT: ads go to propose_boost", () => {
     expect(rule).toContain("call propose_boost, never social_post for an ad");
     expect(rule).toContain("call propose_boost again with the owner's numbers");
     expect(rule).toContain("Never state reach, cost or results");
+    expect(rule).toContain("Pass a field only when the owner says it");
+    expect(rule).toContain("pass only the changed fields");
+    expect(rule).toContain("reset");
     expect(rule).toContain("for now ✅ only saves the plan");
     expect(rule).toContain("A photo that is not posted yet is proposed with social_post first; the ad comes after it is published.");
     const nums = [...SYSTEM_PROMPT.matchAll(/^(\d+)\. /gm)].map((m) => Number(m[1]));
@@ -142,6 +145,8 @@ describe("propose_boost: the variant words", () => {
     for (const text of [rule, (tool as { description?: string }).description ?? ""]) {
       expect(text).toContain(`"morning" ${text === rule ? "only " : ""}when the owner says ${MORNING}`);
       expect(text).toContain(`"weekend" ${text === rule ? "only " : ""}when the owner says ${WEEKEND}`);
+      expect(text).toContain("reset");
+      expect(text).toContain("only the changed fields");
     }
   });
 });

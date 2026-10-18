@@ -1,6 +1,6 @@
 // src/agent/boost-tools.ts
-// The propose_boost tool: Claudia proposes an ad for one of the café's posts (who, where, when and how much, and why), from the
-// café's surroundings (OpenStreetMap, src/geo/surroundings.ts), its Instagram followers and post numbers when Instagram is connected
+// The propose_boost tool: Claudia proposes an ad for one of the business's posts (who, where, when and how much, and why), from the
+// business's surroundings (OpenStreetMap, src/geo/surroundings.ts), its Instagram followers and post numbers when Instagram is connected
 // (src/social/insights-graph.ts) and the recommendation in src/boost/plan.ts. The post's picture goes to the chat first, then one
 // boost_plan proposal with ✅ / ✏️ / ❌. Phase 1: Meta ads are not approved yet, so ✅ only saves the plan (no external call, no change
 // of the month used) and undo removes it. No reach or price is ever shown: those numbers exist only once ads are connected.
@@ -11,11 +11,12 @@ import { GraphClient, IG_GRAPH } from "../destinations/meta-graph";
 import { decryptSecrets } from "../destinations/secrets";
 import { publishedTargets, type PublishedTarget } from "../destinations/social-common";
 import type { SyncDeps } from "../destinations/sync";
-import { formatPrice, tr } from "../domain/format";
-import type { BoostPlanRow, Change, ChangeSet, SocialPostRow } from "../domain/types";
+import { formatPrice, keep, tr } from "../domain/format";
+import { WEEKDAYS, type BoostOwnerChoices, type BoostPlanRow, type Change, type ChangeSet, type SocialPostRow, type Venue } from "../domain/types";
+import { geocode } from "../geo/osm";
 import { loadSurroundings, type Surroundings } from "../geo/surroundings";
 import { bestPost, followerProfile, POST_WINDOW_DAYS, recentPostStats, type FollowerProfile, type PostStat } from "../social/insights-graph";
-import { BoostSchema } from "./tool-schemas";
+import { BoostSchema, type BOOST_RESETS } from "./tool-schemas";
 import { proposalText, type ToolDeps, type ToolKit } from "./tools";
 
 /** The venue's Instagram account for reading insights: a client on graph.instagram.com, the account id, and a log for error codes. */
@@ -68,7 +69,7 @@ const socialRowOf = (cs: ChangeSet): SocialPostRow | null => {
 export function boostTools(d: ToolDeps, k: ToolKit) {
   const boost = betaZodTool({
     name: "propose_boost",
-    description: `Propose an ad (boost) for one of the venue's posts: who sees it (18+, within a radius of the café), when, the budget and the reasons, with the post's picture above the ✅ / ✏️ / ❌ buttons. For now ✅ only saves the plan: nothing is spent and nothing is published until Meta approves ads in Claudia. Never use social_post for an ad. ${VARIANT_WORDS}`,
+    description: `Propose an ad (boost) for one of the venue's posts: who sees it (within a radius of the business), when, the budget and the reasons, with the post's picture above the ✅ / ✏️ / ❌ buttons. For now ✅ only saves the plan: nothing is spent and nothing is published until Meta approves ads in Claudia. Never use social_post for an ad. Claudia's plan comes from her analysis of the area, followers and posts; pass a field only when the owner says it. On a change pass only the changed fields (earlier choices are kept); use reset for fields where the owner wants Claudia to decide again, and reset ["all"] when the owner says "ти реши за всичко" / "decide everything". ${VARIANT_WORDS}`,
     inputSchema: BoostSchema,
     run: (input) =>
       k.attempt(async () => {
@@ -76,12 +77,40 @@ export function boostTools(d: ToolDeps, k: ToolKit) {
         const s = await k.site();
         const venue = s.venue;
         const now = d.now();
-        const base: Omit<BoostInput, "surroundings" | "followers" | "post"> = {
-          venue, ownerWords: "", budgetEur: input.budget_eur, days: input.days, variant: input.variant, hasFacebookPage: d.social?.facebook === true,
+        // The plan being replaced carries its post and the owner's earlier choices over: the one ✏️ names, else (a change by text) the
+        // owner's last plan in this chat that is still waiting or that the agent itself cancelled in this turn (it cancels the pending plan before proposing again). The owner's ❌ never carries.
+        // Read here, before ensureNoPending cancels it.
+        let earlier: BoostPlanRow | null = null;
+        const boostRowOf = (cs: ChangeSet | null): BoostPlanRow | null => {
+          const old = cs && cs.venue_id === d.venueId ? cs.changes.find((c) => c.op === "boost_plan" && c.after !== null) : undefined;
+          return old ? (old.after as unknown as BoostPlanRow) : null;
         };
-        // The owner's numbers first: a budget or duration out of range is refused before anything is read.
+        if (d.correctionFor) {
+          earlier = boostRowOf(await d.store.getChangeSet(d.correctionFor).catch(() => null));
+        } else {
+          const latest = (await d.store.listChangeSets(d.venueId, { limit: 50 })).find((cs) => cs.chat_ref === d.chatRef && !d.turnSets?.has(cs.id) && cs.changes.some((c) => c.op === "boost_plan"));
+          const recent = latest && (latest.status === "proposed" || (latest.status === "cancelled" && k.cancelledThisTurn.has(latest.id)));
+          if (latest && recent) earlier = boostRowOf(latest);
+        }
+        const owner = ownerChoices(input, earlier?.plan.owner ?? {}, earlier?.plan.schedule ?? null);
+        const base: Omit<BoostInput, "surroundings" | "followers" | "post"> = {
+          venue, ownerWords: "", owner, hasFacebookPage: d.social?.facebook === true,
+        };
+        // The owner's numbers first: a value out of range is refused before anything is read.
         const unread: Surroundings = { status: "missing", places: [] };
         rangeCheck(planBoost({ ...base, surroundings: unread, followers: null, post: null }));
+        if (owner.goal === "website_visits" && !hasWebsite(venue)) throw new Error("This business has no website yet; offer reach or profile visits.");
+        if (owner.placements === "facebook" && d.social?.facebook !== true) throw new Error("No Facebook Page is connected; offer Instagram or automatic.");
+        // Another place: its pin, found before the proposal that this one replaces is cancelled. A carried place keeps its pin.
+        let placePin: { lat: number; lng: number } | null = null;
+        let placeDisplay: string | null = null;
+        if (owner.place !== undefined) {
+          const carried = input.place === undefined && earlier?.plan.owner?.place === owner.place && earlier.lat !== null && earlier.lng !== null;
+          const found = carried ? { lat: earlier!.lat as number, lng: earlier!.lng as number, name: earlier!.place_display ?? undefined } : await geocode(owner.place, d.fetch);
+          if (!found) throw new Error(`I couldn't find "${owner.place}" on the map; ask the owner for a street address near it.`);
+          placePin = { lat: found.lat, lng: found.lng };
+          placeDisplay = found.name ?? null;
+        }
         const photo = input.media_id !== undefined ? await d.store.getMedia(input.media_id) : null;
         if (input.media_id !== undefined && (!photo || photo.venue_id !== d.venueId)) throw new Error(`media_id "${input.media_id}" not found for this venue; use the id of a photo you received.`);
 
@@ -106,11 +135,9 @@ export function boostTools(d: ToolDeps, k: ToolKit) {
         if (photo) {
           const posted = (await appliedPosts()).find((x) => x.row.media_id === photo.id);
           chosen = posted ? await fromSocialSet(posted.cs, posted.row) : { post_ref: null, permalink: null, media_id: photo.id, caption: "", image_url: photo.public_url, type: "image" };
-        } else if (input.post_ref === undefined && d.correctionFor) {
-          const corrected = await d.store.getChangeSet(d.correctionFor).catch(() => null);
-          const old = corrected && corrected.venue_id === d.venueId ? corrected.changes.find((c) => c.op === "boost_plan" && c.after !== null) : undefined;
-          const r = old ? (old.after as unknown as BoostPlanRow) : null;
-          if (r) chosen = { post_ref: r.post_ref, permalink: r.permalink, media_id: r.media_id, caption: r.caption, image_url: r.image_url, type: "image" };
+        } else if (input.post_ref === undefined && earlier) {
+          const r = earlier;
+          chosen = { post_ref: r.post_ref, permalink: r.permalink, media_id: r.media_id, caption: r.caption, image_url: r.image_url, type: "image" };
         }
         if (chosen && chosen.post_ref === null) throw new Error(UNPUBLISHED);
 
@@ -148,15 +175,24 @@ export function boostTools(d: ToolDeps, k: ToolKit) {
 
         const plan = rangeCheck(planBoost({ ...base, surroundings, followers, post: { id: chosen.post_ref ?? chosen.media_id ?? "", caption: chosen.caption, type: chosen.type, stat: chosen.stat } }));
         const pinned = surroundings.lat !== undefined && surroundings.lng !== undefined;
+        if (placePin && owner.place !== undefined) {
+          plan.reasons.push({
+            kind: "hypothesis",
+            bg: `районът е анализиран около ${keep(venue.name)}, рекламата е около ${keep(owner.place)}`,
+            en: `the area was analysed around ${keep(venue.name)}, the ad is around ${keep(owner.place)}`,
+          });
+          if (placeDisplay) plan.reasons.push({ kind: "fact", bg: `на картата: ${keep(placeDisplay)}`, en: `on the map: ${keep(placeDisplay)}` });
+        }
         if (surroundings.reason === "no_address") {
-          plan.reasons.push({ kind: "missing", bg: "липсва адрес на кафенето — добавете го, за да проверя района", en: "the café has no address — add it so I can check the area" });
-        } else if (!pinned && surroundings.reason !== "osm_unavailable") {
-          plan.reasons.push({ kind: "missing", bg: "местоположението на кафенето трябва да се провери: адресът не беше намерен на картата", en: "the café's location needs checking: its address wasn't found on the map" });
+          plan.reasons.push({ kind: "missing", bg: `липсва адрес на ${keep(venue.name)} — добавете го, за да проверя района`, en: `${keep(venue.name)} has no address — add it so I can check the area` });
+        } else if (!pinned && !placePin && surroundings.reason !== "osm_unavailable") {
+          plan.reasons.push({ kind: "missing", bg: `местоположението на ${keep(venue.name)} трябва да се провери: адресът не беше намерен на картата`, en: `${keep(venue.name)}'s location needs checking: its address wasn't found on the map` });
         }
 
         const row: BoostPlanRow = {
           plan, post_ref: chosen.post_ref, permalink: chosen.permalink, media_id: chosen.media_id, caption: chosen.caption, image_url: chosen.image_url,
-          lat: pinned ? (surroundings.lat as number) : null, lng: pinned ? (surroundings.lng as number) : null,
+          lat: placePin ? placePin.lat : pinned ? (surroundings.lat as number) : null, lng: placePin ? placePin.lng : pinned ? (surroundings.lng as number) : null,
+          place_label: owner.place ?? venue.name, place_display: placePin ? placeDisplay : null,
         };
         // The post's picture first, so it sits just above the buttons (unless make_visual just put this very picture in the chat);
         // a picture that cannot be sent never holds back the proposal.
@@ -188,5 +224,55 @@ export function boostTools(d: ToolDeps, k: ToolKit) {
 function rangeCheck(r: ReturnType<typeof planBoost>) {
   if (!("error" in r)) return r;
   if (r.error === "budget_range") throw new Error("The ad budget must be 5–200 € in total; nothing was proposed. Tell the owner the allowed range in one short sentence.");
+  if (r.error === "radius_range") throw new Error("The ad radius must be 1–50 km, in steps of half a kilometre; nothing was proposed. Tell the owner the allowed range in one short sentence.");
+  if (r.error === "age_range") throw new Error("The minimum age must be 18–65 and the maximum from the minimum up to 65 (or none); nothing was proposed. Tell the owner the allowed range in one short sentence.");
+  if (r.error === "schedule") throw new Error("An ad schedule needs at least one weekday and a start time before the end time (HH:MM); nothing was proposed. Tell the owner the allowed range in one short sentence.");
   throw new Error("An ad runs 1–14 days; nothing was proposed. Tell the owner the allowed range in one short sentence.");
+}
+
+/** Whether the business has a website the ad can lead to: its own site, a template deployment or the hosted site of a live venue. */
+function hasWebsite(v: Pick<Venue, "site_url" | "deploy" | "status">): boolean {
+  return Boolean(v.site_url) || Boolean(v.deploy?.url) || v.status === "live";
+}
+
+type BoostInputFields = {
+  budget_eur?: number; days?: number; variant?: "default" | "morning" | "weekend"; radius_km?: number; place?: string; age_min?: number; age_max?: number | null;
+  gender?: "all" | "women" | "men"; audience?: string; weekdays?: (typeof WEEKDAYS)[number][]; from?: string; to?: string;
+  goal?: "reach" | "profile_visits" | "website_visits"; placements?: "automatic" | "instagram" | "facebook"; reset?: (typeof BOOST_RESETS)[number][];
+};
+
+/** The owner's choices after this call: the carried ones, minus the fields to decide again, plus what the owner said now. `carriedSchedule` is the earlier plan's schedule. */
+function ownerChoices(input: BoostInputFields, carried: BoostOwnerChoices, carriedSchedule: BoostOwnerChoices["schedule"]): BoostOwnerChoices {
+  const owner: BoostOwnerChoices = { ...carried };
+  for (const field of input.reset ?? []) {
+    if (field === "all") for (const key of Object.keys(owner) as (keyof BoostOwnerChoices)[]) delete owner[key];
+    else if (field === "radius") delete owner.radiusKm;
+    else if (field === "place") delete owner.place;
+    else if (field === "age") { delete owner.ageMin; delete owner.ageMax; }
+    else if (field === "gender") delete owner.gender;
+    else if (field === "audience") delete owner.audience;
+    else if (field === "schedule") { delete owner.schedule; delete owner.variant; }
+    else if (field === "budget") delete owner.budgetEur;
+    else if (field === "days") delete owner.days;
+    else if (field === "goal") delete owner.goal;
+    else if (field === "placements") delete owner.placements;
+  }
+  if (input.budget_eur !== undefined) owner.budgetEur = input.budget_eur;
+  if (input.days !== undefined) owner.days = input.days;
+  // "default" means the owner asked for neither: nothing is stored.
+  if (input.variant !== undefined && input.variant !== "default") owner.variant = input.variant;
+  if (input.radius_km !== undefined) owner.radiusKm = input.radius_km;
+  if (input.place !== undefined) owner.place = input.place;
+  if (input.age_min !== undefined) owner.ageMin = input.age_min;
+  if (input.age_max !== undefined) owner.ageMax = input.age_max;
+  if (input.gender !== undefined) owner.gender = input.gender;
+  if (input.audience !== undefined) owner.audience = input.audience;
+  if (input.goal !== undefined) owner.goal = input.goal;
+  if (input.placements !== undefined) owner.placements = input.placements;
+  if (input.weekdays !== undefined || input.from !== undefined || input.to !== undefined) {
+    // A part the owner leaves out comes from their earlier schedule, else the plan's own (the analysed days or window), else every day.
+    const base = owner.schedule ?? carriedSchedule ?? { days: [...WEEKDAYS], from: "00:00", to: "23:59" };
+    owner.schedule = { days: input.weekdays ?? base.days, from: input.from ?? base.from, to: input.to ?? base.to };
+  }
+  return owner;
 }

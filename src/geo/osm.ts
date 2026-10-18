@@ -21,16 +21,18 @@ function logCode(service: string, code: string | number) {
 }
 
 /** The address as a point in Bulgaria, or null when Nominatim finds nothing, answers badly or does not answer in time. */
-export async function geocode(address: string, fetchFn: typeof fetch = fetch): Promise<{ lat: number; lng: number } | null> {
+export async function geocode(address: string, fetchFn: typeof fetch = fetch): Promise<{ lat: number; lng: number; name?: string } | null> {
   try {
     const url = `${NOMINATIM_URL}?${new URLSearchParams({ q: address, format: "jsonv2", countrycodes: "bg", limit: "1" })}`;
     const res = await fetchFn(url, { headers: { "User-Agent": OSM_USER_AGENT, Accept: "application/json" }, signal: AbortSignal.timeout(GEOCODE_TIMEOUT_MS) });
     if (!res.ok) return logCode("nominatim", res.status), null;
     const body = (await res.json()) as unknown;
-    const hit = Array.isArray(body) ? (body[0] as { lat?: unknown; lon?: unknown } | undefined) : undefined;
+    const hit = Array.isArray(body) ? (body[0] as { lat?: unknown; lon?: unknown; display_name?: unknown } | undefined) : undefined;
     const lat = Number(hit?.lat);
     const lng = Number(hit?.lon);
-    return hit && hit.lat != null && hit.lon != null && Number.isFinite(lat) && Number.isFinite(lng) ? { lat, lng } : null;
+    if (!hit || hit.lat == null || hit.lon == null || !Number.isFinite(lat) || !Number.isFinite(lng)) return null;
+    // Nominatim's own name for the place, so the owner can see which place was found.
+    return typeof hit.display_name === "string" && hit.display_name.trim() !== "" ? { lat, lng, name: hit.display_name.trim() } : { lat, lng };
   } catch (e) {
     return logCode("nominatim", e instanceof Error ? e.name : "error"), null;
   }

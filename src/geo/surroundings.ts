@@ -43,7 +43,9 @@ export async function loadSurroundings(d: SurroundingsDeps, venue: Pick<Venue, "
     // A lookup failed a moment ago: do not ask again yet. Old places for the same address are still better than none.
     if (row?.failed_at && Date.parse(now) - Date.parse(row.failed_at) < FAILURE_BACKOFF_MS) return old ? { ...old, stale: true } : missing(pinned ? "osm_unavailable" : "geocode_failed");
     // The pin of an unchanged address is already known; only a new address costs a Nominatim call.
-    const pin = pinned ?? (await geocode(address, d.fetch));
+    // Only the point: the geocoder's place name is not a column of venue_surroundings.
+    const found = pinned ?? (await geocode(address, d.fetch));
+    const pin = found ? { lat: found.lat, lng: found.lng } : null;
     if (!pin) {
       await d.store.putSurroundings({ venue_id: venue.id, address, lat: null, lng: null, places: [], fetched_at: null, failed_at: now }).catch(() => undefined);
       return missing("geocode_failed");
