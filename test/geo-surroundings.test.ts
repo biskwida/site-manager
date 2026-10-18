@@ -2,13 +2,13 @@
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import { geocode, nearbyPlaces, type Place } from "@/src/geo/osm";
-import { loadSurroundings, summarise, SURROUNDINGS_TTL_MS } from "@/src/geo/surroundings";
+import { FAILURE_BACKOFF_MS, loadSurroundings, summarise, SURROUNDINGS_TTL_MS } from "@/src/geo/surroundings";
 import { InMemoryStore } from "@/src/store/memory";
 import { NOW } from "./fixtures";
 
 const DAY = 86_400_000;
 const at = (iso: string, ms: number) => new Date(Date.parse(iso) + ms).toISOString();
-const UA = "Claudia (getclaudia.app)";
+const UA = "Claudia (https://getclaudia.app)";
 
 const place = (kind: Place["kind"], name: string | null, meters: number): Place => ({ kind, name, meters });
 
@@ -148,7 +148,7 @@ describe("loadSurroundings", () => {
     expect(r.places).toHaveLength(1);
     expect(t.osm.nominatim()).toHaveLength(1);
     expect(t.osm.overpass()).toHaveLength(1);
-    expect(await t.store.getSurroundings(t.venue.id)).toMatchObject({ address: venue.address, lat: 42.6934, lng: 23.3321, fetched_at: NOW, places: r.places });
+    expect(await t.store.getSurroundings(t.venue.id)).toMatchObject({ address: venue.address, lat: 42.6934, lng: 23.3321, fetched_at: NOW, failed_at: null, places: r.places });
   });
 
   it("uses the cache and makes no request under 30 days with the same address", async () => {
@@ -188,31 +188,76 @@ describe("loadSurroundings", () => {
     expect(t.osm.calls).toHaveLength(0);
   });
 
-  it("is missing/geocode_failed when the geocoder finds nothing, and saves nothing", async () => {
+  it("is missing/geocode_failed when the geocoder finds nothing; only the failure is recorded, no pin and no places", async () => {
     for (const geo of [[] as unknown[], "fail" as const, "timeout" as const]) {
       const t = await setup({ geo, overpass });
       expect(await loadSurroundings(t.d, t.venue, NOW)).toEqual({ status: "missing", reason: "geocode_failed", places: [] });
       expect(t.osm.overpass()).toHaveLength(0);
-      expect(await t.store.getSurroundings(t.venue.id)).toBeNull();
+      expect(await t.store.getSurroundings(t.venue.id)).toEqual({ venue_id: t.venue.id, address: venue.address, lat: null, lng: null, places: [], fetched_at: null, failed_at: NOW });
     }
   });
 
-  it("is missing/osm_unavailable on an Overpass timeout or error, never throws, and saves nothing", async () => {
+  it("is missing/osm_unavailable on an Overpass timeout or error, never throws, and records only the failure (with the pin)", async () => {
     for (const o of ["timeout", "fail", "http429"] as const) {
       const t = await setup({ overpass: o });
       expect(await loadSurroundings(t.d, t.venue, NOW)).toEqual({ status: "missing", reason: "osm_unavailable", places: [] });
-      expect(await t.store.getSurroundings(t.venue.id)).toBeNull();
+      expect(await t.store.getSurroundings(t.venue.id)).toEqual({ venue_id: t.venue.id, address: venue.address, lat: 42.6934, lng: 23.3321, places: [], fetched_at: null, failed_at: NOW });
     }
   });
 
-  it("an Overpass failure on a refresh keeps the old row (and its pin), and the next call tries again", async () => {
+  it("serves the old places, marked stale, when a due refresh fails; fetched_at stays so the next call after the backoff retries", async () => {
     const t = await setup();
     await loadSurroundings(t.d, t.venue, NOW);
     const down = fakeOsm({ overpass: "timeout" });
-    const r = await loadSurroundings({ store: t.store, fetch: down.fetch }, t.venue, at(NOW, 31 * DAY));
-    expect(r).toMatchObject({ status: "missing", reason: "osm_unavailable" });
+    const failedAt = at(NOW, 31 * DAY);
+    const r = await loadSurroundings({ store: t.store, fetch: down.fetch }, t.venue, failedAt);
+    expect(r).toMatchObject({ status: "ok", stale: true, lat: 42.6934, lng: 23.3321 });
+    expect(r.places).toHaveLength(1);
     expect(down.nominatim()).toHaveLength(0); // the pin is already known
-    expect((await t.store.getSurroundings(t.venue.id))?.fetched_at).toBe(NOW);
+    expect(await t.store.getSurroundings(t.venue.id)).toMatchObject({ fetched_at: NOW, failed_at: failedAt, places: r.places });
+    // Within the hour: still stale, and OSM is not asked.
+    const calls = down.calls.length;
+    expect(await loadSurroundings({ store: t.store, fetch: down.fetch }, t.venue, at(failedAt, FAILURE_BACKOFF_MS - 1))).toMatchObject({ status: "ok", stale: true });
+    expect(down.calls.length).toBe(calls);
+    // After the hour OSM answers again: fresh data, no stale flag, failure cleared.
+    const fresh = fakeOsm({ overpass: { elements: [] } });
+    const back = await loadSurroundings({ store: t.store, fetch: fresh.fetch }, t.venue, at(failedAt, FAILURE_BACKOFF_MS));
+    expect(back).toMatchObject({ status: "ok", places: [] });
+    expect(back.stale).toBeUndefined();
+    expect(await t.store.getSurroundings(t.venue.id)).toMatchObject({ fetched_at: at(failedAt, FAILURE_BACKOFF_MS), failed_at: null });
+  });
+
+  it("never serves old places after the address changed: a failed refresh is missing", async () => {
+    const t = await setup();
+    await loadSurroundings(t.d, t.venue, NOW);
+    const down = fakeOsm({ overpass: "timeout" });
+    const r = await loadSurroundings({ store: t.store, fetch: down.fetch }, { id: t.venue.id, address: "бул. Витоша 5, София" }, at(NOW, 31 * DAY));
+    expect(r).toEqual({ status: "missing", reason: "osm_unavailable", places: [] });
+    expect(await t.store.getSurroundings(t.venue.id)).toMatchObject({ address: "бул. Витоша 5, София", places: [], fetched_at: null });
+  });
+
+  it("does not ask OpenStreetMap again for an hour after a failure, then tries again", async () => {
+    for (const first of [{ geo: "fail" as const, reason: "geocode_failed" }, { overpass: "timeout" as const, reason: "osm_unavailable" }]) {
+      const t = await setup({ geo: first.geo, overpass: first.overpass });
+      await loadSurroundings(t.d, t.venue, NOW);
+      const calls = t.osm.calls.length;
+      expect(await loadSurroundings(t.d, t.venue, at(NOW, FAILURE_BACKOFF_MS - 1))).toEqual({ status: "missing", reason: first.reason, places: [] });
+      expect(t.osm.calls.length).toBe(calls);
+      // An hour later it asks again: against a healthy OSM it now succeeds.
+      const healthy = fakeOsm({ overpass });
+      const r = await loadSurroundings({ store: t.store, fetch: healthy.fetch }, t.venue, at(NOW, FAILURE_BACKOFF_MS));
+      expect(r.status).toBe("ok");
+      expect(healthy.overpass()).toHaveLength(1);
+    }
+  });
+
+  it("a changed address is tried at once even within the hour after a failure", async () => {
+    const t = await setup({ geo: "fail" });
+    await loadSurroundings(t.d, t.venue, NOW);
+    const healthy = fakeOsm({ overpass });
+    const r = await loadSurroundings({ store: t.store, fetch: healthy.fetch }, { id: t.venue.id, address: "бул. Витоша 5, София" }, at(NOW, 60_000));
+    expect(r.status).toBe("ok");
+    expect(healthy.nominatim()).toHaveLength(1);
   });
 
   it("sends the User-Agent on every request", async () => {
@@ -246,7 +291,7 @@ describe("venue_surroundings in SQL", () => {
   it.each(["schema.sql", MIGRATION])("%s creates the table with the agreed columns", (file) => {
     const table = read(file).find((s) => s.startsWith("create table if not exists public.venue_surroundings"));
     expect(table).toBeDefined();
-    for (const c of ["venue_id uuid primary key references public.venues(id) on delete cascade", "address text not null", "lat double precision", "lng double precision", "places jsonb not null default '[]'", "fetched_at timestamptz not null"]) expect(table).toContain(c);
+    for (const c of ["venue_id uuid primary key references public.venues(id) on delete cascade", "address text not null", "lat double precision", "lng double precision", "places jsonb not null default '[]'", "fetched_at timestamptz", "failed_at timestamptz"]) expect(table).toContain(c);
   });
   it.each(["policies.sql", MIGRATION])("%s makes it server-only: RLS on, nothing granted, no policy", (file) => {
     const s = read(file);

@@ -6,7 +6,7 @@ import type { Announcement, BusinessType, Category, Change, ChangeSet, ChatLang,
 import type { Place } from "../geo/osm";
 import type { WizardDraft } from "../wizard/schema";
 import { legacyTelegramId } from "../channels/ref";
-import { DEFAULT_HOURS, extensionFor, newInviteCode, newToken, PUBLISH_CLAIM_TTL_MS, type ChangeSetPatch, type ExpiredTimer, type NewCategory, type NewChangeSet, type NewItem, type NewVenue, type Store, type VenuePatch, type Destination, type DestinationKind, type DestinationPatch, type DestinationSync, type DestinationWithSecrets, type NewDestination, type NewSync, type SyncPatch, type SyncStatus, type ListSyncsOpts, type ApplyResult, checkLimitValue, checkMemberLang, CONFIG_KEY_RE, newConfirmationCode, type DataDeletionRequest, type DeletionProvider, type DeletionStatus, type CommentStatus, type ListCommentsOpts, type NewSocialComment, type SocialComment, type SocialCommentPatch, COMMENT_REDACTED, redactCommentRow , type VenueSurroundings } from "./types";
+import { DEFAULT_HOURS, extensionFor, newInviteCode, newToken, PUBLISH_CLAIM_TTL_MS, type ChangeSetPatch, type ExpiredTimer, type NewCategory, type NewChangeSet, type NewItem, type NewVenue, type Store, type VenuePatch, type Destination, type DestinationKind, type DestinationPatch, type DestinationSync, type DestinationWithSecrets, type NewDestination, type NewSync, type SyncPatch, type SyncStatus, type ListSyncsOpts, type ApplyResult, checkLimitValue, checkMemberLang, CONFIG_KEY_RE, newConfirmationCode, type DataDeletionRequest, type DeletionProvider, type DeletionStatus, type CommentStatus, type ListCommentsOpts, type NewSocialComment, type SocialComment, type SocialCommentPatch, COMMENT_REDACTED, redactCommentRow, type VenueSurroundings } from "./types";
 import { limitBlocks } from "./usage";
 
 type Row = Record<string, unknown>;
@@ -782,7 +782,7 @@ export class SupabaseStore implements Store {
     const { data, error } = await this.db.from("venue_surroundings").select("*").eq("venue_id", venueId).maybeSingle();
     if (error) throw new Error(`getSurroundings: ${error.message}`);
     if (!data) return null;
-    return { venue_id: str(data.venue_id), address: str(data.address), lat: data.lat === null ? null : num(data.lat), lng: data.lng === null ? null : num(data.lng), places: (data.places ?? []) as Place[], fetched_at: iso(data.fetched_at) };
+    return { venue_id: str(data.venue_id), address: str(data.address), lat: data.lat === null ? null : num(data.lat), lng: data.lng === null ? null : num(data.lng), places: (data.places ?? []) as Place[], fetched_at: isoOrNull(data.fetched_at), failed_at: isoOrNull(data.failed_at) };
   }
   async putSurroundings(row: VenueSurroundings) {
     await must(this.db.from("venue_surroundings").upsert(row, { onConflict: "venue_id" }).select("venue_id"), "putSurroundings");

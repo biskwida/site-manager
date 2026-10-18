@@ -960,10 +960,10 @@ export function storeContract(name: string, make: () => Promise<Store>, storageH
       const s = await make();
       const v = await s.createVenue({ slug: "t-geo", name: "Test", address: "ул. Пример 1, София" });
       expect(await s.getSurroundings(v.id)).toBeNull();
-      const row = { venue_id: v.id, address: "ул. Пример 1, София", lat: 42.6934, lng: 23.3321, places: [{ kind: "park" as const, name: "Градинка", meters: 80 }, { kind: "office" as const, name: null, meters: 1200.5 }], fetched_at: NOW };
+      const row = { venue_id: v.id, address: "ул. Пример 1, София", lat: 42.6934, lng: 23.3321, places: [{ kind: "park" as const, name: "Градинка", meters: 80 }, { kind: "office" as const, name: null, meters: 1200.5 }], fetched_at: NOW as string | null, failed_at: null as string | null };
       await s.putSurroundings(row);
       expect(await s.getSurroundings(v.id)).toEqual(row);
-      const next = { ...row, address: "бул. Витоша 5, София", lat: 42.69, lng: 23.32, places: [], fetched_at: LATER };
+      const next = { ...row, address: "бул. Витоша 5, София", lat: 42.69, lng: 23.32, places: [], fetched_at: null, failed_at: LATER };
       await s.putSurroundings(next);
       expect(await s.getSurroundings(v.id)).toEqual(next);
       await s.deleteVenue(v.id);

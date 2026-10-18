@@ -457,7 +457,10 @@ export interface VenueSurroundings {
   lat: number | null;
   lng: number | null;
   places: Place[];
-  fetched_at: string;
+  /** When the places were last fetched successfully; null when OpenStreetMap has never answered for this address (only a failure is recorded). */
+  fetched_at: string | null;
+  /** When the last lookup failed; calls within an hour of it do not ask OpenStreetMap again. Cleared by the next success. */
+  failed_at: string | null;
 }
 export interface Store {
   /** The venue's cached surroundings; null when there are none. */

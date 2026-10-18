@@ -6,6 +6,8 @@ import type { Store } from "../store/types";
 import { PLACE_KINDS, geocode, nearbyPlaces, type Place, type PlaceKind } from "./osm";
 
 export const SURROUNDINGS_TTL_MS = 30 * 86_400_000;
+/** After a failed lookup, OpenStreetMap is not asked again for this long. */
+export const FAILURE_BACKOFF_MS = 3_600_000;
 
 export interface Surroundings {
   status: "ok" | "missing";
@@ -14,6 +16,8 @@ export interface Surroundings {
   /** The café's pin when it is known (ok); the ad's 2 km radius is drawn around it. */
   lat?: number;
   lng?: number;
+  /** True when the places are older than 30 days because the refresh failed: still the same address, so still a good picture of the area. */
+  stale?: boolean;
 }
 
 export interface SurroundingsDeps {
@@ -30,17 +34,28 @@ export async function loadSurroundings(d: SurroundingsDeps, venue: Pick<Venue, "
     if (!address) return missing("no_address");
     // A store that cannot be read is no cache; the lookup goes on (OpenStreetMap is asked once more, which the policy allows).
     const cached = await d.store.getSurroundings(venue.id).catch(() => null);
-    const sameAddress = cached !== null && cached.address === address;
-    if (cached && sameAddress && cached.lat !== null && cached.lng !== null && Date.parse(now) - Date.parse(cached.fetched_at) < SURROUNDINGS_TTL_MS) {
-      return { status: "ok", places: cached.places, lat: cached.lat, lng: cached.lng };
-    }
+    // A row of another address says nothing about this one: no pin, no places, no recorded failure.
+    const row = cached && cached.address === address ? cached : null;
+    const pinned = row && row.lat !== null && row.lng !== null ? { lat: row.lat, lng: row.lng } : null;
+    // Places we once fetched for this address (a failure-only row has fetched_at null and none).
+    const old: Surroundings | null = row && pinned && row.fetched_at !== null ? { status: "ok", places: row.places, ...pinned } : null;
+    if (old && row?.fetched_at && Date.parse(now) - Date.parse(row.fetched_at) < SURROUNDINGS_TTL_MS) return old;
+    // A lookup failed a moment ago: do not ask again yet. Old places for the same address are still better than none.
+    if (row?.failed_at && Date.parse(now) - Date.parse(row.failed_at) < FAILURE_BACKOFF_MS) return old ? { ...old, stale: true } : missing(pinned ? "osm_unavailable" : "geocode_failed");
     // The pin of an unchanged address is already known; only a new address costs a Nominatim call.
-    const pin = sameAddress && cached.lat !== null && cached.lng !== null ? { lat: cached.lat, lng: cached.lng } : await geocode(address, d.fetch);
-    if (!pin) return missing("geocode_failed");
+    const pin = pinned ?? (await geocode(address, d.fetch));
+    if (!pin) {
+      await d.store.putSurroundings({ venue_id: venue.id, address, lat: null, lng: null, places: [], fetched_at: null, failed_at: now }).catch(() => undefined);
+      return missing("geocode_failed");
+    }
     const places = await nearbyPlaces(pin.lat, pin.lng, d.fetch);
-    if (!places) return missing("osm_unavailable");
-    await d.store.putSurroundings({ venue_id: venue.id, address, lat: pin.lat, lng: pin.lng, places, fetched_at: now }).catch(() => undefined); // losing the cache costs a later lookup, not this answer
-    return { status: "ok", places, lat: pin.lat, lng: pin.lng };
+    if (!places) {
+      // fetched_at stays as it was, so the next call after the backoff tries again; the old places (same address) carry on meanwhile.
+      await d.store.putSurroundings({ venue_id: venue.id, address, ...pin, places: old?.places ?? [], fetched_at: row?.fetched_at ?? null, failed_at: now }).catch(() => undefined);
+      return old ? { ...old, stale: true } : missing("osm_unavailable");
+    }
+    await d.store.putSurroundings({ venue_id: venue.id, address, ...pin, places, fetched_at: now, failed_at: null }).catch(() => undefined); // losing the cache costs a later lookup, not this answer
+    return { status: "ok", places, ...pin };
   } catch {
     return missing("osm_unavailable");
   }

@@ -8,7 +8,7 @@ export const PLACE_KINDS: readonly PlaceKind[] = ["university", "government", "o
 /** One place near the café; `meters` is the straight-line distance. */
 export interface Place { kind: PlaceKind; name: string | null; meters: number }
 
-export const OSM_USER_AGENT = "Claudia (getclaudia.app)";
+export const OSM_USER_AGENT = "Claudia (https://getclaudia.app)";
 export const SEARCH_RADIUS_M = 2000;
 const NOMINATIM_URL = "https://nominatim.openstreetmap.org/search";
 const OVERPASS_URL = "https://overpass-api.de/api/interpreter";

@@ -650,4 +650,3 @@ export class InMemoryStore implements Store {
     this.surroundings.set(row.venue_id, clone(row));
   }
 }
-
