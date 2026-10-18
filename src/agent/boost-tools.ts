@@ -69,7 +69,7 @@ const socialRowOf = (cs: ChangeSet): SocialPostRow | null => {
 export function boostTools(d: ToolDeps, k: ToolKit) {
   const boost = betaZodTool({
     name: "propose_boost",
-    description: `Propose an ad (boost) for one of the venue's posts: who sees it (within a radius of the business), when, the budget and the reasons, with the post's picture above the ✅ / ✏️ / ❌ buttons. For now ✅ only saves the plan: nothing is spent and nothing is published until Meta approves ads in Claudia. Never use social_post for an ad. Claudia's plan comes from her analysis of the area, followers and posts; pass a field only when the owner says it. On a change pass only the changed fields (earlier choices are kept); use reset for fields where the owner wants Claudia to decide again. ${VARIANT_WORDS}`,
+    description: `Propose an ad (boost) for one of the venue's posts: who sees it (within a radius of the business), when, the budget and the reasons, with the post's picture above the ✅ / ✏️ / ❌ buttons. For now ✅ only saves the plan: nothing is spent and nothing is published until Meta approves ads in Claudia. Never use social_post for an ad. Claudia's plan comes from her analysis of the area, followers and posts; pass a field only when the owner says it. On a change pass only the changed fields (earlier choices are kept); use reset for fields where the owner wants Claudia to decide again, and reset ["all"] when the owner says "ти реши за всичко" / "decide everything". ${VARIANT_WORDS}`,
     inputSchema: BoostSchema,
     run: (input) =>
       k.attempt(async () => {
@@ -172,9 +172,9 @@ export function boostTools(d: ToolDeps, k: ToolKit) {
           });
         }
         if (surroundings.reason === "no_address") {
-          plan.reasons.push({ kind: "missing", bg: "липсва адрес на кафенето — добавете го, за да проверя района", en: "the café has no address — add it so I can check the area" });
-        } else if (!pinned && surroundings.reason !== "osm_unavailable") {
-          plan.reasons.push({ kind: "missing", bg: "местоположението на кафенето трябва да се провери: адресът не беше намерен на картата", en: "the café's location needs checking: its address wasn't found on the map" });
+          plan.reasons.push({ kind: "missing", bg: `липсва адрес на ${keep(venue.name)} — добавете го, за да проверя района`, en: `${keep(venue.name)} has no address — add it so I can check the area` });
+        } else if (!pinned && !placePin && surroundings.reason !== "osm_unavailable") {
+          plan.reasons.push({ kind: "missing", bg: `местоположението на ${keep(venue.name)} трябва да се провери: адресът не беше намерен на картата`, en: `${keep(venue.name)}'s location needs checking: its address wasn't found on the map` });
         }
 
         const row: BoostPlanRow = {
@@ -233,12 +233,13 @@ type BoostInputFields = {
 function ownerChoices(input: BoostInputFields, carried: BoostOwnerChoices): BoostOwnerChoices {
   const owner: BoostOwnerChoices = { ...carried };
   for (const field of input.reset ?? []) {
-    if (field === "radius") delete owner.radiusKm;
+    if (field === "all") for (const key of Object.keys(owner) as (keyof BoostOwnerChoices)[]) delete owner[key];
+    else if (field === "radius") delete owner.radiusKm;
     else if (field === "place") delete owner.place;
     else if (field === "age") { delete owner.ageMin; delete owner.ageMax; }
     else if (field === "gender") delete owner.gender;
     else if (field === "audience") delete owner.audience;
-    else if (field === "schedule") delete owner.schedule;
+    else if (field === "schedule") { delete owner.schedule; delete owner.variant; }
     else if (field === "budget") delete owner.budgetEur;
     else if (field === "days") delete owner.days;
     else if (field === "goal") delete owner.goal;

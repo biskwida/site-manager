@@ -78,7 +78,7 @@ export const UndoSchema = z.object({ change_set_id: z.string().describe('An id f
 export const ListSchema = z.object({ limit: z.number().int().min(1).max(50).default(10) });
 export const CancelSchema = z.object({ change_set_id: Id });
 
-export const BOOST_RESETS = ["radius", "place", "age", "gender", "audience", "schedule", "budget", "days", "goal", "placements"] as const;
+export const BOOST_RESETS = ["all", "radius", "place", "age", "gender", "audience", "schedule", "budget", "days", "goal", "placements"] as const;
 /** propose_boost (src/agent/boost-tools.ts). The budget and days ranges are checked by planBoost, which names the allowed range. */
 export const BoostSchema = z.object({
   media_id: z.string().min(1).optional().describe("The media_id of the photo to boost, when the owner sent or named one (this message or the conversation)."),
@@ -96,6 +96,6 @@ export const BoostSchema = z.object({
   to: z.string().optional().describe("End time of day HH:MM, only when the owner says it."),
   goal: z.enum(["reach", "profile_visits", "website_visits"]).optional().describe("What the ad is for, only when the owner says it."),
   placements: z.enum(["automatic", "instagram", "facebook"]).optional().describe("Where the ad shows, only when the owner says it."),
-  reset: z.array(z.enum(BOOST_RESETS)).optional().describe('Fields where the owner says "ти реши" ("you decide"): Claudia\'s analysis decides them again.'),
+  reset: z.array(z.enum(BOOST_RESETS)).optional().describe('Fields where the owner says "ти реши" ("you decide"): Claudia\'s analysis decides them again. "all" when the owner says "ти реши за всичко" ("decide everything"): every owner choice is dropped.'),
   variant: z.enum(["default", "morning", "weekend"]).optional().describe('"morning" only when the owner says сутрин / закуска / до 11 / morning / breakfast; "weekend" only when the owner says уикенд / събота / неделя / бранч / концерт / weekend / brunch / event / live music; "default" when the owner asks for neither. Omit to let the caption decide.'),
 });

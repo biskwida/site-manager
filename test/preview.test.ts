@@ -298,7 +298,7 @@ describe("renderPreview: the reader's language only", () => {
 
 describe("renderPreview: boost_plan (an ad plan; ✅ only saves it)", () => {
   const plan = (over: Partial<BoostPlanRow["plan"]> = {}): BoostPlanRow["plan"] => ({
-    variant: "default", radiusKm: 2, place: null, ageMin: 18, ageMax: null, gender: "all", audience: null, schedule: null, budgetEur: 20, days: 5, placements: "automatic", goal: "reach", owner: {},
+    variant: "default", radiusKm: 2, place: null, ageMin: 18, ageMax: null, suggestedAge: null, gender: "all", audience: null, schedule: null, budgetEur: 20, days: 5, placements: "automatic", goal: "reach", owner: {},
     reasons: [
       { kind: "missing", bg: "не успях да проверя района", en: "I couldn't check the area" },
       { kind: "hypothesis", bg: "сутрешна оферта → делнични сутрини", en: "a morning offer → weekday mornings" },
@@ -350,7 +350,7 @@ describe("renderPreview: boost_plan (an ad plan; ✅ only saves it)", () => {
 
   it("marks the owner's choices ✎, keeps the owner's words, and shows suggestions to Meta only when there are some", () => {
     const p = plan({
-      radiusKm: 5, place: "НДК", ageMin: 25, ageMax: 44, gender: "women", audience: "студенти", goal: "website_visits", placements: "facebook",
+      radiusKm: 5, place: "НДК", ageMin: 18, ageMax: null, suggestedAge: { min: 25, max: 44 }, gender: "women", audience: "студенти", goal: "website_visits", placements: "facebook",
       schedule: { days: ["mon", "tue", "wed"], from: "09:00", to: "12:00" }, days: 3, budgetEur: 30,
       owner: { radiusKm: 5, place: "НДК", gender: "women", audience: "студенти", goal: "website_visits", placements: "facebook", schedule: { days: ["mon", "tue", "wed"], from: "09:00", to: "12:00" }, budgetEur: 30, days: 3 },
     });
@@ -369,6 +369,12 @@ describe("renderPreview: boost_plan (an ad plan; ✅ only saves it)", () => {
       "When: 3 days ✎, Mon–Wed 09:00–12:00 ✎",
       "Budget: 30 € ✎ total · Goal: website visits ✎ · Shows on: Facebook only ✎",
     ]);
+  });
+
+  it("owner age bounds are the hard limits (✎), and no suggestion to Meta is shown when there is none", () => {
+    const p = plan({ ageMin: 30, ageMax: 40, owner: { ageMin: 30, ageMax: 40 } });
+    expect(renderPreview(state(), [row(p)], "bg", TZ).split("\n")[2]).toBe("Кой: 30–40 ✎");
+    expect(renderPreview(state(), [row(plan({ ageMin: 30, owner: { ageMin: 30 } }))], "en", TZ).split("\n")[2]).toBe("Who: 30+ ✎");
   });
 
   it("an old row without the new fields still renders: no place, 18+, no suggestions, no marks", () => {

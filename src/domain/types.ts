@@ -448,10 +448,12 @@ export interface BoostPlanData {
   radiusKm: number;
   /** The centre of the radius when the owner named another place; null = the business itself. */
   place: string | null;
-  /** Only the minimum age is a hard limit. */
+  /** The hard minimum age: the owner's, else 18. */
   ageMin: number;
-  /** A suggestion to Meta; null = no upper age (65+). */
+  /** The owner's maximum age; null = none (65+). */
   ageMax: number | null;
+  /** The analysis' age range, only a suggestion to Meta; null when the owner set an age bound or the followers show no concentration. Rows saved before this field read as null. */
+  suggestedAge: { min: number; max: number | null } | null;
   /** A suggestion to Meta. */
   gender: "all" | "women" | "men";
   /** The owner's own words about who the customers are, as written; null when they said nothing. */

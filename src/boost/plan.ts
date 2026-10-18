@@ -335,8 +335,10 @@ export function planBoost(input: BoostInput): BoostPlan | { error: BoostPlanErro
   // The owner setting one age bound leaves the other at its plain value: a suggestion beside an owner bound could contradict it.
   const ageOwned = o.ageMin !== undefined || o.ageMax !== undefined;
   const ageSuggestion = ageOwned ? { ageMin: MIN_AGE, ageMax: null, reason: null } : ageFromFollowers(input.followers);
-  const ageMin = o.ageMin ?? ageSuggestion.ageMin;
-  const ageMax = o.ageMax !== undefined ? o.ageMax : ageSuggestion.ageMax;
+  // The hard minimum (the owner's, else 18) and maximum are the owner's; the analysis' age range is only a suggestion to Meta.
+  const ageMin = o.ageMin ?? MIN_AGE;
+  const ageMax = o.ageMax ?? null;
+  const suggestedAge = ageSuggestion.reason ? { min: ageSuggestion.ageMin, max: ageSuggestion.ageMax } : null;
   const genderSuggestion = genderFromFollowers(input.followers);
   const gender = o.gender ?? genderSuggestion.gender;
 
@@ -375,6 +377,7 @@ export function planBoost(input: BoostInput): BoostPlan | { error: BoostPlanErro
     place: o.place ?? null,
     ageMin,
     ageMax,
+    suggestedAge,
     gender,
     audience: o.audience ?? null,
     schedule,

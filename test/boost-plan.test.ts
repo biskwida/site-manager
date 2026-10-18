@@ -52,7 +52,7 @@ const allText = (p: BoostPlan) => p.reasons.map((r) => `${r.bg}\n${r.en}`).join(
 describe("planBoost defaults", () => {
   it("3 km for a mixed area, ages 25–44 from the followers, 20 EUR over 5 days, automatic placements, reach, open days", () => {
     const p = plan();
-    expect(p).toMatchObject({ variant: "default", radiusKm: 3, ageMin: 25, ageMax: 44, gender: "all", budgetEur: 20, days: 5, placements: "automatic", goal: "reach", owner: {}, place: null, audience: null });
+    expect(p).toMatchObject({ variant: "default", radiusKm: 3, ageMin: 18, ageMax: null, suggestedAge: { min: 25, max: 44 }, gender: "all", budgetEur: 20, days: 5, placements: "automatic", goal: "reach", owner: {}, place: null, audience: null });
     // The test café is closed on Sunday: ads on the open days only.
     expect(p.schedule).toEqual({ days: ["mon", "tue", "wed", "thu", "fri", "sat"], from: "00:00", to: "23:59" });
   });
@@ -285,7 +285,7 @@ describe("analysis: age and gender from the followers", () => {
   const followers = (age: Record<string, number>, gender: Record<string, number> = {}): FollowerProfile => ({ followers: 300, age, gender, cities: [] });
   it("the shortest run of bands holding 60% of followers: 25–44", () => {
     const p = plan({ followers: followers({ "18-24": 0.1, "25-34": 0.4, "35-44": 0.3, "45-54": 0.1, "55-64": 0.05, "65+": 0.05 }) });
-    expect(p).toMatchObject({ ageMin: 25, ageMax: 44 });
+    expect(p.suggestedAge).toEqual({ min: 25, max: 44 }); expect(p).toMatchObject({ ageMin: 18, ageMax: null });
     const line = p.reasons.find((r) => r.kind === "hypothesis" && r.bg.includes("последователите са 25–44"));
     expect(line?.bg).toBe("най-много от последователите са 25–44 → предлагам 25–44 на Meta");
     expect(line?.en).toBe("most followers are 25–44 → suggesting 25–44 to Meta");
@@ -293,38 +293,38 @@ describe("analysis: age and gender from the followers", () => {
   it("13-17 is left out, and a run ending in 65+ has no maximum", () => {
     const p = plan({ followers: followers({ "13-17": 0.5, "18-24": 0.05, "45-54": 0.1, "55-64": 0.15, "65+": 0.2 }) });
     // 55-64 + 65+ = 0.35 of 0.5: 70%.
-    expect(p).toMatchObject({ ageMin: 55, ageMax: null });
+    expect(p.suggestedAge).toEqual({ min: 55, max: null }); expect(p).toMatchObject({ ageMin: 18, ageMax: null });
     expect(p.reasons.find((r) => r.bg.includes("→ предлагам"))?.bg).toBe("най-много от последователите са 55+ → предлагам 55+ на Meta");
   });
   it("a run on the higher sum wins a tie in length", () => {
     // 18-24+25-34 = 0.6 and 25-34+35-44 = 0.65 both reach 60% of 1.0 with two bands; the higher one wins.
     const p = plan({ followers: followers({ "18-24": 0.2, "25-34": 0.4, "35-44": 0.25, "45-54": 0.15 }) });
-    expect(p).toMatchObject({ ageMin: 25, ageMax: 44 });
+    expect(p.suggestedAge).toEqual({ min: 25, max: 44 }); expect(p).toMatchObject({ ageMin: 18, ageMax: null });
   });
   it("uniform shares are no concentration: 18 / none, no age line", () => {
     const p = plan({ followers: followers({ "18-24": 1 / 6, "25-34": 1 / 6, "35-44": 1 / 6, "45-54": 1 / 6, "55-64": 1 / 6, "65+": 1 / 6 }) });
-    expect(p).toMatchObject({ ageMin: 18, ageMax: null });
+    expect(p.suggestedAge).toBeNull(); expect(p).toMatchObject({ ageMin: 18, ageMax: null });
     expect(p.reasons.some((r) => r.bg.includes("→ предлагам"))).toBe(false);
   });
   it("a run of more than 3 bands is no concentration either", () => {
     const p = plan({ followers: followers({ "18-24": 0.2, "25-34": 0.15, "35-44": 0.15, "45-54": 0.15, "55-64": 0.15, "65+": 0.2 }) });
-    expect(p).toMatchObject({ ageMin: 18, ageMax: null });
+    expect(p.suggestedAge).toBeNull(); expect(p).toMatchObject({ ageMin: 18, ageMax: null });
   });
   it("a band with no followers inside a run is a member of it", () => {
     const p = plan({ followers: followers({ "18-24": 0.05, "25-34": 0.4, "35-44": 0, "45-54": 0.4, "55-64": 0.05, "65+": 0.1 }) });
-    expect(p).toMatchObject({ ageMin: 25, ageMax: 54 });
+    expect(p.suggestedAge).toEqual({ min: 25, max: 54 }); expect(p).toMatchObject({ ageMin: 18, ageMax: null });
   });
   it("keys Meta might add (U, Unknown) are ignored, not counted in the total", () => {
     const p = plan({ followers: followers({ U: 0.9, Unknown: 0.9, "25-34": 0.5, "35-44": 0.3, "45-54": 0.2 }) });
-    expect(p).toMatchObject({ ageMin: 25, ageMax: 44 });
-    expect(plan({ followers: followers({ U: 1, Unknown: 1 }) })).toMatchObject({ ageMin: 18, ageMax: null });
+    expect(p.suggestedAge).toEqual({ min: 25, max: 44 }); expect(p).toMatchObject({ ageMin: 18, ageMax: null });
+    expect(plan({ followers: followers({ U: 1, Unknown: 1 }) }).suggestedAge).toBeNull();
   });
   it("no followers → 18 / none, everyone, and no age or gender hypothesis", () => {
     const p = plan({ followers: null });
-    expect(p).toMatchObject({ ageMin: 18, ageMax: null, gender: "all" });
+    expect(p).toMatchObject({ ageMin: 18, ageMax: null, gender: "all", suggestedAge: null });
     expect(p.reasons.some((r) => /предлагам|suggesting/.test(r.bg + r.en))).toBe(false);
     // Followers with no age data are the same.
-    expect(plan({ followers: followers({}) })).toMatchObject({ ageMin: 18, ageMax: null });
+    expect(plan({ followers: followers({}) })).toMatchObject({ ageMin: 18, ageMax: null, suggestedAge: null });
   });
   it("women when F is at least 75% of F+M+U, men likewise, otherwise everyone", () => {
     const g = (F: number, M: number, U = 0) => plan({ followers: followers({}, { F, M, U }) });
@@ -385,11 +385,12 @@ describe("owner choices on top of the analysis", () => {
   });
   it("one owner age bound leaves the other plain (18 / none), with no age suggestion", () => {
     const f: FollowerProfile = { followers: 300, age: { "18-24": 0.1, "25-34": 0.5, "35-44": 0.3, "45-54": 0.1 }, gender: {}, cities: [] };
-    expect(plan({ followers: f })).toMatchObject({ ageMin: 25, ageMax: 44 });
+    expect(plan({ followers: f })).toMatchObject({ ageMin: 18, ageMax: null, suggestedAge: { min: 25, max: 44 } });
     const min = plan({ followers: f, owner: { ageMin: 30 } });
-    expect(min).toMatchObject({ ageMin: 30, ageMax: null });
+    expect(min).toMatchObject({ ageMin: 30, ageMax: null, suggestedAge: null });
     const max = plan({ followers: f, owner: { ageMax: 40 } });
-    expect(max).toMatchObject({ ageMin: 18, ageMax: 40 });
+    expect(max).toMatchObject({ ageMin: 18, ageMax: 40, suggestedAge: null });
+    expect(plan({ followers: f, owner: { ageMax: null } })).toMatchObject({ ageMin: 18, ageMax: null, suggestedAge: null });
     for (const p of [min, max]) expect(p.reasons.some((r) => r.bg.includes("→ предлагам"))).toBe(false);
   });
   it("an owner radius is not scaled by a variant, and the area line is gone", () => {

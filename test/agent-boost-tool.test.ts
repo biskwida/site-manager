@@ -9,6 +9,7 @@ import { GraphClient, IG_GRAPH } from "@/src/destinations/meta-graph";
 import { encryptSecrets, parseSecretKey } from "@/src/destinations/secrets";
 import { withDestinationSync } from "@/src/destinations/store-hook";
 import type { BoostPlanRow, Change, SocialPostRow } from "@/src/domain/types";
+import { DEMO_VENUE } from "@/src/seed/demo";
 import type { Store } from "@/src/store/types";
 import { changeUsage } from "@/src/store/usage";
 import { FakeMessenger, makeDemo } from "./helpers";
@@ -291,10 +292,11 @@ describe("propose_boost: the inputs it could not read are missing, never invente
     const s = await setup({ area: "none" });
     const r = await call(s.tools, "propose_boost", { media_id: s.photo.id });
     const cs = await s.store.getChangeSet(r.change_set_id as string);
-    expect(cs.preview_bg).toContain("— липсва адрес на кафенето — добавете го, за да проверя района");
-    expect(cs.preview_en).toContain("— the café has no address — add it so I can check the area");
+    expect(cs.preview_bg).toContain("— липсва адрес на ⟦Кафене „Ъгъла“⟧ — добавете го, за да проверя района");
+    expect(cs.preview_en).toContain("— ⟦Кафене „Ъгъла“⟧ has no address — add it so I can check the area");
     expect(cs.preview_bg).not.toContain("не беше намерен на картата");
     expect(s.outbound).toEqual([]);
+    expect(s.messenger.sent.at(-1)!.text).toContain("— липсва адрес на Кафене „Ъгъла“ —");
   });
 
   it("when the address is not on the map, the proposal also says the location needs checking", async () => {
@@ -302,8 +304,8 @@ describe("propose_boost: the inputs it could not read are missing, never invente
     const r = await call(s.tools, "propose_boost", { media_id: s.photo.id });
     const cs = await s.store.getChangeSet(r.change_set_id as string);
     expect(cs.preview_bg).toContain("— не успях да проверя района");
-    expect(cs.preview_bg).toContain("— местоположението на кафенето трябва да се провери: адресът не беше намерен на картата");
-    expect(cs.preview_en).toContain("— the café's location needs checking: its address wasn't found on the map");
+    expect(cs.preview_bg).toContain("— местоположението на ⟦Кафене „Ъгъла“⟧ трябва да се провери: адресът не беше намерен на картата");
+    expect(cs.preview_en).toContain("— ⟦Кафене „Ъгъла“⟧'s location needs checking: its address wasn't found on the map");
     expect(rowOf(cs)).toMatchObject({ lat: null, lng: null });
   });
 });
@@ -667,5 +669,85 @@ describe("propose_boost: the old row without the new fields", () => {
     const row = rowOf(await s.store.getChangeSet(r.change_set_id as string));
     expect(row.plan.owner).toEqual({ budgetEur: 25 });
     expect(row.place_label).toBe("Кафене „Ъгъла“");
+  });
+});
+
+describe("propose_boost: fix round 1", () => {
+  const correcting = (s: Awaited<ReturnType<typeof setup>>, first: Record<string, unknown>) => makeTools({ ...s.deps, turnSets: new Set(), correctionFor: first.change_set_id as string });
+
+  it("reset [schedule] also drops the owner's morning/weekend variant", async () => {
+    const s = await setup();
+    const first = await call(s.tools, "propose_boost", { media_id: s.photo.id, variant: "weekend", budget_eur: 30 });
+    expect(rowOf(await s.store.getChangeSet(first.change_set_id as string)).plan).toMatchObject({ variant: "weekend", radiusKm: 4.5 });
+    const r = await call(correcting(s, first), "propose_boost", { reset: ["schedule"] });
+    const plan = rowOf(await s.store.getChangeSet(r.change_set_id as string)).plan;
+    expect(plan).toMatchObject({ variant: "default", radiusKm: 3, budgetEur: 30 });
+    expect(plan.owner).toEqual({ budgetEur: 30 });
+  });
+
+  it("reset [all] drops every owner choice and keeps the post: \"само сутрин\" then \"ти реши за всичко\" is the analysis plan with no ✎", async () => {
+    const s = await setup();
+    const first = await call(s.tools, "propose_boost", { media_id: s.photo.id, variant: "morning", radius_km: 2, gender: "women", audience: "студенти", budget_eur: 30 });
+    expect(rowOf(await s.store.getChangeSet(first.change_set_id as string)).plan.variant).toBe("morning");
+    const r = await call(correcting(s, first), "propose_boost", { reset: ["all"] });
+    const cs = await s.store.getChangeSet(r.change_set_id as string);
+    const row = rowOf(cs);
+    expect(row.plan.owner).toEqual({});
+    expect(row.plan).toMatchObject({ variant: "default", radiusKm: 3, gender: "all", audience: null, budgetEur: 20, days: 5, schedule: { days: ["mon", "tue", "wed", "thu", "fri", "sat"], from: "00:00", to: "23:59" } });
+    expect(row).toMatchObject({ post_ref: `ig-${s.photo.id}`, media_id: s.photo.id, place_label: "Кафене „Ъгъла“" });
+    expect(cs.preview_bg).not.toContain("✎");
+    expect(cs.preview_en).not.toContain("✎");
+  });
+
+  it("a ✏️ on another venue's plan carries nothing", async () => {
+    const s = await setup();
+    const other = await s.plain.createVenue({ ...DEMO_VENUE, slug: "drugo" });
+    const foreign: BoostPlanRow = { plan: { variant: "default", radiusKm: 7, place: null, ageMin: 40, ageMax: 50, suggestedAge: null, gender: "men", audience: "чужди", schedule: null, budgetEur: 99, days: 9, placements: "automatic", goal: "reach", reasons: [], owner: { radiusKm: 7, gender: "men", budgetEur: 99 } }, post_ref: "foreign-post", permalink: null, media_id: null, caption: "чужд", image_url: null, lat: 1, lng: 1, place_label: "Чуждо" };
+    const change: Change = { position: 0, op: "boost_plan", entity: "boost_plan", entity_id: "f-1", before: null, after: foreign as unknown as Change["after"] };
+    const cs = await s.store.createChangeSet({ venue_id: other.id, chat_ref: "tg:9", summary_bg: "План", summary_en: "Plan", preview_bg: "", preview_en: "", source: "text", status: "proposed", changes: [change] });
+    const r = await call(correcting(s, { change_set_id: cs.id }), "propose_boost", { budget_eur: 25 });
+    expect(r.status).toBe("proposed");
+    const row = rowOf(await s.store.getChangeSet(r.change_set_id as string));
+    expect(row.plan.owner).toEqual({ budgetEur: 25 });
+    expect(row.plan).toMatchObject({ radiusKm: 3, gender: "all", audience: null });
+    expect(row).toMatchObject({ post_ref: `ig-${s.photo.id}`, caption: "" });
+    expect((await s.store.getChangeSet(cs.id)).status).toBe("proposed"); // theirs is untouched
+  });
+
+  it("a place and a radius together: the radius is around the owner's place", async () => {
+    const geo = fakeNominatim();
+    const s = await setup({}, { fetch: geo.f });
+    const r = await call(s.tools, "propose_boost", { media_id: s.photo.id, place: "НДК", radius_km: 1.5 });
+    const cs = await s.store.getChangeSet(r.change_set_id as string);
+    expect(rowOf(cs)).toMatchObject({ lat: 42.6859, lng: 23.3188, place_label: "НДК" });
+    expect(rowOf(cs).plan).toMatchObject({ radiusKm: 1.5, place: "НДК", owner: { place: "НДК", radiusKm: 1.5 } });
+    expect(cs.preview_bg).toContain("Къде: до 1,5 км ✎ от ⟦НДК⟧ ✎");
+  });
+
+  it("age_max null (65+) survives a ✏️ chain", async () => {
+    const s = await setup({ graph: [...DEMOGRAPHICS, ...MEDIA] });
+    const first = await call(s.tools, "propose_boost", { media_id: s.photo.id, age_min: 30, age_max: null });
+    const second = await call(correcting(s, first), "propose_boost", { budget_eur: 30 });
+    const third = await call(correcting(s, second), "propose_boost", { radius_km: 2 });
+    const plan = rowOf(await s.store.getChangeSet(third.change_set_id as string)).plan;
+    expect(plan.owner).toEqual({ ageMin: 30, ageMax: null, budgetEur: 30, radiusKm: 2 });
+    expect(plan).toMatchObject({ ageMin: 30, ageMax: null, suggestedAge: null });
+  });
+
+  it("an owner place that pins the ad skips the location-check line even when the business's address is not on the map", async () => {
+    const geo = fakeNominatim();
+    const s = await setup({ area: "geocode" }, { fetch: geo.f });
+    const r = await call(s.tools, "propose_boost", { media_id: s.photo.id, place: "НДК" });
+    const cs = await s.store.getChangeSet(r.change_set_id as string);
+    expect(cs.preview_bg).not.toContain("трябва да се провери");
+    expect(rowOf(cs)).toMatchObject({ lat: 42.6859, lng: 23.3188 });
+  });
+
+  it("the preview's age: hard limits with ✎, and the suggestion to Meta from the analysis", async () => {
+    const s = await setup({ graph: [...DEMOGRAPHICS, ...MEDIA] });
+    const plain = await call(s.tools, "propose_boost", { media_id: s.photo.id });
+    expect((await s.store.getChangeSet(plain.change_set_id as string)).preview_bg).toContain("Кой: 18+ · предложение към Meta: 25–44 г.");
+    const owned = await call(correcting(s, plain), "propose_boost", { age_min: 30, age_max: 40 });
+    expect((await s.store.getChangeSet(owned.change_set_id as string)).preview_bg).toContain("Кой: 30–40 ✎\n");
   });
 });

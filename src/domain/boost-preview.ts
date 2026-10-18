@@ -55,15 +55,15 @@ const PLACEMENTS: Record<BoostPlanData["placements"], { bg: string; en: string }
 };
 const GENDERS: Record<"women" | "men", { bg: string; en: string }> = { women: { bg: "жени", en: "women" }, men: { bg: "мъже", en: "men" } };
 
-/** "Кой:" — the hard minimum age, then what is only suggested to Meta (age range, gender), then the owner's words about the customers. */
+/** "Кой:" — the hard age limits (the owner's, else 18+), then what is only suggested to Meta (age range, gender), then the owner's words about the customers. */
 function whoText(p: BoostPlanRow["plan"], lang: Lang, owner: BoostOwnerChoices): string {
-  const hard = owner.ageMin ?? 18;
-  const parts = [`${hard}+${mark(owner.ageMin !== undefined)}`];
-  const ageMin = p.ageMin ?? hard;
+  const ageMin = p.ageMin ?? 18;
   const ageMax = p.ageMax ?? null;
-  const range = ageMax === null ? `${ageMin}+` : `${ageMin}–${ageMax}`;
+  const ageOwned = owner.ageMin !== undefined || owner.ageMax !== undefined;
+  const parts = [`${ageMax === null ? `${ageMin}+` : `${ageMin}–${ageMax}`}${mark(ageOwned)}`];
   const suggested: string[] = [];
-  if (range !== `${hard}+`) suggested.push(`${range}${tr(lang, " г.", "")}${mark(owner.ageMax !== undefined)}`);
+  const age = p.suggestedAge ?? null;
+  if (age) suggested.push(`${age.max === null ? `${age.min}+` : `${age.min}–${age.max}`}${tr(lang, " г.", "")}`);
   const gender = p.gender ?? "all";
   if (gender !== "all") suggested.push(`${GENDERS[gender][lang]}${mark(owner.gender !== undefined)}`);
   if (suggested.length) parts.push(`${tr(lang, "предложение към Meta", "suggested to Meta")}: ${suggested.join(", ")}`);
