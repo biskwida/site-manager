@@ -348,8 +348,11 @@ describe("propose_boost: the preview", () => {
     const cs = await s.store.getChangeSet(r.change_set_id as string);
     expect(cs.preview_bg).toBe([
       "📣 Реклама: ⟦Тиквена супа с джинджифил и печени семки, само тази седмица…⟧",
-      "Къде: до 3 км от кафенето · Кой: 18+ · Кога: 5 дни, пон–съб, по цял ден",
-      "Бюджет: 20 € общо · Обхват: ще го видите, щом рекламите са свързани",
+      "Къде: до 3 км от ⟦Кафене „Ъгъла“⟧",
+      "Кой: 18+",
+      "Кога: 5 дни, пон–съб, по цял ден",
+      "Бюджет: 20 € общо · Цел: посещения на профила · Показва се: автоматично (Instagram + Facebook)",
+      "Обхват: ще го видите, щом рекламите са свързани",
       "Защо:",
       "• в радиус 1 км: ⟦Софийски университет⟧ (400 м), 2 парка",
       "• по-широката аудитория обикновено е по-евтина; Meta сама намира кой да види рекламата в радиуса",
@@ -357,6 +360,7 @@ describe("propose_boost: the preview", () => {
       "• в дните, в които сте отворени",
       "• 20 € за 5 дни е малък тест — достатъчен Meta да научи кой реагира",
       "— демографията на последователите ще се вижда при 100+ последователи и свързан Instagram",
+      "✏️ Всичко може да се промени: радиус, място, възраст, пол, клиенти, дни и часове, бюджет, цел, къде се показва.",
       "(Сега само записвам плана — ще може да се пусне, щом Meta одобри рекламите в Claudia.)",
     ].join("\n"));
     expect(s.messenger.sent.at(-1)!.text).toBe(`${cs.preview_bg.replace(/[⟦⟧]/g, "")}\n\nДа запазя ли плана?`);
@@ -369,8 +373,11 @@ describe("propose_boost: the preview", () => {
     const cs = await s.store.getChangeSet(r.change_set_id as string);
     expect(cs.preview_en).toBe([
       "📣 Ad: ⟦Тиквена супа с джинджифил и печени семки, само тази седмица…⟧",
-      "Where: within 3 km of the café · Who: 18+ · When: 5 days, Mon–Sat, all day",
-      "Budget: 20 € total · Reach: you'll see it once ads are connected",
+      "Where: within 3 km of ⟦Кафене „Ъгъла“⟧",
+      "Who: 18+",
+      "When: 5 days, Mon–Sat, all day",
+      "Budget: 20 € total · Goal: profile visits · Shows on: automatic (Instagram + Facebook)",
+      "Reach: you'll see it once ads are connected",
       "Why:",
       "• within 1 km: ⟦Софийски университет⟧ (400 m), 2 parks",
       "• a broader audience is usually cheaper; Meta itself finds who sees the ad within the radius",
@@ -378,6 +385,7 @@ describe("propose_boost: the preview", () => {
       "• on the days you're open",
       "• 20 € over 5 days is a small test — enough for Meta to learn who responds",
       "— follower demographics will show with 100+ followers and a connected Instagram",
+      "✏️ You can change anything: radius, place, age, gender, customers, days and hours, budget, goal, where it shows.",
       "(For now I only save the plan — it can run once Meta approves ads in Claudia.)",
     ].join("\n"));
   });
@@ -473,5 +481,191 @@ describe("propose_boost: wiring", () => {
       expect(checks.at(-1)).toContain("'boost_plan'");
       expect(checks.at(-1)).toContain("'social_moderate'");
     }
+  });
+});
+
+/** A Nominatim that knows one place (the NDK, in Sofia) and counts its questions; any other place is not on the map. */
+function fakeNominatim() {
+  const asked: string[] = [];
+  const f = (async (input: RequestInfo | URL) => {
+    const url = String(input);
+    asked.push(new URL(url).searchParams.get("q") ?? "");
+    const known = url.includes("%D0%9D%D0%94%D0%9A");
+    return new Response(JSON.stringify(known ? [{ lat: "42.6859", lon: "23.3188" }] : []), { status: 200 });
+  }) as typeof fetch;
+  return { f, asked };
+}
+
+describe("propose_boost: the owner can change every field", () => {
+  /** ✏️ on the plan of `first`: the same chat, correctionFor = that set. */
+  const correcting = (s: Awaited<ReturnType<typeof setup>>, first: Record<string, unknown>, over: Partial<AgentDeps> = {}) =>
+    makeTools({ ...s.deps, turnSets: new Set(), correctionFor: first.change_set_id as string, ...over });
+
+  it("✏️ keeps every earlier owner choice: 5 km, then 30 € gives 5 km and 30 €", async () => {
+    const s = await setup();
+    const first = await call(s.tools, "propose_boost", { media_id: s.photo.id, radius_km: 5 });
+    const r = await call(correcting(s, first), "propose_boost", { budget_eur: 30 });
+    expect(r.status).toBe("proposed");
+    const plan = rowOf(await s.store.getChangeSet(r.change_set_id as string)).plan;
+    expect(plan).toMatchObject({ radiusKm: 5, budgetEur: 30, owner: { radiusKm: 5, budgetEur: 30 } });
+  });
+
+  it("weekdays / from / to make the schedule; a missing part comes from the carried schedule, else mon–sun 00:00–23:59", async () => {
+    const s = await setup();
+    const first = await call(s.tools, "propose_boost", { media_id: s.photo.id, weekdays: ["mon", "tue"] });
+    expect(rowOf(await s.store.getChangeSet(first.change_set_id as string)).plan.schedule).toEqual({ days: ["mon", "tue"], from: "00:00", to: "23:59" });
+    const second = await call(correcting(s, first), "propose_boost", { from: "09:00", to: "12:00" });
+    expect(rowOf(await s.store.getChangeSet(second.change_set_id as string)).plan.schedule).toEqual({ days: ["mon", "tue"], from: "09:00", to: "12:00" });
+    const fresh = await setup();
+    const hours = await call(fresh.tools, "propose_boost", { media_id: fresh.photo.id, from: "10:00" });
+    expect(rowOf(await fresh.store.getChangeSet(hours.change_set_id as string)).plan.schedule).toEqual({ days: ["mon", "tue", "wed", "thu", "fri", "sat", "sun"], from: "10:00", to: "23:59" });
+  });
+
+  it("age_min / age_max / gender / audience / goal / placements reach the plan and its owner record; age_max null is 65+", async () => {
+    const s = await setup({}, { social: { facebook: true, instagram: false } });
+    const r = await call(s.tools, "propose_boost", { media_id: s.photo.id, age_min: 30, age_max: null, gender: "men", audience: "студенти от университета", goal: "profile_visits", placements: "facebook" });
+    const plan = rowOf(await s.store.getChangeSet(r.change_set_id as string)).plan;
+    expect(plan).toMatchObject({ ageMin: 30, ageMax: null, gender: "men", audience: "студенти от университета", goal: "profile_visits", placements: "facebook" });
+    expect(plan.owner).toMatchObject({ ageMin: 30, ageMax: null, gender: "men", audience: "студенти от университета", goal: "profile_visits", placements: "facebook" });
+  });
+
+  it("reset brings back the analysis for exactly the named fields and keeps the other choices", async () => {
+    const s = await setup();
+    const first = await call(s.tools, "propose_boost", { media_id: s.photo.id, radius_km: 5, budget_eur: 30, gender: "women" });
+    const r = await call(correcting(s, first), "propose_boost", { reset: ["radius", "gender"] });
+    const plan = rowOf(await s.store.getChangeSet(r.change_set_id as string)).plan;
+    expect(plan).toMatchObject({ radiusKm: 3, gender: "all", budgetEur: 30 });
+    expect(plan.owner).toEqual({ budgetEur: 30 });
+    // A reset and a new value for the same field in one call: the new value stays.
+    const again = await call(correcting(s, r), "propose_boost", { reset: ["budget"], budget_eur: 40, days: 2 });
+    expect(rowOf(await s.store.getChangeSet(again.change_set_id as string)).plan.owner).toEqual({ budgetEur: 40, days: 2 });
+  });
+
+  it("an out-of-range owner value is the tool error, with nothing proposed", async () => {
+    const s = await setup();
+    expect(String((await call(s.tools, "propose_boost", { media_id: s.photo.id, radius_km: 80 })).error)).toMatch(/1–50 km/);
+    expect(String((await call(s.tools, "propose_boost", { media_id: s.photo.id, age_min: 16 })).error)).toMatch(/18–65/);
+    expect(await boostSets(s)).toEqual([]);
+  });
+});
+
+describe("propose_boost: around another place", () => {
+  it("a place that is not on the map is a tool error asking for an address; no change set, no message, the old plan stays", async () => {
+    const geo = fakeNominatim();
+    const s = await setup({}, { fetch: geo.f });
+    const first = await call(s.tools, "propose_boost", { media_id: s.photo.id });
+    const sent = s.messenger.sent.length;
+    const photos = s.messenger.photos.length;
+    const r = await call(makeTools({ ...s.deps, turnSets: new Set(), correctionFor: first.change_set_id as string }), "propose_boost", { place: "Нигдеград" });
+    expect(r.error).toBe('I couldn\'t find "Нигдеград" on the map; ask the owner for a street address near it.');
+    expect(geo.asked).toEqual(["Нигдеград"]);
+    expect(await boostSets(s)).toHaveLength(1);
+    expect((await s.store.getChangeSet(first.change_set_id as string)).status).toBe("proposed");
+    expect(s.messenger.sent).toHaveLength(sent);
+    expect(s.messenger.photos).toHaveLength(photos);
+  });
+
+  it("a found place: the row's pin is that place, place_label is the owner's text, and the preview says the area was analysed around the business", async () => {
+    const geo = fakeNominatim();
+    const s = await setup({}, { fetch: geo.f });
+    const r = await call(s.tools, "propose_boost", { media_id: s.photo.id, place: "НДК" });
+    const cs = await s.store.getChangeSet(r.change_set_id as string);
+    expect(rowOf(cs)).toMatchObject({ lat: 42.6859, lng: 23.3188, place_label: "НДК" });
+    expect(rowOf(cs).plan).toMatchObject({ place: "НДК", owner: { place: "НДК" } });
+    expect(cs.preview_bg).toContain("Къде: до 3 км от ⟦НДК⟧ ✎");
+    expect(cs.preview_bg).toContain("• районът е анализиран около ⟦Кафене „Ъгъла“⟧, рекламата е около ⟦НДК⟧");
+    expect(cs.preview_en).toContain("• the area was analysed around ⟦Кафене „Ъгъла“⟧, the ad is around ⟦НДК⟧");
+    expect(rowOf(cs).plan.reasons).toContainEqual(expect.objectContaining({ kind: "hypothesis" }));
+    // The business's own area is still what was analysed.
+    expect(cs.preview_bg).toContain("⟦Софийски университет⟧ (400 м)");
+  });
+
+  it("without a place the label is the business name; a carried place keeps its pin without asking the map again", async () => {
+    const geo = fakeNominatim();
+    const s = await setup({}, { fetch: geo.f });
+    const plain = await call(s.tools, "propose_boost", { media_id: s.photo.id });
+    expect(rowOf(await s.store.getChangeSet(plain.change_set_id as string))).toMatchObject({ place_label: "Кафене „Ъгъла“", lat: 42.69, lng: 23.33 });
+    const first = await call(makeTools({ ...s.deps, turnSets: new Set(), correctionFor: plain.change_set_id as string }), "propose_boost", { place: "НДК" });
+    const asked = geo.asked.length;
+    const second = await call(makeTools({ ...s.deps, turnSets: new Set(), correctionFor: first.change_set_id as string }), "propose_boost", { budget_eur: 30 });
+    expect(rowOf(await s.store.getChangeSet(second.change_set_id as string))).toMatchObject({ place_label: "НДК", lat: 42.6859, lng: 23.3188 });
+    expect(geo.asked).toHaveLength(asked);
+    // Claudia deciding the place again brings the business back.
+    const back = await call(makeTools({ ...s.deps, turnSets: new Set(), correctionFor: second.change_set_id as string }), "propose_boost", { reset: ["place"] });
+    expect(rowOf(await s.store.getChangeSet(back.change_set_id as string))).toMatchObject({ place_label: "Кафене „Ъгъла“", lat: 42.69, lng: 23.33 });
+  });
+});
+
+describe("propose_boost: goal and placement checks", () => {
+  it("website_visits needs a website: a draft venue with no site_url is refused; a site_url or a live venue is fine", async () => {
+    const s = await setup();
+    await s.plain.updateVenue(s.venue.id, { status: "draft" });
+    const r = await call(s.tools, "propose_boost", { media_id: s.photo.id, goal: "website_visits" });
+    expect(r.error).toBe("This business has no website yet; offer reach or profile visits.");
+    expect(await boostSets(s)).toEqual([]);
+    await s.plain.updateVenue(s.venue.id, { site_url: "https://agala.example" });
+    const ok = await call(s.tools, "propose_boost", { media_id: s.photo.id, goal: "website_visits" });
+    expect(rowOf(await s.store.getChangeSet(ok.change_set_id as string)).plan.goal).toBe("website_visits");
+    const live = await setup();
+    const liveOk = await call(live.tools, "propose_boost", { media_id: live.photo.id, goal: "website_visits" });
+    expect(liveOk.status).toBe("proposed");
+  });
+
+  it("placements facebook needs a connected Facebook Page", async () => {
+    const s = await setup();
+    const r = await call(s.tools, "propose_boost", { media_id: s.photo.id, placements: "facebook" });
+    expect(r.error).toBe("No Facebook Page is connected; offer Instagram or automatic.");
+    expect(await boostSets(s)).toEqual([]);
+    const fb = await setup({}, { social: { facebook: true, instagram: false } });
+    const ok = await call(fb.tools, "propose_boost", { media_id: fb.photo.id, placements: "facebook" });
+    expect(rowOf(await fb.store.getChangeSet(ok.change_set_id as string)).plan.placements).toBe("facebook");
+  });
+});
+
+describe("propose_boost: the preview shows the analysis and marks the owner's choices", () => {
+  it("is exact in Bulgarian: suggestions to Meta, the owner's choices marked ✎, the owner's words kept", async () => {
+    const s = await setup({ graph: [...DEMOGRAPHICS, ...MEDIA] });
+    const r = await call(s.tools, "propose_boost", { media_id: s.photo.id, radius_km: 2, gender: "women", audience: "студенти", budget_eur: 30 });
+    const cs = await s.store.getChangeSet(r.change_set_id as string);
+    expect(cs.preview_bg.split("\n").slice(0, 7)).toEqual([
+      "📣 Реклама: (пост без текст)",
+      "Къде: до 2 км ✎ от ⟦Кафене „Ъгъла“⟧",
+      "Кой: 18+ · предложение към Meta: 25–44 г., жени ✎ · клиенти: ⟦студенти⟧ ✎",
+      "Кога: 5 дни, пон–съб, по цял ден",
+      "Бюджет: 30 € ✎ общо · Цел: посещения на профила · Показва се: автоматично (Instagram + Facebook)",
+      "Обхват: ще го видите, щом рекламите са свързани",
+      "Защо:",
+    ]);
+    expect(cs.preview_bg).toContain("• най-много от последователите са 25–44 → предлагам 25–44 на Meta");
+  });
+
+  it("in English", async () => {
+    const s = await setup({ graph: [...DEMOGRAPHICS, ...MEDIA] });
+    const r = await call(s.tools, "propose_boost", { media_id: s.photo.id, radius_km: 2, gender: "women", audience: "students", goal: "reach" , placements: "instagram" });
+    const lines = (await s.store.getChangeSet(r.change_set_id as string)).preview_en.split("\n");
+    expect(lines[1]).toBe("Where: within 2 km ✎ of ⟦Кафене „Ъгъла“⟧");
+    expect(lines[2]).toBe("Who: 18+ · suggested to Meta: 25–44, women ✎ · customers: ⟦students⟧ ✎");
+    expect(lines[4]).toBe("Budget: 20 € total · Goal: people nearby ✎ · Shows on: Instagram only ✎");
+    expect(lines.at(-2)).toBe("✏️ You can change anything: radius, place, age, gender, customers, days and hours, budget, goal, where it shows.");
+  });
+
+  it("the owner's audience reaches the chat message kept as written", async () => {
+    const s = await setup();
+    await call(s.tools, "propose_boost", { media_id: s.photo.id, audience: "млади майки" });
+    expect(s.messenger.raw.at(-1)).toContain("клиенти: ⟦млади майки⟧");
+  });
+});
+
+describe("propose_boost: the old row without the new fields", () => {
+  it("is corrected on ✏️ with no owner choices carried, and the new plan has a label", async () => {
+    const s = await setup();
+    const old = { plan: { variant: "default", radiusKm: 3, ageMin: 18, schedule: null, budgetEur: 20, days: 5, placements: "automatic", goal: "reach", reasons: [] }, post_ref: `ig-${s.photo.id}`, permalink: null, media_id: s.photo.id, caption: "", image_url: s.photo.public_url, lat: 42.69, lng: 23.33 };
+    const change: Change = { position: 0, op: "boost_plan", entity: "boost_plan", entity_id: "old-1", before: null, after: old as unknown as Change["after"] };
+    const cs = await s.store.createChangeSet({ venue_id: s.venue.id, chat_ref: "tg:1001", summary_bg: "План", summary_en: "Plan", preview_bg: "", preview_en: "", source: "text", status: "proposed", changes: [change] });
+    const r = await call(makeTools({ ...s.deps, turnSets: new Set(), correctionFor: cs.id }), "propose_boost", { budget_eur: 25 });
+    expect(r.status).toBe("proposed");
+    const row = rowOf(await s.store.getChangeSet(r.change_set_id as string));
+    expect(row.plan.owner).toEqual({ budgetEur: 25 });
+    expect(row.place_label).toBe("Кафене „Ъгъла“");
   });
 });

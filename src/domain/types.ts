@@ -480,4 +480,6 @@ export interface BoostPlanRow {
   /** The café's pin, the centre of the radius; null when its address was not found on the map. */
   lat: number | null;
   lng: number | null;
+  /** The name of what the radius is around: the business's name, or the owner's place. Absent on rows saved before it existed. */
+  place_label: string;
 }

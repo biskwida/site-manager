@@ -308,11 +308,11 @@ describe("renderPreview: boost_plan (an ad plan; ✅ only saves it)", () => {
   });
   const row = (p: BoostPlanRow["plan"], caption = "Закуска до 11 ч."): Change => ({
     position: 0, op: "boost_plan", entity: "boost_plan", entity_id: "b-1", before: null,
-    after: { plan: p, post_ref: "m1", permalink: "https://instagram.com/p/1", media_id: null, caption, image_url: null, lat: 42.69, lng: 23.33 } as unknown as Change["after"],
+    after: { plan: p, post_ref: "m1", permalink: "https://instagram.com/p/1", media_id: null, caption, image_url: null, lat: 42.69, lng: 23.33, place_label: "Ъгъла" } as unknown as Change["after"],
   });
 
   it("groups the reasons facts → hypotheses → missing, missing marked with —", () => {
-    expect(renderPreview(state(), [row(plan())], "bg", TZ).split("\n").slice(3, 7)).toEqual([
+    expect(renderPreview(state(), [row(plan())], "bg", TZ).split("\n").slice(6, 10)).toEqual([
       "Защо:",
       "• този пост има 4 запазвания",
       "• сутрешна оферта → делнични сутрини",
@@ -322,26 +322,74 @@ describe("renderPreview: boost_plan (an ad plan; ✅ only saves it)", () => {
 
   it("a morning plan: 1.5 km, weekdays 07:30–11:00, one day, a budget with cents", () => {
     const p = plan({ variant: "morning", radiusKm: 1.5, schedule: { days: ["mon", "tue", "wed", "thu", "fri"], from: "07:30", to: "11:00" }, days: 1, budgetEur: 12.5 });
-    const [, whereBg, budgetBg] = renderPreview(state(), [row(p)], "bg", TZ).split("\n");
-    expect(whereBg).toBe("Къде: до 1,5 км от кафенето · Кой: 18+ · Кога: 1 ден, пон–пет 07:30–11:00");
-    expect(budgetBg).toBe("Бюджет: 12,50 € общо · Обхват: ще го видите, щом рекламите са свързани");
-    const [, whereEn, budgetEn] = renderPreview(state(), [row(p)], "en", TZ).split("\n");
-    expect(whereEn).toBe("Where: within 1.5 km of the café · Who: 18+ · When: 1 day, Mon–Fri 07:30–11:00");
-    expect(budgetEn).toBe("Budget: 12.50 € total · Reach: you'll see it once ads are connected");
+    const bg = renderPreview(state(), [row(p)], "bg", TZ).split("\n");
+    expect(bg.slice(1, 6)).toEqual([
+      "Къде: до 1,5 км от ⟦Ъгъла⟧",
+      "Кой: 18+",
+      "Кога: 1 ден, пон–пет 07:30–11:00",
+      "Бюджет: 12,50 € общо · Цел: хора наблизо · Показва се: автоматично (Instagram + Facebook)",
+      "Обхват: ще го видите, щом рекламите са свързани",
+    ]);
+    const en = renderPreview(state(), [row(p)], "en", TZ).split("\n");
+    expect(en.slice(1, 6)).toEqual([
+      "Where: within 1.5 km of ⟦Ъгъла⟧",
+      "Who: 18+",
+      "When: 1 day, Mon–Fri 07:30–11:00",
+      "Budget: 12.50 € total · Goal: people nearby · Shows on: automatic (Instagram + Facebook)",
+      "Reach: you'll see it once ads are connected",
+    ]);
   });
 
   it("a weekend plan: 3 km, Friday to Sunday all day; a morning clipped to some days lists them", () => {
     const weekend = plan({ variant: "weekend", radiusKm: 3, schedule: { days: ["fri", "sat", "sun"], from: "00:00", to: "23:59" } });
-    expect(renderPreview(state(), [row(weekend)], "bg", TZ).split("\n")[1]).toBe("Къде: до 3 км от кафенето · Кой: 18+ · Кога: 5 дни, пет–нед, по цял ден");
-    expect(renderPreview(state(), [row(weekend)], "en", TZ).split("\n")[1]).toBe("Where: within 3 km of the café · Who: 18+ · When: 5 days, Fri–Sun, all day");
+    expect(renderPreview(state(), [row(weekend)], "bg", TZ).split("\n")[3]).toBe("Кога: 5 дни, пет–нед, по цял ден");
+    expect(renderPreview(state(), [row(weekend)], "en", TZ).split("\n")[3]).toBe("When: 5 days, Fri–Sun, all day");
     const gaps = plan({ variant: "morning", radiusKm: 1.5, schedule: { days: ["mon", "wed", "fri"], from: "08:00", to: "11:00" } });
-    expect(renderPreview(state(), [row(gaps)], "en", TZ).split("\n")[1]).toBe("Where: within 1.5 km of the café · Who: 18+ · When: 5 days, Mon, Wed, Fri 08:00–11:00");
+    expect(renderPreview(state(), [row(gaps)], "en", TZ).split("\n")[3]).toBe("When: 5 days, Mon, Wed, Fri 08:00–11:00");
+  });
+
+  it("marks the owner's choices ✎, keeps the owner's words, and shows suggestions to Meta only when there are some", () => {
+    const p = plan({
+      radiusKm: 5, place: "НДК", ageMin: 25, ageMax: 44, gender: "women", audience: "студенти", goal: "website_visits", placements: "facebook",
+      schedule: { days: ["mon", "tue", "wed"], from: "09:00", to: "12:00" }, days: 3, budgetEur: 30,
+      owner: { radiusKm: 5, place: "НДК", gender: "women", audience: "студенти", goal: "website_visits", placements: "facebook", schedule: { days: ["mon", "tue", "wed"], from: "09:00", to: "12:00" }, budgetEur: 30, days: 3 },
+    });
+    const change = row(p);
+    (change.after as unknown as BoostPlanRow).place_label = "НДК";
+    expect(renderPreview(state(), [change], "bg", TZ).split("\n").slice(1, 6)).toEqual([
+      "Къде: до 5 км ✎ от ⟦НДК⟧ ✎",
+      "Кой: 18+ · предложение към Meta: 25–44 г., жени ✎ · клиенти: ⟦студенти⟧ ✎",
+      "Кога: 3 дни ✎, пон–ср 09:00–12:00 ✎",
+      "Бюджет: 30 € ✎ общо · Цел: посещения на сайта ✎ · Показва се: само Facebook ✎",
+      "Обхват: ще го видите, щом рекламите са свързани",
+    ]);
+    expect(renderPreview(state(), [change], "en", TZ).split("\n").slice(1, 5)).toEqual([
+      "Where: within 5 km ✎ of ⟦НДК⟧ ✎",
+      "Who: 18+ · suggested to Meta: 25–44, women ✎ · customers: ⟦студенти⟧ ✎",
+      "When: 3 days ✎, Mon–Wed 09:00–12:00 ✎",
+      "Budget: 30 € ✎ total · Goal: website visits ✎ · Shows on: Facebook only ✎",
+    ]);
+  });
+
+  it("an old row without the new fields still renders: no place, 18+, no suggestions, no marks", () => {
+    const legacy = { variant: "default", radiusKm: 2, ageMin: 18, schedule: null, budgetEur: 20, days: 5, placements: "automatic", goal: "reach", reasons: [] } as unknown as BoostPlanRow["plan"];
+    const old = row(legacy);
+    delete (old.after as unknown as Partial<BoostPlanRow>).place_label;
+    expect(renderPreview(state(), [old], "bg", TZ).split("\n").slice(0, 6)).toEqual([
+      "📣 Реклама: ⟦Закуска до 11 ч.⟧",
+      "Къде: до 2 км",
+      "Кой: 18+",
+      "Кога: 5 дни, по цял ден",
+      "Бюджет: 20 € общо · Цел: хора наблизо · Показва се: автоматично (Instagram + Facebook)",
+      "Обхват: ще го видите, щом рекламите са свързани",
+    ]);
   });
 
   it("never shows a reach or price estimate, and ends with the save-only line", () => {
     for (const lang of ["bg", "en"] as const) {
       const text = renderPreview(state(), [row(plan())], lang, TZ);
       expect(text).not.toMatch(/\d+\s*[–-]\s*\d+\s*(души|people)/);
+      expect(text.split("\n").at(-2)).toBe(lang === "bg" ? "✏️ Всичко може да се промени: радиус, място, възраст, пол, клиенти, дни и часове, бюджет, цел, къде се показва." : "✏️ You can change anything: radius, place, age, gender, customers, days and hours, budget, goal, where it shows.");
       expect(text.split("\n").at(-1)).toBe(lang === "bg" ? "(Сега само записвам плана — ще може да се пусне, щом Meta одобри рекламите в Claudia.)" : "(For now I only save the plan — it can run once Meta approves ads in Claudia.)");
     }
   });

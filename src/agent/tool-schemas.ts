@@ -78,11 +78,24 @@ export const UndoSchema = z.object({ change_set_id: z.string().describe('An id f
 export const ListSchema = z.object({ limit: z.number().int().min(1).max(50).default(10) });
 export const CancelSchema = z.object({ change_set_id: Id });
 
+export const BOOST_RESETS = ["radius", "place", "age", "gender", "audience", "schedule", "budget", "days", "goal", "placements"] as const;
 /** propose_boost (src/agent/boost-tools.ts). The budget and days ranges are checked by planBoost, which names the allowed range. */
 export const BoostSchema = z.object({
   media_id: z.string().min(1).optional().describe("The media_id of the photo to boost, when the owner sent or named one (this message or the conversation)."),
   post_ref: z.string().min(1).optional().describe("A published Instagram or Facebook post the owner names: Meta's post id or its link. Omit both media_id and post_ref to boost the owner's last published post (else the best recent Instagram post)."),
   budget_eur: z.number().optional().describe("Total budget in EUR, only when the owner says one (allowed 5–200). Omit for the recommended 20 €."),
   days: z.number().int().optional().describe("How many days the ad runs, only when the owner says it (allowed 1–14). Omit for the recommended 5."),
+  radius_km: z.number().optional().describe("Radius in km, only when the owner says it (allowed 1–50, steps of 0.5)."),
+  place: z.string().min(1).max(120).optional().describe('Run the ad around another place than the business, only when the owner says it, e.g. "НДК".'),
+  age_min: z.number().int().optional().describe("Minimum age, only when the owner says it (allowed 18–65)."),
+  age_max: z.number().int().nullable().optional().describe("Maximum age, only when the owner says it (from the minimum up to 65); null = 65+."),
+  gender: z.enum(["all", "women", "men"]).optional().describe("Who the ad is suggested to, only when the owner says it."),
+  audience: z.string().min(1).max(200).optional().describe("The owner's own words about who their customers are, only when the owner says it."),
+  weekdays: z.array(z.enum(WEEKDAYS)).optional().describe("The days of the week the ad runs, only when the owner says it."),
+  from: z.string().optional().describe("Start time of day HH:MM, only when the owner says it."),
+  to: z.string().optional().describe("End time of day HH:MM, only when the owner says it."),
+  goal: z.enum(["reach", "profile_visits", "website_visits"]).optional().describe("What the ad is for, only when the owner says it."),
+  placements: z.enum(["automatic", "instagram", "facebook"]).optional().describe("Where the ad shows, only when the owner says it."),
+  reset: z.array(z.enum(BOOST_RESETS)).optional().describe('Fields where the owner says "ти реши" ("you decide"): Claudia\'s analysis decides them again.'),
   variant: z.enum(["default", "morning", "weekend"]).optional().describe('"morning" only when the owner says сутрин / закуска / до 11 / morning / breakfast; "weekend" only when the owner says уикенд / събота / неделя / бранч / концерт / weekend / brunch / event / live music; "default" when the owner asks for neither. Omit to let the caption decide.'),
 });
