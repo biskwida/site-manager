@@ -1,8 +1,8 @@
 // src/store/supabase.ts
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import { COMMENT_LIMIT_DEFAULT, countsTowardLimit } from "../domain/limits";
-import { isChatLang, isExternalEntity, isRecordOnlyEntity, SITE_PLATFORMS, type BoostEntity, type CommentMode, type SocialEntity, type WpEntity } from "../domain/types";
-import type { Announcement, BusinessType, Category, Change, ChangeSet, ChatLang, Conversation, DeployInfo, DeployStatus, Holiday, InstagramImport, Item, Lang, Media, Member, Role, SitePlatform, SiteState, SiteText, SiteTextKey, TemplateId, Venue, VenueStatus } from "../domain/types";
+import { BILLING_STATUSES, isChatLang, isExternalEntity, isRecordOnlyEntity, PLAN_IDS, SITE_PLATFORMS, type BillingStatus, type BoostEntity, type CommentMode, type SocialEntity, type WpEntity } from "../domain/types";
+import type { Announcement, BusinessType, Category, Change, ChangeSet, ChatLang, Conversation, DeployInfo, DeployStatus, Holiday, InstagramImport, Item, Lang, Media, Member, Plan, Role, SitePlatform, SiteState, SiteText, SiteTextKey, TemplateId, Venue, VenueStatus } from "../domain/types";
 import type { Place } from "../geo/osm";
 import type { WizardDraft } from "../wizard/schema";
 import { legacyTelegramId } from "../channels/ref";
@@ -58,6 +58,16 @@ export function toVenue(r: Row): Venue {
     // Missing before the migration is applied (or any unknown value): not asked.
     created_via: r.created_via === "wizard" || r.created_via === "start" ? r.created_via : "operator",
     site_platform: SITE_PLATFORMS.includes(r.site_platform as SitePlatform) ? (r.site_platform as SitePlatform) : null,
+    // Billing (2026-10-19). Missing before the migration is applied (or any unknown value): not set.
+    plan: PLAN_IDS.includes(r.plan as Plan) ? (r.plan as Plan) : null,
+    billing_status: BILLING_STATUSES.includes(r.billing_status as BillingStatus) ? (r.billing_status as BillingStatus) : null,
+    trial_started_at: isoOrNull(r.trial_started_at),
+    trial_ends_at: isoOrNull(r.trial_ends_at),
+    past_due_since: isoOrNull(r.past_due_since),
+    stripe_customer_id: strOrNull(r.stripe_customer_id),
+    stripe_subscription_id: strOrNull(r.stripe_subscription_id),
+    trial_reminder_sent: r.trial_reminder_sent === "soon" || r.trial_reminder_sent === "ended" ? r.trial_reminder_sent : null,
+    website_fee_paid: r.website_fee_paid === true,
     created_at: iso(r.created_at),
   };
 }
@@ -670,6 +680,30 @@ export class SupabaseStore implements Store {
     if (error) throw new Error(`setChangeLimit ${venueId}: ${error.message}`);
     if (!data) throw new Error(`setChangeLimit ${venueId}: not found`);
     return this.venue(data);
+  }
+
+  // --- Billing (appended 2026-10-19) ---
+  async startTrialIfNone(venueId: string, trial: { trial_started_at: string; trial_ends_at: string }) {
+    if (badVenue(venueId)) throw new Error(`startTrialIfNone ${venueId}: not found`);
+    // One conditional UPDATE: the row filter is the claim, so two concurrent callers cannot both start (or restart) a trial.
+    const { data, error } = await this.db.from("venues").update({ ...trial, billing_status: "trialing" }).eq("id", venueId).is("trial_started_at", null).is("billing_status", null).select("id");
+    if (error) throw new Error(`startTrialIfNone ${venueId}: ${error.message}`);
+    if ((data?.length ?? 0) === 1) return true;
+    await this.getVenue(venueId); // throws "not found" for an unknown venue
+    return false;
+  }
+  async findVenueByStripeCustomer(customerId: string) {
+    const { data, error } = await this.db.from("venues").select("*").eq("stripe_customer_id", customerId).maybeSingle();
+    if (error) throw new Error(`findVenueByStripeCustomer: ${error.message}`);
+    return data ? this.venue(data) : null;
+  }
+  async claimBillingEvent(eventId: string, type: string, nowIso: string) {
+    // ON CONFLICT DO NOTHING: the row comes back only for the call that inserted it.
+    const rows = await must(this.db.from("billing_events").upsert({ id: eventId, type, received_at: nowIso }, { onConflict: "id", ignoreDuplicates: true }).select("id"), "claimBillingEvent");
+    return rows.length === 1;
+  }
+  async releaseBillingEvent(eventId: string) {
+    await must(this.db.from("billing_events").delete().eq("id", eventId).select("id"), "releaseBillingEvent");
   }
 
   // --- Meta data deletion (appended 2026-10-14) ---

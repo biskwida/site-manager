@@ -5,7 +5,8 @@ import { invertChanges } from "../domain/changes";
 import { isSoldOut } from "../domain/effective";
 import { baseLang, unkeep, unkeepTexts } from "../domain/format";
 import { renderPreview } from "../domain/preview";
-import { isBoostPlanSet, isBoostPlanUndoSet, TEMPLATE_IDS, type ChangeSet, type DeployInfo, type SiteMode, type TemplateId, type Venue, type VenueStatus } from "../domain/types";
+import { isBoostPlanSet, isBoostPlanUndoSet, TEMPLATE_IDS, type BillingStatus, type ChangeSet, type DeployInfo, type Plan, type SiteMode, type TemplateId, type Venue, type VenueStatus } from "../domain/types";
+import { trialDaysLeft, websiteAllowed } from "../billing/plans";
 import type { Deployer, DeployInput, DomainInstructions } from "../deploy/types";
 import { normalizeDomain } from "../deploy/vercel-domains";
 import type { DestinationStatus, Store, SyncStatus } from "../store/types";
@@ -48,12 +49,37 @@ export interface AdminOverview {
   changes_this_month?: { used: number; limit: number | null };
   /** "Comments" card (comment replies, 2026-10-15). */
   comments?: CommentsOverview;
+  /** The plan and trial card (billing, 2026-10-19). Present only when billing is on. */
+  billing?: BillingOverview;
+}
+
+export interface BillingOverview {
+  plan: Plan | null;
+  status: BillingStatus | null;
+  /** Whole days of free trial left while the status is "trialing"; null otherwise. */
+  trial_days_left: number | null;
+  trial_ends_at: string | null;
+  /** A Stripe subscription exists (Manage billing has something to manage). */
+  subscribed: boolean;
+  /** The website add-on is paid and the venue has no Claudia site yet: the dashboard offers "Build your website". */
+  can_build_website: boolean;
+}
+
+function billingOverview(venue: Venue, now: Date): BillingOverview {
+  return {
+    plan: venue.plan,
+    status: venue.billing_status,
+    trial_days_left: venue.billing_status === "trialing" && venue.trial_ends_at ? trialDaysLeft(venue, now) : null,
+    trial_ends_at: venue.trial_ends_at,
+    subscribed: venue.stripe_subscription_id !== null,
+    can_build_website: venue.site_mode !== "claudia" && venue.status === "live" && websiteAllowed(venue),
+  };
 }
 
 /** How many proposed sets the generic pending list shows. */
 const PENDING_MAX = 20;
 
-export async function adminOverview(store: Store, venue: Venue, now: Date, baseUrl = "", opts: { hosted?: boolean; social?: { facebook: boolean; instagram: boolean } } = {}): Promise<AdminOverview> {
+export async function adminOverview(store: Store, venue: Venue, now: Date, baseUrl = "", opts: { hosted?: boolean; social?: { facebook: boolean; instagram: boolean }; billing?: boolean } = {}): Promise<AdminOverview> {
   const [pending, scheduled, log, site, members] = await Promise.all([
     // Comment sets are decided in the Comments card or the chat only: fetched wider, then left out of the generic list.
     store.listChangeSets(venue.id, { status: ["proposed"], limit: 200 }),
@@ -91,6 +117,7 @@ export async function adminOverview(store: Store, venue: Venue, now: Date, baseU
     social: await socialOverview(store, venue.id, opts.social ?? { facebook: false, instagram: false }),
     changes_this_month: await changesThisMonth(store, venue, now),
     comments: await commentsOverview(store, venue, now),
+    ...(opts.billing ? { billing: billingOverview(venue, now) } : {}),
   };
 }
 

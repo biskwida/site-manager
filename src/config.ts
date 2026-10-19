@@ -84,6 +84,24 @@ export interface Config {
   emailFrom: string;
   /** The public landing (LANDING_URL, else the older NEXT_PUBLIC_LANDING_URL, default https://getclaudia.app); `/` sends visitors there. https only, no trailing slash. */
   landingUrl: string;
+  /**
+   * BILLING_ENABLED (default false): off = everything stays free and unlimited, exactly as before (no trial, no gating, no billing pages or
+   * routes). On only after supabase/migrations/2026-10-19-billing.sql is applied (docs/BILLING-SETUP.md). The Stripe webhook still verifies
+   * and records events either way.
+   */
+  billingEnabled: boolean;
+  /** TRIAL_DAYS (default 14): the free trial, counted from the venue's creation. */
+  trialDays: number;
+  /** TRIAL_CHANGE_LIMIT (default 20): owner changes allowed over the whole trial (enforced in Task 7). */
+  trialChangeLimit: number;
+  /** TRIAL_REQUIRES_CARD (default false): the owner is sent to Checkout (card collected) before the checklist. */
+  trialRequiresCard: boolean;
+  /** STRIPE_SECRET_KEY (sk_test_… in test mode); null = Checkout and the Portal answer 503. */
+  stripeSecretKey: string | null;
+  /** STRIPE_WEBHOOK_SECRET (whsec_…), the secret of the /api/stripe/webhook endpoint; null = the webhook answers 503. */
+  stripeWebhookSecret: string | null;
+  /** Stripe price ids: the three monthly plans and the one-time website setup (199 €). */
+  stripePrices: { admin: string | null; social: string | null; both: string | null; websiteSetup: string | null };
 }
 
 type Env = Record<string, string | undefined>;
@@ -144,6 +162,10 @@ export function loadConfig(env: Env = process.env, opts: { lenient?: boolean } =
   if ((metaPageToken || whatsappToken) && (!metaAppSecret || !metaVerifyToken)) throw new Error("META_APP_SECRET and META_VERIFY_TOKEN are required when META_PAGE_TOKEN or WHATSAPP_TOKEN is set");
   const whatsappPhoneNumberId = optional("WHATSAPP_PHONE_NUMBER_ID");
   if (whatsappToken && !whatsappPhoneNumberId) throw new Error("WHATSAPP_PHONE_NUMBER_ID is required with WHATSAPP_TOKEN");
+  const trialDays = Number(optional("TRIAL_DAYS") ?? 14);
+  if (!Number.isInteger(trialDays) || trialDays < 0 || trialDays > 365) throw new Error("TRIAL_DAYS must be a whole number of days from 0 to 365");
+  const trialChangeLimit = Number(optional("TRIAL_CHANGE_LIMIT") ?? 20);
+  if (!Number.isInteger(trialChangeLimit) || trialChangeLimit < 0) throw new Error("TRIAL_CHANGE_LIMIT must be a whole number >= 0");
   // Without a scheme the admin link is a bare domain that the translation layer would not recognise as a link (src/bot/translate.ts).
   const publicBaseUrl = need("PUBLIC_BASE_URL");
   if (publicBaseUrl && !opts.lenient && !/^https?:\/\//i.test(publicBaseUrl)) throw new Error("PUBLIC_BASE_URL must start with http:// or https://");
@@ -188,5 +210,12 @@ export function loadConfig(env: Env = process.env, opts: { lenient?: boolean } =
     resendApiKey: optional("RESEND_API_KEY"),
     emailFrom: optional("EMAIL_FROM") ?? "Claudia <hello@getclaudia.app>",
     landingUrl: httpsUrl(optional("LANDING_URL")) ?? httpsUrl(optional("NEXT_PUBLIC_LANDING_URL")) ?? DEFAULT_LANDING_URL,
+    billingEnabled: /^(1|true)$/i.test(optional("BILLING_ENABLED") ?? ""),
+    trialDays,
+    trialChangeLimit,
+    trialRequiresCard: /^(1|true)$/i.test(optional("TRIAL_REQUIRES_CARD") ?? ""),
+    stripeSecretKey: optional("STRIPE_SECRET_KEY"),
+    stripeWebhookSecret: optional("STRIPE_WEBHOOK_SECRET"),
+    stripePrices: { admin: optional("STRIPE_PRICE_ADMIN"), social: optional("STRIPE_PRICE_SOCIAL"), both: optional("STRIPE_PRICE_BOTH"), websiteSetup: optional("STRIPE_PRICE_WEBSITE_SETUP") },
   };
 }

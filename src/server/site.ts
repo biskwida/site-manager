@@ -1,7 +1,7 @@
 // src/server/site.ts
 import { applyChanges } from "../domain/changes";
 import { unkeepTexts } from "../domain/format";
-import type { DraftInfo, SiteState, Venue } from "../domain/types";
+import type { DraftInfo, SiteState, Venue, VenueBilling } from "../domain/types";
 import type { Store } from "../store/types";
 import { sha256Hex } from "./hash";
 
@@ -55,12 +55,12 @@ export async function loadSite(store: Store, slug: string, opts: LoadSiteOptions
 }
 
 /** The venue as the public feed sends it: no deploy record (provider ids, build errors), no wizard draft, no Instagram import list, no own-site URL or site mode, no change limit, no comment settings. */
-export type PublicVenue = Omit<Venue, "deploy" | "wizard_draft" | "instagram_import" | "site_url" | "site_mode" | "site_platform" | "created_via" | "change_limit" | "comment_mode" | "comment_digest_hour" | "comment_limit" | "last_comment_digest_at">;
+export type PublicVenue = Omit<Venue, "deploy" | "wizard_draft" | "instagram_import" | "site_url" | "site_mode" | "site_platform" | "created_via" | "change_limit" | "comment_mode" | "comment_digest_hour" | "comment_limit" | "last_comment_digest_at" | keyof VenueBilling>;
 export type PublicSiteState = Omit<SiteState, "venue"> & { venue: PublicVenue };
 
 /** For GET /api/site/[slug]: everything templates and outside readers (Coffique) use, minus the owner-only venue fields. */
 export function publicSiteState(state: SiteState): PublicSiteState {
-  const { deploy, wizard_draft, instagram_import, site_url, site_mode, site_platform, created_via, change_limit, comment_mode, comment_digest_hour, comment_limit, last_comment_digest_at, ...venue } = state.venue;
+  const { deploy, wizard_draft, instagram_import, site_url, site_mode, site_platform, created_via, change_limit, comment_mode, comment_digest_hour, comment_limit, last_comment_digest_at, plan, billing_status, trial_started_at, trial_ends_at, past_due_since, stripe_customer_id, stripe_subscription_id, trial_reminder_sent, website_fee_paid, ...venue } = state.venue;
   void deploy;
   void wizard_draft;
   void instagram_import;
@@ -73,6 +73,7 @@ export function publicSiteState(state: SiteState): PublicSiteState {
   void comment_digest_hour;
   void comment_limit;
   void last_comment_digest_at;
+  void [plan, billing_status, trial_started_at, trial_ends_at, past_due_since, stripe_customer_id, stripe_subscription_id, trial_reminder_sent, website_fee_paid]; // billing is server-only
   // background is always present for outside readers: null = the design's own page colour.
   return { ...state, venue: { ...venue, theme: { ...venue.theme, background: venue.theme.background ?? null } } };
 }

@@ -6,7 +6,8 @@
 import { INVITE_TTL_MS } from "../bot/bot";
 import type { Config } from "../config";
 import { parseTypedSiteUrl } from "../domain/site-url";
-import { SITE_PLATFORMS, type Lang, type SitePlatform, type Venue } from "../domain/types";
+import { SITE_PLATFORMS, type Lang, type Plan, type SitePlatform, type Venue } from "../domain/types";
+import { trialDaysLeft, websiteAllowed } from "../billing/plans";
 import { connectWordPress, type ConnectDeps } from "../destinations/connect";
 import { isLocalHost, isPrivateAddress } from "../destinations/wordpress-client";
 import { SlugTakenError, type Store } from "../store/types";
@@ -176,10 +177,19 @@ const FORBIDDEN = () => new WizardError("unauthorized", 403, "Заявката �
 
 export interface StartVenueDeps {
   store: Store;
-  config: Pick<Config, "rateSalt" | "maxSitesPerDay">;
+  config: Pick<Config, "rateSalt" | "maxSitesPerDay"> & Partial<Pick<Config, "billingEnabled" | "trialRequiresCard">>;
   now: () => Date;
   /** The signed-in account of this request; defaults to the Supabase session cookies. Tests inject one. */
   sessionUser?: () => Promise<SessionUser | null>;
+}
+
+/**
+ * Where a new owner goes after creating a business: the checklist, or, with billing on and TRIAL_REQUIRES_CARD, the plan page first
+ * (`?required=1`: Checkout collects a card before the checklist).
+ */
+export function afterSignupPath(slug: string, config: Partial<Pick<Config, "billingEnabled" | "trialRequiresCard">>): string {
+  const s = encodeURIComponent(slug);
+  return config.billingEnabled && config.trialRequiresCard ? `/billing/${s}?required=1` : `/onboarding/${s}`;
 }
 
 /**
@@ -201,7 +211,7 @@ export async function handleStartVenue(req: Request, d: StartVenueDeps): Promise
     if (!(await d.store.bumpRateLimit(keys.global, DAY_MS, d.config.maxSitesPerDay, nowIso)))
       throw new WizardError("rate_limited", 429, "Днес достигнахме лимита за нови бизнеси. Опитайте утре.", "We reached today's limit for new businesses. Try again tomorrow.");
     const r = await createOwnVenue(d, user, parsed.input);
-    return Response.json({ ...r, onboarding_url: `/onboarding/${encodeURIComponent(r.slug)}` }, { status: 201, headers: NO_STORE });
+    return Response.json({ ...r, onboarding_url: afterSignupPath(r.slug, d.config) }, { status: 201, headers: NO_STORE });
   } catch (e) {
     return wizardErrorResponse(e);
   }
@@ -211,9 +221,12 @@ export async function handleStartVenue(req: Request, d: StartVenueDeps): Promise
 // Status
 
 export interface PlanSummary {
-  /** "none" until billing (Task 6) fills it in. */
+  /** "none" while billing is off (or has not touched the venue). trial = in the free trial with no subscription; active = a subscription is running (past due included). */
   status: "none" | "trial" | "active" | "paused" | "canceled";
+  /** Whole days of free trial left; null unless status is "trial". The changes used (of TRIAL_CHANGE_LIMIT) are Task 7's. */
   trial_days_left: number | null;
+  /** The chosen plan; null until one is. */
+  plan: Plan | null;
 }
 export interface OnboardingStatus {
   /** An owner has joined the chat (an owner venue_member exists). */
@@ -226,7 +239,7 @@ export interface OnboardingStatus {
 }
 
 /** The checklist's facts for one venue. Reads nothing secret and returns no codes or tokens. */
-export async function onboardingStatus(store: Store, venue: Venue): Promise<OnboardingStatus> {
+export async function onboardingStatus(store: Store, venue: Venue, opts: { billing?: boolean; now?: Date } = {}): Promise<OnboardingStatus> {
   const [members, destinations] = await Promise.all([store.listMembers(venue.id), store.listDestinations(venue.id)]);
   const connected = (kind: "wordpress" | "instagram" | "facebook") => destinations.some((x) => x.kind === kind && x.status === "connected");
   return {
@@ -234,8 +247,24 @@ export async function onboardingStatus(store: Store, venue: Venue): Promise<Onbo
     instagram: connected("instagram"),
     facebook: connected("facebook"),
     website: venue.site_mode !== "own" ? "n/a" : connected("wordpress") ? "connected" : "todo",
-    plan: { status: "none", trial_days_left: null },
+    plan: opts.billing ? planSummary(venue, opts.now ?? new Date()) : { status: "none", trial_days_left: null, plan: null },
   };
+}
+
+function planSummary(venue: Venue, now: Date): PlanSummary {
+  const subscribed = venue.stripe_subscription_id !== null;
+  switch (venue.billing_status) {
+    case "trialing":
+      return subscribed ? { status: "active", trial_days_left: null, plan: venue.plan } : { status: "trial", trial_days_left: trialDaysLeft(venue, now), plan: venue.plan };
+    case "active":
+    case "past_due":
+      return { status: "active", trial_days_left: null, plan: venue.plan };
+    case "paused":
+    case "canceled":
+      return { status: venue.billing_status, trial_days_left: null, plan: venue.plan };
+    default:
+      return { status: "none", trial_days_left: null, plan: null };
+  }
 }
 
 // ---------------------------------------------------------------------------------------------------------------------
@@ -244,6 +273,8 @@ export async function onboardingStatus(store: Store, venue: Venue): Promise<Onbo
 export interface OwnerGateDeps {
   store: Store;
   sessionUser?: () => Promise<SessionUser | null>;
+  /** BILLING_ENABLED: the checklist's plan card reads the venue's trial and plan only when true. */
+  billing?: boolean;
 }
 
 /**
@@ -264,7 +295,7 @@ export async function handleOnboardingStatus(req: Request, slug: string, d: Owne
   try {
     const gate = await ownerGate(req, slug, d);
     if ("response" in gate) return gate.response;
-    return Response.json(await onboardingStatus(d.store, gate.venue), { headers: NO_STORE });
+    return Response.json(await onboardingStatus(d.store, gate.venue, { billing: d.billing }), { headers: NO_STORE });
   } catch (e) {
     return wizardErrorResponse(e);
   }
@@ -310,13 +341,16 @@ export async function handleOnboardingWordPress(req: Request, slug: string, d: O
 }
 
 /**
- * POST /api/onboarding/[slug]/website: the owner buys the website add-on; startDraftForVenue puts the wizard draft on this venue and the
+ * POST /api/onboarding/[slug]/website: the owner has bought the website add-on (gated by billing when it is on: 402 otherwise); startDraftForVenue puts the wizard draft on this venue and the
  * wizard cookie is set. Returns the wizard's URL. Account owners only.
  */
-export async function handleWebsiteDraft(req: Request, slug: string, d: OwnerGateDeps & { config: Pick<WizardDeps["config"], "publicBaseUrl"> }): Promise<Response> {
+export async function handleWebsiteDraft(req: Request, slug: string, d: OwnerGateDeps & { config: Pick<WizardDeps["config"], "publicBaseUrl"> & Partial<Pick<Config, "billingEnabled">> }): Promise<Response> {
   try {
     const gate = await ownerGate(req, slug, d);
     if ("response" in gate) return gate.response;
+    // With billing on, the website is the paid add-on: Admin or Both with the 199 € setup paid in Checkout (website_fee_paid).
+    if (d.config.billingEnabled && !websiteAllowed(gate.venue))
+      throw new WizardError("payment_required", 402, "Сайтът е платена добавка към Admin или Both. Изберете план, за да го добавите.", "The website is a paid add-on to Admin or Both. Choose a plan to add it.");
     const { venue, token } = await startDraftForVenue(d.store, gate.venue.id, gate.user);
     const secure = d.config.publicBaseUrl.startsWith("https://");
     return Response.json({ url: `/new/${venue.id}` }, { headers: { ...NO_STORE, "set-cookie": serializeDraftCookie(venue.id, token, { secure }) } });

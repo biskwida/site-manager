@@ -106,7 +106,8 @@ export type ChangeSetPatch = Partial<Pick<ChangeSet, "status" | "apply_at" | "re
 export type VenuePatch = Partial<Pick<Venue,
   "slug" | "name" | "tagline_bg" | "tagline_en" | "about_bg" | "about_en" | "address" | "phone" | "maps_url" | "instagram" |
   "hours" | "tz" | "default_lang" | "theme" | "template" | "business_type" | "status" | "wizard_draft" | "instagram_import" | "site_url" | "site_mode" | "site_platform" | "created_via" |
-  "comment_mode" | "comment_digest_hour" | "comment_limit" | "last_comment_digest_at">>;
+  "comment_mode" | "comment_digest_hour" | "comment_limit" | "last_comment_digest_at" |
+  "plan" | "billing_status" | "trial_started_at" | "trial_ends_at" | "past_due_since" | "stripe_customer_id" | "stripe_subscription_id" | "trial_reminder_sent" | "website_fee_paid">>;
 
 export interface InviteSummary {
   role: Role;
@@ -519,4 +520,26 @@ export interface Store {
    * dashboard load, a signup form, a script): a caller that passes an email nobody verified hands the venue to a stranger.
    */
   claimAccountInvites(userId: string, email: string): Promise<string[]>;
+}
+
+// --- Billing (appended 2026-10-19; supabase/migrations/2026-10-19-billing.sql) ---
+// Declaration merging: the Store interface above gains the billing methods. The billing columns themselves are read with the venue
+// and written with updateVenue (VenuePatch); these methods are the ones that must be atomic.
+export interface Store {
+  /**
+   * Starts the free trial of a venue that has none: sets trial_started_at, trial_ends_at and billing_status "trialing" in ONE conditional
+   * update, only while trial_started_at and billing_status are both still null. True when this call started it; false when the venue
+   * already has a trial or a billing status (a second call, a grandfathered venue, a subscriber): nothing changes, a trial is never
+   * restarted or extended. Throws on an unknown venue.
+   */
+  startTrialIfNone(venueId: string, trial: { trial_started_at: string; trial_ends_at: string }): Promise<boolean>;
+  /** The venue with this Stripe customer id (stripe_customer_id is unique); null when none. */
+  findVenueByStripeCustomer(customerId: string): Promise<Venue | null>;
+  /**
+   * Records a processed Stripe event id (billing_events, primary key). True when this call recorded it (the caller applies the event);
+   * false when it was recorded before (a duplicate delivery: apply nothing).
+   */
+  claimBillingEvent(eventId: string, type: string, nowIso: string): Promise<boolean>;
+  /** Forgets a claimed event id after applying it failed, so Stripe's retry is applied instead of ignored as a duplicate. */
+  releaseBillingEvent(eventId: string): Promise<void>;
 }

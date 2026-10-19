@@ -152,6 +152,21 @@ export function Checklist(p: ChecklistProps) {
   const platformName = p.platform && ["wordpress", "wix", "squarespace", "shopify"].includes(p.platform) ? t[`form.platform.${p.platform}` as OnboardingKey] : null;
   const socialProblem = p.socialResult === "instagram_personal" ? t["list.social.result.personal"] : p.socialResult === "facebook_no_pages" ? t["list.social.result.noPages"] : p.socialResult?.endsWith("_error") ? t["list.social.result.error"] : null;
 
+  // The plan card: with billing off (or a venue it never touched) the old placeholder; otherwise the trial days left or the plan, and the way to choose one.
+  const plan = status.plan;
+  const days = plan.trial_days_left ?? 0;
+  const planLines =
+    plan.status === "trial"
+      ? [days <= 0 ? t["list.plan.trialEnded"] : days === 1 ? t["list.plan.trialDay"] : fill(t["list.plan.trialDays"], { n: days }), t["list.plan.trialNote"]]
+      : plan.status === "active"
+        ? [fill(t["list.plan.active"], { plan: plan.plan ? t[`plan.${plan.plan}` as OnboardingKey] : "" }).replace(/: \.$/, ".")]
+        : plan.status === "paused"
+          ? [t["list.plan.paused"]]
+          : plan.status === "canceled"
+            ? [t["list.plan.canceled"]]
+            : [t["list.plan.text"]];
+  const chooseHref = plan.status === "trial" || plan.status === "paused" || plan.status === "canceled" ? `/billing/${encodeURIComponent(slug)}?lang=${lang}` : null;
+
   return (
     <div className="grid items-start gap-5 md:grid-cols-[minmax(0,1.6fr)_minmax(0,1fr)]">
       <div>
@@ -239,7 +254,8 @@ export function Checklist(p: ChecklistProps) {
       <aside aria-labelledby="plan-title" className={`${cardCls} grid gap-3 bg-[var(--cl-bg)]`}>
         <span className={`${pillCls} justify-self-start`}>{t["list.plan.pill"]}</span>
         <h2 id="plan-title" className="font-display text-2xl">{t["list.plan.title"]}</h2>
-        <p className="text-[var(--cl-ink-2)]">{t["list.plan.text"]}</p>
+        {planLines.map((line) => <p key={line} className="text-[var(--cl-ink-2)]">{line}</p>)}
+        {chooseHref ? <Link href={chooseHref} className={btnPrimary}>{t["list.plan.choose"]}</Link> : null}
         <Link href="/dashboard" className={btnGhost}>{t["list.plan.dashboard"]}</Link>
       </aside>
     </div>

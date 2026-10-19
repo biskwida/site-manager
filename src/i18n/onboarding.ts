@@ -114,6 +114,14 @@ const bg = {
   "list.plan.title": "Вашият план",
   "list.plan.text": "Подробностите за пробния период и плановете ще се покажат тук.",
   "list.plan.dashboard": "Към таблото",
+  "list.plan.trialDays": "Остават {n} дни от безплатния ви пробен период.",
+  "list.plan.trialDay": "Остава 1 ден от безплатния ви пробен период.",
+  "list.plan.trialEnded": "Пробният ви период приключи. Сайтът и постовете ви остават онлайн; новите промени са на пауза.",
+  "list.plan.trialNote": "Ако платите по време на пробния период, получавате пълния месечен лимит веднага. Нищо не излиза офлайн, ако спрете: Claudia просто прави пауза.",
+  "list.plan.choose": "Изберете план",
+  "list.plan.active": "Планът ви е активен: {plan}.",
+  "list.plan.paused": "Новите промени са на пауза. Сайтът и постовете ви остават онлайн.",
+  "list.plan.canceled": "Абонаментът ви приключи. Сайтът и постовете ви остават онлайн.",
 } as const;
 
 export type OnboardingKey = keyof typeof bg;
@@ -224,6 +232,14 @@ const en: Record<OnboardingKey, string> = {
   "list.plan.title": "Your plan",
   "list.plan.text": "The details of your trial and plans will show here.",
   "list.plan.dashboard": "Back to your dashboard",
+  "list.plan.trialDays": "{n} days left of your free trial.",
+  "list.plan.trialDay": "1 day left of your free trial.",
+  "list.plan.trialEnded": "Your free trial has ended. Your website and posts stay online; new changes are paused.",
+  "list.plan.trialNote": "If you pay during the trial, you get the full monthly limit right away. Nothing goes offline if you stop: Claudia just pauses.",
+  "list.plan.choose": "Choose a plan",
+  "list.plan.active": "Your plan is active: {plan}.",
+  "list.plan.paused": "New changes are paused. Your website and posts stay online.",
+  "list.plan.canceled": "Your subscription ended. Your website and posts stay online.",
 };
 
 export const ONBOARDING: Record<Lang, Record<OnboardingKey, string>> = { bg, en };

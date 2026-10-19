@@ -41,6 +41,15 @@ export function buildPreviewState(d: WizardDraft, media: Media[], now: Date): Si
     site_mode: "claudia",
     site_platform: null,
     created_via: "wizard",
+    plan: null,
+    billing_status: null,
+    trial_started_at: null,
+    trial_ends_at: null,
+    past_due_since: null,
+    stripe_customer_id: null,
+    stripe_subscription_id: null,
+    trial_reminder_sent: null,
+    website_fee_paid: false,
   };
   const categories: Category[] = d.categories.map((c, i) => {
     const n = bothLangs(c.name_bg, c.name_en);

@@ -1077,5 +1077,62 @@ export function storeContract(
       expect(await s.claimAccountInvites(u2, email)).toEqual([a.id]);
       expect((await s.listVenuesForUser(u2)).map((v) => v.id)).toEqual([a.id]);
     });
+
+    it("billing: venues start with no plan or status; billing fields are written with updateVenue and untouched by other patches", async () => {
+      const s = await make();
+      const v = await s.createVenue({ slug: "t-b1", name: "B" });
+      try {
+        expect(v).toMatchObject({ plan: null, billing_status: null, trial_started_at: null, trial_ends_at: null, past_due_since: null, stripe_customer_id: null, stripe_subscription_id: null, trial_reminder_sent: null, website_fee_paid: false });
+        const cus = `cus_${crypto.randomUUID()}`;
+        const u = await s.updateVenue(v.id, { plan: "admin", billing_status: "past_due", past_due_since: "2026-10-15T09:00:00.000Z", stripe_customer_id: cus, stripe_subscription_id: "sub_1", trial_reminder_sent: "soon", website_fee_paid: true });
+        expect(u).toMatchObject({ plan: "admin", billing_status: "past_due", past_due_since: "2026-10-15T09:00:00.000Z", stripe_customer_id: cus, stripe_subscription_id: "sub_1", trial_reminder_sent: "soon", website_fee_paid: true });
+        expect((await s.updateVenue(v.id, { name: "B2" })).plan).toBe("admin"); // untouched by other patches
+        expect((await s.updateVenue(v.id, { plan: null, past_due_since: null })).past_due_since).toBeNull();
+        expect((await s.findVenueByStripeCustomer(cus))?.id).toBe(v.id);
+        expect(await s.findVenueByStripeCustomer(`cus_${crypto.randomUUID()}`)).toBeNull();
+      } finally {
+        await s.deleteVenue(v.id);
+      }
+    });
+
+    it("billing: startTrialIfNone starts a trial once and never restarts or extends it", async () => {
+      const s = await make();
+      const v = await s.createVenue({ slug: "t-b2", name: "B" });
+      const g = await s.createVenue({ slug: "t-b3", name: "G" });
+      try {
+        const first = { trial_started_at: "2026-10-19T09:00:00.000Z", trial_ends_at: "2026-11-02T09:00:00.000Z" };
+        expect(await s.startTrialIfNone(v.id, first)).toBe(true);
+        expect(await s.getVenue(v.id)).toMatchObject({ ...first, billing_status: "trialing" });
+        expect(await s.startTrialIfNone(v.id, { trial_started_at: "2026-10-25T09:00:00.000Z", trial_ends_at: "2026-11-08T09:00:00.000Z" })).toBe(false);
+        expect(await s.getVenue(v.id)).toMatchObject({ ...first, billing_status: "trialing" });
+        // a venue billing already knows (grandfathered, subscribed) never gets one
+        await s.updateVenue(g.id, { plan: "both", billing_status: "active" });
+        expect(await s.startTrialIfNone(g.id, first)).toBe(false);
+        expect(await s.getVenue(g.id)).toMatchObject({ billing_status: "active", trial_started_at: null });
+        // concurrent starts: exactly one wins
+        const h = await s.createVenue({ slug: "t-b4", name: "H" });
+        try {
+          const wins = await Promise.all([s.startTrialIfNone(h.id, first), s.startTrialIfNone(h.id, first), s.startTrialIfNone(h.id, first)]);
+          expect(wins.filter(Boolean)).toHaveLength(1);
+        } finally {
+          await s.deleteVenue(h.id);
+        }
+        await expect(s.startTrialIfNone(crypto.randomUUID(), first)).rejects.toThrow();
+      } finally {
+        await s.deleteVenue(v.id);
+        await s.deleteVenue(g.id);
+      }
+    });
+
+    it("billing: a Stripe event id is claimed once, and can be released for a retry", async () => {
+      const s = await make();
+      const id = `evt_${crypto.randomUUID()}`;
+      expect(await s.claimBillingEvent(id, "invoice.paid", NOW)).toBe(true);
+      expect(await s.claimBillingEvent(id, "invoice.paid", LATER)).toBe(false);
+      await s.releaseBillingEvent(id);
+      expect(await s.claimBillingEvent(id, "invoice.paid", LATER)).toBe(true);
+      await s.releaseBillingEvent(id);
+      await s.releaseBillingEvent(id); // releasing an unknown id is a no-op
+    });
   });
 }

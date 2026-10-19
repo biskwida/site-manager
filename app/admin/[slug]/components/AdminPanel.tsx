@@ -5,6 +5,7 @@ import { formatDateTime } from "@/src/time";
 import { AccountBanner } from "./AccountBanner";
 import { SessionExpired } from "./SessionExpired";
 import { AppsCard } from "./AppsCard";
+import { BillingCard } from "./BillingCard";
 import { CommentsCard } from "./CommentsCard";
 import { Empty, Section } from "./bits";
 import { PendingList, ScheduledList } from "./Decisions";
@@ -19,9 +20,10 @@ import { SocialCard } from "./SocialCard";
 
 /**
  * The owner's dashboard, on a legacy admin key (`adminKey`, sent as ?key=) or on the signed-in account (no `adminKey`: the session cookie
- * goes with every same-origin request). `showAccountBanner` adds the "log in with your email" note on the key page.
+ * goes with every same-origin request). `showAccountBanner` adds the "log in with your email" note on the key page. `billingJustPaid` is the
+ * ?billing=success return from Stripe Checkout.
  * The dashboard: the site (status, template switch), the optional custom domain, decisions, schedule, sold-out items, change log with undo, connected apps, QR and links. Client-polled every 3 s. */
-export function AdminPanel({ slug, adminKey, initial, showAccountBanner = false }: { slug: string; adminKey?: string; initial: AdminOverview; showAccountBanner?: boolean }) {
+export function AdminPanel({ slug, adminKey, initial, showAccountBanner = false, billingJustPaid = false }: { slug: string; adminKey?: string; initial: AdminOverview; showAccountBanner?: boolean; billingJustPaid?: boolean }) {
   const { lang, t } = useLang();
   const { overview: o, unauthorized, decide, post, refresh } = useAdminOverview(initial, slug, adminKey);
   // A key that stopped working: the invalid-link text. An account whose session ended: a way back in.
@@ -40,6 +42,8 @@ export function AdminPanel({ slug, adminKey, initial, showAccountBanner = false 
       </header>
       <main className="mx-auto w-full max-w-3xl flex-1 px-4 pb-16 sm:px-6">
         {showAccountBanner && <AccountBanner />}
+        {/* Plan and payment: the account dashboard only (a legacy key page is unchanged), and only while billing is on. */}
+        {!adminKey && o.billing && <BillingCard billing={o.billing} slug={slug} justPaid={billingJustPaid} />}
         <SiteCard overview={o} post={post} adminKey={adminKey} refresh={refresh} />
         <PendingList sets={o.pending} slug={slug} adminKey={adminKey} tz={tz} decide={decide} />
         <ScheduledList sets={o.scheduled} tz={tz} decide={decide} />

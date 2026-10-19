@@ -206,7 +206,7 @@ describe("onboardingStatus", () => {
     const store = new InMemoryStore();
     const r = await createOwnVenue({ store }, owner, ownInput);
     const v = (await store.getVenueBySlug(r.slug))!;
-    expect(await onboardingStatus(store, v)).toEqual({ chat: false, instagram: false, facebook: false, website: "todo", plan: { status: "none", trial_days_left: null } });
+    expect(await onboardingStatus(store, v)).toEqual({ chat: false, instagram: false, facebook: false, website: "todo", plan: { status: "none", trial_days_left: null, plan: null } });
     const staff = await store.createInvite(v.id, "staff", new Date(T0.getTime() + 86_400_000).toISOString());
     await store.redeemInvite(staff, "tg:5", "bg", T0.toISOString());
     expect((await onboardingStatus(store, v)).chat).toBe(false);

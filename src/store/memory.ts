@@ -86,6 +86,15 @@ export class InMemoryStore implements Store {
       site_mode: v.site_mode ?? "claudia",
       site_platform: v.site_platform ?? null,
       created_via: v.created_via ?? "operator",
+      plan: null,
+      billing_status: null,
+      trial_started_at: null,
+      trial_ends_at: null,
+      past_due_since: null,
+      stripe_customer_id: null,
+      stripe_subscription_id: null,
+      trial_reminder_sent: null,
+      website_fee_paid: false,
       created_at: this.clock(),
     };
     if ([...this.sites.values()].some((s) => s.venue.slug === venue.slug)) throw new SlugTakenError(venue.slug);
@@ -543,6 +552,29 @@ export class InMemoryStore implements Store {
     checkLimitValue(limit);
     this.site(venueId).venue.change_limit = limit;
     return this.getVenue(venueId);
+  }
+
+  // --- Billing (appended 2026-10-19) ---
+  billingEvents = new Map<string, { type: string; at: string }>();
+  async startTrialIfNone(venueId: string, trial: { trial_started_at: string; trial_ends_at: string }) {
+    const v = this.site(venueId).venue;
+    if (v.trial_started_at !== null || v.billing_status !== null) return false;
+    v.trial_started_at = trial.trial_started_at;
+    v.trial_ends_at = trial.trial_ends_at;
+    v.billing_status = "trialing";
+    return true;
+  }
+  async findVenueByStripeCustomer(customerId: string) {
+    const s = [...this.sites.values()].find((x) => x.venue.stripe_customer_id === customerId);
+    return s ? clone(s.venue) : null;
+  }
+  async claimBillingEvent(eventId: string, type: string, nowIso: string) {
+    if (this.billingEvents.has(eventId)) return false;
+    this.billingEvents.set(eventId, { type, at: nowIso });
+    return true;
+  }
+  async releaseBillingEvent(eventId: string) {
+    this.billingEvents.delete(eventId);
   }
 
   // --- Meta data deletion (appended 2026-10-14) ---

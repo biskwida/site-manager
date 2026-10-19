@@ -20,7 +20,7 @@ export async function GET(req: Request, ctx: RouteContext<"/api/admin/[slug]">) 
   const { slug } = await ctx.params;
   const { deps, venue, response } = await auth(req, slug);
   if (!venue) return response!;
-  return Response.json(await adminOverview(deps.store, venue, new Date(), deps.config.publicBaseUrl, { hosted: deps.deployer === null, social: socialAvailability(deps.config, deps.destinationSecretKey) }), { headers: { "cache-control": "no-store" } });
+  return Response.json(await adminOverview(deps.store, venue, new Date(), deps.config.publicBaseUrl, { hosted: deps.deployer === null, social: socialAvailability(deps.config, deps.destinationSecretKey), billing: Boolean(deps.config.billingEnabled) }), { headers: { "cache-control": "no-store" } });
 }
 
 export async function POST(req: Request, ctx: RouteContext<"/api/admin/[slug]">) {

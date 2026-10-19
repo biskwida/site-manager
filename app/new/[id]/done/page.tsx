@@ -10,6 +10,7 @@ import { connectedApps, connectLinks, enabledApps } from "@/src/server/connect-a
 import { getServerDeps } from "@/src/server/deps";
 import { getSessionUser } from "@/src/server/session";
 import { socialAvailability } from "@/src/server/social-connect";
+import { afterSignupPath } from "@/src/server/onboarding";
 import { DRAFT_COOKIE, venueFromDraftCookie } from "@/src/server/draft-cookie";
 import { claimVenueForSession, doneInviteCode, DRAFT_ACCOUNT_COOKIE } from "@/src/server/wizard";
 import { DoneStatus, type DoneStatusResponse } from "./DoneStatus";
@@ -55,7 +56,7 @@ export default async function Page(props: PageProps<"/new/[id]/done">) {
   const startedSignedIn = jar.get(DRAFT_ACCOUNT_COOKIE)?.value === venue.id;
   if (user && startedSignedIn) await claimVenueForSession(deps.store, venue, user).catch((e) => console.error(`[done] claiming the venue failed: ${e instanceof Error ? e.message : "error"}`));
   // The "Continue setup" link only for the signed-in account that owns this venue (the checklist is owner-only).
-  const onboardingHref = user && (await deps.store.isVenueOwner(venue.id, user.id)) ? `/onboarding/${encodeURIComponent(venue.slug)}` : undefined;
+  const onboardingHref = user && (await deps.store.isVenueOwner(venue.id, user.id)) ? afterSignupPath(venue.slug, venue.stripe_subscription_id ? {} : deps.config) : undefined; // with TRIAL_REQUIRES_CARD the plan page comes first (not for a venue that already subscribes)
   const loginHref = !user && startedSignedIn && !(await deps.store.hasOwnerAccount(venue.id)) ? `/login?next=${encodeURIComponent(`/new/${id}/done`)}` : undefined;
   return (
     <LangProvider defaultLang={venue.default_lang}>

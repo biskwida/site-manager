@@ -53,6 +53,32 @@ export const SITE_MODES: readonly SiteMode[] = ["claudia", "own", "none"];
  */
 export type CreatedVia = "operator" | "wizard" | "start";
 export const CREATED_VIA: readonly CreatedVia[] = ["operator", "wizard", "start"];
+
+/** Billing plans (2026-10-19): admin = website changes, social = social media, comments and boosts, both = everything. */
+export type Plan = "admin" | "social" | "both";
+export const PLAN_IDS: readonly Plan[] = ["admin", "social", "both"];
+/** trialing = in the free trial (or in a Stripe trial); active = paying; past_due = a payment failed; paused = no new owner changes; canceled = the subscription ended. */
+export type BillingStatus = "trialing" | "active" | "past_due" | "paused" | "canceled";
+export const BILLING_STATUSES: readonly BillingStatus[] = ["trialing", "active", "past_due", "paused", "canceled"];
+/** Which trial reminder has gone out: 3 days before the end ("soon"), or after it ended ("ended"). */
+export type TrialReminder = "soon" | "ended";
+
+/** Server-only billing columns of a venue (supabase/migrations/2026-10-19-billing.sql). Never in PublicVenue, never granted to anon. */
+export interface VenueBilling {
+  /** null = not chosen yet (a venue in its free trial). */
+  plan: Plan | null;
+  /** null = billing never touched this venue (it was made while BILLING_ENABLED was off). */
+  billing_status: BillingStatus | null;
+  trial_started_at: string | null;
+  trial_ends_at: string | null;
+  /** ISO of the first failed payment of the current run of failures; cleared when a payment succeeds. */
+  past_due_since: string | null;
+  stripe_customer_id: string | null;
+  stripe_subscription_id: string | null;
+  trial_reminder_sent: TrialReminder | null;
+  /** The 199 € website setup was paid in Checkout. Never turned back to false. */
+  website_fee_paid: boolean;
+}
 /** What an own-site venue's website is built with (asked at onboarding; picks how the website step of the checklist connects it). */
 export type SitePlatform = "wordpress" | "wix" | "squarespace" | "shopify" | "other" | "unknown";
 export const SITE_PLATFORMS: readonly SitePlatform[] = ["wordpress", "wix", "squarespace", "shopify", "other", "unknown"];
@@ -87,7 +113,7 @@ export interface DraftInfo {
   key: string;
 }
 
-export interface Venue {
+export interface Venue extends VenueBilling {
   id: string;
   slug: string;
   name: string;

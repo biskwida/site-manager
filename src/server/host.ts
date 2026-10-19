@@ -4,7 +4,7 @@ export const DEFAULT_APP_HOST = "getclaudia.app";
 export const DEFAULT_LANDING_URL = "https://getclaudia.app";
 
 /** Browser pages that live on the app host. Whole path segments: `/start` and `/start/x`, never `/startup`. */
-const APP_PREFIXES = ["/start", "/login", "/dashboard", "/onboarding", "/admin"];
+const APP_PREFIXES = ["/start", "/login", "/dashboard", "/onboarding", "/billing", "/admin"];
 
 /** APP_HOST cleaned up: a pasted scheme or trailing slash is dropped, lowercase; empty means the default. */
 export function resolveAppHost(env: Record<string, string | undefined>): string {

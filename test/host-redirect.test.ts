@@ -21,6 +21,7 @@ describe("hostRedirect", () => {
     expect(to(`${OLD}/login`)).toBe(`https://${APP}/login`);
     expect(to(`${OLD}/start?plan=both&lang=bg`)).toBe(`https://${APP}/start?plan=both&lang=bg`);
     expect(to(`${OLD}/onboarding/x`)).toBe(`https://${APP}/onboarding/x`);
+    expect(to(`${OLD}/billing/x?required=1`)).toBe(`https://${APP}/billing/x?required=1`);
   });
   it("handles /admin alone and a trailing slash", () => {
     expect(to(`${OLD}/admin`)).toBe(`https://${APP}/admin`);

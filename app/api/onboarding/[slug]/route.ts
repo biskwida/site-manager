@@ -8,5 +8,5 @@ export const dynamic = "force-dynamic";
 export async function GET(req: Request, ctx: RouteContext<"/api/onboarding/[slug]">) {
   const { slug } = await ctx.params;
   const deps = await getServerDeps((fn) => after(fn));
-  return handleOnboardingStatus(req, slug, { store: deps.store });
+  return handleOnboardingStatus(req, slug, { store: deps.store, billing: deps.config.billingEnabled });
 }

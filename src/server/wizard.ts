@@ -23,6 +23,8 @@ export type WizardErrorCode =
   | "bad_request"
   | "invalid"
   | "unauthorized"
+  /** 402: billing is on and the website add-on is not paid (POST /api/onboarding/[slug]/website). */
+  | "payment_required"
   | "not_found"
   | "slug_taken"
   | "already_published"
