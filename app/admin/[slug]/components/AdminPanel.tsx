@@ -11,6 +11,7 @@ import { Empty, Section } from "./bits";
 import { PendingList, ScheduledList } from "./Decisions";
 import { DomainCard } from "./DomainCard";
 import { InvalidKey } from "./InvalidKey";
+import { LockedCard } from "./LockedCard";
 import { LogList } from "./LogList";
 import { QrCard } from "./QrCard";
 import { SiteCard } from "./SiteCard";
@@ -62,8 +63,9 @@ export function AdminPanel({ slug, adminKey, initial, showAccountBanner = false,
         <LogList sets={o.log} tz={tz} decide={decide} usage={o.changes_this_month} />
         <AppsCard apps={o.connected_apps ?? []} post={post} />
         <WordPressCard overview={o.wordpress ?? null} slug={slug} adminKey={adminKey} baseUrl={o.public_url.replace(new RegExp(`/${slug}$`), "")} tz={tz} />
-        <SocialCard overview={o.social ?? null} slug={slug} adminKey={adminKey} tz={tz} />
-        <CommentsCard overview={o.comments ?? null} post={post} tz={tz} />
+        {/* A feature outside the plan is shown, not hidden: a locked card with the upgrade link (billing on only). */}
+        {o.billing?.locked?.includes("social") ? <LockedCard id="social" title="admin.social.title" plan={o.billing.plan} slug={slug} /> : <SocialCard overview={o.social ?? null} slug={slug} adminKey={adminKey} tz={tz} />}
+        {o.billing?.locked?.includes("comments") ? <LockedCard id="comments" title="admin.comments.title" plan={o.billing.plan} slug={slug} /> : <CommentsCard overview={o.comments ?? null} post={post} tz={tz} />}
         {/* Hosted mode (no deployer on this server), an own site or no website: there is no provider project of ours to attach a domain to. */}
         {!o.hosted && !o.own_site && o.site_mode !== "none" && <DomainCard overview={o} post={post} />}
         <QrCard siteUrl={o.site_url} />

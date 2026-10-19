@@ -17,6 +17,8 @@ import { copy } from "../bot/copy";
 import { usageLine } from "../bot/limit";
 import { changeUsage } from "../store/usage";
 import { countsTowardLimit } from "../domain/limits";
+import { billingUrl, effectiveLimit, entitlement } from "../billing/entitlements";
+import type { Feature } from "../billing/plans";
 import { BulkSchema, CancelSchema, CheckAllergensSchema, ListSchema, ProposeSchema, ScheduleSchema, UndoSchema, type ChangeInput } from "./tool-schemas";
 import { boostTools, type InstagramAccess } from "./boost-tools";
 import { commentTools, isCommentReplySet } from "./comment-tools";
@@ -201,20 +203,48 @@ export function makeTools(deps: AgentDeps) {
   };
 
   /**
-   * Monthly change limit (src/domain/limits.ts): every proposal that would use up a change refuses here once the month's
-   * limit is reached, before anything is created. Undo never calls it. The apply-time stop in the store covers the rest.
+   * Plan and payment gate (src/billing/entitlements.ts): called before any NEW owner proposal of this feature, never for undo, a
+   * scheduled set that comes due or the tick's auto reverts. Does nothing while BILLING_ENABLED is off. The refusal is a tool error
+   * with the exact owner text (the paused line carries the /billing/<slug> link); nothing goes offline whatever the state.
+   */
+  const ensureEntitled = async (feature: Feature) => {
+    const cfg = d.store.billingConfig;
+    if (!cfg?.billingEnabled) return;
+    const venue = await d.store.getVenue(d.venueId);
+    const r = entitlement(venue, feature, d.now(), cfg);
+    if (r.ok) return;
+    const url = billingUrl(cfg, venue.slug);
+    const c = copy(lang);
+    const line =
+      r.reason === "paused" ? (venue.stripe_subscription_id === null && venue.billing_status !== "canceled" ? c.trialEndedRefusal(url) : c.planPausedRefusal(url))
+      : r.reason === "past_due_expired" ? c.pastDueRefusal(url)
+      : r.reason === "card_required" ? c.cardRequiredRefusal(url)
+      : c.notInPlanRefusal(feature, venue.plan ? c.planName[venue.plan] : "", url);
+    throw new Error(`Plan or billing state (${r.reason}): nothing was proposed. Do not retry, split or rephrase this request and do not offer a workaround; reply to the owner with exactly this line: "${line}" Undo still works.`);
+  };
+
+  /**
+   * Change limit (src/domain/limits.ts): every proposal that would use up a change refuses here once the limit is reached, before
+   * anything is created. The limit is the venue's own, else the free trial's (TRIAL_CHANGE_LIMIT over the whole trial) or its plan's
+   * monthly number (src/billing/entitlements.ts effectiveLimit). Undo never calls it. The apply-time stop in the store covers the rest.
    */
   const ensureWithinLimit = async () => {
     const venue = await d.store.getVenue(d.venueId);
-    if (venue.change_limit === null) return;
+    if (effectiveLimit(venue, d.store.billingConfig, d.now()).limit === null) return;
     const u = await changeUsage(d.store, venue, d.now());
-    if (!u.reached) return;
-    const line = copy(lang).limitReached(venue.change_limit, u.used, u.resets_on);
-    throw new Error(`Monthly change limit reached (${u.used}/${venue.change_limit} this month): nothing was proposed. Do not retry, split or rephrase this request; reply to the owner with exactly this line: "${line}" Undo still works.`);
+    if (!u.reached || u.limit === null) return;
+    if (u.kind === "trial" && d.store.billingConfig) {
+      const line = copy(lang).trialLimitReached(u.limit, billingUrl(d.store.billingConfig, venue.slug));
+      throw new Error(`Trial change limit reached (${u.used}/${u.limit} over the trial): nothing was proposed. Do not retry, split or rephrase this request; reply to the owner with exactly this line: "${line}" Undo still works.`);
+    }
+    const line = copy(lang).limitReached(u.limit, u.used, u.resets_on);
+    throw new Error(`Monthly change limit reached (${u.used}/${u.limit} this month): nothing was proposed. Do not retry, split or rephrase this request; reply to the owner with exactly this line: "${line}" Undo still works.`);
   };
 
   /** Shared by propose_changes and schedule_changes. */
   const propose = async (input: ProposeInput, applyAt: string | null) => {
+    // The plan and payment gate first: a set made only of set_comment_mode rows is a comments feature, anything else is a site change.
+    await ensureEntitled(input.changes.every((c) => c.op === "set_comment_mode") ? "comments" : "site");
     // A set made only of set_comment_mode rows never counts toward the limit (countsTowardLimit), so it is never refused here.
     if (countsTowardLimit(d.source ?? "text", input.changes)) await ensureWithinLimit();
     const s = await site();
@@ -343,7 +373,7 @@ export function makeTools(deps: AgentDeps) {
   });
 
   // Task 11 appends schedule_changes, propose_bulk_price_change, check_allergens, undo here.
-  const kit: ToolKit = { attempt, site, ctx, previews, mine, propose, getSet, ensureNoPending, ensureWithinLimit, cancelledThisTurn, lang };
+  const kit: ToolKit = { attempt, site, ctx, previews, mine, propose, getSet, ensureNoPending, ensureWithinLimit, ensureEntitled, cancelledThisTurn, lang };
   return [getSite, getMenu, proposeChanges, cancelChangeSet, listChanges, ...extraTools(d, kit), ...wpTools(d, kit), ...socialTools(d, kit), ...commentTools(d, kit), ...visualTools(d, kit), ...boostTools(d, kit)];
 }
 
@@ -359,6 +389,8 @@ export interface ToolKit {
   ensureNoPending: () => Promise<void>;
   /** Throws the owner's limit line when the venue's monthly change limit is reached; call before creating any non-undo set. */
   ensureWithinLimit: () => Promise<void>;
+  /** Throws the owner's plan/payment line when the venue may not use this feature now (not in its plan, trial over, plan paused, payment overdue); a no-op while billing is off. Call before any new owner proposal, not for undo. */
+  ensureEntitled: (feature: Feature) => Promise<void>;
   /** Ids of the sets this turn cancelled itself (per makeTools call); an owner's ❌ in an earlier turn is not in it. */
   cancelledThisTurn: ReadonlySet<string>;
   lang: Lang;

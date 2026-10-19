@@ -35,6 +35,10 @@ import { connectWordPress, wordPressClientFor } from "../destinations/connect";
 import { instagramAccess } from "../agent/boost-tools";
 import { socialConnections } from "../agent/social-tools";
 import { httpVisualClient } from "../visual/client";
+import { billingConfigOf } from "../billing/entitlements";
+import type { TrialBilling } from "../billing/reminders";
+import { sendEmail } from "./email";
+import { memoryOwnerEmails, supabaseOwnerEmails } from "./owner-emails";
 
 export interface ServerDeps {
   config: Config;
@@ -60,6 +64,8 @@ export interface ServerDeps {
   sync: SyncDeps | null;
   /** Comment reply drafting for the tick; null when integrations are off. */
   comments: { draft: DraftFn } | null;
+  /** The free trial's end and reminders for the tick; null while BILLING_ENABLED is off. */
+  billing: TrialBilling | null;
   /**
    * FakeDeployer in memory mode; VercelDeployer when VERCEL_TOKEN is set; null otherwise (production without a token):
    * no venue projects are created and every site is served from the hosted /<slug>.
@@ -111,6 +117,16 @@ export async function makeServerDeps(o: DepsOptions): Promise<ServerDeps> {
     }
   }
   const s = store;
+  // Billing (BILLING_ENABLED on): the store reads these settings for the trial/plan change limit, and the tick ends trials and sends reminders.
+  // Off, the store has no billing settings and the tick no billing deps: everything behaves as before billing existed.
+  const billing: TrialBilling | null = config.billingEnabled
+    ? {
+        config: billingConfigOf(config),
+        ownerEmails: isMemory ? memoryOwnerEmails : supabaseOwnerEmails(config.supabaseUrl, config.supabaseServiceKey),
+        sendEmail: (msg) => sendEmail(msg, { apiKey: config.resendApiKey, from: config.emailFrom }, o.fetch),
+      }
+    : null;
+  if (billing) s.billingConfig = billing.config;
   const destinationSecretKey = resolveSecretKey(config.destinationSecretKey, isMemory, log);
   const sync: SyncDeps | null = destinationSecretKey ? { store: s, secretKey: destinationSecretKey, log } : null;
   // Every apply (bot button, dashboard, tick, agent) goes through store2 so wp_* rows reach the site right after the apply.
@@ -175,7 +191,7 @@ export async function makeServerDeps(o: DepsOptions): Promise<ServerDeps> {
 
   async function handleRun(r: RunRequest): Promise<void> {
     try {
-      await runTick({ store: store2, messenger, now: new Date(), venueId: r.venueId, deployer, sync, comments });
+      await runTick({ store: store2, messenger, now: new Date(), venueId: r.venueId, deployer, sync, comments, billing });
     } catch (e) {
       console.error("[tick] per-webhook tick failed:", e instanceof Error ? e.message : e);
     }
@@ -194,7 +210,7 @@ export async function makeServerDeps(o: DepsOptions): Promise<ServerDeps> {
   }
 
   const outbound: typeof fetch = o.fetch ?? ((input, init) => fetch(input, init));
-  return { config, store: store2, messenger, bot, botDeps, waDownload, fetchUrl, handleRun, isMemory, deployer, startDeploy, watchDeploy, anthropic, destinationSecretKey, sync, comments, fetch: outbound };
+  return { config, store: store2, messenger, bot, botDeps, waDownload, fetchUrl, handleRun, isMemory, deployer, startDeploy, watchDeploy, anthropic, destinationSecretKey, sync, comments, billing, fetch: outbound };
 }
 
 // On globalThis, not a module variable: `next dev` (HMR, separate route bundles) then shares one in-memory store between pages and API routes.

@@ -15,6 +15,7 @@ import { COMMENT_POST_WINDOW_MS, pollVenueComments, purgeOldComments } from "./s
 import { COMMENT_PROPOSAL_TTL_MS, commentsOfSet, proposalTargets, proposalTtlHours, proposeForComments } from "./social/comments-propose";
 import type { DraftFn } from "./social/comments-draft";
 import { runCommentDigests } from "./social/comments-digest";
+import { pauseExpiredTrials, sendTrialReminders, type TrialBilling } from "./billing/reminders";
 
 export interface TickDeps {
   store: Store;
@@ -28,6 +29,8 @@ export interface TickDeps {
   deployer?: Deployer | null;
   /** Comment reply drafting (src/social/comments-draft.ts); null/undefined = comments are polled but never proposed. */
   comments?: { draft: DraftFn } | null;
+  /** Billing (BILLING_ENABLED on): the free trial's end and its reminders. null/undefined = billing is off, the tick does none of it. */
+  billing?: TrialBilling | null;
 }
 export interface TickReport {
   applied: string[];
@@ -49,6 +52,10 @@ export interface TickReport {
   comments_proposed?: number;
   /** Venue ids that got their daily comment digest this tick (global tick only). */
   digests?: string[];
+  /** Venue ids whose free trial ran out and were paused this tick (billing on only). */
+  trials_paused?: string[];
+  /** Trial reminders sent this tick (billing on only). */
+  trial_reminders?: number;
 }
 
 const HOUR = 3_600_000;
@@ -131,6 +138,18 @@ export async function runTick(d: TickDeps): Promise<TickReport> {
       report.auto.push(id);
     } catch (e) {
       console.error(`[tick] auto set for ${t.item.id} failed:`, e instanceof Error ? e.message : e);
+    }
+  }
+
+  // 3b. The free trial's end (billing on only): pause trials that ran out, then send the two reminders (once each). Pausing stops NEW owner
+  //     proposals only; the due scheduled sets above and the auto reverts of step 3 have already run, and nothing goes offline.
+  if (d.billing?.config.billingEnabled) {
+    try {
+      const b = { store: d.store, messenger: d.messenger, billing: d.billing, venueId: d.venueId };
+      report.trials_paused = await pauseExpiredTrials(b, d.now);
+      report.trial_reminders = await sendTrialReminders(b, d.now);
+    } catch (e) {
+      console.error("[tick] trial end failed:", e instanceof Error ? e.message : e);
     }
   }
 

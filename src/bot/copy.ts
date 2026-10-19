@@ -17,8 +17,15 @@ const MONTHS_EN = ["January", "February", "March", "April", "May", "June", "July
 /** "not confirmed within N hours": 2 for ordinary proposals, 24 for comment sets (proposalTtlHours). */
 const expiredBg = (hours: number) => `Изтекло: не беше потвърдено в рамките на ${hours} часа.`;
 const expiredEn = (hours: number) => `Expired: not confirmed within ${hours} hours.`;
+/** 1 → "1st", 2 → "2nd", 20 → "20th" (the trial's last change, in English). */
+const ordinalEn = (n: number) => `${n}${n % 100 >= 11 && n % 100 <= 13 ? "th" : (["th", "st", "nd", "rd"][n % 10] ?? "th")}`;
 /** YYYY-MM-DD → "1 ноември" / "1 November". */
 const dayMonth = (date: string, months: string[]) => `${Number(date.slice(8, 10))} ${months[Number(date.slice(5, 7)) - 1]}`;
+
+/** "2026-11-02" → "2 ноември" / "2 November" for the reminders. */
+export function dayMonthLabel(date: string, lang: Lang): string {
+  return dayMonth(date, lang === "bg" ? MONTHS_BG : MONTHS_EN);
+}
 
 function membersText(head: string, roles: Record<Role, string>, you: string, lastSeen: string, never: string, joined: string, codesHead: string, validUntil: string, noCodes: string, tail: string, members: MemberView[], invites: InviteView[]): string {
   const lines = members.map((m) => `• ${roles[m.role]}${m.you ? ` (${you})` : ""} · ${m.channel} ${m.id} · ${m.lang.toUpperCase()} · ${m.lastSeen ? `${lastSeen} ${m.lastSeen}` : never} · ${joined} ${m.joined}`);
@@ -60,6 +67,31 @@ const BG = {
   /** Monthly change limit (src/domain/limits.ts); `resetsOn` is YYYY-MM-DD, the 1st of next month. */
   limitReached: (limit: number, used: number, resetsOn: string) => `Лимитът от ${limit} промени за този месец е достигнат (${used}/${limit}). Нови промени от ${dayMonth(resetsOn, MONTHS_BG)}.`,
   changesThisMonth: (used: number, limit: number) => `Промени този месец: ${used}/${limit}`,
+  /** Billing (2026-10-19): the free trial counts its changes over the whole trial, not per month. */
+  changesInTrial: (used: number, limit: number) => `Промени в пробния период: ${used}/${limit}`,
+  /** The last trial change was used (or a new one is refused): new changes wait for a plan. Undo still works. */
+  trialLimitReached: (limit: number, url: string) => `Използвахте и последната от ${limit} промени в пробния период, затова новите промени са на пауза, докато изберете план. Отмяната работи: ${url}`,
+  /** Reminder "soon": `days` whole days left, `when` = "2 ноември". */
+  trialEndsSoon: (days: number, when: string, url: string) => `Безплатният ви пробен период свършва след ${days === 1 ? "1 ден" : `${days} дни`}, на ${when}. За да продължите, изберете план: ${url}`,
+  /** Reminder "soon" by use: 15 of the 20 trial changes are used. */
+  trialChangesSoon: (used: number, limit: number, url: string) => `Използвахте ${used} от ${limit} промени в пробния период. За да не спират новите промени, изберете план: ${url}`,
+  /** Reminder "ended": the trial time is over. */
+  trialEnded: (url: string) => `Безплатният ви пробен период приключи, затова новите промени са на пауза. Сайтът и постовете ви остават онлайн. За да продължите, изберете план: ${url}`,
+  /** The refusal of an owner request once the trial is over. */
+  trialEndedRefusal: (url: string) => `Пробният ви период приключи, затова спрях новите промени. Сайтът и постовете ви остават онлайн. Изберете план и ще го направя веднага: ${url}`,
+  /** The refusal when a paid plan is paused or canceled. */
+  planPausedRefusal: (url: string) => `Планът ви е на пауза, затова новите промени са спрени. Сайтът и постовете ви остават онлайн. Подновете го тук и ще го направя веднага: ${url}`,
+  /** The refusal when a payment failed more than 7 days ago. */
+  pastDueRefusal: (url: string) => `Плащането ви не мина преди повече от 7 дни, затова новите промени са спрени. Сайтът и постовете ви остават онлайн. Обновете картата си и ще го направя веднага: ${url}`,
+  /** The refusal when TRIAL_REQUIRES_CARD is on and no card was added. */
+  cardRequiredRefusal: (url: string) => `Добавете карта, за да започне пробният ви период, и ще го направя веднага: ${url}`,
+  /** A feature the plan does not include; `plan` is its name. */
+  notInPlanRefusal: (feature: "site" | "social" | "comments" | "boost", plan: string, url: string) => {
+    const what = { site: "Промените по сайта", social: "Публикациите в социалните мрежи", comments: "Отговорите на коментари", boost: "Рекламите" }[feature];
+    return `${what} не са включени във вашия план ${plan}. Вижте плановете и ще го направя веднага: ${url}`;
+  },
+  /** The plan's name in a sentence. */
+  planName: { admin: "Admin", social: "Социални мрежи", both: "Both" } as Record<"admin" | "social" | "both", string>,
   /** Comment replies (2026-10-15): the separate monthly cap on replies and moderations. */
   commentLimitReached: (limit: number, used: number, resetsOn: string) => `Лимитът от ${limit} отговора на коментари за този месец е достигнат (${used}/${limit}). Нови отговори от ${dayMonth(resetsOn, MONTHS_BG)}.`,
   /** Another owner tapped first on a comment proposal; `channel` is a CHANNEL_NAMES value. */
@@ -133,6 +165,20 @@ const EN: typeof BG = {
   cancelled: "❌ Cancelled",
   limitReached: (limit, used, resetsOn) => `This month's limit of ${limit} changes is reached (${used}/${limit}). New changes from ${dayMonth(resetsOn, MONTHS_EN)}.`,
   changesThisMonth: (used, limit) => `Changes this month: ${used}/${limit}`,
+  changesInTrial: (used, limit) => `Changes in your trial: ${used}/${limit}`,
+  trialLimitReached: (limit, url) => `That was your ${ordinalEn(limit)} trial change, so new changes are paused until you choose a plan. Undo still works: ${url}`,
+  trialEndsSoon: (days, when, url) => `Your free trial ends in ${days === 1 ? "1 day" : `${days} days`}, on ${when}. To keep going, choose a plan: ${url}`,
+  trialChangesSoon: (used, limit, url) => `You've used ${used} of your ${limit} trial changes. To keep new changes coming, choose a plan: ${url}`,
+  trialEnded: (url) => `Your free trial has ended, so new changes are paused. Your website and posts stay online. To keep going, choose a plan: ${url}`,
+  trialEndedRefusal: (url) => `Your trial has ended, so I've paused new changes. Your website and posts stay online. Choose a plan and I'll do this right away: ${url}`,
+  planPausedRefusal: (url) => `Your plan is paused, so new changes are on hold. Your website and posts stay online. Restart it here and I'll do this right away: ${url}`,
+  pastDueRefusal: (url) => `Your payment failed more than 7 days ago, so new changes are on hold. Your website and posts stay online. Update your card and I'll do this right away: ${url}`,
+  cardRequiredRefusal: (url) => `Add a card to start your trial and I'll do this right away: ${url}`,
+  notInPlanRefusal: (feature, plan, url) => {
+    const what = { site: "Website changes", social: "Social media posts", comments: "Comment replies", boost: "Ads" }[feature];
+    return `${what} aren't included in your ${plan} plan. See the plans and I'll do this right away: ${url}`;
+  },
+  planName: { admin: "Admin", social: "Social media", both: "Both" },
   commentLimitReached: (limit, used, resetsOn) => `This month's limit of ${limit} comment replies is reached (${used}/${limit}). New replies from ${dayMonth(resetsOn, MONTHS_EN)}.`,
   decidedByOther: (decision, channel) => (decision === "apply" ? `✅ Answered by another owner (${channel})` : `❌ Declined by another owner (${channel})`),
   alreadyDecided: "Already decided.",

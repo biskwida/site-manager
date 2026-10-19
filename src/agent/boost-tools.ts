@@ -74,6 +74,7 @@ export function boostTools(d: ToolDeps, k: ToolKit) {
     run: (input) =>
       k.attempt(async () => {
         if (d.member.role !== "owner") throw new Error("Ads are only the owner's decision; tell the owner to send this.");
+        await k.ensureEntitled("boost");
         const s = await k.site();
         const venue = s.venue;
         const now = d.now();

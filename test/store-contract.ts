@@ -1124,6 +1124,54 @@ export function storeContract(
       }
     });
 
+    it("billing: pauseExpiredTrial pauses a trialing venue only when its trial is over and it has no subscription, once", async () => {
+      const s = await make();
+      const [a, b, c, d] = [await s.createVenue({ slug: "t-b10", name: "A" }), await s.createVenue({ slug: "t-b11", name: "B" }), await s.createVenue({ slug: "t-b12", name: "C" }), await s.createVenue({ slug: "t-b13", name: "D" })];
+      const now = "2026-11-02T09:00:00.000Z";
+      try {
+        await s.updateVenue(a.id, { billing_status: "trialing", trial_started_at: "2026-10-19T09:00:00.000Z", trial_ends_at: "2026-11-02T09:00:00.000Z" });
+        await s.updateVenue(b.id, { billing_status: "trialing", trial_started_at: "2026-10-19T09:00:00.000Z", trial_ends_at: "2026-11-02T09:00:01.000Z" }); // not over yet
+        await s.updateVenue(c.id, { billing_status: "trialing", plan: "both", stripe_subscription_id: "sub_x", trial_started_at: "2026-10-19T09:00:00.000Z", trial_ends_at: "2026-11-01T09:00:00.000Z" }); // Stripe's trial
+        await s.updateVenue(d.id, { billing_status: "active", plan: "both", trial_ends_at: "2026-11-01T09:00:00.000Z" });
+        const wins = await Promise.all([s.pauseExpiredTrial(a.id, now), s.pauseExpiredTrial(a.id, now), s.pauseExpiredTrial(a.id, now)]);
+        expect(wins.filter(Boolean)).toHaveLength(1);
+        expect((await s.getVenue(a.id)).billing_status).toBe("paused");
+        expect(await s.pauseExpiredTrial(a.id, now)).toBe(false);
+        for (const v of [b, c, d]) expect(await s.pauseExpiredTrial(v.id, now)).toBe(false);
+        expect((await s.getVenue(b.id)).billing_status).toBe("trialing");
+        expect((await s.getVenue(c.id)).billing_status).toBe("trialing");
+        expect((await s.getVenue(d.id)).billing_status).toBe("active");
+        await expect(s.pauseExpiredTrial(crypto.randomUUID(), now)).rejects.toThrow();
+      } finally {
+        for (const v of [a, b, c, d]) await s.deleteVenue(v.id);
+      }
+    });
+
+    it("billing: claimTrialReminder marks each reminder once; 'ended' may follow 'soon' but never repeats", async () => {
+      const s = await make();
+      const v = await s.createVenue({ slug: "t-b14", name: "R" });
+      try {
+        const soon = await Promise.all([s.claimTrialReminder(v.id, "soon"), s.claimTrialReminder(v.id, "soon"), s.claimTrialReminder(v.id, "soon")]);
+        expect(soon.filter(Boolean)).toHaveLength(1);
+        expect((await s.getVenue(v.id)).trial_reminder_sent).toBe("soon");
+        expect(await s.claimTrialReminder(v.id, "soon")).toBe(false);
+        const ended = await Promise.all([s.claimTrialReminder(v.id, "ended"), s.claimTrialReminder(v.id, "ended")]);
+        expect(ended.filter(Boolean)).toHaveLength(1);
+        expect((await s.getVenue(v.id)).trial_reminder_sent).toBe("ended");
+        expect(await s.claimTrialReminder(v.id, "ended")).toBe(false);
+        expect(await s.claimTrialReminder(v.id, "soon")).toBe(false);
+        const fresh = await s.createVenue({ slug: "t-b15", name: "R2" }); // straight to 'ended' from no marker
+        try {
+          expect(await s.claimTrialReminder(fresh.id, "ended")).toBe(true);
+        } finally {
+          await s.deleteVenue(fresh.id);
+        }
+        await expect(s.claimTrialReminder(crypto.randomUUID(), "soon")).rejects.toThrow();
+      } finally {
+        await s.deleteVenue(v.id);
+      }
+    });
+
     it("billing: claimStripeCustomer stores a customer only while there is none and returns what is stored", async () => {
       const s = await make();
       const v = await s.createVenue({ slug: "t-b6", name: "B6" });

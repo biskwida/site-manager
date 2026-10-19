@@ -102,7 +102,7 @@ TRIAL_REQUIRES_CARD=false
 
 ## 8. Try it with the test card
 
-1. Create a business at `https://getclaudia.app/start`. The free trial starts (14 days). The 20-change trial limit is stored as `TRIAL_CHANGE_LIMIT` but is not enforced yet (that comes with the limits task).
+1. Create a business at `https://getclaudia.app/start`. The free trial starts (14 days). The free trial allows `TRIAL_CHANGE_LIMIT` (20) owner changes over the whole trial (not per month); the 21st proposal is refused with the choose-a-plan line, and undo still works.
 2. The checklist's plan card (or the dashboard's "Plan and payment") links to `/billing/<slug>`. Pick a plan, tick "Build me a website" if it is offered, and continue.
 3. In Stripe Checkout pay with the test card `4242 4242 4242 4242`, any future expiry, any CVC, any postcode. Other useful test cards: `4000 0000 0000 0341` (card attaches, then payments fail, for the past-due path) and `4000 0025 0000 3155` (asks for 3-D Secure).
 4. You land on `/dashboard/<slug>?billing=success`. Within a few seconds the webhook has set the plan and status (check Stripe, Developers, Webhooks, the endpoint's delivery log: 200 for each event).
@@ -111,6 +111,14 @@ TRIAL_REQUIRES_CARD=false
 A Social media subscriber has no website; an Admin or Both subscriber with an own site or no site can add the 199 € website later from the dashboard ("Add a website") or the plan page: a one-off Checkout, after which "Build your website" appears.
 
 Without a card, "if required" Checkout lets an owner with trial days left start the subscription with nothing charged yet; the plan starts when the trial ends. If no card is added by then, Stripe pauses the subscription and Claudia pauses new owner changes.
+
+## What the limits and the tick do (with `BILLING_ENABLED=true`)
+
+- **Plan limits** when a venue has no `change_limit`: Admin 40 a month, Both 150, Social none for site changes (it refuses site changes as "not in plan"). A venue's own `change_limit` still overrides. Existing venues were set to `active` / `both` by the migration, so they now have the 150 a month limit; give one a high `change_limit` (`npm run venue:set -- --slug <slug> --change-limit 100000`) to keep it practically unlimited (`--change-limit none` clears the override, so the plan's number applies).
+- **Trial:** a free trial (no Stripe subscription) counts `TRIAL_CHANGE_LIMIT` over `trial_started_at`..`trial_ends_at`. Paying during the trial switches straight to the plan's monthly limit.
+- **Paused / canceled / past due more than 7 days:** only new owner proposals are refused (the reply carries the `/billing/<slug>` link). Scheduled changes already due, the auto sold-out reverts and undo still run; the website, menu page and posts stay online.
+- **The cron tick** (`/api/tick`) pauses free trials whose `trial_ends_at` has passed (no Stripe subscription; a Stripe trial is left to the webhook) and sends two reminders, each once (`trial_reminder_sent`): `soon` at 3 days left or 15 of 20 changes used, `ended` at the end or the 20th change. Each goes to the owner chats and, with `RESEND_API_KEY` set, by email to the account owners.
+- **`TRIAL_REQUIRES_CARD=true`:** while a venue is in a free trial with no subscription, the agent refuses proposals with an "add a card" line and the billing link.
 
 ## Going live later
 

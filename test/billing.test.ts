@@ -1028,7 +1028,7 @@ describe("the dashboard and checklist read the plan", () => {
     const s = await setup({ billing_status: "trialing", trial_ends_at: "2026-11-02T09:00:00.000Z", site_mode: "own", site_url: "https://own.example", created_via: "start", plan: "both", website_fee_paid: true });
     const v = await s.store.getVenue(s.venue.id);
     expect((await adminOverview(s.store, v, T0, BASE)).billing).toBeUndefined();
-    expect((await adminOverview(s.store, v, T0, BASE, { billing: true })).billing).toEqual({ plan: "both", status: "trialing", trial_days_left: 14, trial_ends_at: "2026-11-02T09:00:00.000Z", subscribed: false, has_customer: false, can_build_website: true, can_buy_website: false, website_note: false });
+    expect((await adminOverview(s.store, v, T0, BASE, { billing: true })).billing).toEqual({ plan: "both", status: "trialing", trial_days_left: 14, trial_ends_at: "2026-11-02T09:00:00.000Z", subscribed: false, has_customer: false, can_build_website: true, can_buy_website: false, website_note: false, trial_changes: null, locked: [] });
     // a live Admin subscription on an own-site venue that has not paid for the website can buy it; Social gets the note instead
     const sub1 = await s.store.updateVenue(s.venue.id, { website_fee_paid: false, billing_status: "active", stripe_subscription_id: "sub_1", stripe_customer_id: "cus_1" });
     expect((await adminOverview(s.store, sub1, T0, BASE, { billing: true })).billing).toMatchObject({ subscribed: true, has_customer: true, can_build_website: false, can_buy_website: true, website_note: false });

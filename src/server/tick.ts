@@ -1,5 +1,6 @@
 // src/server/tick.ts
 import type { Messenger } from "../bot/messenger";
+import type { TrialBilling } from "../billing/reminders";
 import type { SyncDeps } from "../destinations/sync";
 import type { Deployer } from "../deploy/types";
 import type { DraftFn } from "../social/comments-draft";
@@ -13,7 +14,7 @@ import type { SessionUser } from "./session";
  * ?slug=<venue> with the signed-in owner's session (the account dashboard's deploy nudge; a POST then needs a same-host Origin/Referer).
  * A ?key= that does not match is refused even when a session exists.
  */
-export async function handleTickRequest(req: Request, deps: { config: { tickSecret: string }; store: Store; messenger: Messenger; deployer?: Deployer | null; sync?: SyncDeps | null; comments?: { draft: DraftFn } | null; sessionUser?: () => Promise<Pick<SessionUser, "id"> | null> }, now = new Date()): Promise<Response> {
+export async function handleTickRequest(req: Request, deps: { config: { tickSecret: string }; store: Store; messenger: Messenger; deployer?: Deployer | null; sync?: SyncDeps | null; comments?: { draft: DraftFn } | null; billing?: TrialBilling | null; sessionUser?: () => Promise<Pick<SessionUser, "id"> | null> }, now = new Date()): Promise<Response> {
   const url = new URL(req.url);
   const secret = deps.config.tickSecret;
   const bearer = req.headers.get("authorization")?.replace(/^Bearer\s+/i, "");
@@ -32,6 +33,6 @@ export async function handleTickRequest(req: Request, deps: { config: { tickSecr
     if (!venue) return new Response("unauthorized", { status: 401 });
     venueId = venue.id;
   }
-  const report = await runTick({ store: deps.store, messenger: deps.messenger, now, venueId, deployer: deps.deployer ?? null, sync: deps.sync ?? null, comments: deps.comments ?? null });
+  const report = await runTick({ store: deps.store, messenger: deps.messenger, now, venueId, deployer: deps.deployer ?? null, sync: deps.sync ?? null, comments: deps.comments ?? null, billing: deps.billing ?? null });
   return Response.json({ ok: true, at: now.toISOString(), ...report });
 }

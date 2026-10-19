@@ -157,7 +157,7 @@ export function Checklist(p: ChecklistProps) {
   const days = plan.trial_days_left ?? 0;
   const planLines =
     plan.status === "trial"
-      ? [days <= 0 ? t["list.plan.trialEnded"] : days === 1 ? t["list.plan.trialDay"] : fill(t["list.plan.trialDays"], { n: days }), t["list.plan.trialNote"]]
+      ? [days <= 0 ? t["list.plan.trialEnded"] : days === 1 ? t["list.plan.trialDay"] : fill(t["list.plan.trialDays"], { n: days }), ...(plan.trial_changes ? [fill(t["list.plan.trialChanges"], { used: plan.trial_changes.used, limit: plan.trial_changes.limit })] : []), t["list.plan.trialNote"]]
       : plan.status === "active"
         ? [fill(t["list.plan.active"], { plan: plan.plan ? t[`plan.${plan.plan}` as OnboardingKey] : "" }).replace(/: \.$/, ".")]
         : plan.status === "paused"

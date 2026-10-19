@@ -31,7 +31,7 @@ export default async function Page(props: PageProps<"/onboarding/[slug]">) {
   const access = await authorizeAdminAccess(null, slug, { store: deps.store, sessionUser: async () => user });
   if (!access) notFound();
   const { venue } = access;
-  const status = await onboardingStatus(deps.store, venue);
+  const status = await onboardingStatus(deps.store, venue, { billing: deps.config.billingEnabled });
   // The owner code is shown until a chat is connected; it is the newest open one, a new one only when none is open.
   const code = status.chat ? null : await doneInviteCode(deps.store, venue.id, null, new Date());
   const base = deps.config.publicBaseUrl;

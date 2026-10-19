@@ -6,6 +6,8 @@ import { isSoldOut } from "../domain/effective";
 import { baseLang, unkeep, unkeepTexts } from "../domain/format";
 import { renderPreview } from "../domain/preview";
 import { isBoostPlanSet, isBoostPlanUndoSet, TEMPLATE_IDS, type BillingStatus, type ChangeSet, type DeployInfo, type Plan, type SiteMode, type TemplateId, type Venue, type VenueStatus } from "../domain/types";
+import { lockedFeatures } from "../billing/entitlements";
+import type { Feature } from "../billing/plans";
 import { canBuyWebsiteLater, hasStoredSubscription, socialWebsiteNote, trialDaysLeft, websiteAllowed } from "../billing/plans";
 import type { Deployer, DeployInput, DomainInstructions } from "../deploy/types";
 import { normalizeDomain } from "../deploy/vercel-domains";
@@ -45,8 +47,11 @@ export interface AdminOverview {
   connected_apps: ConnectedApp[];
   /** "Facebook and Instagram" card. */
   social?: SocialOverview;
-  /** Monthly change limit (src/domain/limits.ts): changes applied this calendar month in the venue's zone; limit null = unlimited. */
-  changes_this_month?: { used: number; limit: number | null };
+  /**
+   * Change limit (src/domain/limits.ts): changes applied this calendar month in the venue's zone; limit null = unlimited. In a free
+   * trial (billing on, no subscription) it counts the whole trial instead and `trial` is true ("Changes in your trial: 6 / 20").
+   */
+  changes_this_month?: { used: number; limit: number | null; trial?: true };
   /** "Comments" card (comment replies, 2026-10-15). */
   comments?: CommentsOverview;
   /** The plan and trial card (billing, 2026-10-19). Present only when billing is on. */
@@ -69,9 +74,15 @@ export interface BillingOverview {
   can_buy_website: boolean;
   /** A Social media subscriber with no Claudia site: the dashboard says a website comes with Admin or Both. */
   website_note: boolean;
+  /** The free trial's changes used so far over the whole trial, against TRIAL_CHANGE_LIMIT; null outside a free trial. */
+  trial_changes?: { used: number; limit: number } | null;
+  /** Features the venue's plan does not include (shown as locked cards with the upgrade link); empty when nothing is locked. */
+  locked?: Feature[];
 }
 
-function billingOverview(venue: Venue, now: Date): BillingOverview {
+async function billingOverview(store: Store, venue: Venue, now: Date): Promise<BillingOverview> {
+  const usage = venue.billing_status === "trialing" && venue.stripe_subscription_id === null && venue.change_limit === null ? await changeUsage(store, venue, now) : null;
+  const planStates: (Venue["billing_status"])[] = ["trialing", "active", "past_due"]; // a paused or canceled venue shows its status, not locked cards
   return {
     plan: venue.plan,
     status: venue.billing_status,
@@ -82,6 +93,8 @@ function billingOverview(venue: Venue, now: Date): BillingOverview {
     can_build_website: venue.site_mode !== "claudia" && venue.status === "live" && websiteAllowed(venue),
     can_buy_website: canBuyWebsiteLater(venue),
     website_note: socialWebsiteNote(venue),
+    trial_changes: usage && usage.kind === "trial" && usage.limit !== null ? { used: usage.used, limit: usage.limit } : null,
+    locked: planStates.includes(venue.billing_status) ? lockedFeatures(venue, { billingEnabled: true }) : [],
   };
 }
 
@@ -126,13 +139,13 @@ export async function adminOverview(store: Store, venue: Venue, now: Date, baseU
     social: await socialOverview(store, venue.id, opts.social ?? { facebook: false, instagram: false }),
     changes_this_month: await changesThisMonth(store, venue, now),
     comments: await commentsOverview(store, venue, now),
-    ...(opts.billing ? { billing: billingOverview(venue, now) } : {}),
+    ...(opts.billing ? { billing: await billingOverview(store, venue, now) } : {}),
   };
 }
 
-async function changesThisMonth(store: Store, venue: Venue, now: Date): Promise<{ used: number; limit: number | null }> {
+async function changesThisMonth(store: Store, venue: Venue, now: Date): Promise<{ used: number; limit: number | null; trial?: true }> {
   const u = await changeUsage(store, venue, now);
-  return { used: u.used, limit: u.limit };
+  return { used: u.used, limit: u.limit, ...(u.kind === "trial" ? { trial: true as const } : {}) };
 }
 
 export type AdminActionName = "apply" | "reject" | "cancel" | "undo";

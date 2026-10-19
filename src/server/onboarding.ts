@@ -11,6 +11,7 @@ import { trialDaysLeft, websiteAllowed } from "../billing/plans";
 import { connectWordPress, type ConnectDeps } from "../destinations/connect";
 import { isLocalHost, isPrivateAddress } from "../destinations/wordpress-client";
 import { SlugTakenError, type Store } from "../store/types";
+import { changeUsage } from "../store/usage";
 import type { PublishError } from "../wizard/schema";
 import { slugError } from "../wizard/schema";
 import { afterVenueCreated } from "./after-venue-created";
@@ -223,8 +224,10 @@ export async function handleStartVenue(req: Request, d: StartVenueDeps): Promise
 export interface PlanSummary {
   /** "none" while billing is off (or has not touched the venue). trial = in the free trial with no subscription; active = a subscription is running (past due included). */
   status: "none" | "trial" | "active" | "paused" | "canceled";
-  /** Whole days of free trial left; null unless status is "trial". The changes used (of TRIAL_CHANGE_LIMIT) are Task 7's. */
+  /** Whole days of free trial left; null unless status is "trial". */
   trial_days_left: number | null;
+  /** The trial's changes used so far against TRIAL_CHANGE_LIMIT ("0 of 20 changes"); only in a free trial whose limit applies. */
+  trial_changes?: { used: number; limit: number };
   /** The chosen plan; null until one is. */
   plan: Plan | null;
 }
@@ -247,15 +250,20 @@ export async function onboardingStatus(store: Store, venue: Venue, opts: { billi
     instagram: connected("instagram"),
     facebook: connected("facebook"),
     website: venue.site_mode !== "own" ? "n/a" : connected("wordpress") ? "connected" : "todo",
-    plan: opts.billing ? planSummary(venue, opts.now ?? new Date()) : { status: "none", trial_days_left: null, plan: null },
+    plan: opts.billing ? await planSummary(store, venue, opts.now ?? new Date()) : { status: "none", trial_days_left: null, plan: null },
   };
 }
 
-function planSummary(venue: Venue, now: Date): PlanSummary {
+async function planSummary(store: Store, venue: Venue, now: Date): Promise<PlanSummary> {
   const subscribed = venue.stripe_subscription_id !== null;
   switch (venue.billing_status) {
-    case "trialing":
-      return subscribed ? { status: "active", trial_days_left: null, plan: venue.plan } : { status: "trial", trial_days_left: trialDaysLeft(venue, now), plan: venue.plan };
+    case "trialing": {
+      if (subscribed) return { status: "active", trial_days_left: null, plan: venue.plan };
+      const base: PlanSummary = { status: "trial", trial_days_left: trialDaysLeft(venue, now), plan: venue.plan };
+      // The trial counter ("0 of 20 changes"): the same count the limit uses, over the whole trial; none when an explicit change_limit overrides it.
+      const u = await changeUsage(store, venue, now);
+      return u.kind === "trial" && u.limit !== null ? { ...base, trial_changes: { used: u.used, limit: u.limit } } : base;
+    }
     case "active":
     case "past_due":
       return { status: "active", trial_days_left: null, plan: venue.plan };

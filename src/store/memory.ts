@@ -1,7 +1,8 @@
 // src/store/memory.ts
+import type { BillingConfig } from "../billing/entitlements";
 import { applyChanges } from "../domain/changes";
 import { COMMENT_LIMIT_DEFAULT, countsTowardLimit } from "../domain/limits";
-import type { Category, ChangeSet, ChatLang, Conversation, DeployInfo, DeployStatus, Item, Media, Member, Role, SiteMode, SiteState, SiteTextKey, Venue, VenueStatus } from "../domain/types";
+import type { Category, ChangeSet, ChatLang, Conversation, DeployInfo, DeployStatus, Item, Media, Member, Role, SiteMode, SiteState, SiteTextKey, TrialReminder, Venue, VenueStatus } from "../domain/types";
 import { DEFAULT_HOURS, extensionFor, newInviteCode, newToken, PUBLISH_CLAIM_TTL_MS, type ChangeSetPatch, type ExpiredTimer, type NewCategory, type NewChangeSet, type NewItem, type NewVenue, type Store, type VenuePatch, SlugTakenError, type Destination, type DestinationKind, type DestinationPatch, type DestinationSync, type DestinationWithSecrets, type NewDestination, type NewSync, type SyncPatch, type ListSyncsOpts, type ApplyResult, checkLimitValue, checkMemberLang, CONFIG_KEY_RE, newConfirmationCode, type DataDeletionRequest, type DeletionProvider, type ListCommentsOpts, type NewSocialComment, type SocialComment, type SocialCommentPatch, COMMENT_REDACTED, redactCommentRow, type VenueSurroundings } from "./types";
 import { limitBlocks } from "./usage";
 
@@ -562,6 +563,19 @@ export class InMemoryStore implements Store {
     v.trial_started_at = trial.trial_started_at;
     v.trial_ends_at = trial.trial_ends_at;
     v.billing_status = "trialing";
+    return true;
+  }
+  billingConfig?: BillingConfig;
+  async pauseExpiredTrial(venueId: string, nowIso: string) {
+    const v = this.site(venueId).venue;
+    if (v.billing_status !== "trialing" || v.stripe_subscription_id !== null || v.trial_ends_at === null || Date.parse(v.trial_ends_at) > Date.parse(nowIso)) return false;
+    v.billing_status = "paused";
+    return true;
+  }
+  async claimTrialReminder(venueId: string, kind: TrialReminder) {
+    const v = this.site(venueId).venue;
+    if (kind === "soon" ? v.trial_reminder_sent !== null : v.trial_reminder_sent === "ended") return false;
+    v.trial_reminder_sent = kind;
     return true;
   }
   async findVenueByStripeCustomer(customerId: string) {

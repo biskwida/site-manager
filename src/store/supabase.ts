@@ -1,8 +1,9 @@
 // src/store/supabase.ts
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
+import type { BillingConfig } from "../billing/entitlements";
 import { COMMENT_LIMIT_DEFAULT, countsTowardLimit } from "../domain/limits";
 import { BILLING_STATUSES, isChatLang, isExternalEntity, isRecordOnlyEntity, PLAN_IDS, SITE_PLATFORMS, type BillingStatus, type BoostEntity, type CommentMode, type SocialEntity, type WpEntity } from "../domain/types";
-import type { Announcement, BusinessType, Category, Change, ChangeSet, ChatLang, Conversation, DeployInfo, DeployStatus, Holiday, InstagramImport, Item, Lang, Media, Member, Plan, Role, SitePlatform, SiteState, SiteText, SiteTextKey, TemplateId, Venue, VenueStatus } from "../domain/types";
+import type { Announcement, BusinessType, Category, Change, ChangeSet, ChatLang, Conversation, DeployInfo, DeployStatus, Holiday, InstagramImport, Item, Lang, Media, Member, Plan, Role, SitePlatform, SiteState, SiteText, SiteTextKey, TemplateId, TrialReminder, Venue, VenueStatus } from "../domain/types";
 import type { Place } from "../geo/osm";
 import type { WizardDraft } from "../wizard/schema";
 import { legacyTelegramId } from "../channels/ref";
@@ -690,6 +691,26 @@ export class SupabaseStore implements Store {
     if (error) throw new Error(`startTrialIfNone ${venueId}: ${error.message}`);
     if ((data?.length ?? 0) === 1) return true;
     await this.getVenue(venueId); // throws "not found" for an unknown venue
+    return false;
+  }
+  billingConfig?: BillingConfig;
+  async pauseExpiredTrial(venueId: string, nowIso: string) {
+    if (badVenue(venueId)) throw new Error(`pauseExpiredTrial ${venueId}: not found`);
+    // One conditional UPDATE: the row filter is the claim, so a racing webhook (a subscription just started) or a second tick changes nothing.
+    const { data, error } = await this.db.from("venues").update({ billing_status: "paused" }).eq("id", venueId).eq("billing_status", "trialing").is("stripe_subscription_id", null).lte("trial_ends_at", nowIso).select("id");
+    if (error) throw new Error(`pauseExpiredTrial ${venueId}: ${error.message}`);
+    if ((data?.length ?? 0) === 1) return true;
+    await this.getVenue(venueId); // throws "not found" for an unknown venue
+    return false;
+  }
+  async claimTrialReminder(venueId: string, kind: TrialReminder) {
+    if (badVenue(venueId)) throw new Error(`claimTrialReminder ${venueId}: not found`);
+    let q = this.db.from("venues").update({ trial_reminder_sent: kind }).eq("id", venueId);
+    q = kind === "soon" ? q.is("trial_reminder_sent", null) : q.or("trial_reminder_sent.is.null,trial_reminder_sent.neq.ended");
+    const { data, error } = await q.select("id");
+    if (error) throw new Error(`claimTrialReminder ${venueId}: ${error.message}`);
+    if ((data?.length ?? 0) === 1) return true;
+    await this.getVenue(venueId);
     return false;
   }
   async findVenueByStripeCustomer(customerId: string) {

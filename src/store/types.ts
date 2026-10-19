@@ -1,8 +1,9 @@
 // src/store/types.ts
 import type {
-  BusinessType, Category, Change, ChangeSet, ChangeSetStatus, ChangeSource, ChatLang, CommentMode, CommentNetwork, Conversation, DeployInfo, DeployStatus, Item, Lang, Media, Member, Role, CreatedVia, SiteMode, SitePlatform, SiteState, SiteTextKey, TemplateId, Venue, VenueStatus, WeekHours,
+  BusinessType, Category, Change, ChangeSet, ChangeSetStatus, ChangeSource, ChatLang, CommentMode, CommentNetwork, Conversation, DeployInfo, DeployStatus, Item, Lang, Media, Member, Role, CreatedVia, SiteMode, SitePlatform, SiteState, SiteTextKey, TemplateId, TrialReminder, Venue, VenueStatus, WeekHours,
 } from "../domain/types";
 import { isChatLang } from "../domain/types";
+import type { BillingConfig } from "../billing/entitlements";
 import type { Place } from "../geo/osm";
 import type { WizardDraft } from "../wizard/schema";
 
@@ -549,4 +550,20 @@ export interface Store {
    * harmless). True when this call recorded it; false when it was recorded already (the second insert of a race loses cleanly).
    */
   recordBillingEvent(eventId: string, type: string, nowIso: string): Promise<boolean>;
+  /**
+   * Billing settings the store reads for the apply-time change limit and the usage lines (src/billing/entitlements.ts effectiveLimit).
+   * Set once at startup (makeServerDeps); absent = billing off, the monthly limit is venues.change_limit alone, as before billing.
+   */
+  billingConfig?: BillingConfig;
+  /**
+   * The free trial ran out: sets billing_status "paused" in ONE conditional update, only while the venue is still "trialing" with no
+   * Stripe subscription and trial_ends_at is at or before `nowIso`. True when this call paused it; false otherwise (already paused,
+   * subscribed, not over yet), so a tick that runs twice, or races the Stripe webhook, changes nothing twice. Throws on an unknown venue.
+   */
+  pauseExpiredTrial(venueId: string, nowIso: string): Promise<boolean>;
+  /**
+   * Marks a trial reminder as sent, in ONE conditional update, so two ticks never both send it. "soon" is claimed only while no
+   * reminder is marked; "ended" while the marker is not "ended" yet (it may be "soon"). True when this call claimed it. Throws on an unknown venue.
+   */
+  claimTrialReminder(venueId: string, kind: TrialReminder): Promise<boolean>;
 }

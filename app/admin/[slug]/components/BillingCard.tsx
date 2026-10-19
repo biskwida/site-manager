@@ -68,6 +68,12 @@ export function BillingCard({ billing: b, slug, justPaid = false, go = defaultGo
           {b.plan ? <Chip tone="good">{t("admin.billing.plan", { plan: t(`admin.billing.plan.${b.plan}` as MessageKey) })}</Chip> : null}
           <p>{status}</p>
         </div>
+        {b.trial_changes ? (
+          <div className="mt-3">
+            <p className="font-semibold">{t("admin.billing.trialChanges", { used: String(b.trial_changes.used), limit: String(b.trial_changes.limit) })}</p>
+            <p className="mt-1 text-sm text-ink-soft">{t("admin.billing.trialChangesNote")}</p>
+          </div>
+        ) : null}
         {b.can_build_website ? <p className="mt-3 text-sm text-ink-soft">{t("admin.billing.buildHint")}</p> : null}
         {b.website_note ? <p className="mt-3 text-sm text-ink-soft">{t("admin.billing.websiteNote")}</p> : null}
         <div className="mt-3 flex flex-wrap gap-2">
