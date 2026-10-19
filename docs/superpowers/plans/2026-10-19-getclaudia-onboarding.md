@@ -3,7 +3,7 @@
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:**
-- Owners start at getclaudia.app, sign up on app.getclaudia.app with an email link or Google, and pick one of three paths: make me a website, I have a website, only social media.
+- Owners start at getclaudia.app, sign up there with an email link or Google, and pick one of three paths: make me a website, I have a website, only social media.
 - Every path finishes the same onboarding checklist.
 - Every business gets a trial and pays through Stripe (test mode), without breaking today's owners.
 
@@ -12,14 +12,14 @@
 - **Explicit `site_mode`:** a new venue column replaces the implicit "`site_url` = own site" rule.
 - **Billing:** billing columns on `venues`, Stripe Checkout and Portal, and an idempotent webhook.
 - **Gating:** one entitlement check in the agent tools, next to the existing monthly limit check. Trial reminders run from the existing tick.
-- **Domain:** the app gets app.getclaudia.app. Browser pages on the old host redirect there, while `/api/*` and venue pages stay on both hosts.
+- **Domain:** everything is on getclaudia.app (owner, 19 Oct). The landing page moves into this app (Task 8). Browser pages on the old host redirect there once `LEGACY_HOSTS` + `APP_HOST` are set, while `/api/*` and venue pages stay on both hosts.
 
 **Tech Stack:**
 - Next.js 16 (app router), TypeScript, vitest
 - Supabase Postgres + Auth
 - New dependencies: `@supabase/ssr`, `stripe`
 - Resend over SMTP for Supabase Auth emails, and over HTTP for reminders
-- Landing: the separate repo ~/Projects/claudia-landing
+- Landing: ported from ~/Projects/claudia-landing into this app (Task 8)
 
 **Spec:** docs/superpowers/specs/2026-10-19-getclaudia-onboarding-design.md
 
@@ -38,7 +38,7 @@
   - `STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET`
   - `STRIPE_PRICE_ADMIN`, `STRIPE_PRICE_SOCIAL`, `STRIPE_PRICE_BOTH`, `STRIPE_PRICE_WEBSITE_SETUP`
   - `RESEND_API_KEY`, `EMAIL_FROM` (default `Claudia <hello@getclaudia.app>`)
-  - `LANDING_URL` (default `https://getclaudia.app`), `APP_HOST` (default `app.getclaudia.app`)
+  - `APP_HOST` (default `getclaudia.app`, used for links; the redirect needs it set explicitly), `LEGACY_HOSTS` (no default: redirect off until set)
 - **Trial (owner, 19 Oct):** 2 weeks free, 20 changes counted over the whole trial (`trial_started_at`..`trial_ends_at`), no card. Paying during the trial switches straight to the plan's monthly limit.
 - **Plans:** `admin` (website changes, 40 a month), `social` (social, comments and boosts; no site changes), `both` (everything, 150 a month). `venues.change_limit`, when not null, overrides the plan's number.
 
@@ -63,10 +63,10 @@
 - Produces: `hostRedirect(url: URL, appHost: string): URL | null`, a pure function in `src/server/host.ts`. It returns the redirect target for a browser page on another host, or null.
 
 - [ ] **Step 1: Failing tests** in `test/host-redirect.test.ts`:
-  - `site-manager-lovat.vercel.app/admin/coffique?key=abc` → `https://app.getclaudia.app/admin/coffique?key=abc`. The query is kept.
+  - `site-manager-lovat.vercel.app/admin/coffique?key=abc` → `https://getclaudia.app/admin/coffique?key=abc`. The query is kept.
   - `/dashboard`, `/login`, `/start?plan=both&lang=bg`, `/onboarding/x` redirect.
   - `/api/telegram`, `/api/site/coffique`, `/coffique`, `/coffique/menu`, `/new`, `/new/abc` → null.
-  - Already on `app.getclaudia.app`, or `localhost:3000` → null.
+  - Already on `getclaudia.app`, or `localhost:3000` → null.
   - `RESERVED_SLUGS` contains `start`, `login`, `dashboard`, `onboarding`, `auth`, `app`, `billing`.
 - [ ] **Step 2:** Run `npx vitest run test/host-redirect.test.ts`. Expect FAIL.
 - [ ] **Step 3: Implement.**
@@ -75,7 +75,7 @@
   - `app/page.tsx`: when there is a session, redirect to `/dashboard`; otherwise redirect to `config.landingUrl`. Keep the fallback landing when no landing URL is set.
   - Before the reserved slugs change, add a check script: `npm run slugs:check` lists venues whose slug is newly reserved.
 - [ ] **Step 4:** Run the full `npx vitest run`, `npx tsc --noEmit` and `npm run lint`. Expect PASS.
-- [ ] **Step 5: Commit:** `Domain: app.getclaudia.app redirects for browser pages, reserved slugs`
+- [ ] **Step 5: Commit:** `Domain: getclaudia.app redirects for browser pages, reserved slugs`
 
 ### Task 2: `site_mode`, an explicit choice between a Claudia site, an own site, or none
 
@@ -266,7 +266,7 @@
 - [ ] **Step 3: Implement.**
   - Checkout: `locale` bg/en, `customer_email` from the account, `tax_id_collection` on, no automatic tax.
   - The Portal comes from the dashboard's "Manage billing".
-  - `docs/BILLING-SETUP.md` covers the owner's Stripe test-mode steps: products and prices, webhook endpoint `https://app.getclaudia.app/api/stripe/webhook`, and the env keys.
+  - `docs/BILLING-SETUP.md` covers the owner's Stripe test-mode steps: products and prices, webhook endpoint `https://getclaudia.app/api/stripe/webhook`, and the env keys.
 - [ ] **Step 4:** Full suite, tsc and lint.
 - [ ] **Step 5: Commit:** `Billing: plans, trial, Stripe Checkout/Portal and idempotent webhook (test mode)`
 
@@ -303,30 +303,51 @@
 - [ ] **Step 4:** Full suite, tsc and lint.
 - [ ] **Step 5: Commit:** `Billing: plan gating in the agent, paused never offline, trial reminders`
 
-### Task 8: Landing buttons (repo ~/Projects/claudia-landing)
+### Task 8: The landing page moves into the app
 
 **Files:**
+- Create:
+  - `app/(landing)/page.tsx`, replacing the `/` redirect
+  - `app/(landing)/components/Landing.tsx`, ported from `~/Projects/claudia-landing/components/Landing.tsx`
+  - `src/landing/copy.ts`, ported from `claudia-landing/lib/copy.ts`
+  - `public/landing/*`: the demo videos, posters and frames
+  - `test/landing.test.tsx`
 - Modify:
-  - `lib/copy.ts` (`START_URL`, `LOGIN_URL`, CTA labels "Започнете безплатно" / "Start free", "Вход" / "Log in")
-  - `components/Landing.tsx` (hero, nav and closing CTAs → `${APP_URL}/start?lang=`, plan buttons → `?plan=admin|social|both`, a Log in link in the nav)
-  - `lib/privacy.ts:5` (the data-deletion URL → app.getclaudia.app)
+  - `app/privacy/page.tsx`: the Claudia privacy text from `claudia-landing/lib/privacy.ts`. Keep `/data-deletion` and the Meta compliance links working.
+  - `app/layout.tsx`: Sofia Sans and Sofia Sans Condensed through `next/font/google`, for the landing route group only.
+  - `package.json`: add `motion`, `@phosphor-icons/react` and `simple-icons` at the versions the landing uses.
+  - `src/wizard/schema.ts`: add `pricing` to the reserved slugs.
+  - Remove the old fallback `app/components/Landing.tsx` and its test only if nothing else imports them.
 
-**Interfaces:** `APP_URL` defaults to `https://app.getclaudia.app` and can be overridden by `NEXT_PUBLIC_APP_URL`.
+**Interfaces:** the landing CTAs are internal links:
+- "Start free" → `/start?lang=<bg|en>`
+- each plan → `/start?plan=admin|social|both&lang=`
+- "Log in" → `/login`
+- signed in: "Dashboard" → `/dashboard`
 
-- [ ] **Step 1:** Change the links and copy. Keep "Talk to us" as a secondary link (mailto).
-- [ ] **Step 2:** Run `npm run lint` and `npm run build`. Check in the preview that every CTA carries the current `lang`, and every plan button its `plan`.
-- [ ] **Step 3: Commit:** `Landing: Start free and Log in go to app.getclaudia.app`. Deploy from a git-archive export with `--scope biskwida-dev`, **only after the owner says go**.
+- [ ] **Step 1: Failing tests** in `test/landing.test.tsx`:
+  - `/` renders the hero in BG and EN, with no redirect.
+  - Every plan button links to `/start?plan=…`.
+  - "Log in" links to `/login`.
+  - Signed in, the nav shows "Dashboard".
+  - The trial line reads "2 седмици безплатно · 20 промени" / "2 weeks free · 20 changes".
+  - `/privacy` renders the Claudia policy.
+  - `/data-deletion` still renders.
+- [ ] **Step 2:** Run them. Expect FAIL.
+- [ ] **Step 3: Implement.** Port without redesign. The copy changes only for the CTAs and the trial line. The language toggle and `localStorage` key stay as on the landing.
+- [ ] **Step 4:** Run the full suite, tsc and lint, plus `npm run build` (the videos and fonts must bundle).
+- [ ] **Step 5: Commit:** `Landing: getclaudia.app's landing page now lives in the app`
 
 ---
 
 ## Owner steps (not code; listed in docs/DOMAIN-SWITCH.md and docs/BILLING-SETUP.md)
 
-1. Vercel: add `app.getclaudia.app` to the site-manager project, and add the CNAME in the biskwida-dev DNS zone.
+1. Vercel: after Task 8 is deployed on the old host and checked, move the apex domain `getclaudia.app` from team biskwida-dev to the site-manager project (Domains → Move, or add it with TXT verification).
 2. Meta: add the new redirect URIs (Instagram Login and Facebook Login), keeping the old ones.
 3. Supabase:
    - enable Email (magic link) and Google
-   - Site URL `https://app.getclaudia.app`
-   - redirect URL `https://app.getclaudia.app/auth/callback`
+   - Site URL `https://getclaudia.app`
+   - redirect URL `https://getclaudia.app/auth/callback`
    - custom SMTP = Resend
 4. Google Cloud: an OAuth client for sign-in, with redirect `https://<project>.supabase.co/auth/v1/callback`.
 5. Resend: create the account, verify getclaudia.app (SPF/DKIM), add `RESEND_API_KEY`.

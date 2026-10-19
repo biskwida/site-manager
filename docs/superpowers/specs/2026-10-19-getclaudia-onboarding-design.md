@@ -6,7 +6,7 @@ Date: 19 Oct 2026. Owner's request: "move the creation page of the website to th
 
 | Topic | Decision |
 |---|---|
-| Domain | **app.getclaudia.app** for the app. The landing page stays at getclaudia.app. The old site-manager-lovat.vercel.app keeps working. |
+| Domain | **Everything on getclaudia.app** (changed 19 Oct; no app.* subdomain). The landing page moves into the app. The old site-manager-lovat.vercel.app keeps working. |
 | Login | **An email link plus "Sign in with Google"**, no passwords. This replaces the secret `?key=` dashboard links. |
 | Prices | **The landing page's prices go into Stripe**: Admin 19 €, Social media 39 €, Both 49 € a month, and the ready website 199 € once (no setup fee with your own site). Prices exclude VAT. Stripe runs in **test mode** now and goes live after the company (ЕООД) is registered. |
 | Trial | **Decided 19 Oct: 2 weeks free with limited changes, no card.** Settings: `TRIAL_DAYS` = 14, `TRIAL_CHANGE_LIMIT` = 20 (website changes and posts together, counted over the whole trial; undo never counts), `TRIAL_REQUIRES_CARD` = false. All three can change later without code. |
@@ -17,7 +17,7 @@ Today anyone can open `/new`, build a website and get a chat code. There is no a
 
 ## Goals
 
-1. **One place to start.** getclaudia.app → "Start free" goes to app.getclaudia.app/start, which covers sign-up, the "what do you need?" choice and onboarding.
+1. **One place to start.** On getclaudia.app, "Start free" goes to getclaudia.app/start, which covers sign-up, the "what do you need?" choice and onboarding.
 2. **Three paths, one onboarding:**
    - **A. "Make me a website"**: today's wizard, now tied to the account.
    - **B. "I already have a website"**: the name, the website address and its platform (WordPress / Wix / Squarespace / Shopify / other / I don't know). No site gets built. WordPress sites get the plugin connection on the web, not only `/connect` in the bot. Other platforms get Claudia for social media, Google and a menu page they can link to.
@@ -36,7 +36,7 @@ Today anyone can open `/new`, build a website and get a chat code. There is no a
 - Changing what each plan can do beyond today's limits. v1 gates on the plan as follows: **Admin** = website changes, **Social** = social media and comments, **Both** = everything. The existing monthly change limit stays.
 - Live payments. These come after the ЕООД is registered, Stripe is activated and an accountant has checked that Stripe invoices are valid in Bulgaria.
 - Google Business connection. The checklist shows it as "coming soon".
-- Moving the landing page into the app, or moving the app's Vercel project to another team.
+- Moving the app's Vercel project to another team (the domain moves instead).
 - Team accounts (several logins per business). The schema allows them; there is no UI.
 
 ## Anti-goals: what would make this a failure even if it works
@@ -61,23 +61,27 @@ Today anyone can open `/new`, build a website and get a chat code. There is no a
 
 ## How it works
 
-### Domains
+### One domain: getclaudia.app (owner, 19 Oct: "we don't want two .apps")
 
-- **app.getclaudia.app**
-  - Add it to the site-manager Vercel project. The DNS record is a CNAME in the biskwida-dev team's getclaudia.app zone.
-  - Set `PUBLIC_BASE_URL=https://app.getclaudia.app`.
-  - Add the new OAuth redirect URIs next to the old ones: Instagram Login, Facebook Login and Supabase Google.
-  - Point the Telegram webhook at the new host.
-- **Per-venue sites** read `${PUBLIC_BASE_URL}/api/site/<slug>`. Both hosts serve the same app, so existing deploys keep working.
-- **The old host** redirects browser pages (`/start`, `/login`, `/dashboard`, `/onboarding`, `/admin`) to the new host, **keeping the query string** so legacy `?key=` links survive. Never redirected: `/api/*` (callbacks, webhooks), `/<slug>`, and `/new` (the draft cookie is host-bound, so an owner mid-wizard keeps their draft). The old host stays an alias forever, because per-venue deploys and WordPress plugins hold it.
-- **`/` on the new host** sends signed-in owners to `/dashboard` and everyone else to getclaudia.app.
-- **Switch order:** register the new OAuth redirect URIs with Meta and Supabase/Google first, then set `PUBLIC_BASE_URL`, then re-run `scripts/set-webhook.mts`. Meta webhooks may stay on the old host (alias). Do it at a quiet hour, since in-flight OAuth started on the old host would lose its cookie.
-- **Reserved slugs** gain `start`, `login`, `dashboard`, `onboarding`, `auth`, `app`, `billing` (check first that no live venue uses them).
-- **Landing (claudia-landing):**
-  - "Talk to us" becomes **"Start free"** → `https://app.getclaudia.app/start?lang=<bg|en>`.
-  - Each plan's button goes to `/start?plan=admin|social|both`.
-  - Add a **"Log in"** link → `/login`.
-  - The data-deletion link moves to the new host.
+- **The landing page moves into this app.** getclaudia.app serves:
+  - the landing at `/`
+  - `/start`, `/login`, `/dashboard`, `/onboarding`, `/billing`, `/new`, `/admin`
+  - the hosted venue pages `/<slug>`
+  - every `/api/*`
+
+  The separate claudia-landing project stays deployed only as a rollback until the switch is confirmed. Its content (components, copy, fonts, videos, privacy text) is ported into `app/` (Task 8).
+- **The switch:**
+  - The apex domain `getclaudia.app` moves from Vercel team biskwida-dev to the site-manager project, by Vercel's domain move or TXT verification.
+  - Set `PUBLIC_BASE_URL=https://getclaudia.app`, `APP_HOST=getclaudia.app` and `LEGACY_HOSTS=site-manager-lovat.vercel.app`.
+  - Add the new OAuth redirect URIs (Instagram Login, Facebook Login, Supabase/Google) next to the old ones, then re-run `scripts/set-webhook.mts` (optional).
+  - The full order, the verify step and the rollback are in `docs/DOMAIN-SWITCH.md`.
+- **The old host:**
+  - Redirects browser pages (`/start`, `/login`, `/dashboard`, `/onboarding`, `/admin`) to getclaudia.app, **keeping the query string** so legacy `?key=` links survive. The redirect is **off until `LEGACY_HOSTS` and `APP_HOST` are set**.
+  - Never redirected: `/api/*`, `/<slug>` and `/new` (the draft cookie is host-bound).
+  - Stays an alias forever, because per-venue deploys and WordPress plugins hold it.
+- **`/`** is the landing for everyone. Its nav shows "Dashboard" in place of "Log in" for a signed-in owner.
+- **Reserved slugs:** `start`, `login`, `dashboard`, `onboarding`, `auth`, `app`, `billing`, `pricing` and `privacy` can never be venue slugs (check live venues first).
+- **Landing CTAs are internal links:** "Start free" → `/start?lang=`, each plan → `/start?plan=admin|social|both`, "Log in" → `/login`.
 
 ### Accounts
 
@@ -104,7 +108,7 @@ Today anyone can open `/new`, build a website and get a chat code. There is no a
    2. Connect Instagram and Facebook: the existing social connect, plus the note for Development mode.
    3. **Path B only:** connect the website.
       - WordPress: the plugin download plus a one-time code on the web (the same handshake as `/connect`).
-      - Other platforms: "Link to your menu page: app.getclaudia.app/<slug>/menu", plus a copy-paste snippet. A full embed comes later.
+      - Other platforms: "Link to your menu page: getclaudia.app/<slug>/menu", plus a copy-paste snippet. A full embed comes later.
    4. Google Business: "coming soon".
    5. Your plan: the trial days left and a "Choose plan" button.
 
@@ -169,7 +173,7 @@ Today anyone can open `/new`, build a website and get a chat code. There is no a
 
 ## What's left to the builder
 
-- Page layout and styling. Reuse the landing's look (fonts, greige palette) so getclaudia.app → app.getclaudia.app feels like one product.
+- Page layout and styling. Reuse the landing's look (fonts, warm palette) so the landing, sign-up and dashboard feel like one product.
 - The exact wording of the BG and EN copy, in the existing tone (short, warm, no jargon).
 - How the dashboard is split into components.
 

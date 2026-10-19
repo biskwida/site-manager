@@ -1,6 +1,6 @@
 // src/server/host.ts
 // Pure host logic, shared by config.ts and proxy.ts. No secrets, no store: proxy.ts must stay light.
-export const DEFAULT_APP_HOST = "app.getclaudia.app";
+export const DEFAULT_APP_HOST = "getclaudia.app";
 export const DEFAULT_LANDING_URL = "https://getclaudia.app";
 
 /** Browser pages that live on the app host. Whole path segments: `/start` and `/start/x`, never `/startup`. */
@@ -39,4 +39,17 @@ export function hostRedirect(url: URL, appHost: string | null, legacyHosts: read
   const path = url.pathname;
   if (!APP_PREFIXES.some((p) => path === p || path.startsWith(`${p}/`))) return null;
   return new URL(`${path}${url.search}`, `https://${host}`);
+}
+
+/**
+ * Where `/` should send a visitor, or null to render the built-in fallback landing: when the landing URL's host is the host the
+ * request came in on (getclaudia.app serving the app and LANDING_URL=https://getclaudia.app), redirecting would loop.
+ */
+export function landingRedirect(landingUrl: string, requestHost: string | null | undefined): string | null {
+  const own = requestHost?.trim().toLowerCase().replace(/:\d+$/, "");
+  try {
+    return own && new URL(landingUrl).hostname.toLowerCase() === own ? null : landingUrl;
+  } catch {
+    return null;
+  }
 }
