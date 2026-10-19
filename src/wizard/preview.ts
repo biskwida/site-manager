@@ -44,7 +44,7 @@ export function buildPreviewState(d: WizardDraft, media: Media[], now: Date): Si
   };
   const categories: Category[] = d.categories.map((c, i) => {
     const n = bothLangs(c.name_bg, c.name_en);
-    return { id: `prev-cat-${c.key}`, venue_id: "preview", name_bg: n.bg, name_en: n.en, position: i, active: true };
+    return { id: `prev-cat-${c.key}`, venue_id: "preview", name_bg: n.bg, name_en: n.en, position: i, active: c.active !== false };
   });
   const items: Item[] = d.categories.flatMap((c) =>
     c.items.map((it, j): Item => {
@@ -64,7 +64,7 @@ export function buildPreviewState(d: WizardDraft, media: Media[], now: Date): Si
         is_special: false,
         special_expires_at: null,
         position: j,
-        active: true,
+        active: it.active !== false,
         created_at: iso,
         updated_at: iso,
       };

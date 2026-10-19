@@ -385,3 +385,96 @@ describe("6. the account link after a wizard publish without a session", () => {
     spy.mockRestore();
   });
 });
+
+/** What Postgres does to a jsonb object: keys come back sorted by length, then bytes. Applied to every object, recursively. */
+function jsonbOrder<T>(v: T): T {
+  if (Array.isArray(v)) return v.map(jsonbOrder) as T;
+  if (v && typeof v === "object") return Object.fromEntries(Object.entries(v).sort(([a], [b]) => a.length - b.length || (a < b ? -1 : a > b ? 1 : 0)).map(([k, x]) => [k, jsonbOrder(x)])) as T;
+  return v;
+}
+
+const MARKS = { sold_out_until: "2031-01-01T00:00:00.000Z", is_special: true, special_expires_at: "2031-02-01T00:00:00.000Z" };
+/** Sold-out and special marks have no Store setter (the chat sets them through change sets); the memory rows are edited in place. */
+const setMarks = (store: InMemoryStore, venueId: string, itemId: string, marks: object) =>
+  Object.assign((store as unknown as { sites: Map<string, { items: { id: string }[] }> }).sites.get(venueId)!.items.find((i) => i.id === itemId)!, marks);
+
+describe("fix round 2: an unchanged menu is recognised whatever the key order", () => {
+  it("a draft read back from jsonb (keys re-ordered) is still 'unchanged': no menu write, same ids and marks", async () => {
+    const { store, venue } = await addon();
+    const { shown } = await withMenu(store, venue.id);
+    setMarks(store, venue.id, shown.id, MARKS);
+    const { venue: v } = await startDraftForVenue(store, venue.id, owner);
+    await store.updateVenue(venue.id, { wizard_draft: jsonbOrder(v.wizard_draft!) });
+    expect(Object.keys((await store.getVenue(venue.id)).wizard_draft!)).not.toEqual(Object.keys(v.wizard_draft!)); // the order really differs
+    const spy = Object.create(store) as InMemoryStore;
+    const calls: string[] = [];
+    for (const m of ["clearMenu", "insertCategory", "insertItem"] as const) (spy as unknown as Record<string, unknown>)[m] = async (...a: unknown[]) => {
+      calls.push(m);
+      return (store as unknown as Record<string, (...x: unknown[]) => unknown>)[m](...a);
+    };
+    await publishDraft(spy, await store.getVenue(venue.id), T0);
+    expect(calls).toEqual([]);
+    const after = (await store.getSite(venue.id)).items.find((i) => i.name_en === "Espresso");
+    expect(after).toMatchObject({ id: shown.id, sold_out_until: "2031-01-01T00:00:00.000Z", is_special: true, special_expires_at: "2031-02-01T00:00:00.000Z" });
+  });
+  it("a really changed menu is still rewritten when the keys are re-ordered", async () => {
+    const { store, venue } = await addon();
+    await withMenu(store, venue.id);
+    const { venue: v } = await startDraftForVenue(store, venue.id, owner);
+    const draft = structuredClone(v.wizard_draft!);
+    draft.categories[0].items[0].price_eur = 9.9;
+    await store.updateVenue(venue.id, { wizard_draft: jsonbOrder(draft) });
+    await publishDraft(store, await store.getVenue(venue.id), T0);
+    expect((await store.getSite(venue.id)).items.find((i) => i.name_en === "Espresso")?.price_eur).toBe(9.9);
+  });
+});
+
+describe("fix round 2: a rewrite keeps the marks of the items that are still there", () => {
+  it("matches by the draft item's key (the original item id) first", async () => {
+    const { store, venue } = await addon();
+    const { shown } = await withMenu(store, venue.id);
+    setMarks(store, venue.id, shown.id, MARKS);
+    const { venue: v } = await startDraftForVenue(store, venue.id, owner);
+    const draft = structuredClone(v.wizard_draft!);
+    draft.categories[0].items[0].name_en = "Double espresso"; // renamed, same key
+    draft.categories[0].items[0].price_eur = 2.2;
+    draft.categories[0].items.push({ key: "brand-new", name_bg: "Нов", name_en: "New", desc_bg: "", desc_en: "", price_eur: 3, allergens: [], image_media_id: null });
+    await updateDraft(store, v, draft);
+    await publishDraft(store, await store.getVenue(venue.id), T0);
+    const items = (await store.getSite(venue.id)).items;
+    expect(items.find((i) => i.name_en === "Double espresso")).toMatchObject({ ...MARKS, price_eur: 2.2 });
+    expect(items.find((i) => i.name_en === "New")).toMatchObject({ sold_out_until: null, is_special: false, special_expires_at: null });
+  });
+  it("falls back to the same category and name when the key is new", async () => {
+    const { store, venue } = await addon();
+    const { shown } = await withMenu(store, venue.id);
+    setMarks(store, venue.id, shown.id, MARKS);
+    const { venue: v } = await startDraftForVenue(store, venue.id, owner);
+    const draft = structuredClone(v.wizard_draft!);
+    draft.categories[0].items[0].key = "re-keyed"; // the client re-keyed it
+    draft.categories[0].items[0].desc_en = "now with a description";
+    await updateDraft(store, v, draft);
+    await publishDraft(store, await store.getVenue(venue.id), T0);
+    expect((await store.getSite(venue.id)).items.find((i) => i.name_en === "Espresso")).toMatchObject({ ...MARKS, desc_en: "now with a description" });
+  });
+  it("gives a dish that is renamed AND re-keyed, a removed dish, and a dish in another category no marks; one old item's marks go to one new item only", async () => {
+    const { store, venue } = await addon();
+    const { shown, hidden } = await withMenu(store, venue.id);
+    setMarks(store, venue.id, shown.id, MARKS);
+    setMarks(store, venue.id, hidden.id, MARKS);
+    const { venue: v } = await startDraftForVenue(store, venue.id, owner);
+    const draft = structuredClone(v.wizard_draft!);
+    const [esp, latte] = draft.categories[0].items;
+    esp.key = "k1";
+    esp.name_bg = "Друго";
+    esp.name_en = "Other"; // renamed + re-keyed: a new dish
+    draft.categories[0].items = [esp, { ...latte, key: "dup-a" }, { ...latte, key: "dup-b" }]; // two copies of the hidden Latte under new keys
+    await updateDraft(store, v, draft);
+    await publishDraft(store, await store.getVenue(venue.id), T0);
+    const items = (await store.getSite(venue.id)).items;
+    expect(items.find((i) => i.name_en === "Other")).toMatchObject({ sold_out_until: null, is_special: false });
+    const lattes = items.filter((i) => i.name_en === "Latte");
+    expect(lattes).toHaveLength(2);
+    expect(lattes.filter((i) => i.is_special)).toHaveLength(1); // the marks went to one of them, not both
+  });
+});

@@ -9,7 +9,7 @@ import { pollDeployments } from "../deploy/run";
 import type { Deployer } from "../deploy/types";
 import { planChanges } from "../domain/changes";
 import { renderPreview } from "../domain/preview";
-import { TEMPLATE_IDS, type ChangeOp, type SiteState, type TemplateId, type Venue } from "../domain/types";
+import { TEMPLATE_IDS, type ChangeOp, type Item, type SiteState, type TemplateId, type Venue } from "../domain/types";
 import { seedMenuFrom, type SeedCategory, type SeedItem, type SeedTexts } from "../seed/demo";
 import { SlugTakenError, type Store, type VenuePatch } from "../store/types";
 import { bothLangs, DRAFT_SLUG_PREFIX, emptyDraft, slugError, WIZARD_MAX_IMAGE_BYTES, validateForPublish, WizardPatchSchema, type PublishError, type WizardCategory, type WizardDraft } from "../wizard/schema";
@@ -277,13 +277,49 @@ export async function publishDraft(store: Store, venue: Venue, now: Date, opts: 
   }
 }
 
-/** The menu rows and texts of a venue as the wizard would show them: for "did the draft change the menu?". */
+/** JSON with every object's keys sorted, recursively: equal data gives equal text whatever order the keys came in. */
+function canonical(v: unknown): string {
+  if (Array.isArray(v)) return `[${v.map(canonical).join(",")}]`;
+  if (v && typeof v === "object") {
+    return `{${Object.entries(v as Record<string, unknown>)
+      .filter(([, x]) => x !== undefined)
+      .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
+      .map(([k, x]) => `${JSON.stringify(k)}:${canonical(x)}`)
+      .join(",")}}`;
+  }
+  return JSON.stringify(v) ?? "null";
+}
+
+/**
+ * The menu rows and texts of a venue as the wizard would show them: for "did the draft change the menu?". Canonical, because a draft read
+ * back from Postgres jsonb has its keys re-ordered (by length, then bytes) and must still compare equal to the one draftFromSite builds.
+ */
 function menuSignature(categories: WizardCategory[], welcome: { bg: string; en: string }, footer: { bg: string; en: string }): string {
-  return JSON.stringify({
+  return canonical({
     welcome,
     footer,
     categories: categories.map((c) => ({ ...c, active: c.active !== false, items: c.items.map((i) => ({ ...i, active: i.active !== false })) })),
   });
+}
+
+type ItemMarks = Pick<Item, "sold_out_until" | "is_special" | "special_expires_at">;
+
+/**
+ * The sold-out and special marks of the venue's existing items, found for a draft item so a rewrite does not drop them. The draft item
+ * is the same dish when (1) its key is an existing item's id (the prefill uses the id as the key), else (2) it sits in the same
+ * category (the category key is the category's id) and has the same names. Each existing item hands its marks to ONE draft item. Not
+ * matched (a renamed AND re-keyed dish, a new dish): no marks, it is a different dish as far as we can tell.
+ */
+function itemMarkFinder(site: SiteState): (categoryKey: string, item: { key: string; name_bg: string; name_en: string }) => ItemMarks | null {
+  const byId = new Map(site.items.map((i) => [i.id, i]));
+  const byName = new Map(site.items.map((i) => [`${i.category_id}\u0000${i.name_bg}\u0000${i.name_en}`, i]));
+  const used = new Set<string>();
+  return (categoryKey, it) => {
+    const old = [byId.get(it.key), byName.get(`${categoryKey}\u0000${it.name_bg}\u0000${it.name_en}`)].find((x) => x && !used.has(x.id));
+    if (!old) return null;
+    used.add(old.id);
+    return { sold_out_until: old.sold_out_until, is_special: old.is_special, special_expires_at: old.special_expires_at };
+  };
 }
 
 interface MenuSnapshot {
@@ -364,10 +400,11 @@ async function publishClaimed(store: Store, venue: Venue, d: WizardDraft, now: D
         const n = bothLangs(c.name_bg, c.name_en);
         return { name_bg: n.bg, name_en: n.en, ...(c.active === false ? { active: false } : {}) };
       });
+      const findMarks = addon ? itemMarkFinder(before) : () => null;
       const items: (SeedItem & { image_media_id: string | null })[] = d.categories.flatMap((c, ci) =>
         c.items.map((it) => {
           const n = bothLangs(it.name_bg, it.name_en);
-          return { cat: ci, name_bg: n.bg, name_en: n.en, desc_bg: it.desc_bg.trim(), desc_en: it.desc_en.trim(), price_eur: it.price_eur, allergens: [...it.allergens].sort((a, b) => a - b), image_media_id: mediaOrNull(it.image_media_id), ...(it.active === false ? { active: false } : {}) };
+          return { ...(findMarks(c.key, it) ?? {}), cat: ci, name_bg: n.bg, name_en: n.en, desc_bg: it.desc_bg.trim(), desc_en: it.desc_en.trim(), price_eur: it.price_eur, allergens: [...it.allergens].sort((a, b) => a - b), image_media_id: mediaOrNull(it.image_media_id), ...(it.active === false ? { active: false } : {}) };
         }),
       );
       const texts: SeedTexts = { welcome: bothLangs(d.texts.welcome.bg, d.texts.welcome.en), footer_note: bothLangs(d.texts.footer_note.bg, d.texts.footer_note.en) };
