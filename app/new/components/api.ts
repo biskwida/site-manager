@@ -2,6 +2,7 @@
 import type { Media } from "@/src/domain/types";
 import type { ExtractFile, ExtractResult } from "@/src/wizard/extract";
 import type { PublishError, WizardDraft } from "@/src/wizard/schema";
+import type { RandevueImport } from "@/src/server/wizard-randevue";
 import type { DraftTexts } from "@/src/wizard/texts";
 
 /** Server limits (R25): per-image upload ceiling after client downscaling, and total decoded bytes per extraction request. */
@@ -54,6 +55,7 @@ export const api = {
   },
   extract: (id: string, files: ExtractFile[]) => call<ExtractResult>(`/api/new/${id}/extract`, json("POST", { files })),
   texts: (id: string, facts: string) => call<DraftTexts>(`/api/new/${id}/texts`, json("POST", { facts })),
+  randevue: (id: string, url: string) => call<RandevueImport>(`/api/new/${id}/randevue`, json("POST", { url })),
   publish: (id: string) => call<PublishResponse>(`/api/new/${id}/publish`, { method: "POST" }),
   /** A full-page navigation (Instagram's sign-in), not a fetch. */
   igStartUrl: (id: string, from: "photos" | "look") => `/api/new/${id}/instagram/start${from === "look" ? "?from=look" : ""}`,

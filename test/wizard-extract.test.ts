@@ -109,6 +109,16 @@ describe("extractMenu request shape", () => {
 });
 
 describe("postProcessExtract", () => {
+  it("carries the Randevue-only fields (image_url, sold_out_until, hidden) through untouched", () => {
+    const input: ExtractResult = {
+      categories: [{ name_bg: "Кафе", name_en: "Coffee", items: [
+        { name_bg: "Лате", name_en: "Latte", desc_bg: "", desc_en: "", price_eur: 3, currency_seen: "EUR", allergens: [], image_url: "https://x.supabase.co/storage/v1/object/public/a.png", sold_out_until: "2026-10-16T00:00:00+00:00", hidden: true },
+      ] }],
+      notes_bg: "", notes_en: "",
+    };
+    const out = postProcessExtract(input);
+    expect(out.categories[0].items[0]).toEqual({ name_bg: "Лате", name_en: "Latte", desc_bg: "", desc_en: "", price_eur: 3, currency_seen: "EUR", allergens: [7], image_url: "https://x.supabase.co/storage/v1/object/public/a.png", sold_out_until: "2026-10-16T00:00:00+00:00", hidden: true });
+  });
   it("converts BGN, merges suggested allergens, clamps and rounds prices, trims names", () => {
     const out = postProcessExtract(RAW); // the pure step also tolerates codes the schema would reject
     expect(out.categories[0].name_bg).toBe("Кафе");
@@ -136,6 +146,7 @@ describe("postProcessExtract", () => {
     const before = structuredClone(input);
     const out = postProcessExtract(input);
     expect(out.categories[0].items[0]).toEqual({ name_bg: "Чай", name_en: "Tea", desc_bg: "", desc_en: "", price_eur: 0.1, currency_seen: "BGN", allergens: [3] });
+    expect(out.categories[0].items[0]).not.toHaveProperty("image_url"); // the optional Randevue fields are absent, not undefined
     expect(out.notes_bg).toBe("");
     expect(out.notes_en).toBe("");
     expect(input).toEqual(before);

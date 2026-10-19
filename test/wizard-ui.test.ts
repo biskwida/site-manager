@@ -132,6 +132,27 @@ describe("step components render labelled fields in both languages", () => {
     expect(html).toContain("Една цена не се чете.");
     expect(html).toContain("2,56 €");
   });
+  it("ExtractReview shows a Randevue thumbnail and sold-out badge, and starts a hidden row unticked", () => {
+    const html = render("en", createElement(ExtractReview, {
+      result: { categories: [{ name_bg: "Храна", name_en: "Food", items: [
+        { name_bg: "Пиле", name_en: "Chicken", desc_bg: "", desc_en: "", price_eur: 9.5, currency_seen: "EUR", allergens: [], image_url: "https://x.supabase.co/storage/v1/object/public/chicken.png", sold_out_until: "2026-10-15T16:00:00+00:00" },
+        { name_bg: "Супа", name_en: "Soup", desc_bg: "", desc_en: "", price_eur: 4, currency_seen: "EUR", allergens: [], hidden: true },
+      ] }], notes_bg: "", notes_en: "Imported from Randevue: 2 products." },
+      onAccept: noop, onDiscard: noop,
+    }));
+    expect(html).toContain('src="https://x.supabase.co/storage/v1/object/public/chicken.png"');
+    expect(html).toContain("Sold out");
+    expect(html).toContain("Add selected (1)"); // the hidden soup starts unticked
+    expect(html).toContain("Imported from Randevue");
+  });
+  it("Menu offers the Randevue import with a link field and an Import button, even without AI", () => {
+    const en = render("en", createElement(Menu, props({ aiAvailable: false })));
+    expect(en).toContain("Import from Randevue");
+    expect(en).toContain("randevue.app");
+    expect(en).toContain(">Import<");
+    const bg = render("bg", createElement(Menu, props()));
+    expect(bg).toContain("Внесете менюто от Randevue");
+  });
   it("Stepper marks the current step and numbers all seven", () => {
     const html = render("en", createElement(Stepper, { current: "hours", onSelect: noop }));
     expect(html).toContain("Step 3 of 7");
