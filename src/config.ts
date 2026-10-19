@@ -1,5 +1,7 @@
 // src/config.ts
 // Server-only: never import from app/ client components or src/i18n.
+import { DEFAULT_LANDING_URL, resolveAppHost } from "./server/host";
+
 export type Effort = "low" | "medium" | "high";
 
 export interface Config {
@@ -74,6 +76,10 @@ export interface Config {
   metaAppId: string | null;
   /** Facebook Login for Business configuration id; when set the login sends config_id instead of a scope list. */
   metaLoginConfigId: string | null;
+  /** Host that serves the owner's browser pages (APP_HOST, default app.getclaudia.app); /dashboard, /login, /start, /onboarding and /admin on another host are redirected here (proxy.ts). */
+  appHost: string;
+  /** The public landing (LANDING_URL, else the older NEXT_PUBLIC_LANDING_URL, default https://getclaudia.app); `/` sends visitors there. https only, no trailing slash. */
+  landingUrl: string;
 }
 
 type Env = Record<string, string | undefined>;
@@ -101,6 +107,15 @@ export function parseHandle(raw: string | null, hosts: readonly string[]): strin
   }
   v = v.replace(/^@/, "");
   return HANDLE.test(v) ? v : null;
+}
+
+function httpsUrl(raw: string | null): string | null {
+  if (!raw) return null;
+  try {
+    return new URL(raw).protocol === "https:" ? raw.replace(/\/+$/, "") : null;
+  } catch {
+    return null;
+  }
 }
 
 /** `lenient` (offline memory-store mode) returns "" for missing secrets instead of throwing. */
@@ -165,5 +180,7 @@ export function loadConfig(env: Env = process.env, opts: { lenient?: boolean } =
     channelsEnabled: /^(1|true)$/i.test(optional("CHANNELS_ENABLED") ?? ""),
     metaAppId: optional("META_APP_ID"),
     metaLoginConfigId: optional("META_LOGIN_CONFIG_ID"),
+    appHost: resolveAppHost(env),
+    landingUrl: httpsUrl(optional("LANDING_URL")) ?? httpsUrl(optional("NEXT_PUBLIC_LANDING_URL")) ?? DEFAULT_LANDING_URL,
   };
 }

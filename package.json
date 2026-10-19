@@ -37,6 +37,7 @@
     "wp:live": "tsx scripts/wp-live-check.mts",
     "social:comments-live": "tsx --env-file-if-exists=.env.local scripts/social-comments-live-check.mts",
     "test:templates": "tsx scripts/template-build.mts",
+    "slugs:check": "tsx --env-file-if-exists=.env.local scripts/slugs-check.mts",
     "site:delete": "tsx --env-file-if-exists=.env.local scripts/site-delete.mts"
   },
   "dependencies": {
