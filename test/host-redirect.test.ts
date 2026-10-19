@@ -1,6 +1,6 @@
 import { renderToStaticMarkup } from "react-dom/server";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { NextRequest } from "next/server";
+import { NextRequest, type NextResponse } from "next/server";
 import { explicitAppHost, hostRedirect, landingRedirect, parseLegacyHosts, resolveAppHost } from "@/src/server/host";
 import { RESERVED_SLUGS } from "@/src/wizard/schema";
 import { loadConfig } from "@/src/config";
@@ -113,7 +113,7 @@ describe("proxy", () => {
   const on = { APP_HOST: APP, LEGACY_HOSTS: OLD_HOST };
   it("answers 308 to the app host when switched on", () => {
     withEnv(on, () => {
-      const res = proxy(new NextRequest(`${OLD}/admin/coffique?key=abc`));
+      const res = proxy(new NextRequest(`${OLD}/admin/coffique?key=abc`)) as NextResponse; // sync here: no session refresh on /admin
       expect(res.status).toBe(308);
       expect(res.headers.get("location")).toBe(`https://${APP}/admin/coffique?key=abc`);
     });
@@ -121,7 +121,7 @@ describe("proxy", () => {
   it("passes everything through while LEGACY_HOSTS or APP_HOST is unset", () => {
     for (const vars of [{}, { APP_HOST: APP }, { LEGACY_HOSTS: OLD_HOST }]) {
       withEnv(vars, () => {
-        const res = proxy(new NextRequest(`${OLD}/admin/coffique?key=abc`));
+        const res = proxy(new NextRequest(`${OLD}/admin/coffique?key=abc`)) as NextResponse; // sync here: no session refresh on /admin
         expect(res.headers.get("location")).toBeNull();
         expect(res.headers.get("x-middleware-next")).toBe("1");
       });
@@ -130,7 +130,7 @@ describe("proxy", () => {
   it("passes a preview host, venue pages and /api/telegram through", () => {
     withEnv(on, () => {
       for (const u of ["https://site-manager-git-x.vercel.app/dashboard", `${OLD}/coffique`, `${OLD}/api/telegram`]) {
-        const res = proxy(new NextRequest(u));
+        const res = proxy(new NextRequest(u)) as NextResponse; // sync: Supabase env is not set in tests
         expect(res.headers.get("location")).toBeNull();
         expect(res.headers.get("x-middleware-next")).toBe("1");
       }

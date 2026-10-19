@@ -6,6 +6,7 @@ import { socialErrorText } from "@/src/destinations/social-errors";
 import type { SocialAccountOverview, SocialOverview } from "@/src/server/admin";
 import { formatDateTime } from "@/src/time";
 import { Chip, Section } from "./bits";
+import { adminApiUrl } from "./useAdminOverview";
 
 type Kind = "facebook" | "instagram";
 const NAME: Record<Kind, string> = { facebook: "Facebook", instagram: "Instagram" };
@@ -33,7 +34,7 @@ function readResult(): Result | null {
 const noSubscribe = () => () => {};
 
 /** Connect the venue's Facebook Page and Instagram account for posting: status per network, Connect/Disconnect, prerequisites, last posts. */
-export function SocialCard({ overview, slug, adminKey, tz }: { overview: SocialOverview | null; slug: string; adminKey: string; tz: string }) {
+export function SocialCard({ overview, slug, adminKey, tz }: { overview: SocialOverview | null; slug: string; adminKey?: string; tz: string }) {
   const { lang, t } = useLang();
   const [busy, setBusy] = useState<Kind | null>(null);
   const [failed, setFailed] = useState(false);
@@ -56,7 +57,7 @@ export function SocialCard({ overview, slug, adminKey, tz }: { overview: SocialO
     setBusy(kind);
     setFailed(false);
     try {
-      const res = await fetch(`/api/admin/${encodeURIComponent(slug)}/social?key=${encodeURIComponent(adminKey)}`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ action: "disconnect", kind }) });
+      const res = await fetch(adminApiUrl(slug, adminKey, "/social"), { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ action: "disconnect", kind }) });
       setFailed(!res.ok);
     } catch {
       setFailed(true);
@@ -64,7 +65,7 @@ export function SocialCard({ overview, slug, adminKey, tz }: { overview: SocialO
     setBusy(null);
   }
 
-  const startUrl = (kind: Kind) => `/api/admin/${encodeURIComponent(slug)}/social/${kind}/start?key=${encodeURIComponent(adminKey)}`;
+  const startUrl = (kind: Kind) => adminApiUrl(slug, adminKey, `/social/${kind}/start`);
   const connectLink = (kind: Kind, label: string, primary: boolean) => (
     <a href={startUrl(kind)} className={primary ? "inline-flex min-h-11 items-center rounded-full bg-accent px-5 text-sm font-semibold text-white transition hover:brightness-110" : "inline-flex min-h-11 items-center rounded-full px-5 text-sm font-semibold text-ink ring-1 ring-ink/25 transition hover:bg-ink/5"}>
       {label}

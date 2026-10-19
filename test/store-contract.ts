@@ -999,7 +999,11 @@ export function storeContract(
       expect(await s.isVenueOwner(a.id, u2)).toBe(false); // not linked
       await s.linkVenueUser(a.id, u1, "staff"); // never downgrades
       expect(await s.isVenueOwner(a.id, u1)).toBe(true);
+      expect(await s.hasOwnerAccount(a.id)).toBe(true);
+      expect(await s.hasOwnerAccount(b.id)).toBe(false); // only a staff link
+      expect(await s.hasOwnerAccount(crypto.randomUUID())).toBe(false);
       await s.deleteVenue(a.id);
+      expect(await s.hasOwnerAccount(a.id)).toBe(false);
       expect((await s.listVenuesForUser(u1)).map((v) => v.id)).toEqual([b.id]);
     });
 

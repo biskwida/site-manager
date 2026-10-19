@@ -1,4 +1,5 @@
 import { after } from "next/server";
+import { authorizeAdmin } from "@/src/server/admin-auth";
 import { adminCommentAction, parseAdminCommentAction } from "@/src/server/admin-comments";
 import { adminAction, adminOverview, checkDomain, connectDomain, setTemplate, type AdminActionName } from "@/src/server/admin";
 import { newOwnerCode } from "@/src/server/connect-apps";
@@ -11,10 +12,8 @@ export const maxDuration = 300;
 
 async function auth(req: Request, slug: string) {
   const deps = await getServerDeps((fn) => after(fn));
-  const key = new URL(req.url).searchParams.get("key");
-  const venue = key ? await deps.store.findVenueByAdminToken(key) : null;
-  if (!venue || venue.slug !== slug) return { deps, venue: null };
-  return { deps, venue };
+  const access = await authorizeAdmin(req, slug, { store: deps.store });
+  return { deps, venue: access?.venue ?? null };
 }
 
 export async function GET(req: Request, ctx: RouteContext<"/api/admin/[slug]">) {

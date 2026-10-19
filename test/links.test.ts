@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { dashboardLink } from "@/src/bot/links";
 import { startLinks } from "@/src/channels/links";
 
 describe("startLinks", () => {
@@ -10,5 +11,12 @@ describe("startLinks", () => {
       whatsapp: "https://wa.me/359888123456?text=ABCD2345",
     });
     expect(startLinks({ telegramBotUsername: null, messengerPageHandle: null, instagramUsername: null, whatsappNumber: null }, "X")).toEqual({});
+  });
+});
+
+describe("dashboardLink", () => {
+  it("is the account dashboard with an owner account, the key link without", () => {
+    expect(dashboardLink("https://x.app", { slug: "agala" }, "tok", true)).toBe("https://x.app/dashboard/agala");
+    expect(dashboardLink("https://x.app", { slug: "agala" }, "tok", false)).toBe("https://x.app/admin/agala?key=tok");
   });
 });

@@ -809,6 +809,12 @@ export class SupabaseStore implements Store {
     if (error) throw new Error(`isVenueOwner: ${error.message}`);
     return data?.role === "owner";
   }
+  async hasOwnerAccount(venueId: string) {
+    if (badVenue(venueId)) return false;
+    const { data, error } = await this.db.from("venue_users").select("user_id").eq("venue_id", venueId).eq("role", "owner").limit(1);
+    if (error) throw new Error(`hasOwnerAccount: ${error.message}`);
+    return (data?.length ?? 0) > 0;
+  }
   async createPendingAccountInvite(venueId: string, email: string) {
     // A pending invite stays as it is (like the memory store); a claimed one is reopened with a fresh created_at.
     const e = email.trim().toLowerCase();

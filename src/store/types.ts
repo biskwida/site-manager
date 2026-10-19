@@ -491,6 +491,8 @@ export interface Store {
   /** The venues this account is linked to (any role), oldest venue first. */
   listVenuesForUser(userId: string): Promise<Venue[]>;
   isVenueOwner(venueId: string, userId: string): Promise<boolean>;
+  /** True when some account is linked to the venue as owner (venue_users). The chat then sends the dashboard link instead of the key link. */
+  hasOwnerAccount(venueId: string): Promise<boolean>;
   /** Promises the venue to whoever signs in with this email (compared ignoring case). Idempotent; inviting again after a claim opens a new pending invite. Throws on an unknown venue. */
   createPendingAccountInvite(venueId: string, email: string): Promise<void>;
   /**

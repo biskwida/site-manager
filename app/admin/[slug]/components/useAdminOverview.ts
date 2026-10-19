@@ -2,12 +2,20 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { AdminActionName, AdminOverview } from "@/src/server/admin";
 
+/**
+ * The admin API URL for this venue. A legacy admin key rides as `?key=`; without one (the account dashboard) the request carries
+ * the session cookie on its own (same-origin fetches and navigations send it).
+ */
+export function adminApiUrl(slug: string, adminKey: string | undefined, path = ""): string {
+  return `/api/admin/${encodeURIComponent(slug)}${path}${adminKey ? `?key=${encodeURIComponent(adminKey)}` : ""}`;
+}
+
 /** Polls the overview every 3 s (sequence-guarded like useLiveSite); `decide` POSTs a decision, then refetches at once. */
-export function useAdminOverview(initial: AdminOverview, slug: string, adminKey: string) {
+export function useAdminOverview(initial: AdminOverview, slug: string, adminKey: string | undefined) {
   const [overview, setOverview] = useState(initial);
   const [unauthorized, setUnauthorized] = useState(false);
   const seq = useRef(0);
-  const url = `/api/admin/${encodeURIComponent(slug)}?key=${encodeURIComponent(adminKey)}`;
+  const url = adminApiUrl(slug, adminKey);
 
   const load = useCallback(async () => {
     const mine = ++seq.current;

@@ -8,3 +8,10 @@ export function adminUrl(baseUrl: string, slug: string, token: string): string {
 export function publicUrl(baseUrl: string, slug: string): string {
   return `${baseUrl}/${slug}`;
 }
+/**
+ * The owner's dashboard link in chat: `/dashboard/<slug>` (a signed-in account, no secret in the link) when the venue has an
+ * owner account, else the legacy key link. `token` is only read in the second case.
+ */
+export function dashboardLink(baseUrl: string, venue: { slug: string }, token: string, hasAccount: boolean): string {
+  return hasAccount ? `${baseUrl}/dashboard/${venue.slug}` : adminUrl(baseUrl, venue.slug, token);
+}

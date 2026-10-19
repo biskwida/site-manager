@@ -259,6 +259,76 @@ describe("Instagram callback", () => {
   });
 });
 
+describe("session auth (dashboard on an account)", () => {
+  /** A venue whose owner account u1 starts the connect; `as` picks who is signed in at the callback. */
+  async function sessionSetup() {
+    const s = await setup();
+    await s.store.linkVenueUser(s.venue.id, "u1", "owner");
+    await s.store.linkVenueUser(s.venue.id, "u2", "staff");
+    let who: string | null = "u1";
+    const d: SocialConnectDeps = { ...s.d, sessionUser: async () => (who ? { id: who } : null) };
+    const start = async (kind: "facebook" | "instagram") => {
+      const res = await handleSocialStart(d, s.venue, { via: "session" }, kind);
+      const loc = new URL(res.headers.get("location") ?? "about:blank");
+      const nonce = (res.headers.get("set-cookie") ?? "").match(new RegExp(`${SOCIAL_NONCE_COOKIE}=([^;]*)`))?.[1] ?? "";
+      return { loc, state: loc.searchParams.get("state") ?? "", cookie: `${SOCIAL_NONCE_COOKIE}=${nonce}` };
+    };
+    const callback = (kind: "facebook" | "instagram", q: string, cookie: string) =>
+      (kind === "facebook" ? handleFacebookCallback : handleInstagramPublishCallback)(new Request(`${BASE}${kind === "facebook" ? FB_CALLBACK_PATH : IG_PUBLISH_CALLBACK_PATH}?${q}`, { headers: { cookie } }), d);
+    return { ...s, d, start, callback, as: (id: string | null) => (who = id) };
+  }
+
+  it("returns to /dashboard/<slug> without any key; a key start still returns to /admin/<slug>?key=", async () => {
+    const { start, callback, meta, store, venue } = await sessionSetup();
+    meta.addPage("Кафе Агала");
+    const { state, cookie, loc } = await start("facebook");
+    expect(loc.toString()).not.toContain("key");
+    const res = await callback("facebook", `code=${meta.issueFacebookCode()}&state=${state}`, cookie);
+    expect(res.status).toBe(303);
+    const back = new URL(res.headers.get("location") ?? "about:blank");
+    expect(`${back.pathname}${back.search}${back.hash}`).toBe(`/dashboard/${venue.slug}?social_result=facebook_connected#social`);
+    expect(await store.getDestination(venue.id, "facebook")).toMatchObject({ status: "connected" });
+  });
+
+  it("works for Instagram too", async () => {
+    const { start, callback, meta, venue } = await sessionSetup();
+    const ig = meta.addInstagramUser("agala.cafe");
+    const { state, cookie } = await start("instagram");
+    const res = await callback("instagram", `code=${meta.issueInstagramCode(ig.user_id)}&state=${state}`, cookie);
+    expect(new URL(res.headers.get("location") ?? "about:blank").pathname).toBe(`/dashboard/${venue.slug}`);
+  });
+
+  it("refuses at the callback when nobody is signed in, or the signed-in account is not an owner of the venue", async () => {
+    const { start, callback, meta, store, venue, as } = await sessionSetup();
+    meta.addPage("A");
+    for (const who of [null, "u2", "u3"]) {
+      const { state, cookie } = await start("facebook");
+      as(who);
+      expect(await isGeneric(await callback("facebook", `code=${meta.issueFacebookCode()}&state=${state}`, cookie))).toBe(true);
+    }
+    expect(await store.getDestination(venue.id, "facebook")).toBeNull();
+  });
+
+  it("a session state is refused by a callback with no session reader (the key path never accepts it)", async () => {
+    const { start, meta, s0 } = await sessionSetup().then((x) => ({ ...x, s0: x.d }));
+    meta.addPage("A");
+    const { state, cookie } = await start("facebook");
+    const res = await handleFacebookCallback(new Request(`${BASE}${FB_CALLBACK_PATH}?code=${meta.issueFacebookCode()}&state=${state}`, { headers: { cookie } }), { ...s0, sessionUser: undefined });
+    expect(await isGeneric(res)).toBe(true);
+  });
+
+  it("the chooser keeps the session mode through to the dashboard", async () => {
+    const { start, callback, meta, venue, d } = await sessionSetup();
+    meta.addPage("A");
+    const b = meta.addPage("B");
+    const { state, cookie } = await start("facebook");
+    const html = await (await callback("facebook", `code=${meta.issueFacebookCode()}&state=${state}`, cookie)).text();
+    const selectState = html.match(/name="state" value="([^"]+)"/)?.[1] ?? "";
+    const sel = await handleFacebookSelect(new Request(`${BASE}/api/social/facebook/select`, { method: "POST", body: new URLSearchParams({ state: selectState, page: b.id }), headers: { cookie, "content-type": "application/x-www-form-urlencoded" } }), d);
+    expect(new URL(sel.headers.get("location") ?? "about:blank").pathname).toBe(`/dashboard/${venue.slug}`);
+  });
+});
+
 describe("disconnect", () => {
   it("removes the stored connection of that network only", async () => {
     const { store, venue } = await setup();

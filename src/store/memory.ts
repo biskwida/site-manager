@@ -680,6 +680,9 @@ export class InMemoryStore implements Store {
   async isVenueOwner(venueId: string, userId: string) {
     return this.venueUsers.get(`${venueId}:${userId}`)?.role === "owner";
   }
+  async hasOwnerAccount(venueId: string) {
+    return [...this.venueUsers.values()].some((r) => r.venue_id === venueId && r.role === "owner");
+  }
   async createPendingAccountInvite(venueId: string, email: string) {
     this.site(venueId);
     const e = email.trim().toLowerCase();

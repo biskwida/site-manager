@@ -9,7 +9,9 @@
 // Separate from the wizard's photo import (src/server/instagram.ts): own authorize request, own state key and cookie, own callback;
 // only the constants and the code exchange are shared. State = base64url(JSON) "." base64url(HMAC) under a key derived from the
 // app secret; a nonce cookie set by the start ties the callback to the browser that started it; the admin key rides in the state
-// encrypted with DESTINATION_SECRET_KEY, so the callback can return to the dashboard. Tokens are encrypted, never logged, never
+// encrypted with DESTINATION_SECRET_KEY, so the callback can return to the dashboard. A dashboard opened on an account (no key)
+// starts with `a: "session"` instead: nothing secret rides in that state, the callback re-checks that the signed-in account still
+// owns the venue, and it returns to /dashboard/<slug> rather than the key URL. Tokens are encrypted, never logged, never
 // in a URL we build for the browser, never rendered.
 import { createHmac, randomBytes, timingSafeEqual } from "node:crypto";
 import type { Config } from "../config";
@@ -45,7 +47,12 @@ export interface SocialConnectDeps {
   secretKey: Buffer | null;
   fetch: typeof fetch;
   now: () => Date;
+  /** The signed-in account of the callback's request; needed to finish a connect that was started from the account dashboard. */
+  sessionUser?: () => Promise<{ id: string } | null>;
 }
+
+/** How the dashboard was opened: with the legacy admin key (its value), or on a signed-in owner account. */
+export type SocialAuth = string | { via: "session" };
 
 /** Which Connect buttons the dashboard shows: each login needs its app id + secret, and secrets need the destination key. */
 export function socialAvailability(c: Pick<Config, "metaAppId" | "metaAppSecret" | "instagramAppId" | "instagramAppSecret">, secretKey: Buffer | null): { facebook: boolean; instagram: boolean } {
@@ -62,8 +69,10 @@ interface SocialState {
   v: string;
   n: string;
   exp: number;
-  /** Admin key, encrypted. */
+  /** Admin key, encrypted; "" in a session state. */
   r: string;
+  /** "session": started from the account dashboard (no admin key); absent: started with the admin key in `r`. */
+  a?: "session";
   /** facebook_select only: the long-lived user token, encrypted. */
   t?: string;
 }
@@ -98,8 +107,9 @@ export function verifySocialState(state: string | null, key: Buffer, want: State
   }
   if (!p || p.k !== want || typeof p.v !== "string" || typeof p.n !== "string" || typeof p.exp !== "number" || typeof p.r !== "string") return null;
   if (p.t !== undefined && typeof p.t !== "string") return null;
+  if (p.a !== undefined && p.a !== "session") return null;
   if (p.exp <= now.getTime()) return null;
-  return { k: p.k, v: p.v, n: p.n, exp: p.exp, r: p.r, ...(p.t ? { t: p.t } : {}) };
+  return { k: p.k, v: p.v, n: p.n, exp: p.exp, r: p.r, ...(p.a ? { a: p.a } : {}), ...(p.t ? { t: p.t } : {}) };
 }
 
 function sameSecret(a: string, b: string): boolean {
@@ -139,14 +149,17 @@ export type SocialResult =
   | "facebook_connected" | "facebook_no_pages" | "facebook_error"
   | "instagram_connected" | "instagram_personal" | "instagram_error";
 
-function backToDashboard(d: SocialConnectDeps, slug: string, adminKey: string, result: SocialResult): Response {
+/** `adminKey` null = the dashboard was opened on an account: back to /dashboard/<slug>, with no key anywhere. */
+function backToDashboard(d: SocialConnectDeps, slug: string, adminKey: string | null, result: SocialResult): Response {
   const secure = d.config.publicBaseUrl.startsWith("https://");
-  const location = `${d.config.publicBaseUrl}/admin/${encodeURIComponent(slug)}?key=${encodeURIComponent(adminKey)}&social_result=${result}#social`;
+  const location = adminKey === null
+    ? `${d.config.publicBaseUrl}/dashboard/${encodeURIComponent(slug)}?social_result=${result}#social`
+    : `${d.config.publicBaseUrl}/admin/${encodeURIComponent(slug)}?key=${encodeURIComponent(adminKey)}&social_result=${result}#social`;
   return new Response(null, { status: 303, headers: { ...NO_STORE, location, "set-cookie": nonceCookie("", 0, secure), "referrer-policy": "no-referrer" } });
 }
 
 // ---------------------------------------------------------------------------------------------------------------------
-// Start (dashboard, admin key already checked by the route)
+// Start (dashboard, admin key or owner session already checked by the route)
 
 const UNAVAILABLE = (kind: SocialKind) =>
   Response.json(
@@ -155,10 +168,11 @@ const UNAVAILABLE = (kind: SocialKind) =>
   );
 
 /** GET /api/admin/[slug]/social/<kind>/start?key= → 302 to the login with a signed state and a nonce cookie. */
-export async function handleSocialStart(d: SocialConnectDeps, venue: Venue, adminKey: string, kind: SocialKind): Promise<Response> {
+export async function handleSocialStart(d: SocialConnectDeps, venue: Venue, auth: SocialAuth, kind: SocialKind): Promise<Response> {
   if (!socialAvailability(d.config, d.secretKey)[kind] || !d.secretKey) return UNAVAILABLE(kind);
   const nonce = randomBytes(16).toString("hex");
-  const state = signSocialState({ k: kind, v: venue.id, n: nonce, exp: d.now().getTime() + SOCIAL_STATE_TTL_MS, r: encryptSecrets({ key: adminKey }, d.secretKey) }, stateKey(appSecretFor(d, kind)!));
+  const who = typeof auth === "string" ? { r: encryptSecrets({ key: auth }, d.secretKey) } : { r: "", a: "session" as const };
+  const state = signSocialState({ k: kind, v: venue.id, n: nonce, exp: d.now().getTime() + SOCIAL_STATE_TTL_MS, ...who }, stateKey(appSecretFor(d, kind)!));
   const base = d.config.publicBaseUrl;
   const url = new URL(kind === "facebook" ? FB_DIALOG_URL : IG_AUTHORIZE_URL);
   url.searchParams.set("client_id", kind === "facebook" ? d.config.metaAppId! : d.config.instagramAppId!);
@@ -177,24 +191,39 @@ export async function handleSocialStart(d: SocialConnectDeps, venue: Venue, admi
 interface Checked {
   state: SocialState;
   venue: Venue;
-  adminKey: string;
+  /** The admin key the connect was started with; null when it was started from the account dashboard. */
+  adminKey: string | null;
   /** False when the nonce cookie is missing or belongs to another start. */
   sameBrowser: boolean;
 }
 
-/** Verifies the state (signature, step, expiry), decrypts the admin key, loads the venue and compares the nonce cookie. */
+/**
+ * Verifies the state (signature, step, expiry), loads the venue and compares the nonce cookie. A key state decrypts the admin key and
+ * looks the venue up by it; a session state needs the signed-in account of this request to still own the venue.
+ */
 async function checkState(d: SocialConnectDeps, raw: string | null, step: StateStep, cookies: string | null): Promise<Checked | null> {
   const secret = appSecretFor(d, step);
   if (!secret || !d.secretKey) return null;
   const state = verifySocialState(raw, stateKey(secret), step, d.now());
   if (!state) return null;
-  let adminKey: string;
-  try {
-    adminKey = decryptSecrets(state.r, d.secretKey).key ?? "";
-  } catch {
-    return null;
+  let adminKey: string | null = null;
+  let venue: Venue | null = null;
+  if (state.a === "session") {
+    try {
+      const user = d.sessionUser ? await d.sessionUser() : null;
+      const v = user ? await d.store.getVenue(state.v) : null;
+      venue = v && user && (await d.store.isVenueOwner(v.id, user.id)) ? v : null;
+    } catch {
+      return null;
+    }
+  } else {
+    try {
+      adminKey = decryptSecrets(state.r, d.secretKey).key ?? "";
+    } catch {
+      return null;
+    }
+    venue = adminKey ? await d.store.findVenueByAdminToken(adminKey).catch(() => null) : null;
   }
-  const venue = adminKey ? await d.store.findVenueByAdminToken(adminKey).catch(() => null) : null;
   if (!venue || venue.id !== state.v) return null;
   const nonce = cookieFromHeader(cookies, SOCIAL_NONCE_COOKIE);
   return { state, venue, adminKey, sameBrowser: !!nonce && sameSecret(nonce, state.n) };
@@ -275,7 +304,7 @@ export async function handleFacebookCallback(req: Request, d: SocialConnectDeps)
       return back("facebook_connected");
     }
     const selectState = signSocialState(
-      { k: "facebook_select", v: venue.id, n: checked.state.n, exp: d.now().getTime() + SOCIAL_STATE_TTL_MS, r: checked.state.r, t: encryptSecrets({ user_token: userToken }, d.secretKey!) },
+      { k: "facebook_select", v: venue.id, n: checked.state.n, exp: d.now().getTime() + SOCIAL_STATE_TTL_MS, r: checked.state.r, ...(checked.state.a ? { a: checked.state.a } : {}), t: encryptSecrets({ user_token: userToken }, d.secretKey!) },
       stateKey(d.config.metaAppSecret!),
     );
     return chooserPage(pages, selectState);

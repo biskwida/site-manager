@@ -147,6 +147,19 @@ describe("handleInbound", () => {
     await handleInbound(d, { chatRef: "fb:901", kind: "text", text: "меню" });
     expect(texts(messenger).at(-1)).toBe("Сайтът: https://coffique.vercel.app");
   });
+  it("sends the dashboard link instead of the key link once the venue has an owner account (/menu and welcome-back)", async () => {
+    const { d, messenger, store, venue } = await setup();
+    const key = await store.getAdminToken(venue.id);
+    await handleInbound(d, { chatRef: "tg:1001", kind: "text", text: "/menu" });
+    expect(texts(messenger).at(-1)).toContain(`https://site.example/admin/agala?key=${key}`);
+    await store.linkVenueUser(venue.id, crypto.randomUUID(), "owner");
+    await handleInbound(d, { chatRef: "tg:1001", kind: "text", text: "/menu" });
+    expect(texts(messenger).at(-1)).toContain("QR код и табло: https://site.example/dashboard/agala");
+    expect(texts(messenger).at(-1)).not.toContain(key);
+    await store.upsertMember({ venue_id: venue.id, chat_ref: "fb:810", role: "owner", lang: "bg" });
+    await handleInbound(d, { chatRef: "fb:810", kind: "text", text: "" });
+    expect(texts(messenger).at(-1)).toBe("Вече сте свързани с Кафене „Ъгъла“. Табло: https://site.example/dashboard/agala");
+  });
   it("still starts the run when touchMember fails", async () => {
     const { d, runs } = await setup();
     const errs: string[] = []; const orig = console.error; console.error = (...a: unknown[]) => { errs.push(a.join(" ")); };

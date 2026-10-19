@@ -2,6 +2,7 @@
 import { LangToggle, useLang } from "@/src/i18n";
 import type { AdminOverview } from "@/src/server/admin";
 import { formatDateTime } from "@/src/time";
+import { AccountBanner } from "./AccountBanner";
 import { AppsCard } from "./AppsCard";
 import { CommentsCard } from "./CommentsCard";
 import { Empty, Section } from "./bits";
@@ -15,8 +16,11 @@ import { useAdminOverview } from "./useAdminOverview";
 import { WordPressCard } from "./WordPressCard";
 import { SocialCard } from "./SocialCard";
 
-/** The owner's dashboard: the site (status, template switch), the optional custom domain, decisions, schedule, sold-out items, change log with undo, connected apps, QR and links. Client-polled every 3 s. */
-export function AdminPanel({ slug, adminKey, initial }: { slug: string; adminKey: string; initial: AdminOverview }) {
+/**
+ * The owner's dashboard, on a legacy admin key (`adminKey`, sent as ?key=) or on the signed-in account (no `adminKey`: the session cookie
+ * goes with every same-origin request). `showAccountBanner` adds the "log in with your email" note on the key page.
+ * The dashboard: the site (status, template switch), the optional custom domain, decisions, schedule, sold-out items, change log with undo, connected apps, QR and links. Client-polled every 3 s. */
+export function AdminPanel({ slug, adminKey, initial, showAccountBanner = false }: { slug: string; adminKey?: string; initial: AdminOverview; showAccountBanner?: boolean }) {
   const { lang, t } = useLang();
   const { overview: o, unauthorized, decide, post, refresh } = useAdminOverview(initial, slug, adminKey);
   if (unauthorized) return <InvalidKey />;
@@ -33,6 +37,7 @@ export function AdminPanel({ slug, adminKey, initial }: { slug: string; adminKey
         </div>
       </header>
       <main className="mx-auto w-full max-w-3xl flex-1 px-4 pb-16 sm:px-6">
+        {showAccountBanner && <AccountBanner slug={slug} />}
         <SiteCard overview={o} post={post} adminKey={adminKey} refresh={refresh} />
         <PendingList sets={o.pending} slug={slug} adminKey={adminKey} tz={tz} decide={decide} />
         <ScheduledList sets={o.scheduled} tz={tz} decide={decide} />

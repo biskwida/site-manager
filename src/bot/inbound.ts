@@ -5,11 +5,11 @@ import { PHOTO_NO_CAPTION } from "../agent/prompt";
 import type { ImageInput } from "../agent/run";
 import { channelOf, isMetaChannel, maskRef, type Channel } from "../channels/ref";
 import { baseLang, countLatinWords, countWords, detectScriptLang, isLatinText, isMarkerlessCyrillic, keep } from "../domain/format";
-import type { ChatLang, Member } from "../domain/types";
+import type { ChatLang, Member, Venue } from "../domain/types";
 import { handleDecision, parseCallback } from "./approvals";
 import type { BotDeps } from "./bot";
 import { copy } from "./copy";
-import { adminUrl, publicUrl } from "./links";
+import { dashboardLink, publicUrl } from "./links";
 import { imageMediaType, MAX_IMAGE_BYTES } from "./media";
 import { memberViews, openInviteViews } from "./members";
 import { audioContentType } from "./voice";
@@ -227,6 +227,12 @@ async function followWords(d: BotDeps, member: Member, text: string, m: InboundM
   return m.forwarded ? member : followLanguage(d, member, await languageOf(d, text, member.lang));
 }
 
+/** The owner's dashboard link: the account dashboard when the venue has an owner account, else the key link. */
+async function ownerDashboardLink(d: BotDeps, venue: Venue): Promise<string> {
+  const hasAccount = await d.store.hasOwnerAccount(venue.id);
+  return dashboardLink(d.baseUrl, venue, hasAccount ? "" : await d.store.getAdminToken(venue.id), hasAccount);
+}
+
 /** `previous` is the chat's membership before the redeem (null for a new chat). The venue's name is kept: a translation leaves it as written. */
 async function welcome(d: BotDeps, member: Member, previous: Member | null) {
   const venue = await d.store.getVenue(member.venue_id);
@@ -235,7 +241,7 @@ async function welcome(d: BotDeps, member: Member, previous: Member | null) {
   // An own site (built and hosted elsewhere, reads our feed) is the site the owner and staff know.
   const site = venue.site_mode === "own" && venue.site_url ? venue.site_url : publicUrl(d.baseUrl, venue.slug);
   if (member.role === "owner") {
-    const admin = adminUrl(d.baseUrl, venue.slug, await d.store.getAdminToken(venue.id));
+    const admin = await ownerDashboardLink(d, venue);
     // No website at all (social media only): the welcome talks about their Instagram, not a site.
     if (venue.site_mode === "none") await d.messenger.send(member.chat_ref, c.welcomeSocial(keep(venue.name), admin, channelOf(member.chat_ref)));
     else await d.messenger.send(member.chat_ref, c.welcome(keep(venue.name), admin, site, channelOf(member.chat_ref)));
@@ -256,7 +262,7 @@ async function welcome(d: BotDeps, member: Member, previous: Member | null) {
 async function welcomeBack(d: BotDeps, member: Member) {
   const venue = await d.store.getVenue(member.venue_id);
   const c = copy(baseLang(member.lang));
-  if (member.role === "owner") await d.messenger.send(member.chat_ref, c.welcomeBack(keep(venue.name), adminUrl(d.baseUrl, venue.slug, await d.store.getAdminToken(venue.id))));
+  if (member.role === "owner") await d.messenger.send(member.chat_ref, c.welcomeBack(keep(venue.name), await ownerDashboardLink(d, venue)));
   else await d.messenger.send(member.chat_ref, c.welcomeStaff(keep(venue.name), publicUrl(d.baseUrl, venue.slug), venue.site_mode === "none"));
 }
 
@@ -280,7 +286,7 @@ async function runCommand(d: BotDeps, member: Member, channel: Channel, cmd: str
       return;
     case "menu": {
       const venue = await d.store.getVenue(member.venue_id);
-      const admin = member.role === "owner" ? adminUrl(d.baseUrl, venue.slug, await d.store.getAdminToken(venue.id)) : null;
+      const admin = member.role === "owner" ? await ownerDashboardLink(d, venue) : null;
       // An own-site venue is linked as is: its site may not have a /menu path. Hosted venues get site and menu.
       const hosted = publicUrl(d.baseUrl, venue.slug);
       await d.messenger.send(member.chat_ref, venue.site_mode === "own" && venue.site_url ? c.menu(venue.site_url, null, admin) : c.menu(hosted, `${hosted}/menu`, admin, venue.site_mode === "none")); // none: "Your page", intended: its hosted page is not a website
