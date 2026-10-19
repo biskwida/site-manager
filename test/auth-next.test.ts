@@ -24,6 +24,9 @@ describe("safeNext", () => {
     ["whitespace before the slash", " //evil.example"],
     ["a control character", "/\t/evil.example"],
     ["a newline", "/\n/evil.example"],
+    ["dot segments that collapse to //", "/.//evil"],
+    ["a parent segment that collapses to //", "/a/..//evil"],
+    ["an encoded parent segment that collapses to //", "/%2e%2e//evil"],
   ])("falls back to /dashboard for %s", (_name, input) => {
     expect(safeNext(input)).toBe(DEFAULT_NEXT);
   });

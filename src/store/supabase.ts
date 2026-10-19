@@ -800,7 +800,7 @@ export class SupabaseStore implements Store {
     if (badVenue(userId)) return [];
     const links = await must(this.db.from("venue_users").select("venue_id").eq("user_id", userId), "listVenuesForUser");
     if (links.length === 0) return [];
-    const rows = await must(this.db.from("venues").select("*").in("id", links.map((l) => l.venue_id as string)).order("created_at"), "listVenuesForUser venues");
+    const rows = await must(this.db.from("venues").select("*").in("id", links.map((l) => l.venue_id as string)).order("created_at").order("id"), "listVenuesForUser venues");
     return rows.map((r) => this.venue(r));
   }
   async isVenueOwner(venueId: string, userId: string) {
@@ -810,8 +810,12 @@ export class SupabaseStore implements Store {
     return data?.role === "owner";
   }
   async createPendingAccountInvite(venueId: string, email: string) {
-    // A pending invite stays as it is; a claimed one is reopened.
-    await must(this.db.from("account_invites").upsert({ venue_id: venueId, email: email.trim().toLowerCase(), claimed_at: null }, { onConflict: "venue_id,email" }).select("venue_id"), "createPendingAccountInvite");
+    // A pending invite stays as it is (like the memory store); a claimed one is reopened with a fresh created_at.
+    const e = email.trim().toLowerCase();
+    const { data, error } = await this.db.from("account_invites").select("claimed_at").eq("venue_id", venueId).eq("email", e).maybeSingle();
+    if (error) throw new Error(`createPendingAccountInvite: ${error.message}`);
+    if (data && data.claimed_at === null) return;
+    await must(this.db.from("account_invites").upsert({ venue_id: venueId, email: e, created_at: new Date().toISOString(), claimed_at: null }, { onConflict: "venue_id,email" }).select("venue_id"), "createPendingAccountInvite");
   }
   async claimAccountInvites(userId: string, email: string) {
     const e = email.trim().toLowerCase();

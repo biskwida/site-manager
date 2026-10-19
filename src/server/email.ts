@@ -27,6 +27,7 @@ export async function sendEmail(msg: EmailMessage, cfg: EmailConfig, fetchFn: ty
       method: "POST",
       headers: { Authorization: `Bearer ${cfg.apiKey}`, "Content-Type": "application/json" },
       body: JSON.stringify({ from: cfg.from, to: [msg.to], subject: msg.subject, html: msg.html, text: msg.text }),
+      signal: AbortSignal.timeout(10_000), // a hung Resend never hangs a request or the script; the abort is the network failure below
     });
     const body = (await res.json().catch(() => null)) as { id?: unknown; message?: unknown } | null;
     if (!res.ok) return { status: "failed", error: `Resend ${res.status}${typeof body?.message === "string" ? `: ${body.message}` : ""}` };

@@ -6,6 +6,7 @@ import { createClient } from "@supabase/supabase-js";
 import { accountInviteLines, inviteAccount } from "../src/server/account-invite";
 import { makeServerDeps } from "../src/server/deps";
 import { sendEmail } from "../src/server/email";
+import { explicitAppHost } from "../src/server/host";
 import { parseArgs } from "./invite-lines.mts";
 
 const USAGE = `Usage: npm run account:invite -- --slug my-cafe --email owner@example.com`;
@@ -28,12 +29,13 @@ const outcome = await inviteAccount(
   {
     store: deps.store,
     appUrl,
-    emailEnabled: Boolean(config.resendApiKey) && admin !== null,
+    // No mail unless the key is set AND APP_HOST was set explicitly: the default host is for building links, and a sign-in link to the wrong host is useless.
+    emailOff: !config.resendApiKey || admin === null ? "no_key" : explicitAppHost(process.env) === null ? "no_app_host" : null,
     generateLink: async (to, redirectTo) => {
       if (!admin) throw new Error("no Supabase admin client in memory mode");
       const { data, error } = await admin.auth.admin.generateLink({ type: "magiclink", email: to, options: { redirectTo } });
       if (error) throw new Error(`Supabase generateLink: ${error.message}`);
-      return { hashedToken: data.properties?.hashed_token ?? null, actionLink: data.properties?.action_link ?? null };
+      return { hashedToken: data.properties?.hashed_token ?? null };
     },
     send: (msg) => sendEmail(msg, { apiKey: config.resendApiKey, from: config.emailFrom }),
   },

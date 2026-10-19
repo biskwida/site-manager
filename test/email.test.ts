@@ -44,4 +44,16 @@ describe("sendEmail", () => {
     const f = vi.fn(async () => new Response("<html>bad gateway</html>", { status: 502 }));
     expect(await sendEmail(MSG, CFG, f as unknown as typeof fetch)).toEqual({ status: "failed", error: "Resend 502" });
   });
+
+  it("gives the request a 10 s abort signal and reports an abort as the network failure", async () => {
+    const f = vi.fn(async (url: unknown, init?: RequestInit) => {
+      expect([url, init?.signal][1]).toBeInstanceOf(AbortSignal);
+      throw new DOMException("The operation was aborted due to timeout", "TimeoutError");
+    });
+    const timeout = vi.spyOn(AbortSignal, "timeout");
+    const r = await sendEmail(MSG, CFG, f as unknown as typeof fetch);
+    expect(timeout).toHaveBeenCalledWith(10_000);
+    expect(r).toEqual({ status: "failed", error: "Resend request failed (network error)" });
+    timeout.mockRestore();
+  });
 });

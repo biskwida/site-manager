@@ -23,6 +23,7 @@ export default async function Page({ searchParams }: PageProps<"/login">) {
   const t = LOGIN[lang];
   const other = new URLSearchParams({ lang: t.otherLangCode, ...(next !== "/dashboard" ? { next } : {}) });
   return (
+    <div lang={lang}>
     <main className="cl-auth flex min-h-dvh flex-col items-center px-4 py-10 sm:py-16">
       <div className="w-full max-w-md">
         <header className="mb-8 flex items-center justify-between">
@@ -38,5 +39,6 @@ export default async function Page({ searchParams }: PageProps<"/login">) {
         )}
       </div>
     </main>
+    </div>
   );
 }

@@ -11,7 +11,7 @@ async function setup(over: Partial<InviteAccountDeps> = {}) {
   const venue = await store.createVenue({ slug: "coffique", name: "Coffique & Co" });
   const generateLink = vi.fn(async (email: string, redirectTo: string) => (void [email, redirectTo], { hashedToken: LINK_TOKEN, actionLink: "https://x.supabase.co/auth/v1/verify?token=SECRET" }));
   const send = vi.fn(async (m: { to: string; subject: string; html: string; text: string }) => (void m, { status: "sent" as const, id: "em_1" }));
-  const deps: InviteAccountDeps = { store, appUrl: APP, emailEnabled: true, generateLink, send, ...over };
+  const deps: InviteAccountDeps = { store, appUrl: APP, emailOff: null, generateLink, send, ...over };
   return { store, venue, generateLink, send, deps };
 }
 
@@ -36,9 +36,9 @@ describe("inviteAccount", () => {
   });
 
   it("without an email key it stores the invite and sends nothing", async () => {
-    const { store, venue, generateLink, send, deps } = await setup({ emailEnabled: false });
+    const { store, venue, generateLink, send, deps } = await setup({ emailOff: "no_key" });
     const r = await inviteAccount(deps, { slug: "coffique", email: "owner@example.com" });
-    expect(r.status).toBe("stored");
+    expect(r).toMatchObject({ status: "stored", reason: "no_key" });
     expect(generateLink).not.toHaveBeenCalled();
     expect(send).not.toHaveBeenCalled();
     expect(await store.claimAccountInvites("22222222-2222-4222-8222-222222222222", "owner@example.com")).toEqual([venue.id]);
@@ -58,6 +58,13 @@ describe("inviteAccount", () => {
     expect(send).not.toHaveBeenCalled();
   });
 
+  it("does not fall back to the action link: no token hash is a failed email, nothing is sent", async () => {
+    const { deps, send } = await setup({ generateLink: vi.fn(async () => ({ hashedToken: null, actionLink: "https://x.supabase.co/auth/v1/verify?token=SECRET" })) });
+    const r = await inviteAccount(deps, { slug: "coffique", email: "owner@example.com" });
+    expect(r).toMatchObject({ status: "email_failed", error: "no token hash" });
+    expect(send).not.toHaveBeenCalled();
+  });
+
   it("refuses an unknown venue or a bad email before storing anything", async () => {
     const { store, deps } = await setup();
     const spy = vi.spyOn(store, "createPendingAccountInvite");
@@ -71,7 +78,7 @@ describe("accountInviteLines (what the script prints)", () => {
   const SECRETS = [LINK_TOKEN, "SECRET", "re_key", "token_hash"];
   it.each([
     [{ status: "emailed", venueName: "Coffique", email: "o@example.com" } as const, /o@example\.com/],
-    [{ status: "stored", venueName: "Coffique", email: "o@example.com" } as const, /\/login/],
+    [{ status: "stored", venueName: "Coffique", email: "o@example.com", reason: "no_key" } as const, /\/login/],
     [{ status: "email_failed", venueName: "Coffique", email: "o@example.com", error: "Resend 422: Invalid `to` field" } as const, /Resend 422/],
   ])("prints no link or key (%o)", (outcome, expected) => {
     const lines = accountInviteLines(outcome, APP).join("\n");
@@ -81,9 +88,23 @@ describe("accountInviteLines (what the script prints)", () => {
   });
 
   it("tells the owner to sign in at /login with that email when nothing was mailed", () => {
-    const lines = accountInviteLines({ status: "stored", venueName: "Coffique", email: "o@example.com" }, APP).join("\n");
+    const lines = accountInviteLines({ status: "stored", venueName: "Coffique", email: "o@example.com", reason: "no_key" }, APP).join("\n");
     expect(lines).toContain(`${APP}/login`);
     expect(lines).toContain("RESEND_API_KEY");
+  });
+});
+
+describe("without an explicit APP_HOST", () => {
+  it("stores the invite, sends nothing, and says to set APP_HOST", async () => {
+    const { store, venue, generateLink, send, deps } = await setup({ emailOff: "no_app_host" });
+    const r = await inviteAccount(deps, { slug: "coffique", email: "owner@example.com" });
+    expect(r).toMatchObject({ status: "stored", reason: "no_app_host" });
+    expect(generateLink).not.toHaveBeenCalled();
+    expect(send).not.toHaveBeenCalled();
+    expect(await store.claimAccountInvites("22222222-2222-4222-8222-222222222222", "owner@example.com")).toEqual([venue.id]);
+    const lines = accountInviteLines(r, APP).join("\n");
+    expect(lines).toContain("APP_HOST");
+    expect(lines).not.toContain("RESEND_API_KEY");
   });
 });
 

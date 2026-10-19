@@ -9,16 +9,16 @@ export interface InviteAccountDeps {
   store: Pick<Store, "getVenueBySlug" | "createPendingAccountInvite">;
   /** https://<APP_HOST>, no trailing slash. */
   appUrl: string;
-  /** False without RESEND_API_KEY: the invite is stored and nothing else happens. */
-  emailEnabled: boolean;
-  /** Supabase admin generateLink({ type: "magiclink", email, options: { redirectTo } }): the token hash and the action link. Throws on failure. */
-  generateLink: (email: string, redirectTo: string) => Promise<{ hashedToken: string | null; actionLink: string | null }>;
+  /** Why no mail goes out (the invite is then only stored): no RESEND_API_KEY, or APP_HOST not set explicitly (the link must point at the real host). Null = mail on. */
+  emailOff: "no_key" | "no_app_host" | null;
+  /** Supabase admin generateLink({ type: "magiclink", email, options: { redirectTo } }): the token hash. Throws on failure. */
+  generateLink: (email: string, redirectTo: string) => Promise<{ hashedToken: string | null }>;
   send: (msg: EmailMessage) => Promise<EmailResult>;
 }
 
 export type InviteOutcome =
   | { status: "emailed"; venueName: string; email: string }
-  | { status: "stored"; venueName: string; email: string }
+  | { status: "stored"; venueName: string; email: string; reason: "no_key" | "no_app_host" }
   | { status: "email_failed"; venueName: string; email: string; error: string }
   | { status: "unknown_venue"; slug: string }
   | { status: "bad_email" };
@@ -29,7 +29,7 @@ const escapeHtml = (s: string) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;")
 /**
  * Stores the pending invite first (the first sign-in with this email claims it whatever happens to the mail), then mails a link.
  * The link goes to /auth/callback with the magic link's token hash (the admin API's own action link returns tokens in the URL
- * fragment, which a server callback never sees). Never throws: a link or mail failure is an "email_failed" outcome.
+ * fragment, which a server callback never sees, so a missing hash is a failure, not a reason to mail the action link). Never throws: a link or mail failure is an "email_failed" outcome.
  */
 export async function inviteAccount(deps: InviteAccountDeps, input: { slug: string; email: string }): Promise<InviteOutcome> {
   const email = input.email.trim().toLowerCase();
@@ -38,12 +38,13 @@ export async function inviteAccount(deps: InviteAccountDeps, input: { slug: stri
   if (!venue) return { status: "unknown_venue", slug: input.slug };
   await deps.store.createPendingAccountInvite(venue.id, email);
   const base = { venueName: venue.name, email };
-  if (!deps.emailEnabled) return { status: "stored", ...base };
+  if (deps.emailOff) return { status: "stored", ...base, reason: deps.emailOff };
   try {
     const redirectTo = callbackUrl(deps.appUrl, DEFAULT_NEXT);
-    const { hashedToken, actionLink } = await deps.generateLink(email, redirectTo);
-    const link = hashedToken ? `${deps.appUrl}/auth/callback?token_hash=${encodeURIComponent(hashedToken)}&type=magiclink&next=${encodeURIComponent(DEFAULT_NEXT)}` : actionLink;
-    if (!link) return { status: "email_failed", ...base, error: "Supabase returned no sign-in link" };
+    const { hashedToken } = await deps.generateLink(email, redirectTo);
+    // No fallback to the admin API's action_link: it returns the session in the URL fragment, which /auth/callback never sees.
+    if (!hashedToken) return { status: "email_failed", ...base, error: "no token hash" };
+    const link = `${deps.appUrl}/auth/callback?token_hash=${encodeURIComponent(hashedToken)}&type=magiclink&next=${encodeURIComponent(DEFAULT_NEXT)}`;
     const sent = await deps.send({ to: email, ...accountInviteEmail({ venueName: venue.name, link, loginUrl: `${deps.appUrl}/login` }) });
     if (sent.status === "sent") return { status: "emailed", ...base };
     return { status: "email_failed", ...base, error: sent.status === "failed" ? sent.error : "email is not configured" };
@@ -89,6 +90,12 @@ export function accountInviteLines(o: InviteOutcome, appUrl: string): string[] {
     case "emailed":
       return [`${o.venueName}: invite stored for ${o.email}, sign-in link emailed.`, `The first sign-in with that email links the account to the venue.`];
     case "stored":
+      if (o.reason === "no_app_host") {
+        return [
+          `${o.venueName}: invite stored for ${o.email}. No email was sent: APP_HOST is not set in the environment, and the sign-in link must point at the real app host.`,
+          `Set APP_HOST (for example getclaudia.app) and run this command again (the stored invite stays), or the owner can sign in at ${appUrl}/login with that email.`,
+        ];
+      }
       return [
         `${o.venueName}: invite stored for ${o.email}. No email was sent (RESEND_API_KEY is not set).`,
         `The owner can sign in at ${appUrl}/login with that email; the first sign-in links the account to the venue.`,

@@ -1020,6 +1020,13 @@ export function storeContract(
       expect((await s.listVenuesForUser(u1)).map((v) => v.id).sort()).toEqual([a.id, b.id].sort());
       expect(await s.isVenueOwner(a.id, u1)).toBe(true);
       expect(await s.listVenuesForUser(u2)).toEqual([]);
+      // A claim lifts an earlier staff link to owner.
+      const c = await s.createVenue({ slug: "t-i3", name: "C" });
+      await s.linkVenueUser(c.id, u1, "staff");
+      expect(await s.isVenueOwner(c.id, u1)).toBe(false);
+      await s.createPendingAccountInvite(c.id, email);
+      expect(await s.claimAccountInvites(u1, email)).toEqual([c.id]);
+      expect(await s.isVenueOwner(c.id, u1)).toBe(true);
       // Inviting again after a claim opens a new pending invite.
       await s.createPendingAccountInvite(a.id, email);
       expect(await s.claimAccountInvites(u2, email)).toEqual([a.id]);

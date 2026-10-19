@@ -493,6 +493,11 @@ export interface Store {
   isVenueOwner(venueId: string, userId: string): Promise<boolean>;
   /** Promises the venue to whoever signs in with this email (compared ignoring case). Idempotent; inviting again after a claim opens a new pending invite. Throws on an unknown venue. */
   createPendingAccountInvite(venueId: string, email: string): Promise<void>;
-  /** Links `userId` as owner to every venue with an unclaimed invite for `email` (ignoring case), marks those invites claimed, and returns their venue ids. A second call returns []. */
+  /**
+   * Links `userId` as owner to every venue with an unclaimed invite for `email` (ignoring case), marks those invites claimed, and returns their venue ids. A second call returns [].
+   * SECURITY: an invite is a promise to whoever proves they own the email, so this runs ONLY in /auth/callback (src/server/auth-callback.ts),
+   * right after a successful code exchange or OTP verify, with the email Supabase confirmed. Never call it from anywhere else (a
+   * dashboard load, a signup form, a script): a caller that passes an email nobody verified hands the venue to a stranger.
+   */
   claimAccountInvites(userId: string, email: string): Promise<string[]>;
 }

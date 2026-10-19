@@ -1,18 +1,11 @@
 "use client";
 // app/login/LoginForm.tsx — email link (signInWithOtp) and Google (signInWithOAuth) through Supabase Auth in the browser.
-import { createBrowserClient } from "@supabase/ssr";
 import { useEffect, useRef, useState, type FormEvent } from "react";
-import { callbackUrl } from "@/src/auth/next";
 import { LANG_COOKIE, type PageLang } from "@/src/auth/page-lang";
 import { LOGIN } from "@/src/i18n/login";
+import { sendEmailLink, startGoogle } from "./sign-in";
 
 type Phase = "idle" | "sending" | "sent";
-
-function browserClient() {
-  const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
-  const key = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
-  return url && key ? createBrowserClient(url, key) : null;
-}
 
 export function LoginForm({ lang, next, rememberLang, initialError }: { lang: PageLang; next: string; rememberLang: boolean; initialError: boolean }) {
   const t = LOGIN[lang];
@@ -39,30 +32,28 @@ export function LoginForm({ lang, next, rememberLang, initialError }: { lang: Pa
 
   async function sendLink(e: FormEvent) {
     e.preventDefault();
-    const supabase = browserClient();
-    if (!supabase || phase === "sending") return;
+    if (phase === "sending") return;
     setError(null);
     setPhase("sending");
-    const { error: err } = await supabase.auth.signInWithOtp({ email: email.trim(), options: { emailRedirectTo: callbackUrl(window.location.origin, next) } });
-    if (err) {
+    const r = await sendEmailLink({ email, origin: window.location.origin, next });
+    if (r.ok) setPhase("sent");
+    else {
       setError(t.errorSend);
       setPhase("idle");
-    } else setPhase("sent");
+    }
   }
 
   async function google() {
-    const supabase = browserClient();
-    if (!supabase) return;
     setError(null);
-    const { error: err } = await supabase.auth.signInWithOAuth({ provider: "google", options: { redirectTo: callbackUrl(window.location.origin, next) } });
-    if (err) setError(t.errorGoogle);
+    const r = await startGoogle({ origin: window.location.origin, next });
+    if (!r.ok) setError(t.errorGoogle);
   }
 
   if (phase === "sent") {
     return (
       <div role="status" className="rounded-2xl border border-[var(--cl-line)] bg-[var(--cl-card)] p-6">
         <h2 ref={sentRef} tabIndex={-1} className="font-display text-2xl outline-none">{t.sentTitle}</h2>
-        <p className="mt-3 text-[var(--cl-ink-2)]">{t.sentBody.replace("{email}", email.trim())}</p>
+        <p className="mt-3 text-[var(--cl-ink-2)]">{t.sentBody.replace("{email}", () => email.trim())}</p>
         <button type="button" onClick={() => setPhase("idle")} className="mt-5 min-h-11 text-[var(--cl-accent)] underline underline-offset-4 hover:text-[var(--cl-accent-hover)]">{t.another}</button>
       </div>
     );

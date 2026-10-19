@@ -43,6 +43,8 @@ export async function handleAuthCallback(url: URL, deps: { auth: AuthLike; store
   }
   if (!user) return redirect(url, "/login?error=1");
   if (user.email && user.email_confirmed_at) {
+    // The ONE place account invites are claimed: right after Supabase proved, by a code exchange or OTP verify just above, that this
+    // user owns this confirmed email. Do not claim anywhere else (see Store.claimAccountInvites).
     try {
       await deps.store.claimAccountInvites(user.id, user.email);
     } catch (e) {

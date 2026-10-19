@@ -101,7 +101,7 @@ export class InMemoryStore implements Store {
     return [...this.sites.values()]
       .map((s) => s.venue)
       .filter((v) => (!opts.status || v.status === opts.status) && (!opts.deploying || (v.deploy !== null && (v.deploy.status === "pending" || v.deploy.status === "building"))))
-      .sort((a, b) => a.created_at.localeCompare(b.created_at))
+      .sort((a, b) => a.created_at.localeCompare(b.created_at) || a.id.localeCompare(b.id))
       .map(clone);
   }
   async updateVenue(id: string, patch: VenuePatch): Promise<Venue> {
