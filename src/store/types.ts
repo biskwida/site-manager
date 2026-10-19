@@ -481,3 +481,18 @@ export function redactCommentRow(row: Record<string, unknown> | null): Record<st
   if ("author_name" in out) out.author_name = "";
   return out;
 }
+
+// --- Accounts (appended 2026-10-19; supabase/migrations/2026-10-19-venue-users.sql) ---
+/** A Supabase Auth user linked to a venue (venue_users). */
+// Declaration merging: the Store interface above gains the account methods.
+export interface Store {
+  /** Links an account to a venue. Idempotent: a second call changes nothing, and an existing "owner" is never downgraded to "staff". Throws on an unknown venue. */
+  linkVenueUser(venueId: string, userId: string, role: Role): Promise<void>;
+  /** The venues this account is linked to (any role), oldest venue first. */
+  listVenuesForUser(userId: string): Promise<Venue[]>;
+  isVenueOwner(venueId: string, userId: string): Promise<boolean>;
+  /** Promises the venue to whoever signs in with this email (compared ignoring case). Idempotent; inviting again after a claim opens a new pending invite. Throws on an unknown venue. */
+  createPendingAccountInvite(venueId: string, email: string): Promise<void>;
+  /** Links `userId` as owner to every venue with an unclaimed invite for `email` (ignoring case), marks those invites claimed, and returns their venue ids. A second call returns []. */
+  claimAccountInvites(userId: string, email: string): Promise<string[]>;
+}

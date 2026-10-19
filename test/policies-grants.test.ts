@@ -40,4 +40,14 @@ describe("supabase/policies.sql venue grants", () => {
     expect(statements).toContain("revoke all on public.translations from anon, authenticated");
     expect(statements.filter((s) => /^(grant|create policy) /i.test(s)).join(" ")).not.toMatch(/translations/);
   });
+
+  it.each(["venue_users", "account_invites"])("%s is server-only: RLS on, no policy, everything revoked from anon/authenticated, never granted", (table) => {
+    expect(statements).toContain(`alter table public.${table} enable row level security`);
+    expect(statements).toContain(`revoke all on public.${table} from anon, authenticated`);
+    expect(statements.filter((s) => /^(grant|create policy) /i.test(s)).join(" ")).not.toMatch(new RegExp(table));
+  });
+
+  it("account tables never appear in any column or table-wide grant", () => {
+    for (const s of statements.filter((x) => /^grant /i.test(x))) expect(s).not.toMatch(/venue_users|account_invites/);
+  });
 });

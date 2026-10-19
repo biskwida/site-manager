@@ -84,3 +84,10 @@ body:has(.sm-brand)::before { background-image: radial-gradient(1100px 520px at 
   *, *::before, *::after { animation-duration: 1ms !important; animation-delay: 0ms !important; animation-iteration-count: 1 !important; transition-duration: 1ms !important; }
 }
 @media (min-width: 1600px) { html { font-size: 112.5%; } }
+
+/* Sign-in (/login): the getclaudia.app landing's warm off-white and terracotta accent, tinted neutrals. The button is a shade darker than the
+   landing's orange so white text on it keeps AA contrast. */
+.cl-auth { --cl-bg: oklch(98.6% 0.005 60); --cl-card: oklch(99.6% 0.003 60); --cl-ink: oklch(23% 0.022 50); --cl-ink-2: oklch(44% 0.02 50);
+  --cl-line: oklch(86% 0.014 60); --cl-accent: oklch(50% 0.15 45); --cl-accent-hover: oklch(45% 0.15 45); --cl-accent-soft: oklch(94.5% 0.045 50);
+  --cl-error: oklch(46% 0.16 28); --accent: oklch(50% 0.15 45); background: var(--cl-bg); color: var(--cl-ink); }
+body:has(.cl-auth)::before { background-image: radial-gradient(1000px 520px at 88% -10%, oklch(62% 0.17 45 / 0.09), transparent 60%); }

@@ -790,6 +790,40 @@ export class SupabaseStore implements Store {
   async putSurroundings(row: VenueSurroundings) {
     await must(this.db.from("venue_surroundings").upsert(row, { onConflict: "venue_id" }).select("venue_id"), "putSurroundings");
   }
+
+  // --- Accounts (appended 2026-10-19) ---
+  async linkVenueUser(venueId: string, userId: string, role: Role) {
+    // ON CONFLICT DO NOTHING: a second link changes nothing, so an owner is never downgraded.
+    await must(this.db.from("venue_users").upsert({ venue_id: venueId, user_id: userId, role }, { onConflict: "venue_id,user_id", ignoreDuplicates: true }).select("venue_id"), "linkVenueUser");
+  }
+  async listVenuesForUser(userId: string) {
+    if (badVenue(userId)) return [];
+    const links = await must(this.db.from("venue_users").select("venue_id").eq("user_id", userId), "listVenuesForUser");
+    if (links.length === 0) return [];
+    const rows = await must(this.db.from("venues").select("*").in("id", links.map((l) => l.venue_id as string)).order("created_at"), "listVenuesForUser venues");
+    return rows.map((r) => this.venue(r));
+  }
+  async isVenueOwner(venueId: string, userId: string) {
+    if (badVenue(venueId) || badVenue(userId)) return false;
+    const { data, error } = await this.db.from("venue_users").select("role").eq("venue_id", venueId).eq("user_id", userId).maybeSingle();
+    if (error) throw new Error(`isVenueOwner: ${error.message}`);
+    return data?.role === "owner";
+  }
+  async createPendingAccountInvite(venueId: string, email: string) {
+    // A pending invite stays as it is; a claimed one is reopened.
+    await must(this.db.from("account_invites").upsert({ venue_id: venueId, email: email.trim().toLowerCase(), claimed_at: null }, { onConflict: "venue_id,email" }).select("venue_id"), "createPendingAccountInvite");
+  }
+  async claimAccountInvites(userId: string, email: string) {
+    const e = email.trim().toLowerCase();
+    const pending = await must(this.db.from("account_invites").select("venue_id").eq("email", e).is("claimed_at", null), "claimAccountInvites");
+    if (pending.length === 0) return [];
+    const ids = pending.map((r) => r.venue_id as string);
+    // Link first (an invite makes the account an owner, lifting an earlier staff link), then mark claimed: a crash in between retries next sign-in.
+    await must(this.db.from("venue_users").upsert(ids.map((venue_id) => ({ venue_id, user_id: userId, role: "owner" })), { onConflict: "venue_id,user_id" }).select("venue_id"), "claimAccountInvites link");
+    // Only the call that flips claimed_at gets the ids, so two concurrent sign-ins never both report them.
+    const claimed = await must(this.db.from("account_invites").update({ claimed_at: new Date().toISOString() }).eq("email", e).is("claimed_at", null).in("venue_id", ids).select("venue_id"), "claimAccountInvites mark");
+    return claimed.map((r) => r.venue_id as string);
+  }
 }
 
 export function toDeletionRequest(r: Row): DataDeletionRequest {

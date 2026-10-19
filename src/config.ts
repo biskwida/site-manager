@@ -78,6 +78,10 @@ export interface Config {
   metaLoginConfigId: string | null;
   /** Host that serves the owner's browser pages (APP_HOST, default getclaudia.app, used to build links). proxy.ts redirects to it only when APP_HOST is set explicitly and the request's host is in LEGACY_HOSTS. */
   appHost: string;
+  /** Resend API key (RESEND_API_KEY); null = no email goes out (src/server/email.ts reports "disabled"). */
+  resendApiKey: string | null;
+  /** The From header of mail Claudia sends (EMAIL_FROM, default "Claudia <hello@getclaudia.app>"). */
+  emailFrom: string;
   /** The public landing (LANDING_URL, else the older NEXT_PUBLIC_LANDING_URL, default https://getclaudia.app); `/` sends visitors there. https only, no trailing slash. */
   landingUrl: string;
 }
@@ -181,6 +185,8 @@ export function loadConfig(env: Env = process.env, opts: { lenient?: boolean } =
     metaAppId: optional("META_APP_ID"),
     metaLoginConfigId: optional("META_LOGIN_CONFIG_ID"),
     appHost: resolveAppHost(env),
+    resendApiKey: optional("RESEND_API_KEY"),
+    emailFrom: optional("EMAIL_FROM") ?? "Claudia <hello@getclaudia.app>",
     landingUrl: httpsUrl(optional("LANDING_URL")) ?? httpsUrl(optional("NEXT_PUBLIC_LANDING_URL")) ?? DEFAULT_LANDING_URL,
   };
 }

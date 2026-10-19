@@ -19,6 +19,12 @@ if (url && key && process.env.SUPABASE_CONTRACT === "1") {
     const { data, error } = await db.storage.from("media").list(path.slice(0, slash), { limit: 1000, search: path.slice(slash + 1) });
     if (error) throw new Error(`storage list: ${error.message}`);
     return (data ?? []).some((o) => o.name === path.slice(slash + 1));
+  }, async () => {
+    // venue_users.user_id references auth.users: make a real (throwaway) user per call.
+    const db = createClient(url, key, { auth: { persistSession: false } });
+    const { data, error } = await db.auth.admin.createUser({ email: `contract-${crypto.randomUUID()}@example.com`, email_confirm: true });
+    if (error || !data.user) throw new Error(`createUser: ${error?.message}`);
+    return data.user.id;
   });
 } else {
   describe("supabase store", () => {

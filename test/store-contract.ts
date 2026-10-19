@@ -14,7 +14,13 @@ const only = (venues: { id: string }[], ...ids: string[]) => venues.map((v) => v
  * Behaviour every Store must have. Call with a factory that yields an empty store, and a probe that says whether a storage
  * object exists at a media row's storage_path in that store (used by the draft-cleanup storage test).
  */
-export function storeContract(name: string, make: () => Promise<Store>, storageHas: (s: Store, path: string) => Promise<boolean>) {
+export function storeContract(
+  name: string,
+  make: () => Promise<Store>,
+  storageHas: (s: Store, path: string) => Promise<boolean>,
+  /** A user id the store accepts for venue_users (a live database needs a real auth.users row); a random uuid by default. */
+  newUserId: () => Promise<string> = async () => crypto.randomUUID(),
+) {
   describe(`${name} store`, () => {
     it("creates a venue with defaults and reads it back by id and slug", async () => {
       const s = await make();
@@ -973,6 +979,51 @@ export function storeContract(name: string, make: () => Promise<Store>, storageH
       expect(await s.getSurroundings(v.id)).toEqual(next);
       await s.deleteVenue(v.id);
       expect(await s.getSurroundings(v.id)).toBeNull();
+    });
+
+    it("links accounts to venues: idempotent link, list only the linked venues, owner check, venue delete cascades", async () => {
+      const s = await make();
+      const a = await s.createVenue({ slug: "t-u1", name: "A" });
+      const b = await s.createVenue({ slug: "t-u2", name: "B" });
+      const c = await s.createVenue({ slug: "t-u3", name: "C" });
+      const [u1, u2] = [await newUserId(), await newUserId()];
+      expect(await s.listVenuesForUser(u1)).toEqual([]);
+      await s.linkVenueUser(a.id, u1, "owner");
+      await s.linkVenueUser(a.id, u1, "owner"); // a second link changes nothing
+      await s.linkVenueUser(b.id, u1, "staff");
+      await s.linkVenueUser(c.id, u2, "owner");
+      expect((await s.listVenuesForUser(u1)).map((v) => v.id)).toEqual([a.id, b.id]);
+      expect((await s.listVenuesForUser(u2)).map((v) => v.id)).toEqual([c.id]);
+      expect(await s.isVenueOwner(a.id, u1)).toBe(true);
+      expect(await s.isVenueOwner(b.id, u1)).toBe(false); // staff
+      expect(await s.isVenueOwner(a.id, u2)).toBe(false); // not linked
+      await s.linkVenueUser(a.id, u1, "staff"); // never downgrades
+      expect(await s.isVenueOwner(a.id, u1)).toBe(true);
+      await s.deleteVenue(a.id);
+      expect((await s.listVenuesForUser(u1)).map((v) => v.id)).toEqual([b.id]);
+    });
+
+    it("claims pending account invites once, by email, ignoring case", async () => {
+      const s = await make();
+      const a = await s.createVenue({ slug: "t-i1", name: "A" });
+      const b = await s.createVenue({ slug: "t-i2", name: "B" });
+      const email = `Owner-${crypto.randomUUID()}@Example.com`;
+      const [u1, u2] = [await newUserId(), await newUserId()];
+      await s.createPendingAccountInvite(a.id, email);
+      await s.createPendingAccountInvite(a.id, email.toLowerCase()); // the same invite again
+      await s.createPendingAccountInvite(b.id, email.toUpperCase());
+      await s.createPendingAccountInvite(b.id, `other-${crypto.randomUUID()}@example.com`);
+      expect(await s.claimAccountInvites(u2, `nobody-${crypto.randomUUID()}@example.com`)).toEqual([]);
+      expect((await s.claimAccountInvites(u1, email.toLowerCase())).sort()).toEqual([a.id, b.id].sort());
+      expect(await s.claimAccountInvites(u1, email)).toEqual([]); // once
+      expect(await s.claimAccountInvites(u2, email)).toEqual([]);
+      expect((await s.listVenuesForUser(u1)).map((v) => v.id).sort()).toEqual([a.id, b.id].sort());
+      expect(await s.isVenueOwner(a.id, u1)).toBe(true);
+      expect(await s.listVenuesForUser(u2)).toEqual([]);
+      // Inviting again after a claim opens a new pending invite.
+      await s.createPendingAccountInvite(a.id, email);
+      expect(await s.claimAccountInvites(u2, email)).toEqual([a.id]);
+      expect((await s.listVenuesForUser(u2)).map((v) => v.id)).toEqual([a.id]);
     });
   });
 }

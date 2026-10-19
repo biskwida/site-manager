@@ -15,6 +15,7 @@
     "db:dry-run": "tsx --env-file-if-exists=.env.local scripts/db-dry-run.mts",
     "check:rls": "tsx --env-file-if-exists=.env.local scripts/check-rls.mts",
     "venue:create": "tsx --env-file-if-exists=.env.local scripts/venue-create.mts",
+    "account:invite": "tsx --env-file-if-exists=.env.local scripts/account-invite.mts",
     "invite:create": "tsx --env-file-if-exists=.env.local scripts/invite-create.mts",
     "venue:set": "tsx --env-file-if-exists=.env.local scripts/venue-set.mts",
     "member:list": "tsx --env-file-if-exists=.env.local scripts/member-list.mts",
@@ -43,6 +44,7 @@
   "dependencies": {
     "@anthropic-ai/sdk": "0.133.0",
     "@imgly/background-removal-node": "^1.4.5",
+    "@supabase/ssr": "0.12.7",
     "@supabase/supabase-js": "2.117.3",
     "grammy": "1.46.0",
     "next": "16.4.0",

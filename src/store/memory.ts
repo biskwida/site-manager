@@ -157,6 +157,8 @@ export class InMemoryStore implements Store {
     for (const [sid, s] of this.syncs) if (s.venue_id === id) this.syncs.delete(sid);
     for (const [cid, c] of this.comments) if (c.venue_id === id) this.comments.delete(cid);
     this.surroundings.delete(id);
+    for (const [k, r] of this.venueUsers) if (r.venue_id === id) this.venueUsers.delete(k);
+    for (const [k, r] of this.accountInvites) if (r.venue_id === id) this.accountInvites.delete(k);
   }
   async getSite(venueId: string) {
     return clone(this.site(venueId));
@@ -656,5 +658,47 @@ export class InMemoryStore implements Store {
   async putSurroundings(row: VenueSurroundings) {
     this.site(row.venue_id); // the table's foreign key: the venue must exist
     this.surroundings.set(row.venue_id, clone(row));
+  }
+  // --- Accounts (appended 2026-10-19) ---
+  /** By "<venue id>:<user id>". */
+  venueUsers = new Map<string, { venue_id: string; user_id: string; role: Role; created_at: string }>();
+  /** By "<venue id>:<lower-case email>". */
+  accountInvites = new Map<string, { venue_id: string; email: string; created_at: string; claimed_at: string | null }>();
+  async linkVenueUser(venueId: string, userId: string, role: Role) {
+    this.site(venueId); // the table's foreign key: the venue must exist
+    const key = `${venueId}:${userId}`;
+    if (this.venueUsers.has(key)) return;
+    this.venueUsers.set(key, { venue_id: venueId, user_id: userId, role, created_at: this.clock() });
+  }
+  async listVenuesForUser(userId: string) {
+    return [...this.venueUsers.values()]
+      .filter((r) => r.user_id === userId && this.sites.has(r.venue_id))
+      .map((r) => this.site(r.venue_id).venue)
+      .sort((a, b) => a.created_at.localeCompare(b.created_at))
+      .map(clone);
+  }
+  async isVenueOwner(venueId: string, userId: string) {
+    return this.venueUsers.get(`${venueId}:${userId}`)?.role === "owner";
+  }
+  async createPendingAccountInvite(venueId: string, email: string) {
+    this.site(venueId);
+    const e = email.trim().toLowerCase();
+    const key = `${venueId}:${e}`;
+    const prev = this.accountInvites.get(key);
+    if (prev && prev.claimed_at === null) return;
+    this.accountInvites.set(key, { venue_id: venueId, email: e, created_at: this.clock(), claimed_at: null });
+  }
+  async claimAccountInvites(userId: string, email: string) {
+    const e = email.trim().toLowerCase();
+    const claimed: string[] = [];
+    for (const inv of this.accountInvites.values()) {
+      if (inv.email !== e || inv.claimed_at !== null || !this.sites.has(inv.venue_id)) continue;
+      await this.linkVenueUser(inv.venue_id, userId, "owner");
+      // An owner link already there stays; an earlier staff link is lifted to owner by the invite.
+      this.venueUsers.get(`${inv.venue_id}:${userId}`)!.role = "owner";
+      inv.claimed_at = this.clock();
+      claimed.push(inv.venue_id);
+    }
+    return claimed;
   }
 }

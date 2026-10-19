@@ -51,6 +51,12 @@ revoke all on public.translations from anon, authenticated;
 alter table public.venue_surroundings enable row level security;
 revoke all on public.venue_surroundings from anon, authenticated;
 
+-- Accounts (2026-10-19): server-only, like the tables above (RLS on, no policies, no grants). The app reads them with the service-role key.
+alter table public.venue_users enable row level security;
+revoke all on public.venue_users from anon, authenticated;
+alter table public.account_invites enable row level security;
+revoke all on public.account_invites from anon, authenticated;
+
 -- 2. No RPCs: the owner dashboard and the public site read through the app's server (service-role key, never in the browser).
 
 -- 3. Realtime for the public site and the dashboard.
