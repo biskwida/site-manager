@@ -284,7 +284,7 @@ describe("POST /api/new/[id]/extract and /texts (routes)", () => {
     const ok = await extractRoute(post(url, { files: [png] }, { cookie }), ctx(id));
     expect(ok.status).toBe(200);
     expect(await ok.json()).toMatchObject({ categories: [{ items: [{ price_eur: 2.56 }] }] });
-    expect(fake.calls[0].model).toBe("claude-opus-5-5"); // config.agentModel default
+    expect(fake.calls[0].model).toBe("claude-haiku-5-5"); // config.agentModel default
   });
 
   it("serves texts with the injected client and answers 503 when the server has no key", async () => {
