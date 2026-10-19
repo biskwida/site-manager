@@ -26,8 +26,8 @@ export const DEMO_VENUE: NewVenue = {
 };
 
 /** Seed data shapes shared by every seed file. `cat` indexes into the categories array. */
-export type SeedCategory = { name_bg: string; name_en: string };
-export type SeedItem = { cat: number; name_bg: string; name_en: string; desc_bg: string; desc_en: string; price_eur: number; allergens: number[] };
+export type SeedCategory = { name_bg: string; name_en: string; active?: boolean };
+export type SeedItem = { cat: number; name_bg: string; name_en: string; desc_bg: string; desc_en: string; price_eur: number; allergens: number[]; active?: boolean };
 export type SeedTexts = Record<"welcome" | "footer_note", { bg: string; en: string }>;
 
 const CATEGORIES: SeedCategory[] = [

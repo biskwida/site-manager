@@ -25,8 +25,8 @@ beforeEach(() => {
 
 describe("needsSessionRefresh", () => {
   it("covers the account pages, whole segments only", () => {
-    for (const p of ["/dashboard", "/dashboard/agala", "/login", "/start", "/start/x", "/onboarding/x", "/billing", "/auth/callback"]) expect(needsSessionRefresh(p), p).toBe(true);
-    for (const p of ["/", "/agala", "/agala/menu", "/new", "/admin/agala", "/api/admin/agala", "/dashboards", "/startup", "/loginx"]) expect(needsSessionRefresh(p), p).toBe(false);
+    for (const p of ["/dashboard", "/dashboard/agala", "/login", "/start", "/start/x", "/onboarding/x", "/billing", "/auth/callback", "/new", "/new/abc/done"]) expect(needsSessionRefresh(p), p).toBe(true);
+    for (const p of ["/", "/agala", "/agala/menu", "/newsletter", "/admin/agala", "/api/admin/agala", "/dashboards", "/startup", "/loginx"]) expect(needsSessionRefresh(p), p).toBe(false);
   });
 });
 
@@ -62,7 +62,7 @@ describe("proxy session refresh", () => {
   });
 
   it("does nothing on venue pages, /, /admin and /api (the matcher already keeps /api out)", async () => {
-    for (const p of ["/", "/agala", "/agala/menu", "/admin/agala", "/new/abc", "/api/telegram"]) await proxy(new NextRequest(`${APP}${p}`));
+    for (const p of ["/", "/agala", "/agala/menu", "/admin/agala", "/api/telegram"]) await proxy(new NextRequest(`${APP}${p}`));
     expect(createServerClient).not.toHaveBeenCalled();
     expect(getUser).not.toHaveBeenCalled();
   });

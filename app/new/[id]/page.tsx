@@ -51,7 +51,7 @@ export default async function Page(props: PageProps<"/new/[id]">) {
   const igReturn = instagramAvailable ? readIgReturn(await props.searchParams) : null;
   return (
     <LangProvider defaultLang={draft.default_lang}>
-      <Wizard id={id} initialDraft={draft} initialMedia={site.media} baseUrl={deps.config.publicBaseUrl} aiAvailable={aiAvailable} now={now} instagramAvailable={instagramAvailable} igReturn={igReturn} apps={enabledApps(deps.config)} />
+      <Wizard id={id} initialDraft={draft} initialMedia={site.media} baseUrl={deps.config.publicBaseUrl} aiAvailable={aiAvailable} now={now} instagramAvailable={instagramAvailable} igReturn={igReturn} apps={enabledApps(deps.config)} slugLocked={venue.status === "live"} />
     </LangProvider>
   );
 }

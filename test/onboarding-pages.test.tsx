@@ -202,8 +202,9 @@ describe("/onboarding/[slug]", () => {
     expect(html).toContain(invite_code);
     expect(html).toContain("t.me/claudia_bot?start=" + invite_code);
     expect(html).toContain("Докато Meta одобри Claudia, първо добавяме акаунта ви ръчно — ще ви пишем до ден.");
-    expect(html).toContain(`href="/api/admin/${slug}/social/instagram/start"`);
-    expect(html).toContain(`href="/api/admin/${slug}/social/facebook/start"`);
+    expect(html).toContain(`href="/api/admin/${slug}/social/instagram/start?return=onboarding"`);
+    expect(html).toContain(`href="/api/admin/${slug}/social/facebook/start?return=onboarding"`);
+    expect(html).toContain("Coffique · coffique.bg (WordPress)");
     expect(html).toContain('href="/wp/site-manager.zip"');
     expect(html).toContain('for="wp-code"');
     expect(html).toContain("Скоро");
@@ -219,6 +220,23 @@ describe("/onboarding/[slug]", () => {
     expect(html).toContain("Линкът към страницата с менюто");
     expect(html).toContain("Копирайте линка");
     expect(html).not.toContain("site-manager.zip");
+    expect(html).toContain("Coffique · coffique.bg (Wix)");
+    // an info card with the link and a small HTML snippet, each with a copy button, and no tick or number
+    const card = html.match(/<li[^>]*aria-labelledby="menu-card-title"[\s\S]*?<\/li>/)?.[0] ?? "";
+    expect(card).toContain(`&lt;a href=&quot;https://getclaudia.app/${slug}/menu&quot;&gt;Меню / Menu&lt;/a&gt;`);
+    expect(card).toContain("Копирайте кода");
+    expect(card).not.toContain("border-2");
+    expect(card).not.toContain("За правене");
+  });
+  it("Instagram and Facebook say what went wrong when a connect returns here", async () => {
+    const { slug } = await venue("none");
+    sessionUser.mockResolvedValue(owner);
+    const bad = (await outcome(() => OnboardingPage(slugSp(slug, { social_result: "instagram_personal" })))) as { html: string };
+    expect(bad.html).toContain("Instagram трябва да е бизнес или творчески акаунт");
+    const ok = (await outcome(() => OnboardingPage(slugSp(slug, { social_result: "instagram_connected" })))) as { html: string };
+    expect(ok.html).not.toContain('role="alert"');
+    const junk = (await outcome(() => OnboardingPage(slugSp(slug, { social_result: "<script>" })))) as { html: string };
+    expect(junk.html).not.toContain("<script>");
   });
   it("path C: no website step at all", async () => {
     const { slug } = await venue("none");
@@ -247,5 +265,29 @@ describe("/onboarding/[slug]", () => {
     const { html } = (await outcome(() => OnboardingPage(slugSp(slug)))) as { html: string };
     expect(html).not.toContain("/social/instagram/start");
     expect(html).toContain("Свържете Instagram · Скоро");
+  });
+});
+
+describe("hosted page and wizard changes", () => {
+  it("OwnSiteLink opens the venue's own site in a new tab without following or opener rights", async () => {
+    const { OwnSiteLink } = await import("@/app/[slug]/components/OwnSiteLink");
+    const { LangProvider } = await import("@/src/i18n");
+    const html = (lang: "bg" | "en") => renderToStaticMarkup(<LangProvider defaultLang={lang}><OwnSiteLink href="https://coffique.bg" /></LangProvider>);
+    expect(html("bg")).toContain("Посетете сайта ни");
+    expect(html("en")).toContain("Visit our website");
+    expect(html("en")).toContain('href="https://coffique.bg"');
+    expect(html("en")).toContain('rel="nofollow noopener"');
+    expect(html("en")).toContain('target="_blank"');
+  });
+  it("the Basics step shows the address read-only for a website add-on and editable otherwise", async () => {
+    const { Basics } = await import("@/app/new/components/Steps/Basics");
+    const { LangProvider } = await import("@/src/i18n");
+    const { emptyDraft } = await import("@/src/wizard/schema");
+    const render = (slugLocked: boolean) =>
+      renderToStaticMarkup(<LangProvider defaultLang="en"><Basics id="v1" draft={{ ...emptyDraft("classic"), name: "Coffique", slug: "coffique" }} media={[]} update={() => {}} addMedia={() => {}} baseUrl="https://getclaudia.app" aiAvailable={false} fieldErrors={[]} slugLocked={slugLocked} /></LangProvider>);
+    const slugInput = (html: string) => html.match(/<input[^>]*value="coffique"[^>]*>/g)?.find((i) => i.includes('maxLength="39"') || i.includes('maxlength="39"')) ?? "";
+    expect(slugInput(render(true))).toMatch(/readonly/i);
+    expect(render(true)).toContain("Your business keeps its address");
+    expect(slugInput(render(false))).not.toMatch(/readonly/i);
   });
 });

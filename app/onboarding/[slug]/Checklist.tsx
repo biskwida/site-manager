@@ -8,7 +8,7 @@ import { ConnectApps, parseOwnerCode, type AppLink } from "@/app/components/Conn
 import { btnGhost, btnPrimary, btnSmall, cardCls, inputCls, pillCls } from "@/app/components/account-ui";
 import type { PageLang } from "@/src/auth/page-lang";
 import type { SiteMode, SitePlatform } from "@/src/domain/types";
-import { fill, ONBOARDING } from "@/src/i18n/onboarding";
+import { fill, ONBOARDING, type OnboardingKey } from "@/src/i18n/onboarding";
 import type { OnboardingStatus } from "@/src/server/onboarding";
 
 const POLL_MS = 5_000;
@@ -33,6 +33,8 @@ export interface ChecklistProps {
   pluginHref: string;
   /** The address the WordPress plugin asks for ("Claudia address"). */
   appUrl: string;
+  /** `social_result` from the Instagram/Facebook callback, when it returned here. */
+  socialResult?: string | null;
   fetcher?: typeof fetch;
 }
 
@@ -73,7 +75,7 @@ export function Checklist(p: ChecklistProps) {
   const [wpBusy, setWpBusy] = useState(false);
   const [wpError, setWpError] = useState<string | null>(null);
   const [wpSite, setWpSite] = useState<string | null>(null);
-  const [copied, setCopied] = useState(false);
+  const [copied, setCopied] = useState<"link" | "snippet" | null>(null);
   const freshHeading = useRef<HTMLHeadingElement>(null);
   const api = `/api/onboarding/${encodeURIComponent(slug)}`;
 
@@ -130,11 +132,12 @@ export function Checklist(p: ChecklistProps) {
     setWpBusy(false);
   }
 
-  async function copyMenu() {
+  const snippet = `<a href="${p.menuHref}">${t["list.menu.snippetText"]}</a>`;
+  async function copyText(what: "link" | "snippet") {
     try {
-      await navigator.clipboard.writeText(p.menuHref);
-      setCopied(true);
-      window.setTimeout(() => setCopied(false), 1500);
+      await navigator.clipboard.writeText(what === "link" ? p.menuHref : snippet);
+      setCopied(what);
+      window.setTimeout(() => setCopied(null), 1500);
     } catch {
       // clipboard blocked: the link is on screen to copy by hand
     }
@@ -143,8 +146,11 @@ export function Checklist(p: ChecklistProps) {
   const own = p.mode === "own";
   const wordpress = own && p.platform === "wordpress";
   let n = 1;
-  const igHref = `/api/admin/${encodeURIComponent(slug)}/social/instagram/start`;
-  const fbHref = `/api/admin/${encodeURIComponent(slug)}/social/facebook/start`;
+  // ?return=onboarding: the connect comes back to this page instead of the dashboard.
+  const igHref = `/api/admin/${encodeURIComponent(slug)}/social/instagram/start?return=onboarding`;
+  const fbHref = `/api/admin/${encodeURIComponent(slug)}/social/facebook/start?return=onboarding`;
+  const platformName = p.platform && ["wordpress", "wix", "squarespace", "shopify"].includes(p.platform) ? t[`form.platform.${p.platform}` as OnboardingKey] : null;
+  const socialProblem = p.socialResult === "instagram_personal" ? t["list.social.result.personal"] : p.socialResult === "facebook_no_pages" ? t["list.social.result.noPages"] : p.socialResult?.endsWith("_error") ? t["list.social.result.error"] : null;
 
   return (
     <div className="grid items-start gap-5 md:grid-cols-[minmax(0,1.6fr)_minmax(0,1fr)]">
@@ -153,7 +159,7 @@ export function Checklist(p: ChecklistProps) {
         <p className="mb-5 mt-2 text-[var(--cl-ink-2)]">{t["list.lead"]}</p>
         <ol className="grid gap-3">
           <Step n={n++} done title={t["list.step.details"]} lang={lang}>
-            <p>{own && p.siteUrl ? fill(t["list.details.own"], { name: p.name, site: p.siteUrl.replace(/^https:\/\//, "") }) : fill(t["list.details.plain"], { name: p.name })}</p>
+            <p>{own && p.siteUrl ? fill(t[platformName ? "list.details.ownPlatform" : "list.details.own"], { name: p.name, site: p.siteUrl.replace(/^https:\/\//, ""), platform: platformName ?? "" }) : fill(t["list.details.plain"], { name: p.name })}</p>
           </Step>
 
           <Step n={n++} done={status.chat} title={t["list.step.chat"]} pill={status.chat ? undefined : t["list.chat.start"]} lang={lang}>
@@ -184,6 +190,7 @@ export function Checklist(p: ChecklistProps) {
               {status.instagram ? <span className={pillCls}>{t["list.social.instagramDone"]}</span> : p.social.instagram ? <a href={igHref} className={btnSmall}>{t["list.social.instagram"]}</a> : <span aria-disabled="true" className={`${btnSmall} opacity-60`}>{t["list.social.instagram"]} · {t["list.social.soon"]}</span>}
               {status.facebook ? <span className={pillCls}>{t["list.social.facebookDone"]}</span> : p.social.facebook ? <a href={fbHref} className={btnSmall}>{t["list.social.facebook"]}</a> : <span aria-disabled="true" className={`${btnSmall} opacity-60`}>{t["list.social.facebook"]} · {t["list.social.soon"]}</span>}
             </div>
+            {socialProblem ? <p role="alert" className="mt-3 text-sm text-[var(--cl-error)]">{socialProblem}</p> : null}
             <p className="mt-3 text-sm">{t["list.social.metaNote"]}</p>
           </Step>
 
@@ -207,12 +214,20 @@ export function Checklist(p: ChecklistProps) {
                 </>
               )}
             </Step>
-          ) : own ? (
-            <Step n={n++} done={false} title={t["list.step.menuLink"]} lang={lang}>
-              <p>{t["list.menu.text"].split("{url}")[0]}<a href={p.menuHref} className="break-all font-medium text-[var(--cl-ink)] underline underline-offset-4">{p.menuUrl}</a></p>
-              <p className="mt-1 text-sm">{t["list.menu.hint"]}</p>
-              <button type="button" onClick={() => void copyMenu()} aria-live="polite" className={`${btnSmall} mt-3`}>{copied ? t["list.menu.copied"] : t["list.menu.copy"]}</button>
-            </Step>
+          ) : null}
+
+          {own && !wordpress ? (
+            <li className="rounded-2xl border border-dashed border-[var(--cl-line)] bg-[var(--cl-card)] p-4" aria-labelledby="menu-card-title">
+              <h2 id="menu-card-title" className="font-display text-xl">{t["list.step.menuLink"]}</h2>
+              <div className="mt-1 text-[var(--cl-ink-2)]">
+                <p>{t["list.menu.text"].split("{url}")[0]}<a href={p.menuHref} className="break-all font-medium text-[var(--cl-ink)] underline underline-offset-4">{p.menuUrl}</a></p>
+                <p className="mt-1 text-sm">{t["list.menu.hint"]}</p>
+                <button type="button" onClick={() => void copyText("link")} aria-live="polite" className={`${btnSmall} mt-3`}>{copied === "link" ? t["list.menu.copied"] : t["list.menu.copy"]}</button>
+                <p className="mt-4 text-sm">{t["list.menu.snippetLabel"]}</p>
+                <code className="mt-1.5 block break-all rounded-xl bg-[var(--cl-accent-soft)] px-3 py-2 font-mono text-sm text-[var(--cl-ink)]">{snippet}</code>
+                <button type="button" onClick={() => void copyText("snippet")} aria-live="polite" className={`${btnSmall} mt-3`}>{copied === "snippet" ? t["list.menu.copied"] : t["list.menu.copySnippet"]}</button>
+              </div>
+            </li>
           ) : null}
 
           <Step n={n++} done={false} title={t["list.step.google"]} pill={t["list.google.soon"]} lang={lang}>

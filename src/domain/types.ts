@@ -46,6 +46,13 @@ export type VenueStatus = "draft" | "live";
  */
 export type SiteMode = "claudia" | "own" | "none";
 export const SITE_MODES: readonly SiteMode[] = ["claudia", "own", "none"];
+/**
+ * How the venue was made. operator = by us (venue:create, the demo, seeds; the default, and every venue before this column), wizard =
+ * published from the website wizard, start = created by the owner on /start (paths B and C). Self-serve own sites ("start") never redirect
+ * visitors off our domain (see ownSiteRedirect).
+ */
+export type CreatedVia = "operator" | "wizard" | "start";
+export const CREATED_VIA: readonly CreatedVia[] = ["operator", "wizard", "start"];
 /** What an own-site venue's website is built with (asked at onboarding; picks how the website step of the checklist connects it). */
 export type SitePlatform = "wordpress" | "wix" | "squarespace" | "shopify" | "other" | "unknown";
 export const SITE_PLATFORMS: readonly SitePlatform[] = ["wordpress", "wix", "squarespace", "shopify", "other", "unknown"];
@@ -126,6 +133,8 @@ export interface Venue {
   site_mode: SiteMode;
   /** Server-only (never in the public feed). What an own-site venue's site is built with; null = not asked (every other venue). */
   site_platform: SitePlatform | null;
+  /** Server-only (never in the public feed). */
+  created_via: CreatedVia;
   created_at: string;
 }
 

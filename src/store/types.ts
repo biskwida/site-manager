@@ -1,6 +1,6 @@
 // src/store/types.ts
 import type {
-  BusinessType, Category, Change, ChangeSet, ChangeSetStatus, ChangeSource, ChatLang, CommentMode, CommentNetwork, Conversation, DeployInfo, DeployStatus, Item, Lang, Media, Member, Role, SiteMode, SitePlatform, SiteState, SiteTextKey, TemplateId, Venue, VenueStatus, WeekHours,
+  BusinessType, Category, Change, ChangeSet, ChangeSetStatus, ChangeSource, ChatLang, CommentMode, CommentNetwork, Conversation, DeployInfo, DeployStatus, Item, Lang, Media, Member, Role, CreatedVia, SiteMode, SitePlatform, SiteState, SiteTextKey, TemplateId, Venue, VenueStatus, WeekHours,
 } from "../domain/types";
 import { isChatLang } from "../domain/types";
 import type { Place } from "../geo/osm";
@@ -18,6 +18,14 @@ export const DEFAULT_HOURS: WeekHours = {
   sat: { open: "09:00", close: "16:00" },
   sun: null,
 };
+
+/** A venue slug that another venue already has (Postgres unique violation 23505 on venues.slug; the memory store throws it too). */
+export class SlugTakenError extends Error {
+  constructor(public readonly slug: string) {
+    super(`slug ${slug} already exists`);
+    this.name = "SlugTakenError";
+  }
+}
 
 export interface NewVenue {
   slug: string;
@@ -50,12 +58,16 @@ export interface NewVenue {
   site_mode?: SiteMode;
   /** Own-site venues only; default null. */
   site_platform?: SitePlatform | null;
+  /** Default "operator". */
+  created_via?: CreatedVia;
 }
 export interface NewCategory {
   venue_id: string;
   name_bg: string;
   name_en: string;
   position: number;
+  /** Default true; false = hidden. */
+  active?: boolean;
 }
 export interface NewItem {
   venue_id: string;
@@ -70,6 +82,9 @@ export interface NewItem {
   is_special?: boolean;
   special_expires_at?: string | null;
   image_media_id?: string | null;
+  sold_out_until?: string | null;
+  /** Default true; false = hidden. */
+  active?: boolean;
 }
 export interface NewChangeSet {
   venue_id: string;
@@ -90,7 +105,7 @@ export interface NewChangeSet {
 export type ChangeSetPatch = Partial<Pick<ChangeSet, "status" | "apply_at" | "reminded_at" | "decided_at" | "applied_at" | "reverted_by" | "message_ref" | "preview_bg" | "preview_en" | "proposal_refs" | "summary_bg" | "summary_en">>;
 export type VenuePatch = Partial<Pick<Venue,
   "slug" | "name" | "tagline_bg" | "tagline_en" | "about_bg" | "about_en" | "address" | "phone" | "maps_url" | "instagram" |
-  "hours" | "tz" | "default_lang" | "theme" | "template" | "business_type" | "status" | "wizard_draft" | "instagram_import" | "site_url" | "site_mode" | "site_platform" |
+  "hours" | "tz" | "default_lang" | "theme" | "template" | "business_type" | "status" | "wizard_draft" | "instagram_import" | "site_url" | "site_mode" | "site_platform" | "created_via" |
   "comment_mode" | "comment_digest_hour" | "comment_limit" | "last_comment_digest_at">>;
 
 export interface InviteSummary {

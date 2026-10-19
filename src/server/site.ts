@@ -55,18 +55,19 @@ export async function loadSite(store: Store, slug: string, opts: LoadSiteOptions
 }
 
 /** The venue as the public feed sends it: no deploy record (provider ids, build errors), no wizard draft, no Instagram import list, no own-site URL or site mode, no change limit, no comment settings. */
-export type PublicVenue = Omit<Venue, "deploy" | "wizard_draft" | "instagram_import" | "site_url" | "site_mode" | "site_platform" | "change_limit" | "comment_mode" | "comment_digest_hour" | "comment_limit" | "last_comment_digest_at">;
+export type PublicVenue = Omit<Venue, "deploy" | "wizard_draft" | "instagram_import" | "site_url" | "site_mode" | "site_platform" | "created_via" | "change_limit" | "comment_mode" | "comment_digest_hour" | "comment_limit" | "last_comment_digest_at">;
 export type PublicSiteState = Omit<SiteState, "venue"> & { venue: PublicVenue };
 
 /** For GET /api/site/[slug]: everything templates and outside readers (Coffique) use, minus the owner-only venue fields. */
 export function publicSiteState(state: SiteState): PublicSiteState {
-  const { deploy, wizard_draft, instagram_import, site_url, site_mode, site_platform, change_limit, comment_mode, comment_digest_hour, comment_limit, last_comment_digest_at, ...venue } = state.venue;
+  const { deploy, wizard_draft, instagram_import, site_url, site_mode, site_platform, created_via, change_limit, comment_mode, comment_digest_hour, comment_limit, last_comment_digest_at, ...venue } = state.venue;
   void deploy;
   void wizard_draft;
   void instagram_import;
   void site_url;
   void site_mode; // how the venue's website is run is the owner's business
   void site_platform;
+  void created_via;
   void change_limit; // the plan's limit is the owner's business, not the public's
   void comment_mode; // how the owner hears about comments is the owner's business
   void comment_digest_hour;
@@ -82,7 +83,16 @@ export function publicSiteState(state: SiteState): PublicSiteState {
  * null = render the hosted page as usual.
  */
 export function ownSiteRedirect(site: { state: SiteState; draft: DraftInfo | null }): string | null {
-  const { site_mode, site_url } = site.state.venue;
-  if (site_mode !== "own" || !site_url || site.draft) return null;
+  const { site_mode, site_url, created_via } = site.state.venue;
+  // Only venues we made ourselves redirect. A self-serve venue (created on /start or in the wizard) typed its address in without our
+  // review, so /<slug> on our domain must not send visitors to it: that would be an open redirect. ownSiteLink offers a link instead.
+  if (site_mode !== "own" || !site_url || site.draft || created_via !== "operator") return null;
+  return site_url;
+}
+
+/** The own site of a self-serve venue (see ownSiteRedirect), for a visible "Visit our website" link on the hosted page; null otherwise. */
+export function ownSiteLink(site: { state: SiteState; draft: DraftInfo | null }): string | null {
+  const { site_mode, site_url, created_via } = site.state.venue;
+  if (site_mode !== "own" || !site_url || site.draft || created_via === "operator") return null;
   return site_url;
 }

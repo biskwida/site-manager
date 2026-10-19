@@ -40,6 +40,7 @@ export function buildPreviewState(d: WizardDraft, media: Media[], now: Date): Si
     site_url: null,
     site_mode: "claudia",
     site_platform: null,
+    created_via: "wizard",
   };
   const categories: Category[] = d.categories.map((c, i) => {
     const n = bothLangs(c.name_bg, c.name_en);

@@ -62,6 +62,13 @@ export function socialAvailability(c: Pick<Config, "metaAppId" | "metaAppSecret"
 // ---------------------------------------------------------------------------------------------------------------------
 // State
 
+/** Where a session-started connect returns to. A key-started connect always returns to its key page. */
+export type ReturnTarget = "onboarding";
+/** `?return=onboarding` on a start route; anything else is the dashboard (undefined). */
+export function returnTargetOf(url: string): ReturnTarget | undefined {
+  return new URL(url).searchParams.get("return") === "onboarding" ? "onboarding" : undefined;
+}
+
 type StateStep = "facebook" | "instagram" | "facebook_select";
 interface SocialState {
   /** Step this state is good for. */
@@ -73,6 +80,8 @@ interface SocialState {
   r: string;
   /** "session": started from the account dashboard (no admin key); absent: started with the admin key in `r`. */
   a?: "session";
+  /** Session states only: where the callback returns. Absent = the dashboard; "onboarding" = the /onboarding/<slug> checklist. Inside the signed state, so it cannot be changed. */
+  ret?: ReturnTarget;
   /** facebook_select only: the long-lived user token, encrypted. */
   t?: string;
 }
@@ -108,8 +117,9 @@ export function verifySocialState(state: string | null, key: Buffer, want: State
   if (!p || p.k !== want || typeof p.v !== "string" || typeof p.n !== "string" || typeof p.exp !== "number" || typeof p.r !== "string") return null;
   if (p.t !== undefined && typeof p.t !== "string") return null;
   if (p.a !== undefined && p.a !== "session") return null;
+  if (p.ret !== undefined && p.ret !== "onboarding") return null;
   if (p.exp <= now.getTime()) return null;
-  return { k: p.k, v: p.v, n: p.n, exp: p.exp, r: p.r, ...(p.a ? { a: p.a } : {}), ...(p.t ? { t: p.t } : {}) };
+  return { k: p.k, v: p.v, n: p.n, exp: p.exp, r: p.r, ...(p.a ? { a: p.a } : {}), ...(p.ret ? { ret: p.ret } : {}), ...(p.t ? { t: p.t } : {}) };
 }
 
 function sameSecret(a: string, b: string): boolean {
@@ -150,10 +160,12 @@ export type SocialResult =
   | "instagram_connected" | "instagram_personal" | "instagram_error";
 
 /** `adminKey` null = the dashboard was opened on an account: back to /dashboard/<slug>, with no key anywhere. */
-function backToDashboard(d: SocialConnectDeps, slug: string, adminKey: string | null, result: SocialResult): Response {
+function backToDashboard(d: SocialConnectDeps, slug: string, adminKey: string | null, result: SocialResult, ret?: ReturnTarget): Response {
   const secure = d.config.publicBaseUrl.startsWith("https://");
   const location = adminKey === null
-    ? `${d.config.publicBaseUrl}/dashboard/${encodeURIComponent(slug)}?social_result=${result}#social`
+    ? ret === "onboarding"
+      ? `${d.config.publicBaseUrl}/onboarding/${encodeURIComponent(slug)}?social_result=${result}`
+      : `${d.config.publicBaseUrl}/dashboard/${encodeURIComponent(slug)}?social_result=${result}#social`
     : `${d.config.publicBaseUrl}/admin/${encodeURIComponent(slug)}?key=${encodeURIComponent(adminKey)}&social_result=${result}#social`;
   return new Response(null, { status: 303, headers: { ...NO_STORE, location, "set-cookie": nonceCookie("", 0, secure), "referrer-policy": "no-referrer" } });
 }
@@ -168,10 +180,10 @@ const UNAVAILABLE = (kind: SocialKind) =>
   );
 
 /** GET /api/admin/[slug]/social/<kind>/start?key= → 302 to the login with a signed state and a nonce cookie. */
-export async function handleSocialStart(d: SocialConnectDeps, venue: Venue, auth: SocialAuth, kind: SocialKind): Promise<Response> {
+export async function handleSocialStart(d: SocialConnectDeps, venue: Venue, auth: SocialAuth, kind: SocialKind, opts: { ret?: ReturnTarget } = {}): Promise<Response> {
   if (!socialAvailability(d.config, d.secretKey)[kind] || !d.secretKey) return UNAVAILABLE(kind);
   const nonce = randomBytes(16).toString("hex");
-  const who = typeof auth === "string" ? { r: encryptSecrets({ key: auth }, d.secretKey) } : { r: "", a: "session" as const };
+  const who = typeof auth === "string" ? { r: encryptSecrets({ key: auth }, d.secretKey) } : { r: "", a: "session" as const, ...(opts.ret ? { ret: opts.ret } : {}) };
   const state = signSocialState({ k: kind, v: venue.id, n: nonce, exp: d.now().getTime() + SOCIAL_STATE_TTL_MS, ...who }, stateKey(appSecretFor(d, kind)!));
   const base = d.config.publicBaseUrl;
   const url = new URL(kind === "facebook" ? FB_DIALOG_URL : IG_AUTHORIZE_URL);
@@ -287,7 +299,7 @@ export async function handleFacebookCallback(req: Request, d: SocialConnectDeps)
   const checked = await checkState(d, params.get("state"), "facebook", req.headers.get("cookie"));
   if (!checked || !checked.sameBrowser || params.get("error")) return genericPage();
   const { venue, adminKey } = checked;
-  const back = (r: SocialResult) => backToDashboard(d, venue.slug, adminKey, r);
+  const back = (r: SocialResult) => backToDashboard(d, venue.slug, adminKey, r, checked.state.ret);
   const code = (params.get("code") ?? "").replace(/#_$/, "");
   if (!code || code.length > 2048) return back("facebook_error");
   const base = d.config.publicBaseUrl;
@@ -304,7 +316,7 @@ export async function handleFacebookCallback(req: Request, d: SocialConnectDeps)
       return back("facebook_connected");
     }
     const selectState = signSocialState(
-      { k: "facebook_select", v: venue.id, n: checked.state.n, exp: d.now().getTime() + SOCIAL_STATE_TTL_MS, r: checked.state.r, ...(checked.state.a ? { a: checked.state.a } : {}), t: encryptSecrets({ user_token: userToken }, d.secretKey!) },
+      { k: "facebook_select", v: venue.id, n: checked.state.n, exp: d.now().getTime() + SOCIAL_STATE_TTL_MS, r: checked.state.r, ...(checked.state.a ? { a: checked.state.a } : {}), ...(checked.state.ret ? { ret: checked.state.ret } : {}), t: encryptSecrets({ user_token: userToken }, d.secretKey!) },
       stateKey(d.config.metaAppSecret!),
     );
     return chooserPage(pages, selectState);
@@ -321,7 +333,7 @@ export async function handleFacebookSelect(req: Request, d: SocialConnectDeps): 
   const pageId = form?.get("page");
   const checked = await checkState(d, typeof raw === "string" ? raw : null, "facebook_select", req.headers.get("cookie"));
   if (!checked || !checked.sameBrowser) return genericPage();
-  const back = (r: SocialResult) => backToDashboard(d, checked.venue.slug, checked.adminKey, r);
+  const back = (r: SocialResult) => backToDashboard(d, checked.venue.slug, checked.adminKey, r, checked.state.ret);
   if (typeof pageId !== "string" || !checked.state.t) return back("facebook_error");
   try {
     const userToken = decryptSecrets(checked.state.t, d.secretKey!).user_token ?? "";
@@ -341,7 +353,7 @@ export async function handleInstagramPublishCallback(req: Request, d: SocialConn
   const checked = await checkState(d, params.get("state"), "instagram", req.headers.get("cookie"));
   if (!checked || !checked.sameBrowser || params.get("error")) return genericPage();
   const { venue, adminKey } = checked;
-  const back = (r: SocialResult) => backToDashboard(d, venue.slug, adminKey, r);
+  const back = (r: SocialResult) => backToDashboard(d, venue.slug, adminKey, r, checked.state.ret);
   // Meta may append "#_" to the code; a browser never sends the fragment, but strip it in case it arrives encoded.
   const code = (params.get("code") ?? "").replace(/#_$/, "");
   if (!code || code.length > 2048) return back("instagram_error");

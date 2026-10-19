@@ -46,6 +46,7 @@ export function venue(over: Partial<Venue> = {}): Venue {
     site_url: null,
     site_mode: "claudia",
     site_platform: null,
+    created_via: "operator",
     created_at: NOW,
     ...over,
   };

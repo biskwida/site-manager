@@ -3,8 +3,8 @@
 import { createServerClient } from "@supabase/ssr";
 import { NextResponse, type NextRequest } from "next/server";
 
-/** The account pages that read the session. Whole path segments; never /api, venue pages or /admin (the key page). */
-const SESSION_PREFIXES = ["/dashboard", "/login", "/start", "/onboarding", "/billing", "/auth"];
+/** The pages that read the session. Whole path segments; never /api, venue pages or /admin (the key page). /new is the wizard: its done page links the venue to the signed-in account. */
+const SESSION_PREFIXES = ["/dashboard", "/login", "/start", "/onboarding", "/billing", "/auth", "/new"];
 
 export function needsSessionRefresh(pathname: string): boolean {
   return SESSION_PREFIXES.some((p) => pathname === p || pathname.startsWith(`${p}/`));

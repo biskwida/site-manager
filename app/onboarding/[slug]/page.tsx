@@ -15,6 +15,8 @@ import { getSessionUser } from "@/src/server/session";
 import { socialAvailability } from "@/src/server/social-connect";
 import { doneInviteCode } from "@/src/server/wizard";
 
+const SOCIAL_RESULTS = ["facebook_connected", "facebook_no_pages", "facebook_error", "instagram_connected", "instagram_personal", "instagram_error"];
+
 export const dynamic = "force-dynamic";
 export const metadata: Metadata = { title: "Claudia", robots: { index: false, follow: false }, referrer: "no-referrer" };
 
@@ -49,6 +51,7 @@ export default async function Page(props: PageProps<"/onboarding/[slug]">) {
           social={socialAvailability(deps.config, deps.destinationSecretKey)}
           menuUrl={`${base.replace(/^https?:\/\//, "")}/${venue.slug}/menu`}
           menuHref={`${base}/${venue.slug}/menu`}
+          socialResult={SOCIAL_RESULTS.includes(firstParam(sp.social_result) ?? "") ? (firstParam(sp.social_result) ?? null) : null}
           pluginHref="/wp/site-manager.zip"
           appUrl={base}
         />

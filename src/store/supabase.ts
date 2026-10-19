@@ -6,7 +6,7 @@ import type { Announcement, BusinessType, Category, Change, ChangeSet, ChatLang,
 import type { Place } from "../geo/osm";
 import type { WizardDraft } from "../wizard/schema";
 import { legacyTelegramId } from "../channels/ref";
-import { DEFAULT_HOURS, extensionFor, newInviteCode, newToken, PUBLISH_CLAIM_TTL_MS, type ChangeSetPatch, type ExpiredTimer, type NewCategory, type NewChangeSet, type NewItem, type NewVenue, type Store, type VenuePatch, type Destination, type DestinationKind, type DestinationPatch, type DestinationSync, type DestinationWithSecrets, type NewDestination, type NewSync, type SyncPatch, type SyncStatus, type ListSyncsOpts, type ApplyResult, checkLimitValue, checkMemberLang, CONFIG_KEY_RE, newConfirmationCode, type DataDeletionRequest, type DeletionProvider, type DeletionStatus, type CommentStatus, type ListCommentsOpts, type NewSocialComment, type SocialComment, type SocialCommentPatch, COMMENT_REDACTED, redactCommentRow, type VenueSurroundings } from "./types";
+import { DEFAULT_HOURS, extensionFor, newInviteCode, newToken, PUBLISH_CLAIM_TTL_MS, type ChangeSetPatch, type ExpiredTimer, type NewCategory, type NewChangeSet, type NewItem, type NewVenue, type Store, type VenuePatch, SlugTakenError, type Destination, type DestinationKind, type DestinationPatch, type DestinationSync, type DestinationWithSecrets, type NewDestination, type NewSync, type SyncPatch, type SyncStatus, type ListSyncsOpts, type ApplyResult, checkLimitValue, checkMemberLang, CONFIG_KEY_RE, newConfirmationCode, type DataDeletionRequest, type DeletionProvider, type DeletionStatus, type CommentStatus, type ListCommentsOpts, type NewSocialComment, type SocialComment, type SocialCommentPatch, COMMENT_REDACTED, redactCommentRow, type VenueSurroundings } from "./types";
 import { limitBlocks } from "./usage";
 
 type Row = Record<string, unknown>;
@@ -56,6 +56,7 @@ export function toVenue(r: Row): Venue {
     // Missing before the migration is applied (or any unknown value): a Claudia site, as before.
     site_mode: r.site_mode === "own" || r.site_mode === "none" ? r.site_mode : "claudia",
     // Missing before the migration is applied (or any unknown value): not asked.
+    created_via: r.created_via === "wizard" || r.created_via === "start" ? r.created_via : "operator",
     site_platform: SITE_PLATFORMS.includes(r.site_platform as SitePlatform) ? (r.site_platform as SitePlatform) : null,
     created_at: iso(r.created_at),
   };
@@ -179,7 +180,10 @@ export class SupabaseStore implements Store {
       status: v.status ?? "live",
       wizard_draft: v.wizard_draft ?? null,
     };
-    return this.venue(await must(this.db.from("venues").insert(row).select("*").single(), "createVenue"));
+    const { data, error } = await this.db.from("venues").insert(row).select("*").single();
+    if (error?.code === "23505") throw new SlugTakenError(v.slug);
+    if (error) throw new Error(`createVenue: ${error.message}${error.code ? ` [${error.code}]` : ""}`);
+    return this.venue(data);
   }
   async getVenue(id: string) {
     return this.venue(await must(this.db.from("venues").select("*").eq("id", id).single(), `getVenue ${id}`));
@@ -200,7 +204,8 @@ export class SupabaseStore implements Store {
     if (typeof clean.slug === "string") clean.slug = `${this.slugPrefix}${clean.slug}`;
     if (Object.keys(clean).length === 0) return this.getVenue(id);
     const { data, error } = await this.db.from("venues").update(clean).eq("id", id).select("*").maybeSingle();
-    if (error) throw new Error(error.code === "23505" ? `slug ${patch.slug} already exists` : `updateVenue ${id}: ${error.message} [${error.code ?? ""}]`);
+    if (error?.code === "23505" && typeof patch.slug === "string") throw new SlugTakenError(patch.slug);
+    if (error) throw new Error(`updateVenue ${id}: ${error.message} [${error.code ?? ""}]`);
     if (!data) throw new Error(`updateVenue ${id}: not found`);
     return this.venue(data);
   }

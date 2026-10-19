@@ -8,7 +8,8 @@ import type { Config } from "../config";
 import { parseTypedSiteUrl } from "../domain/site-url";
 import { SITE_PLATFORMS, type Lang, type SitePlatform, type Venue } from "../domain/types";
 import { connectWordPress, type ConnectDeps } from "../destinations/connect";
-import type { Store } from "../store/types";
+import { isLocalHost, isPrivateAddress } from "../destinations/wordpress-client";
+import { SlugTakenError, type Store } from "../store/types";
 import type { PublishError } from "../wizard/schema";
 import { slugError } from "../wizard/schema";
 import { afterVenueCreated } from "./after-venue-created";
@@ -54,6 +55,12 @@ export async function pickSlug(store: Store, name: string, skip: ReadonlySet<str
 // ---------------------------------------------------------------------------------------------------------------------
 // Input
 
+/** localhost, private/loopback/link-local addresses (URL has already turned 2130706433 and 0x7f.1 into 127.0.0.1) and internal-only name endings. */
+function isPrivateHost(hostname: string): boolean {
+  const h = hostname.toLowerCase();
+  return isLocalHost(h) || isPrivateAddress(h) || /\.(local|internal|lan|home\.arpa|intranet|corp)$/.test(h);
+}
+
 export interface OwnVenueInput {
   path: "own" | "none";
   name: string;
@@ -93,6 +100,7 @@ export function parseOwnVenueInput(body: unknown): { ok: true; input: OwnVenueIn
   if (path === "own") {
     const u = typeof b.site_url === "string" ? parseTypedSiteUrl(b.site_url) : null;
     if (!u) errors.push(err("site_url", "Въведете адрес на сайт, който започва с https, например coffique.bg.", "Enter a website address that uses https, for example coffique.bg."));
+    else if (isPrivateHost(new URL(u).hostname)) errors.push(err("site_url", "Това е адрес във вътрешна мрежа. Въведете публичния адрес на сайта.", "That is an address on a private network. Enter your site's public address."));
     else siteUrl = u;
     if (b.platform === undefined || b.platform === "") platform = "unknown";
     else if (typeof b.platform === "string" && (SITE_PLATFORMS as readonly string[]).includes(b.platform)) platform = b.platform as SitePlatform;
@@ -137,12 +145,13 @@ export async function createOwnVenue(d: { store: Store }, user: Pick<SessionUser
         default_lang: input.lang,
         tz: "Europe/Sofia",
         status: "live",
+        created_via: "start",
         site_mode: input.path,
         ...(input.path === "own" ? { site_url: input.site_url ?? null, site_platform: input.platform ?? "unknown" } : {}),
       });
     } catch (e) {
       // Another request took this address between the check and the insert: the next free one. Anything else (store down, bad row) fails at once.
-      if (!(e instanceof Error && /slug/i.test(e.message)) || attempt >= 3) throw e;
+      if (!(e instanceof SlugTakenError) || attempt >= 3) throw e;
       lost.add(slug);
     }
   }

@@ -9,17 +9,17 @@ import { useT } from "../useWizardText";
 
 const CHIP = "inline-flex min-h-11 cursor-pointer items-center gap-2 rounded-full bg-panel px-4 text-sm font-semibold text-fg ring-1 ring-line-strong transition-[background-color,color,box-shadow] duration-150 ease-out hover:bg-sunken has-[:checked]:bg-fg has-[:checked]:text-canvas has-[:checked]:ring-fg has-[:focus-visible]:ring-2 has-[:focus-visible]:ring-brand has-[:focus-visible]:ring-offset-2 has-[:focus-visible]:ring-offset-canvas";
 
-export function Basics({ draft, update, baseUrl, fieldErrors }: StepProps) {
+export function Basics({ draft, update, baseUrl, fieldErrors, slugLocked = false }: StepProps) {
   const { t, lang } = useT();
   const [slugTouched, setSlugTouched] = useState(draft.slug !== "");
   const host = baseUrl.replace(/^https?:\/\//, "");
   const err = (path: string) => fieldError(fieldErrors, path, lang);
   return (
     <div className="grid gap-6">
-      <TextField label={t("basics.name")} value={draft.name} error={err("name")} required maxLength={80} autoComplete="organization" onChange={(name) => update(slugTouched ? { name } : { name, slug: slugify(name) })} />
+      <TextField label={t("basics.name")} value={draft.name} error={err("name")} required maxLength={80} autoComplete="organization" onChange={(name) => update(slugTouched || slugLocked ? { name } : { name, slug: slugify(name) })} />
       <TextField label={t("basics.slug")} value={draft.slug} required prefix={`${host}/`} inputMode="url" autoCapitalize="none" spellCheck={false} maxLength={39}
-        hint={t("basics.slugHint", { url: `${baseUrl}/${draft.slug || "…"}` })} error={err("slug")}
-        onChange={(v) => { setSlugTouched(true); update({ slug: v.toLowerCase().replace(/[^a-z0-9-]/g, "") }); }} />
+        readOnly={slugLocked} hint={slugLocked ? t("basics.slugLocked", { url: `${baseUrl}/${draft.slug}` }) : t("basics.slugHint", { url: `${baseUrl}/${draft.slug || "…"}` })} error={err("slug")}
+        onChange={(v) => { if (slugLocked) return; setSlugTouched(true); update({ slug: v.toLowerCase().replace(/[^a-z0-9-]/g, "") }); }} />
       <Fieldset legend={t("basics.lang")}>
         <div className="grid gap-1">
           {(["bg", "en"] as const).map((l) => (

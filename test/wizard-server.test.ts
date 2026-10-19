@@ -2,6 +2,7 @@
 import { describe, expect, it } from "vitest";
 import { INVITE_TTL_MS } from "@/src/bot/bot";
 import { monthWindow } from "@/src/domain/limits";
+import { SlugTakenError } from "@/src/store/types";
 import { sha256Hex } from "@/src/server/hash";
 import { createDraft, doneInviteCode, publishDraft, rateLimitKeys, updateDraft, WizardError } from "@/src/server/wizard";
 import { COOKIE_NAME, cookieFromHeader, DRAFT_COOKIE, draftCookieValue, parseDraftCookie, readDraftFromCookies, readDraftFromRequest, serializeDraftCookie, venueFromDraftCookie } from "@/src/server/draft-cookie";
@@ -295,7 +296,7 @@ describe("createDraft → updateDraft → publishDraft", () => {
     expect(calls).toBe(1);
     calls = 0;
     store.createVenue = async (v) => {
-      if (++calls === 1) throw new Error(`slug ${v.slug} already exists`);
+      if (++calls === 1) throw new SlugTakenError(v.slug);
       return real(v);
     };
     await expect(createDraft(store, "classic", T0)).resolves.toMatchObject({ venue: { status: "draft" } });

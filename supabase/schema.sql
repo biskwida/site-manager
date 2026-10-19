@@ -55,6 +55,10 @@ alter table public.venues add constraint venues_site_mode_own_url_check check (s
 alter table public.venues add column if not exists site_platform text;
 alter table public.venues drop constraint if exists venues_site_platform_check;
 alter table public.venues add constraint venues_site_platform_check check (site_platform is null or site_platform in ('wordpress', 'wix', 'squarespace', 'shopify', 'other', 'unknown'));
+-- How the venue was made (2026-10-19): operator (default) | wizard | start. Only operator-made own sites redirect off our domain. Owner-only (not granted to anon).
+alter table public.venues add column if not exists created_via text not null default 'operator';
+alter table public.venues drop constraint if exists venues_created_via_check;
+alter table public.venues add constraint venues_created_via_check check (created_via in ('operator', 'wizard', 'start'));
 -- Monthly change limit (pricing plans; src/domain/limits.ts): applied change sets per calendar month in the venue's tz. null = unlimited.
 alter table public.venues add column if not exists change_limit integer;
 alter table public.venues drop constraint if exists venues_change_limit_check;

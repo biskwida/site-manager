@@ -202,4 +202,11 @@ describe("DoneStatus: connect an app", () => {
     expect(withLink).toContain("Continue setup");
     expect(render("bg", waiting, { onboardingHref: "/onboarding/bar" })).toContain("Продължете с настройката");
   });
+  it("Log in to save appears only with the login address, in both languages", () => {
+    expect(render("en", waiting)).not.toContain("Log in to save");
+    const en = render("en", waiting, { loginHref: "/login?next=%2Fnew%2Fv1%2Fdone" });
+    expect(en).toContain('href="/login?next=%2Fnew%2Fv1%2Fdone"');
+    expect(en).toContain("Log in to save this business to your account");
+    expect(render("bg", waiting, { loginHref: "/login?next=x" })).toContain("Влезте, за да запазите бизнеса в профила си");
+  });
 });

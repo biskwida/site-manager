@@ -2,7 +2,7 @@
 import { describe, expect, it } from "vitest";
 import { planChanges } from "@/src/domain/changes";
 import type { Change } from "@/src/domain/types";
-import { COMMENT_REDACTED, type NewSocialComment, type Store } from "@/src/store/types";
+import { COMMENT_REDACTED, SlugTakenError, type NewSocialComment, type Store } from "@/src/store/types";
 import { emptyDraft } from "@/src/wizard/schema";
 import { NOW } from "./fixtures";
 
@@ -328,6 +328,21 @@ export function storeContract(
         expect((await s.updateVenue(a.id, { site_platform: "wix" })).site_platform).toBe("wix");
         expect((await s.updateVenue(a.id, { name: "A2" })).site_platform).toBe("wix"); // untouched by other patches
         expect((await s.updateVenue(a.id, { site_platform: null })).site_platform).toBeNull();
+        // how the venue was made: operator by default; a duplicate slug is a SlugTakenError
+        expect(b.created_via).toBe("operator");
+        const c = await s.createVenue({ slug: "t13r", name: "C", created_via: "start" });
+        try {
+          expect((await s.getVenue(c.id)).created_via).toBe("start");
+          expect((await s.updateVenue(c.id, { name: "C2" })).created_via).toBe("start"); // untouched by other patches
+          await expect(s.createVenue({ slug: "t13r", name: "dup" })).rejects.toBeInstanceOf(SlugTakenError);
+          await expect(s.updateVenue(c.id, { slug: "t13q" })).rejects.toBeInstanceOf(SlugTakenError);
+          // hidden categories and dishes can be inserted hidden, and a sold-out mark can be carried
+          const cat = await s.insertCategory({ venue_id: c.id, name_bg: "К", name_en: "C", position: 0, active: false });
+          const it = await s.insertItem({ venue_id: c.id, category_id: cat.id, name_bg: "Е", name_en: "E", desc_bg: "", desc_en: "", price_eur: 1, allergens: [], position: 0, active: false, sold_out_until: "2030-01-01T00:00:00.000Z" });
+          expect([cat.active, it.active, it.sold_out_until]).toEqual([false, false, "2030-01-01T00:00:00.000Z"]);
+        } finally {
+          await s.deleteVenue(c.id);
+        }
         // claimPublish: a draft, or a live venue carrying a wizard draft (the website add-on); never a plain live venue
         expect(await s.claimPublish(b.id, NOW)).toBe(false);
         await s.updateVenue(b.id, { wizard_draft: emptyDraft("classic") });

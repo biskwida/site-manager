@@ -2,7 +2,7 @@
 import { applyChanges } from "../domain/changes";
 import { COMMENT_LIMIT_DEFAULT, countsTowardLimit } from "../domain/limits";
 import type { Category, ChangeSet, ChatLang, Conversation, DeployInfo, DeployStatus, Item, Media, Member, Role, SiteMode, SiteState, SiteTextKey, Venue, VenueStatus } from "../domain/types";
-import { DEFAULT_HOURS, extensionFor, newInviteCode, newToken, PUBLISH_CLAIM_TTL_MS, type ChangeSetPatch, type ExpiredTimer, type NewCategory, type NewChangeSet, type NewItem, type NewVenue, type Store, type VenuePatch, type Destination, type DestinationKind, type DestinationPatch, type DestinationSync, type DestinationWithSecrets, type NewDestination, type NewSync, type SyncPatch, type ListSyncsOpts, type ApplyResult, checkLimitValue, checkMemberLang, CONFIG_KEY_RE, newConfirmationCode, type DataDeletionRequest, type DeletionProvider, type ListCommentsOpts, type NewSocialComment, type SocialComment, type SocialCommentPatch, COMMENT_REDACTED, redactCommentRow, type VenueSurroundings } from "./types";
+import { DEFAULT_HOURS, extensionFor, newInviteCode, newToken, PUBLISH_CLAIM_TTL_MS, type ChangeSetPatch, type ExpiredTimer, type NewCategory, type NewChangeSet, type NewItem, type NewVenue, type Store, type VenuePatch, SlugTakenError, type Destination, type DestinationKind, type DestinationPatch, type DestinationSync, type DestinationWithSecrets, type NewDestination, type NewSync, type SyncPatch, type ListSyncsOpts, type ApplyResult, checkLimitValue, checkMemberLang, CONFIG_KEY_RE, newConfirmationCode, type DataDeletionRequest, type DeletionProvider, type ListCommentsOpts, type NewSocialComment, type SocialComment, type SocialCommentPatch, COMMENT_REDACTED, redactCommentRow, type VenueSurroundings } from "./types";
 import { limitBlocks } from "./usage";
 
 const clone = <T>(v: T): T => structuredClone(v);
@@ -85,9 +85,10 @@ export class InMemoryStore implements Store {
       site_url: v.site_url ?? null,
       site_mode: v.site_mode ?? "claudia",
       site_platform: v.site_platform ?? null,
+      created_via: v.created_via ?? "operator",
       created_at: this.clock(),
     };
-    if ([...this.sites.values()].some((s) => s.venue.slug === venue.slug)) throw new Error(`slug ${venue.slug} already exists`);
+    if ([...this.sites.values()].some((s) => s.venue.slug === venue.slug)) throw new SlugTakenError(venue.slug);
     this.sites.set(venue.id, { venue, categories: [], items: [], holidays: [], announcements: [], media: [], texts: [] });
     return clone(venue);
   }
@@ -109,7 +110,7 @@ export class InMemoryStore implements Store {
     const s = this.site(id);
     checkDigestHour(patch.comment_digest_hour);
     checkOwnUrl(patch.site_mode ?? s.venue.site_mode, patch.site_url === undefined ? s.venue.site_url : patch.site_url);
-    if (patch.slug !== undefined && [...this.sites.values()].some((x) => x.venue.id !== id && x.venue.slug === patch.slug)) throw new Error(`slug ${patch.slug} already exists`);
+    if (patch.slug !== undefined && [...this.sites.values()].some((x) => x.venue.id !== id && x.venue.slug === patch.slug)) throw new SlugTakenError(patch.slug);
     for (const [k, v] of Object.entries(patch)) if (v !== undefined) (s.venue as unknown as Record<string, unknown>)[k] = clone(v);
     return clone(s.venue);
   }
@@ -182,11 +183,11 @@ export class InMemoryStore implements Store {
       price_eur: i.price_eur,
       allergens: [...i.allergens],
       image_media_id: i.image_media_id ?? null,
-      sold_out_until: null,
+      sold_out_until: i.sold_out_until ?? null,
       is_special: i.is_special ?? false,
       special_expires_at: i.special_expires_at ?? null,
       position: i.position,
-      active: true,
+      active: i.active ?? true,
       created_at: now,
       updated_at: now,
     };
