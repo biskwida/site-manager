@@ -213,6 +213,7 @@
   - The status shows `chat: true` after the invite is redeemed.
   - `/start?plan=social` lists paths B and C before A. Path A shows "a website comes with Admin or Both".
   - Publish with a session links the user. Publish without a session behaves as today.
+  - An existing `own`/`none` venue whose owner bought the website add-on gets a wizard draft on the same row (`startDraftForVenue(venueId, user)`), prefilled from the venue. Publish keeps the slug and sets `site_mode='claudia'`.
 - [ ] **Step 2:** Run them. Expect FAIL.
 - [ ] **Step 3: Implement.**
   - The pages reuse the landing's look (fonts, greige palette).
@@ -251,6 +252,7 @@
 
 - [ ] **Step 1: Failing tests**, using a fake Stripe client and signed test payloads:
   - Checkout for path A with Admin includes the setup price once.
+  - The add-on: a B/C venue with `withSetupFee: true` gets the setup price once. `plan='social'` with the add-on → 400 ("website needs Admin or Both").
   - A trial with no card sends `payment_method_collection: "if_required"` and `trial_period_days` = the days left.
   - `TRIAL_REQUIRES_CARD=true` sends `"always"`.
   - The same event id twice → second call returns `"duplicate"`, with no change.

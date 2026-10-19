@@ -148,6 +148,9 @@ Today anyone can open `/new`, build a website and get a chat code. There is no a
   - `invoice.payment_failed`
 
   Each one sets `plan` and `billing_status`, idempotently, with the signature checked.
+- **"Build me a website" on the plan page** (mockup, 19 Oct): under the three plans, a 199 € once add-on, available only with Admin or Both (greyed out with Social media).
+  - **Path A venues:** the box is ticked and locked, and the fee is charged at the first payment.
+  - **Path B and C venues:** ticking it adds the fee to Checkout. After payment the dashboard shows "Build your website", which opens the wizard on the **existing** venue (`wizard_draft` on that row, prefilled from it). Publishing switches `site_mode` to `claudia` and starts the deploy.
 - **Customer Portal:** a "Manage billing" button on the dashboard (change plan, card, invoices, cancel).
 - **Gating** (only when `BILLING_ENABLED`):
   - **`trialing` / `active`:** the plan's features apply. Admin = website changes, Social = social, comments and boosts, Both = all. A feature outside the plan is **shown, not hidden**: one friendly line in chat, or a locked dashboard card, with the upgrade link.
