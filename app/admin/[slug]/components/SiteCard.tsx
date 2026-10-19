@@ -30,9 +30,10 @@ export function SiteCard({ overview: o, post, adminKey = "", refresh }: { overvi
   const retry = d?.status === "error" && unchanged;
 
   useEffect(() => {
-    if (!publishing || !adminKey) return;
-    return startTickNudge({ adminKey, onNudged: () => void refresh?.() });
-  }, [publishing, adminKey, refresh]);
+    if (!publishing) return;
+    // A key page nudges with its key; the account dashboard (no key) with the venue slug and the session cookie.
+    return startTickNudge({ adminKey: adminKey || undefined, slug: o.venue.slug, onNudged: () => void refresh?.() });
+  }, [publishing, adminKey, o.venue.slug, refresh]);
 
   async function change(e: FormEvent) {
     e.preventDefault();

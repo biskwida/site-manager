@@ -28,6 +28,7 @@ npm run db:apply -- supabase/policies.sql
 - Resend: verify the sending domain getclaudia.app (the DNS records Resend lists).
 - Vercel env: `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY`, `SUPABASE_SERVICE_ROLE_KEY`, `RESEND_API_KEY`, `EMAIL_FROM` (optional, default `Claudia <hello@getclaudia.app>`) and `APP_HOST=getclaudia.app`.
 - `npm run account:invite -- --slug <s> --email <e>` stores the invite and emails the sign-in link only when `RESEND_API_KEY` is set AND `APP_HOST` is set explicitly in the env (the link must point at the real host). Otherwise it stores the invite and says so; the owner signs in at `/login` with that email and the first sign-in claims it.
+- **Once any account is linked to a venue, every chat owner of that venue gets the dashboard link (`/dashboard/<slug>`, "log in with your email") instead of the key link, and only linked accounts can open it. Link each owner's email with `account:invite` before (or right after) the first one, or the other owners lose their way into the dashboard.**
 
 ## 4. Known caveat: email scanners and one-time links
 

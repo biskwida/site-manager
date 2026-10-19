@@ -1,5 +1,5 @@
 import { after } from "next/server";
-import { authorizeAdmin } from "@/src/server/admin-auth";
+import { adminGate } from "@/src/server/admin-auth";
 import { adminCommentAction, parseAdminCommentAction } from "@/src/server/admin-comments";
 import { adminAction, adminOverview, checkDomain, connectDomain, setTemplate, type AdminActionName } from "@/src/server/admin";
 import { newOwnerCode } from "@/src/server/connect-apps";
@@ -12,21 +12,21 @@ export const maxDuration = 300;
 
 async function auth(req: Request, slug: string) {
   const deps = await getServerDeps((fn) => after(fn));
-  const access = await authorizeAdmin(req, slug, { store: deps.store });
-  return { deps, venue: access?.venue ?? null };
+  const gate = await adminGate(req, slug, { store: deps.store });
+  return { deps, venue: "access" in gate ? gate.access.venue : null, response: "response" in gate ? gate.response : null };
 }
 
 export async function GET(req: Request, ctx: RouteContext<"/api/admin/[slug]">) {
   const { slug } = await ctx.params;
-  const { deps, venue } = await auth(req, slug);
-  if (!venue) return Response.json({ error: "unauthorized" }, { status: 401 });
+  const { deps, venue, response } = await auth(req, slug);
+  if (!venue) return response!;
   return Response.json(await adminOverview(deps.store, venue, new Date(), deps.config.publicBaseUrl, { hosted: deps.deployer === null, social: socialAvailability(deps.config, deps.destinationSecretKey) }), { headers: { "cache-control": "no-store" } });
 }
 
 export async function POST(req: Request, ctx: RouteContext<"/api/admin/[slug]">) {
   const { slug } = await ctx.params;
-  const { deps, venue } = await auth(req, slug);
-  if (!venue) return Response.json({ error: "unauthorized" }, { status: 401 });
+  const { deps, venue, response } = await auth(req, slug);
+  if (!venue) return response!;
   const body = (await req.json().catch(() => ({}))) as { action?: string; change_set_id?: string; template?: unknown; domain?: unknown };
   const siteDeps = { store: deps.store, deployer: deps.deployer, feedUrlFor: (s: string) => `${deps.config.publicBaseUrl}/api/site/${encodeURIComponent(s)}`, now: () => new Date() };
   if (body.action === "set_template") {

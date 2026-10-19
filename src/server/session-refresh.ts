@@ -21,10 +21,12 @@ export async function refreshSession(request: NextRequest, env: { url: string; a
     const supabase = createServerClient(env.url, env.anonKey, {
       cookies: {
         getAll: () => request.cookies.getAll(),
-        setAll(list) {
+        setAll(list, headers) {
           for (const { name, value } of list) request.cookies.set(name, value);
           response = NextResponse.next({ request });
           for (const { name, value, options } of list) response.cookies.set(name, value, options);
+          // Supabase's cache headers (no-store on a response that sets auth cookies) keep a CDN from sharing them.
+          for (const [name, value] of Object.entries(headers ?? {})) response.headers.set(name, value);
         },
       },
     });

@@ -158,7 +158,46 @@ describe("handleInbound", () => {
     expect(texts(messenger).at(-1)).not.toContain(key);
     await store.upsertMember({ venue_id: venue.id, chat_ref: "fb:810", role: "owner", lang: "bg" });
     await handleInbound(d, { chatRef: "fb:810", kind: "text", text: "" });
-    expect(texts(messenger).at(-1)).toBe("Вече сте свързани с Кафене „Ъгъла“. Табло: https://site.example/dashboard/agala");
+    expect(texts(messenger).at(-1)).toBe("Вече сте свързани с Кафене „Ъгъла“. Табло: https://site.example/dashboard/agala (влизате с имейла си)");
+    expect(texts(messenger).at(-1)).not.toContain("ключ");
+  });
+  it("the account link never says 'keep this link, it is your key' (welcome in BG and EN); the key link keeps saying it", async () => {
+    const { d, messenger, store, venue } = await setup();
+    const redeem = async (chatRef: string, lang: "bg" | "en") => {
+      const code = await store.createInvite(venue.id, "owner", "2026-10-30T00:00:00.000Z");
+      await handleInbound(d, { chatRef, kind: "text", text: `/start ${code}`, langHint: lang });
+      return texts(messenger).filter((t) => t.includes("Табло") || t.includes("Dashboard")).at(-1) ?? "";
+    };
+    expect(await redeem("tg:2001", "bg")).toContain("пазете линка");
+    await store.linkVenueUser(venue.id, crypto.randomUUID(), "owner");
+    const bg = await redeem("tg:2002", "bg");
+    expect(bg).toContain("Табло: https://site.example/dashboard/agala (влизате с имейла си)");
+    expect(bg).not.toContain("ключ");
+    const en = await redeem("tg:2003", "en");
+    expect(en).toContain("Dashboard: https://site.example/dashboard/agala (log in with your email)");
+    expect(en).not.toContain("key");
+  });
+  it("a staff member on /menu never gets a dashboard or key link, with or without an owner account", async () => {
+    const { d, messenger, store, venue } = await setup();
+    for (const linked of [false, true]) {
+      if (linked) await store.linkVenueUser(venue.id, crypto.randomUUID(), "owner");
+      await handleInbound(d, { chatRef: "tg:1002", kind: "text", text: "/menu" });
+      const last = texts(messenger).at(-1) ?? "";
+      expect(last).toContain("https://site.example/agala");
+      expect(last).not.toMatch(/dashboard|admin|key=/);
+    }
+  });
+  it("falls back to the key link when hasOwnerAccount fails, in /menu and welcome-back", async () => {
+    const { d, messenger, store, venue } = await setup();
+    const key = await store.getAdminToken(venue.id);
+    store.hasOwnerAccount = async () => {
+      throw new Error("venue_users unavailable");
+    };
+    await handleInbound(d, { chatRef: "tg:1001", kind: "text", text: "/menu" });
+    expect(texts(messenger).at(-1)).toContain(`https://site.example/admin/agala?key=${key}`);
+    await store.upsertMember({ venue_id: venue.id, chat_ref: "fb:811", role: "owner", lang: "bg" });
+    await handleInbound(d, { chatRef: "fb:811", kind: "text", text: "" });
+    expect(texts(messenger).at(-1)).toContain(`https://site.example/admin/agala?key=${key}`);
   });
   it("still starts the run when touchMember fails", async () => {
     const { d, runs } = await setup();

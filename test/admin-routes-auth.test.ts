@@ -28,7 +28,8 @@ async function serve() {
   return { deps, venue, other, key: await deps.store.getAdminToken(venue.id), ctx: { params: Promise.resolve({ slug: venue.slug }) } };
 }
 const url = (path: string, key?: string) => `${BASE}/api/admin/agala${path}${key ? `?key=${key}` : ""}`;
-const json = (body: unknown) => ({ method: "POST", body: JSON.stringify(body), headers: { "content-type": "application/json" } });
+const json = (body: unknown, extra: Record<string, string> = {}) => ({ method: "POST", body: JSON.stringify(body), headers: { "content-type": "application/json", ...extra } });
+const SAME = { origin: BASE };
 
 describe("admin routes: key or owner session", () => {
   it("an owner with only a legacy key still gets 200 from GET /api/admin/<slug>?key=", async () => {
@@ -43,11 +44,30 @@ describe("admin routes: key or owner session", () => {
     await deps.store.linkVenueUser(venue.id, "u1", "owner");
     sessionUser.mockResolvedValue({ id: "u1", email: "o@example.com" });
     expect((await adminGet(new Request(url("")), ctx)).status).toBe(200);
-    expect((await adminPost(new Request(url(""), json({ action: "bad" })), ctx)).status).toBe(400); // past auth
-    expect((await socialPost(new Request(url("/social"), json({ action: "disconnect", kind: "facebook" })), ctx)).status).toBe(200);
-    expect((await wpPost(new Request(url("/wordpress"), json({ action: "disconnect" })), ctx)).status).toBe(200);
+    expect((await adminPost(new Request(url(""), json({ action: "bad" }, SAME)), ctx)).status).toBe(400); // past auth
+    expect((await socialPost(new Request(url("/social"), json({ action: "disconnect", kind: "facebook" }, SAME)), ctx)).status).toBe(200);
+    expect((await wpPost(new Request(url("/wordpress"), json({ action: "disconnect" }, SAME)), ctx)).status).toBe(200);
     expect((await fbStart(new Request(url("/social/facebook/start")), ctx)).status).toBe(302);
     expect((await igStart(new Request(url("/social/instagram/start")), ctx)).status).toBe(302);
+  });
+
+  it("a session POST needs a same-host Origin (or Referer): 403 otherwise; key POSTs are unchanged", async () => {
+    const { deps, venue, ctx, key } = await serve();
+    await deps.store.linkVenueUser(venue.id, "u1", "owner");
+    sessionUser.mockResolvedValue({ id: "u1", email: "o@example.com" });
+    const posts = (extra: Record<string, string>, k?: string) => [
+      adminPost(new Request(url("", k), json({ action: "bad" }, extra)), ctx),
+      socialPost(new Request(url("/social", k), json({ action: "disconnect", kind: "facebook" }, extra)), ctx),
+      wpPost(new Request(url("/wordpress", k), json({ action: "disconnect" }, extra)), ctx),
+    ];
+    const statuses = async (extra: Record<string, string>, k?: string) => (await Promise.all(posts(extra, k))).map((r) => r.status);
+    expect(await statuses({})).toEqual([403, 403, 403]);
+    expect(await statuses({ origin: "https://evil.example" })).toEqual([403, 403, 403]);
+    expect(await statuses({ referer: "https://evil.example/x" })).toEqual([403, 403, 403]);
+    expect(await statuses({ referer: `${BASE}/dashboard/agala` })).toEqual([400, 200, 200]); // no Origin: the Referer decides
+    expect(await statuses(SAME)).toEqual([400, 200, 200]);
+    expect(await statuses({}, key)).toEqual([400, 200, 200]); // a key request needs no Origin
+    expect(await statuses({ origin: "https://evil.example" }, key)).toEqual([400, 200, 200]);
   });
 
   it("a session start carries no key into the OAuth redirect", async () => {

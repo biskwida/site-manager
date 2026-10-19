@@ -18,6 +18,7 @@ vi.mock("@/src/server/deps", () => ({
   getServerDeps: async () => ({ store, config: { publicBaseUrl: "https://x.app" }, deployer: null, destinationSecretKey: null }),
 }));
 
+import { SessionExpired } from "@/app/admin/[slug]/components/SessionExpired";
 import { AdminPanel } from "@/app/admin/[slug]/components/AdminPanel";
 import { adminApiUrl } from "@/app/admin/[slug]/components/useAdminOverview";
 import AdminPage from "@/app/admin/[slug]/page";
@@ -84,6 +85,7 @@ describe("/dashboard/[slug]", () => {
     expect(html).toContain("Кафене „Ъгъла“");
     expect(html).not.toContain("key=");
     expect(html).not.toContain("Добавете имейла");
+    expect(sessionUser).toHaveBeenCalledTimes(1); // the page's user is passed on: no second getUser
   });
   it("answers not-found, the same as for a missing slug, to a user who does not own it", async () => {
     await store.linkVenueUser(venueId, "u2", "staff");
@@ -105,8 +107,9 @@ describe("/admin/[slug] (legacy key page)", () => {
     const first = await outcome(() => AdminPage(slugProps("agala", { key })));
     expect(first.html).toContain("Табло");
     expect(first.html).toContain("Добавете имейла си, за да влизате без линк");
-    expect(first.html).toContain(`href="/login?next=%2Fdashboard%2Fagala"`);
-    expect(first.html).toContain("екипа на Claudia");
+    expect(first.html).toContain("Помолете екипа на Claudia да свърже имейла ви — после влизате на getclaudia.app/login");
+    expect(first.html).not.toContain("/login?next=");
+    expect(first.html).not.toContain("<a href=\"/login");
     await store.linkVenueUser(venueId, "u1", "owner");
     const second = await outcome(() => AdminPage(slugProps("agala", { key })));
     expect(second.html).toContain("Табло");
@@ -123,7 +126,25 @@ describe("/admin/[slug] (legacy key page)", () => {
   });
 });
 
+describe("hasOwnerAccount failing never breaks the key page", () => {
+  it("opens the dashboard and hides the banner", async () => {
+    const key = await store.getAdminToken(venueId);
+    store.hasOwnerAccount = async () => {
+      throw new Error("venue_users unavailable");
+    };
+    const { html } = await outcome(() => AdminPage(slugProps("agala", { key })));
+    expect(html).toContain("Табло");
+    expect(html).not.toContain("Добавете имейла");
+  });
+});
+
 describe("the admin client without a key", () => {
+  it("has a session-expired notice with a way back in (shown instead of the key text when the account dashboard poll gets a 401)", () => {
+    const html = renderToStaticMarkup(<LangProvider defaultLang="bg"><SessionExpired slug="agala" /></LangProvider>);
+    expect(html).toContain("Сесията изтече — влезте отново");
+    expect(html).toContain('href="/login?next=%2Fdashboard%2Fagala"');
+    expect(renderToStaticMarkup(<LangProvider defaultLang="en"><SessionExpired slug="agala" /></LangProvider>)).toContain("Your session expired — log in again");
+  });
   it("adminApiUrl adds ?key= only when there is a key", () => {
     expect(adminApiUrl("agala", "k 1")).toBe("/api/admin/agala?key=k%201");
     expect(adminApiUrl("agala", "")).toBe("/api/admin/agala");

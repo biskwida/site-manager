@@ -33,7 +33,8 @@ export default async function Page(props: PageProps<"/admin/[slug]">) {
   }
   const overview = await adminOverview(deps.store, venue, new Date(), deps.config.publicBaseUrl, { hosted: deps.deployer === null, social: socialAvailability(deps.config, deps.destinationSecretKey) });
   // Until an owner account is linked, offer "log in with your email next time".
-  const hasAccount = await deps.store.hasOwnerAccount(venue.id);
+  // A failing lookup hides the banner: the legacy page never breaks over it.
+  const hasAccount = await deps.store.hasOwnerAccount(venue.id).catch(() => true);
   return (
     <LangProvider defaultLang={venue.default_lang}>
       <AdminPanel slug={slug} adminKey={key} initial={overview} showAccountBanner={!hasAccount} />

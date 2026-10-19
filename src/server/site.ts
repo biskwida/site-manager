@@ -12,11 +12,13 @@ export interface LoadSiteOptions {
   draftId?: string | null;
   /** The admin key from the URL. */
   key?: string | null;
+  /** The signed-in account (id) of this request: previews a draft when it owns the venue and no key was given. */
+  userId?: string | null;
   /** The wizard's draft token (from the sm_draft cookie); required to see a venue with status "draft". */
   draftToken?: string | null;
 }
 
-/** Live state for a slug; with a valid admin key and a pending draft id, the state with that draft applied on top. Draft venues are null without a matching draft token. */
+/** Live state for a slug; with a valid admin key (or the owner's session) and a pending draft id, the state with that draft applied on top. Draft venues are null without a matching draft token. */
 export async function loadSite(store: Store, slug: string, opts: LoadSiteOptions = {}): Promise<{ state: SiteState; draft: DraftInfo | null } | null> {
   const venue = await store.getVenueBySlug(slug);
   if (!venue) return null;
@@ -27,14 +29,15 @@ export async function loadSite(store: Store, slug: string, opts: LoadSiteOptions
   }
   let state = await store.getSite(venue.id);
   let draft: DraftInfo | null = null;
-  if (opts.draftId && opts.key) {
-    const owner = await store.findVenueByAdminToken(opts.key);
-    if (owner && owner.id === venue.id) {
+  if (opts.draftId && (opts.key || opts.userId)) {
+    // A key must match this venue (a wrong key is never rescued by a session); without a key the signed-in account must own it.
+    const allowed = opts.key ? (await store.findVenueByAdminToken(opts.key))?.id === venue.id : await store.isVenueOwner(venue.id, opts.userId as string);
+    if (allowed) {
       try {
         const cs = await store.getChangeSet(opts.draftId);
         if (cs.venue_id === venue.id) {
           // The banner shows what the chat said, without its keep markers (src/domain/format.ts keep).
-          draft = unkeepTexts({ id: cs.id, status: cs.status, summary_bg: cs.summary_bg, summary_en: cs.summary_en, preview_bg: cs.preview_bg, preview_en: cs.preview_en, key: opts.key });
+          draft = unkeepTexts({ id: cs.id, status: cs.status, summary_bg: cs.summary_bg, summary_en: cs.summary_en, preview_bg: cs.preview_bg, preview_en: cs.preview_en, key: opts.key ?? "" });
           if (cs.status === "proposed" || cs.status === "scheduled") {
             try {
               state = applyChanges(state, cs.changes);

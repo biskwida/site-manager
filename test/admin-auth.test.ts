@@ -4,7 +4,7 @@ import { describe, expect, it, vi } from "vitest";
 const sessionUser = vi.fn<() => Promise<{ id: string; email: string } | null>>(async () => null);
 vi.mock("@/src/server/session", () => ({ getSessionUser: () => sessionUser() }));
 
-import { authorizeAdmin } from "@/src/server/admin-auth";
+import { adminGate, authorizeAdmin, sameOrigin, socialAuthOf } from "@/src/server/admin-auth";
 import { InMemoryStore } from "@/src/store/memory";
 import { seedDemo } from "@/src/seed/demo";
 
@@ -65,5 +65,59 @@ describe("authorizeAdmin", () => {
     await store.linkVenueUser(venue.id, "u9", "owner");
     as(null);
     expect(await authorizeAdmin(req(venue.slug), venue.slug, { store, sessionUser: async () => ({ id: "u9", email: "x@y.z" }) })).toMatchObject({ via: "session" });
+  });
+});
+
+describe("socialAuthOf", () => {
+  it("is the key for a key access and the session marker for a session access", async () => {
+    const { store, venue, key } = await setup();
+    expect(socialAuthOf({ venue, via: "key", key })).toBe(key);
+    expect(socialAuthOf({ venue, via: "session" })).toEqual({ via: "session" });
+    void store;
+  });
+});
+
+describe("sameOrigin", () => {
+  const post = (headers: Record<string, string>) => new Request("https://getclaudia.app/api/admin/agala", { method: "POST", headers });
+  it("needs an Origin on the request's host, or a Referer on it when Origin is missing", () => {
+    expect(sameOrigin(post({ origin: "https://getclaudia.app" }))).toBe(true);
+    expect(sameOrigin(post({ referer: "https://getclaudia.app/dashboard/agala" }))).toBe(true);
+    expect(sameOrigin(post({ origin: "https://evil.example" }))).toBe(false);
+    expect(sameOrigin(post({ referer: "https://evil.example/x" }))).toBe(false);
+    expect(sameOrigin(post({ origin: "https://getclaudia.app.evil.example" }))).toBe(false);
+    expect(sameOrigin(post({ origin: "null" }))).toBe(false);
+    expect(sameOrigin(post({ origin: "null", referer: "https://getclaudia.app/x" }))).toBe(false); // an Origin that is present decides
+    expect(sameOrigin(post({}))).toBe(false);
+    expect(sameOrigin(post({ referer: "not a url" }))).toBe(false);
+  });
+});
+
+describe("adminGate", () => {
+  const owner = async () => {
+    const s = await setup();
+    await s.store.linkVenueUser(s.venue.id, "u1", "owner");
+    return s;
+  };
+  const reqOf = (s: { venue: { slug: string } }, method: string, headers: Record<string, string> = {}, key?: string) =>
+    new Request(`https://x.app/api/admin/${s.venue.slug}${key ? `?key=${key}` : ""}`, { method, headers });
+  it("401 without access, 403 for a session POST from another or unknown origin, 200-path otherwise", async () => {
+    const s = await owner();
+    const deps = { store: s.store };
+    as("u1");
+    expect(await adminGate(reqOf(s, "POST", { origin: "https://x.app" }), s.venue.slug, deps)).toMatchObject({ access: { via: "session" } });
+    expect(await adminGate(reqOf(s, "POST", { referer: "https://x.app/dashboard/agala" }), s.venue.slug, deps)).toMatchObject({ access: { via: "session" } });
+    for (const h of [{}, { origin: "https://evil.example" }] as Record<string, string>[]) {
+      const g = await adminGate(reqOf(s, "POST", h), s.venue.slug, deps);
+      expect("response" in g && g.response.status).toBe(403);
+    }
+    expect(await adminGate(reqOf(s, "GET"), s.venue.slug, deps)).toMatchObject({ access: { via: "session" } }); // GET needs no Origin
+    as(null);
+    const none = await adminGate(reqOf(s, "POST", { origin: "https://x.app" }), s.venue.slug, deps);
+    expect("response" in none && none.response.status).toBe(401);
+  });
+  it("leaves key requests as they were: no Origin needed", async () => {
+    const s = await owner();
+    as("u1");
+    expect(await adminGate(reqOf(s, "POST", {}, s.key), s.venue.slug, { store: s.store })).toMatchObject({ access: { via: "key" } });
   });
 });

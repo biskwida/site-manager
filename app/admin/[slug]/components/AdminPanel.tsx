@@ -3,6 +3,7 @@ import { LangToggle, useLang } from "@/src/i18n";
 import type { AdminOverview } from "@/src/server/admin";
 import { formatDateTime } from "@/src/time";
 import { AccountBanner } from "./AccountBanner";
+import { SessionExpired } from "./SessionExpired";
 import { AppsCard } from "./AppsCard";
 import { CommentsCard } from "./CommentsCard";
 import { Empty, Section } from "./bits";
@@ -23,7 +24,8 @@ import { SocialCard } from "./SocialCard";
 export function AdminPanel({ slug, adminKey, initial, showAccountBanner = false }: { slug: string; adminKey?: string; initial: AdminOverview; showAccountBanner?: boolean }) {
   const { lang, t } = useLang();
   const { overview: o, unauthorized, decide, post, refresh } = useAdminOverview(initial, slug, adminKey);
-  if (unauthorized) return <InvalidKey />;
+  // A key that stopped working: the invalid-link text. An account whose session ended: a way back in.
+  if (unauthorized) return adminKey ? <InvalidKey /> : <SessionExpired slug={slug} />;
   const tz = o.venue.tz;
   return (
     <div className="flex flex-1 flex-col">
@@ -37,7 +39,7 @@ export function AdminPanel({ slug, adminKey, initial, showAccountBanner = false 
         </div>
       </header>
       <main className="mx-auto w-full max-w-3xl flex-1 px-4 pb-16 sm:px-6">
-        {showAccountBanner && <AccountBanner slug={slug} />}
+        {showAccountBanner && <AccountBanner />}
         <SiteCard overview={o} post={post} adminKey={adminKey} refresh={refresh} />
         <PendingList sets={o.pending} slug={slug} adminKey={adminKey} tz={tz} decide={decide} />
         <ScheduledList sets={o.scheduled} tz={tz} decide={decide} />

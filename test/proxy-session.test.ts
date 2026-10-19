@@ -3,7 +3,7 @@ import { NextRequest } from "next/server";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const getUser = vi.fn(async () => ({ data: { user: null }, error: null }));
-let captured: { cookies: { getAll: () => unknown; setAll: (l: { name: string; value: string; options?: object }[]) => void } } | null = null;
+let captured: { cookies: { getAll: () => unknown; setAll: (l: { name: string; value: string; options?: object }[], headers?: Record<string, string>) => void } } | null = null;
 const createServerClient = vi.fn((_url: string, _key: string, opts: NonNullable<typeof captured>) => {
   captured = opts;
   return { auth: { getUser } };
@@ -48,6 +48,17 @@ describe("proxy session refresh", () => {
     expect(req.cookies.get("sb-x-auth-token")?.value).toBe("fresh");
     expect(res.cookies.get("sb-x-auth-token")?.value).toBe("fresh");
     expect(res.headers.get("set-cookie")).toMatch(/HttpOnly/i);
+  });
+
+  it("copies the cache headers Supabase hands to setAll onto the response", async () => {
+    getUser.mockImplementationOnce(async () => {
+      captured!.cookies.setAll([{ name: "sb-x-auth-token", value: "fresh", options: {} }], { "cache-control": "private, no-cache, no-store, must-revalidate, max-age=0", expires: "0", pragma: "no-cache" });
+      return { data: { user: null }, error: null };
+    });
+    const res = await proxy(new NextRequest(`${APP}/dashboard`, { headers: { cookie: "sb-x-auth-token=old" } }));
+    expect(res.headers.get("cache-control")).toBe("private, no-cache, no-store, must-revalidate, max-age=0");
+    expect(res.headers.get("pragma")).toBe("no-cache");
+    expect(res.headers.get("expires")).toBe("0");
   });
 
   it("does nothing on venue pages, /, /admin and /api (the matcher already keeps /api out)", async () => {

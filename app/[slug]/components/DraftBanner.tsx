@@ -5,6 +5,8 @@ import { useState } from "react";
 import { useLang } from "@/src/i18n";
 import type { MessageKey } from "@/src/i18n/dicts";
 import type { DraftInfo } from "@/src/domain/types";
+import { adminApiUrl } from "@/app/admin/[slug]/components/useAdminOverview";
+import { draftBackHref } from "./draft-links";
 
 /** Sticky "not live" bar over a draft preview; Apply/Reject call the admin API, then show the live site. */
 export function DraftBanner({ draft, slug }: { draft: DraftInfo; slug: string }) {
@@ -19,7 +21,7 @@ export function DraftBanner({ draft, slug }: { draft: DraftInfo; slug: string })
     setBusy(true);
     setFailed(false);
     try {
-      const res = await fetch(`/api/admin/${encodeURIComponent(slug)}?key=${encodeURIComponent(key)}`, {
+      const res = await fetch(adminApiUrl(slug, key), {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ action, change_set_id: draft.id }),
@@ -52,7 +54,7 @@ export function DraftBanner({ draft, slug }: { draft: DraftInfo; slug: string })
             </button>
           </div>
         ) : (
-          <Link href={`/admin/${slug}?key=${encodeURIComponent(key)}`} className="shrink-0 text-sm font-semibold underline underline-offset-4">{t("site.draftBack")}</Link>
+          <Link href={draftBackHref(slug, key)} className="shrink-0 text-sm font-semibold underline underline-offset-4">{t("site.draftBack")}</Link>
         )}
       </div>
     </div>

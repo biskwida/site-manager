@@ -227,10 +227,13 @@ async function followWords(d: BotDeps, member: Member, text: string, m: InboundM
   return m.forwarded ? member : followLanguage(d, member, await languageOf(d, text, member.lang));
 }
 
-/** The owner's dashboard link: the account dashboard when the venue has an owner account, else the key link. */
-async function ownerDashboardLink(d: BotDeps, venue: Venue): Promise<string> {
-  const hasAccount = await d.store.hasOwnerAccount(venue.id);
-  return dashboardLink(d.baseUrl, venue, hasAccount ? "" : await d.store.getAdminToken(venue.id), hasAccount);
+/**
+ * The owner's dashboard link: the account dashboard when the venue has an owner account (`account`: the copy then says "log in with
+ * your email"), else the key link. A failing owner-account lookup falls back to the key link, so the legacy path never breaks.
+ */
+async function ownerDashboardLink(d: BotDeps, venue: Venue): Promise<{ url: string; account: boolean }> {
+  const account = await d.store.hasOwnerAccount(venue.id).catch(() => false);
+  return { url: dashboardLink(d.baseUrl, venue, account ? "" : await d.store.getAdminToken(venue.id), account), account };
 }
 
 /** `previous` is the chat's membership before the redeem (null for a new chat). The venue's name is kept: a translation leaves it as written. */
@@ -241,10 +244,10 @@ async function welcome(d: BotDeps, member: Member, previous: Member | null) {
   // An own site (built and hosted elsewhere, reads our feed) is the site the owner and staff know.
   const site = venue.site_mode === "own" && venue.site_url ? venue.site_url : publicUrl(d.baseUrl, venue.slug);
   if (member.role === "owner") {
-    const admin = await ownerDashboardLink(d, venue);
+    const { url: admin, account } = await ownerDashboardLink(d, venue);
     // No website at all (social media only): the welcome talks about their Instagram, not a site.
-    if (venue.site_mode === "none") await d.messenger.send(member.chat_ref, c.welcomeSocial(keep(venue.name), admin, channelOf(member.chat_ref)));
-    else await d.messenger.send(member.chat_ref, c.welcome(keep(venue.name), admin, site, channelOf(member.chat_ref)));
+    if (venue.site_mode === "none") await d.messenger.send(member.chat_ref, c.welcomeSocial(keep(venue.name), admin, channelOf(member.chat_ref), account));
+    else await d.messenger.send(member.chat_ref, c.welcome(keep(venue.name), admin, site, channelOf(member.chat_ref), account));
     if (venue.site_mode === "own" && venue.site_url) await d.messenger.send(member.chat_ref, c.ownSite(venue.site_url));
     if (d.onOwnerJoined) {
       // The first owner join is the human check that publishes the site; startDeploy ignores venues that already have one
@@ -262,8 +265,10 @@ async function welcome(d: BotDeps, member: Member, previous: Member | null) {
 async function welcomeBack(d: BotDeps, member: Member) {
   const venue = await d.store.getVenue(member.venue_id);
   const c = copy(baseLang(member.lang));
-  if (member.role === "owner") await d.messenger.send(member.chat_ref, c.welcomeBack(keep(venue.name), await ownerDashboardLink(d, venue)));
-  else await d.messenger.send(member.chat_ref, c.welcomeStaff(keep(venue.name), publicUrl(d.baseUrl, venue.slug), venue.site_mode === "none"));
+  if (member.role === "owner") {
+    const { url, account } = await ownerDashboardLink(d, venue);
+    await d.messenger.send(member.chat_ref, c.welcomeBack(keep(venue.name), url, account));
+  } else await d.messenger.send(member.chat_ref, c.welcomeStaff(keep(venue.name), publicUrl(d.baseUrl, venue.slug), venue.site_mode === "none"));
 }
 
 async function runCommand(d: BotDeps, member: Member, channel: Channel, cmd: string) {
@@ -286,10 +291,10 @@ async function runCommand(d: BotDeps, member: Member, channel: Channel, cmd: str
       return;
     case "menu": {
       const venue = await d.store.getVenue(member.venue_id);
-      const admin = member.role === "owner" ? await ownerDashboardLink(d, venue) : null;
+      const link = member.role === "owner" ? await ownerDashboardLink(d, venue) : null;
       // An own-site venue is linked as is: its site may not have a /menu path. Hosted venues get site and menu.
       const hosted = publicUrl(d.baseUrl, venue.slug);
-      await d.messenger.send(member.chat_ref, venue.site_mode === "own" && venue.site_url ? c.menu(venue.site_url, null, admin) : c.menu(hosted, `${hosted}/menu`, admin, venue.site_mode === "none")); // none: "Your page", intended: its hosted page is not a website
+      await d.messenger.send(member.chat_ref, venue.site_mode === "own" && venue.site_url ? c.menu(venue.site_url, null, link?.url ?? null, false, link?.account) : c.menu(hosted, `${hosted}/menu`, link?.url ?? null, venue.site_mode === "none", link?.account)); // none: "Your page", intended: its hosted page is not a website
       return;
     }
     case "connect": {

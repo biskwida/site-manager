@@ -17,10 +17,11 @@ export const metadata: Metadata = { title: `${DICTS.bg["admin.title"]} · ${DICT
 export default async function Page(props: PageProps<"/dashboard/[slug]">) {
   const { slug } = await props.params;
   // Signed out: sign in, then come back here.
-  if (!(await getSessionUser())) redirect(`/login?next=${encodeURIComponent(`/dashboard/${slug}`)}`);
+  const user = await getSessionUser();
+  if (!user) redirect(`/login?next=${encodeURIComponent(`/dashboard/${slug}`)}`);
   const deps = await getServerDeps((fn) => after(fn));
   // Signed in but not an owner of this slug: the same not-found page as for a slug that does not exist.
-  const access = await authorizeAdminAccess(null, slug, { store: deps.store });
+  const access = await authorizeAdminAccess(null, slug, { store: deps.store, sessionUser: async () => user }); // the user fetched above: no second getUser
   if (!access) notFound();
   const overview = await adminOverview(deps.store, access.venue, new Date(), deps.config.publicBaseUrl, { hosted: deps.deployer === null, social: socialAvailability(deps.config, deps.destinationSecretKey) });
   return (

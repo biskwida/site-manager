@@ -27,6 +27,20 @@ describe("loadSite", () => {
     expect(applied?.state.items.find((i) => i.id === items.Cappuccino.id)?.price_eur).toBe(3.2);
   });
 
+  it("previews a draft for the signed-in owner (userId), never for staff or a stranger, and the draft info carries no key", async () => {
+    const { store, venue, items } = await makeDemo();
+    const site = await store.getSite(venue.id);
+    const cs = await store.createChangeSet({ venue_id: venue.id, chat_ref: "tg:1001", summary_bg: "c", summary_en: "c", preview_bg: "p", preview_en: "p", source: "text", status: "proposed", changes: planChanges(site, [{ op: "set_price", item_id: items.Cappuccino.id, price_eur: 3.2 }], { newId: () => "n", now: "2026-10-09T09:00:00.000Z" }) });
+    await store.linkVenueUser(venue.id, "owner-1", "owner");
+    await store.linkVenueUser(venue.id, "staff-1", "staff");
+    const seen = await loadSite(store, "agala", { draftId: cs.id, userId: "owner-1" });
+    expect(seen?.draft).toMatchObject({ id: cs.id, key: "" });
+    expect(seen?.state.items.find((i) => i.id === items.Cappuccino.id)?.price_eur).toBe(3.2);
+    for (const userId of ["staff-1", "stranger", null]) expect((await loadSite(store, "agala", { draftId: cs.id, userId }))?.draft).toBeNull();
+    // a wrong key is not rescued by the session
+    expect((await loadSite(store, "agala", { draftId: cs.id, key: "wrong", userId: "owner-1" }))?.draft).toBeNull();
+  });
+
   it("hides a draft venue unless the draft token matches, and passes the key into the draft info", async () => {
     const { store, venue } = await makeDemo();
     const draft = await store.createVenue({ slug: "mydraft", name: "Draft", status: "draft" });

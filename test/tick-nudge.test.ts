@@ -27,6 +27,21 @@ describe("startTickNudge", () => {
     stop();
   });
 
+  it("nudges by ?slug= when there is no key (the account dashboard), and not at all with neither", async () => {
+    const calls: string[] = [];
+    const fetcher = (async (input: RequestInfo | URL) => {
+      calls.push(String(input));
+      return new Response("{}");
+    }) as typeof fetch;
+    const stop = startTickNudge({ slug: "my cafe", fetcher });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(calls).toEqual(["/api/tick?slug=my%20cafe"]);
+    stop();
+    startTickNudge({ fetcher })();
+    await vi.advanceTimersByTimeAsync(TICK_NUDGE_MS);
+    expect(calls).toHaveLength(1);
+  });
+
   it("stops when stopped and swallows network errors", async () => {
     let n = 0;
     const fetcher = (async () => {

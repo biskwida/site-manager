@@ -1,6 +1,6 @@
 import { after } from "next/server";
 import { disconnectWordPress } from "@/src/destinations/connect";
-import { authorizeAdmin } from "@/src/server/admin-auth";
+import { adminGate } from "@/src/server/admin-auth";
 import { getServerDeps } from "@/src/server/deps";
 
 export const dynamic = "force-dynamic";
@@ -9,9 +9,9 @@ export const dynamic = "force-dynamic";
 export async function POST(req: Request, ctx: RouteContext<"/api/admin/[slug]/wordpress">) {
   const { slug } = await ctx.params;
   const deps = await getServerDeps((fn) => after(fn));
-  const access = await authorizeAdmin(req, slug, { store: deps.store });
-  if (!access) return Response.json({ error: "unauthorized" }, { status: 401 });
-  const { venue } = access;
+  const gate = await adminGate(req, slug, { store: deps.store });
+  if ("response" in gate) return gate.response;
+  const { venue } = gate.access;
   const body = (await req.json().catch(() => ({}))) as { action?: string };
   if (body.action !== "disconnect") return Response.json({ error: "bad request" }, { status: 400 });
   const disconnected = await disconnectWordPress({ store: deps.store, secretKey: deps.destinationSecretKey }, venue.id);

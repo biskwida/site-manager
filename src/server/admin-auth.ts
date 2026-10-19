@@ -10,7 +10,7 @@ import { getSessionUser, type SessionUser } from "./session";
 export interface AdminAuthDeps {
   store: Store;
   /** The signed-in account of this request; defaults to the Supabase session cookies. Tests inject one. */
-  sessionUser?: () => Promise<SessionUser | null>;
+  sessionUser?: () => Promise<Pick<SessionUser, "id"> | null>;
 }
 
 export type AdminAuth = { venue: Venue; via: "key"; key: string } | { venue: Venue; via: "session"; key?: undefined };
@@ -34,4 +34,38 @@ export async function authorizeAdminAccess(key: string | null | undefined, slug:
 /** authorizeAdminAccess with the key read from the request's `?key=`. */
 export function authorizeAdmin(req: Request, slug: string, deps: AdminAuthDeps): Promise<AdminAuth | null> {
   return authorizeAdminAccess(new URL(req.url).searchParams.get("key"), slug, deps);
+}
+
+/** What `handleSocialStart` takes: the key itself for a key access, a session marker for an account access. */
+export function socialAuthOf(access: AdminAuth): string | { via: "session" } {
+  return access.via === "key" ? access.key : { via: "session" };
+}
+
+/**
+ * CSRF guard for cookie-authenticated writes: the request must say where it came from, and that must be this host. An Origin header
+ * decides when present ("null" and other hosts fail); a Referer is used only when Origin is missing. Neither header: refused.
+ */
+export function sameOrigin(req: Request): boolean {
+  const host = new URL(req.url).host;
+  const origin = req.headers.get("origin");
+  const from = origin ?? req.headers.get("referer");
+  if (!from) return false;
+  try {
+    return new URL(from).host === host;
+  } catch {
+    return false;
+  }
+}
+
+const SAFE_METHODS = new Set(["GET", "HEAD", "OPTIONS"]);
+
+/**
+ * authorizeAdmin plus the answer for the route: a 401 Response for no access, a 403 Response for a session request that changes
+ * something (not GET/HEAD/OPTIONS) without a same-host Origin/Referer, else the access. Key requests are not origin-checked.
+ */
+export async function adminGate(req: Request, slug: string, deps: AdminAuthDeps): Promise<{ access: AdminAuth } | { response: Response }> {
+  const access = await authorizeAdmin(req, slug, deps);
+  if (!access) return { response: Response.json({ error: "unauthorized" }, { status: 401 }) };
+  if (access.via === "session" && !SAFE_METHODS.has(req.method.toUpperCase()) && !sameOrigin(req)) return { response: Response.json({ error: "forbidden" }, { status: 403 }) };
+  return { access };
 }
