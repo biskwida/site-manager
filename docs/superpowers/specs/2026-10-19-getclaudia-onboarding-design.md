@@ -9,7 +9,7 @@ Date: 19 Oct 2026. Owner's request: "move the creation page of the website to th
 | Domain | **app.getclaudia.app** for the app. The landing page stays at getclaudia.app. The old site-manager-lovat.vercel.app keeps working. |
 | Login | **An email link plus "Sign in with Google"**, no passwords. This replaces the secret `?key=` dashboard links. |
 | Prices | **The landing page's prices go into Stripe**: Admin 19 €, Social media 39 €, Both 49 € a month, and the ready website 199 € once (no setup fee with your own site). Prices exclude VAT. Stripe runs in **test mode** now and goes live after the company (ЕООД) is registered. |
-| Trial | **Not decided yet.** It is built as a setting: the number of days (default 14) and whether a card is needed at signup (default: no card). The owner can switch it later without code. |
+| Trial | **Decided 19 Oct: 2 weeks free with limited changes, no card.** Settings: `TRIAL_DAYS` = 14, `TRIAL_CHANGE_LIMIT` = 20 (website changes and posts together, counted over the whole trial; undo never counts), `TRIAL_REQUIRES_CARD` = false. All three can change later without code. |
 
 ## Why
 
@@ -119,7 +119,7 @@ Today anyone can open `/new`, build a website and get a chat code. There is no a
 
 - **New venue columns:**
   - `plan`: `admin | social | both | null`
-  - `trial_ends_at`
+  - `trial_started_at`, `trial_ends_at`
   - `billing_status`: `trialing | active | past_due | paused | canceled`
   - `past_due_since`
   - `stripe_customer_id`, `stripe_subscription_id`
@@ -131,7 +131,8 @@ Today anyone can open `/new`, build a website and get a chat code. There is no a
   - `TRIAL_REQUIRES_CARD`, default `false`
   - `STRIPE_PRICE_ADMIN` / `_SOCIAL` / `_BOTH` / `_WEBSITE_SETUP`
   - `BILLING_ENABLED`: when off, everything stays free and unlimited, as today
-- **At signup:** `trial_ends_at = now + TRIAL_DAYS` and `billing_status = trialing`.
+- **At signup:** `trial_started_at = now`, `trial_ends_at = now + TRIAL_DAYS` and `billing_status = trialing`.
+- **Trial changes:** while `trialing` with no paid subscription, the change limit is `TRIAL_CHANGE_LIMIT` (default 20), counted from `trial_started_at` to `trial_ends_at`, not per calendar month. It uses the same counting rules as `src/domain/limits.ts`. At 20, new owner proposals pause with the choose-a-plan link (undo still works). Paying during the trial switches straight to the plan's monthly limit.
   - With `TRIAL_REQUIRES_CARD=true`, signup goes straight to Stripe Checkout (subscription with `trial_period_days`, card collected).
   - Otherwise Checkout is opened only when the owner presses "Choose plan".
   - Without a card, Stripe's `payment_method_collection: 'if_required'` lets an owner with days of trial left start the subscription with no charge yet.
@@ -159,7 +160,7 @@ Today anyone can open `/new`, build a website and get a chat code. There is no a
   - **Existing venues** get `billing_status='active'` and `plan='both'` from the billing migration, which must run **before** `BILLING_ENABLED` is turned on. Nothing changes for Coffique and the pilots until the owner changes a venue with `venue:set --plan/--billing-status`.
 - **Both trial branches are built.** The default is no card. With `TRIAL_REQUIRES_CARD=true`, the new owner goes through Stripe Checkout with `trial_period_days` right after choosing a path.
 - **Reminders** come from the existing `/api/tick`:
-  - 3 days before the trial ends: a chat message and an email.
+  - 3 days before the trial ends, or when 15 of the 20 trial changes are used: a chat message and an email.
   - The day it ends: the same.
   - Each is sent once (marked in the store).
 
@@ -187,7 +188,6 @@ Settled from the reviewer's questions (calls, owner to check): both trial branch
 
 ## Open points
 
-- **The trial rule** (days, card): the owner's call. It's a setting.
 - **Invoices:** can Stripe invoices serve as Bulgarian фактури, or is a local invoicing tool needed (accountant)?
 - **VAT:** registration status of the future ЕООД, and whether to show prices with VAT.
 - **The plan names** in `limits.ts` (Menu 40 / Everywhere 150) don't match the landing's plans. Decide the change limits per plan: suggestion Admin 40, Both 150, Social with no site-change limit.

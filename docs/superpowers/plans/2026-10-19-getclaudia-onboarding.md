@@ -34,11 +34,12 @@
 - **Paused never means offline:** a `paused` or `canceled` venue never loses its website, menu page or published posts.
 - **Env names (exact):**
   - `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY` (browser auth)
-  - `BILLING_ENABLED`, `TRIAL_DAYS` (default 14), `TRIAL_REQUIRES_CARD` (default false)
+  - `BILLING_ENABLED`, `TRIAL_DAYS` (default 14), `TRIAL_CHANGE_LIMIT` (default 20), `TRIAL_REQUIRES_CARD` (default false)
   - `STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET`
   - `STRIPE_PRICE_ADMIN`, `STRIPE_PRICE_SOCIAL`, `STRIPE_PRICE_BOTH`, `STRIPE_PRICE_WEBSITE_SETUP`
   - `RESEND_API_KEY`, `EMAIL_FROM` (default `Claudia <hello@getclaudia.app>`)
   - `LANDING_URL` (default `https://getclaudia.app`), `APP_HOST` (default `app.getclaudia.app`)
+- **Trial (owner, 19 Oct):** 2 weeks free, 20 changes counted over the whole trial (`trial_started_at`..`trial_ends_at`), no card. Paying during the trial switches straight to the plan's monthly limit.
 - **Plans:** `admin` (website changes, 40 a month), `social` (social, comments and boosts; no site changes), `both` (everything, 150 a month). `venues.change_limit`, when not null, overrides the plan's number.
 
 ## Review Focus
@@ -244,7 +245,7 @@
 **Interfaces:**
 - Produces:
   - `PLANS: Record<Plan, { priceEnv: string; changeLimit: number | null; features: Feature[] }>`, where `type Feature = "site" | "social" | "comments" | "boost"`.
-  - `startTrial(now, config): { trial_ends_at; billing_status: "trialing" }`
+  - `startTrial(now, config): { trial_started_at; trial_ends_at; billing_status: "trialing" }`
   - `checkoutSession(stripe, venue, user, plan, { withSetupFee: boolean; trialDaysLeft: number; requireCard: boolean; lang }): Promise<string /* url */>`
   - `applyStripeEvent(store, event): Promise<"applied" | "duplicate" | "ignored">` (idempotent via `billing_events`)
 
@@ -293,6 +294,8 @@
   - Reminders fire once at 3 days left and once at the end; a second tick sends nothing.
   - The trial end flips `trialing` → `paused` only when no active subscription exists.
   - Plan limits: an Admin venue with null `change_limit` gets 40, and Both gets 150.
+  - Trial limit: a trialing venue with no subscription gets 20 changes counted from `trial_started_at` (not the calendar month); the 21st proposal is refused with the choose-a-plan line, undo still works; after `checkout.session.completed` during the trial the plan's monthly limit applies.
+  - The reminder also fires once when 15 of the 20 trial changes are used.
 - [ ] **Step 2:** Run them. Expect FAIL.
 - [ ] **Step 3: Implement.** The refusal line is thrown as a tool error with exact owner text, the same way `ensureWithinLimit` does it.
 - [ ] **Step 4:** Full suite, tsc and lint.
