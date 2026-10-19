@@ -1,7 +1,9 @@
 "use client";
 import Link from "next/link";
 import { useState } from "react";
+import { WEBSITE_SETUP_EUR } from "@/src/billing/plans";
 import { useLang } from "@/src/i18n";
+import { formatEuro } from "@/src/i18n/billing";
 import type { MessageKey } from "@/src/i18n/dicts";
 import type { BillingOverview } from "@/src/server/admin";
 import { Chip, Section } from "./bits";
@@ -72,8 +74,8 @@ export function BillingCard({ billing: b, slug, justPaid = false, go = defaultGo
           {b.can_build_website ? (
             <button type="button" onClick={() => void open("website")} disabled={busy !== null} className={`${btn} bg-accent text-white`}>{busy === "website" ? t("admin.billing.opening") : t("admin.billing.build")}</button>
           ) : null}
-          {b.can_buy_website ? (
-            <button type="button" onClick={() => void open("buy")} disabled={busy !== null} className={btn}>{busy === "buy" ? t("admin.billing.opening") : t("admin.billing.addWebsite")}</button>
+          {b.can_buy_website && !justPaid ? ( // right after paying, the webhook may not have marked the fee yet: do not offer it a second time
+            <button type="button" onClick={() => void open("buy")} disabled={busy !== null} className={btn}>{busy === "buy" ? t("admin.billing.opening") : t("admin.billing.addWebsite", { price: formatEuro(lang, WEBSITE_SETUP_EUR) })}</button>
           ) : null}
           {choose ? (
             <Link href={`/billing/${encodeURIComponent(slug)}?lang=${lang}`} className={btn}>{t("admin.billing.choose")}</Link>

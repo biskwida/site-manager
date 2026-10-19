@@ -53,13 +53,15 @@ function failure(e: unknown): Response {
   return wizardErrorResponse(e);
 }
 
-/** The venue with a Stripe customer: the stored one, else a new one made from the account's email (the id stored before Checkout opens). */
-async function ensureCustomer(d: BillingDeps & { stripe: StripeLike }, venue: Venue, user: { email: string }): Promise<Venue> {
+/**
+ * The venue with a Stripe customer: the stored one, else a new one made from the account's email. Two requests racing each other are
+ * safe twice over: customers.create has the idempotency key customer-<venue id> (Stripe returns the same customer for both), and the id
+ * is stored only while the venue has none (claimStripeCustomer), after which every caller uses whatever is stored.
+ */
+export async function ensureCustomer(d: Pick<BillingDeps, "store"> & { stripe: StripeLike }, venue: Venue, user: { email: string }): Promise<Venue> {
   if (venue.stripe_customer_id) return venue;
-  const created = await d.stripe.customers.create({ email: user.email, metadata: { venue_id: venue.id } });
-  const fresh = await d.store.getVenue(venue.id);
-  if (fresh.stripe_customer_id) return fresh; // a concurrent checkout stored its customer first
-  return d.store.updateVenue(venue.id, { stripe_customer_id: created.id });
+  const created = await d.stripe.customers.create({ email: user.email, metadata: { venue_id: venue.id } }, { idempotencyKey: `customer-${venue.id}` });
+  return d.store.claimStripeCustomer(venue.id, created.id);
 }
 
 /** The website setup bought on its own: a live Admin or Both subscription, no Claudia site yet, the fee unpaid. 400/409 say why not. */
@@ -142,7 +144,8 @@ export async function handlePortal(req: Request, slug: string, d: BillingDeps): 
 /**
  * POST /api/stripe/webhook: the raw body is read as text and its signature verified before anything else (400 when it fails). A good
  * event is applied once (applyStripeEvent): 200 `{received:true}`, `{duplicate:true}` or `{ignored:true}`. A failure is a 500, so Stripe
- * retries. It runs whatever BILLING_ENABLED says. Nothing from the payload (ids, emails) is logged.
+ * retries. It runs whatever BILLING_ENABLED says. No emails or payload bodies are logged (a failure logs the event type and the error's
+ * type and code; a mismatch or double-charge alarm logs venue, customer and session ids so a person can reconcile it).
  */
 export async function handleStripeWebhook(req: Request, d: Pick<BillingDeps, "store" | "config" | "stripe" | "now">): Promise<Response> {
   const secret = d.config.stripeWebhookSecret;

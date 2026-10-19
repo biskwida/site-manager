@@ -38,7 +38,7 @@ export function startTrial(now: Date, config: { trialDays: number }): { trial_st
 /**
  * Whole days of trial left, rounded UP (a trial with 3 hours left has 1 day left); 0 when it has ended or there is none. Stripe's
  * `trial_period_days` takes whole days only, so Checkout passes this number: rounding up means the owner never loses a part day of the
- * trial they were promised (the subscription may start up to 23 hours after our trial_ends_at, never before it).
+ * trial they were promised (the subscription may start up to just under 24 hours after our trial_ends_at, never before it).
  */
 export function trialDaysLeft(venue: Pick<Venue, "trial_ends_at">, now: Date): number {
   if (!venue.trial_ends_at) return 0;

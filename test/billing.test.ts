@@ -40,17 +40,34 @@ class FakeStripe implements StripeLike {
   portalCalls: Record<string, unknown>[] = [];
   subs = new Map<string, StripeSubscription>();
   retrieved: string[] = [];
+  customerKeys: (string | undefined)[] = [];
+  private customersByKey = new Map<string, string>();
   customers = {
-    create: async (p: { email?: string; metadata?: Record<string, string> }) => {
+    create: async (p: { email?: string; metadata?: Record<string, string> }, o?: { idempotencyKey?: string }) => {
       this.customerCalls.push(p);
-      return { id: `cus_${this.customerCalls.length}` };
+      this.customerKeys.push(o?.idempotencyKey);
+      // Like Stripe: the same idempotency key returns the same customer.
+      const known = o?.idempotencyKey ? this.customersByKey.get(o.idempotencyKey) : undefined;
+      if (known) return { id: known };
+      const id = `cus_${this.customerCalls.length}`;
+      if (o?.idempotencyKey) this.customersByKey.set(o.idempotencyKey, id);
+      return { id };
     },
   };
+  checkoutKeys: (string | undefined)[] = [];
+  private sessionsByKey = new Map<string, { id: string; url: string }>();
+  sessionsMade = 0;
   checkout = {
     sessions: {
-      create: async (p: CheckoutParams) => {
+      create: async (p: CheckoutParams, o?: { idempotencyKey?: string }) => {
         this.checkoutCalls.push(p as unknown as Record<string, unknown>);
-        return { id: "cs_1", url: "https://checkout.stripe.test/c/cs_1" };
+        this.checkoutKeys.push(o?.idempotencyKey);
+        const known = o?.idempotencyKey ? this.sessionsByKey.get(o.idempotencyKey) : undefined;
+        if (known) return known; // the same key returns the same session
+        const n = ++this.sessionsMade;
+        const made = { id: `cs_${n}`, url: `https://checkout.stripe.test/c/cs_${n}` };
+        if (o?.idempotencyKey) this.sessionsByKey.set(o.idempotencyKey, made);
+        return made;
       },
     },
   };
@@ -392,7 +409,7 @@ describe("buying the website later (one-off Checkout)", () => {
         metadata: { venue_id: venue.id, kind: "website_setup" },
         success_url: `${BASE}/dashboard/${venue.slug}?billing=success`,
         cancel_url: `${BASE}/dashboard/${venue.slug}`,
-        expires_at: Math.floor(T0.getTime() / 1000) + 31 * 60,
+        expires_at: (Math.floor(T0.getTime() / 1000 / 1800) + 1) * 1800 + 31 * 60,
       });
       expect(c).not.toHaveProperty("subscription_data");
       expect(c).not.toHaveProperty("automatic_tax");
@@ -459,6 +476,89 @@ describe("Stripe errors", () => {
     expect(logged).toContain("resource_missing");
     expect(logged).not.toContain("cus_SECRET");
     spy.mockRestore();
+  });
+});
+
+describe("customer races", () => {
+  it("customers.create gets the idempotency key customer-<venue id>", async () => {
+    const { venue, d, stripe } = await setup();
+    await handleCheckout(post("/api/billing/checkout", { plan: "both" }), venue.slug, d);
+    expect(stripe.customerKeys).toEqual([`customer-${venue.id}`]);
+  });
+
+  it("two concurrent checkouts end with one stored customer, and both sessions use it", async () => {
+    const { store, venue, d, stripe } = await setup();
+    const [a, b] = await Promise.all([handleCheckout(post("/api/billing/checkout", { plan: "both" }), venue.slug, d), handleCheckout(post("/api/billing/checkout", { plan: "both" }), venue.slug, d)]);
+    expect([a.status, b.status]).toEqual([200, 200]);
+    const stored = (await store.getVenue(venue.id)).stripe_customer_id;
+    expect(stored).toBeTruthy();
+    expect(stripe.checkoutCalls.map((c) => c.customer)).toEqual([stored, stored]);
+    expect(new Set(stripe.customerKeys).size).toBe(1);
+  });
+
+  it("even if Stripe handed out two different customers, only the first stored one is used by both", async () => {
+    const { store, venue, d } = await setup();
+    let n = 0;
+    const racing = { ...d.stripe, customers: { create: async () => ({ id: `cus_race_${++n}` }) } } as unknown as StripeLike;
+    const { ensureCustomer } = await import("@/src/server/billing");
+    const [a, b] = await Promise.all([ensureCustomer({ ...d, stripe: racing }, venue, user), ensureCustomer({ ...d, stripe: racing }, venue, user)]);
+    expect(a.stripe_customer_id).toBe(b.stripe_customer_id);
+    expect((await store.getVenue(venue.id)).stripe_customer_id).toBe(a.stripe_customer_id);
+  });
+});
+
+describe("buying the website twice", () => {
+  const live = { plan: "admin" as const, billing_status: "active" as const, stripe_subscription_id: "sub_1", stripe_customer_id: "cus_1", site_mode: "own" as const, site_url: "https://own.example", created_via: "start" as const };
+  const ask = (venue: Venue, d: Parameters<typeof handleCheckout>[2]) => handleCheckout(post("/api/billing/checkout", { kind: "website_setup" }), venue.slug, d);
+
+  it("the one-off Checkout carries website-<venue id>-<30-minute bucket> as its idempotency key; a double click returns the same session", async () => {
+    const { venue, d, stripe } = await setup(live);
+    const bucket = Math.floor(T0.getTime() / (30 * 60_000));
+    const [a, b] = await Promise.all([ask(venue, d), ask(venue, d)]);
+    const urls = [((await a.json()) as { url: string }).url, ((await b.json()) as { url: string }).url];
+    expect(stripe.checkoutKeys).toEqual([`website-${venue.id}-${bucket}`, `website-${venue.id}-${bucket}`]);
+    expect(urls[0]).toBe(urls[1]);
+    expect(stripe.sessionsMade).toBe(1);
+    expect(stripe.checkoutCalls[0]).toEqual(stripe.checkoutCalls[1]); // same parameters, as Stripe's idempotency requires
+  });
+
+  it("the next 30-minute bucket gets a new key (and so a new session)", async () => {
+    const { venue, d, stripe } = await setup(live);
+    await ask(venue, d);
+    await ask(venue, { ...d, now: () => new Date(T0.getTime() + 31 * 60_000) });
+    expect(new Set(stripe.checkoutKeys).size).toBe(2);
+    expect(stripe.sessionsMade).toBe(2);
+    for (const c of stripe.checkoutCalls) {
+      const s = c.expires_at as number;
+      expect(s).toBeGreaterThan(0);
+    }
+  });
+
+  it("a session made anywhere in a bucket expires at least 30 minutes after it is made", async () => {
+    const { venue, d, stripe } = await setup(live);
+    const bucketStart = Math.floor(T0.getTime() / (30 * 60_000)) * 30 * 60_000;
+    for (const offset of [0, 29 * 60_000 + 59_000]) await ask(venue, { ...d, now: () => new Date(bucketStart + offset) });
+    const [first, last] = stripe.checkoutCalls.map((c) => c.expires_at as number);
+    expect(first).toBe(last); // one deterministic value per bucket
+    expect(first * 1000 - (bucketStart + 29 * 60_000 + 59_000)).toBeGreaterThanOrEqual(30 * 60_000);
+  });
+
+  it("a paid website-setup event for a venue whose fee is already paid logs an error with the venue id and the session id", async () => {
+    const t = await setup({ ...live, website_fee_paid: true });
+    const err = vi.spyOn(console, "error").mockImplementation(() => {});
+    const session = { id: "cs_twice", mode: "payment", customer: "cus_1", subscription: null, payment_status: "paid", amount_total: 19900, metadata: { venue_id: t.venue.id, kind: "website_setup" } };
+    await applyStripeEvent(t.store, ev("evt_twice", "checkout.session.completed", session), { config: { stripePrices: PRICES }, stripe: t.stripe, now: () => T0 });
+    const logged = err.mock.calls.flat().join(" ");
+    expect(logged).toContain(t.venue.id);
+    expect(logged).toContain("cs_twice");
+    expect(logged).toMatch(/double charge/i);
+    expect((await t.store.getVenue(t.venue.id)).website_fee_paid).toBe(true);
+    err.mockClear();
+    // a first payment is not an alarm
+    const fresh = await setup(live);
+    await applyStripeEvent(fresh.store, ev("evt_once", "checkout.session.completed", { ...session, metadata: { venue_id: fresh.venue.id, kind: "website_setup" } }), { config: { stripePrices: PRICES }, stripe: fresh.stripe, now: () => T0 });
+    expect(err).not.toHaveBeenCalled();
+    err.mockRestore();
   });
 });
 
@@ -631,6 +731,36 @@ describe("applyStripeEvent", () => {
     expect(await t.get()).toMatchObject({ billing_status: null, stripe_subscription_id: null });
     expect(warn).toHaveBeenCalled();
     expect(warn.mock.calls.flat().join(" ")).toContain(t.venue.id);
+    warn.mockRestore();
+  });
+
+  it("the same mismatch on a PAID event (checkout paid, async succeeded, invoice.paid) is an error with the venue id and both customer ids; the state is still not touched", async () => {
+    const t = await ready({ stripe_customer_id: "cus_1" });
+    const err = vi.spyOn(console, "error").mockImplementation(() => {});
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    t.stripe.subs.set("sub_x", sub({ id: "sub_x", customer: "cus_other" }));
+    const paid = { id: "cs_p", customer: "cus_other", subscription: "sub_x", payment_status: "paid", amount_total: 100, metadata: { venue_id: t.venue.id, setup_fee: "0" } };
+    const cases: [string, string, unknown][] = [
+      ["e1", "checkout.session.completed", paid],
+      ["e2", "checkout.session.async_payment_succeeded", { ...paid, payment_status: "paid" }],
+      ["e3", "invoice.paid", { id: "in_p", customer: "cus_other", parent: { subscription_details: { subscription: "sub_x", metadata: { venue_id: t.venue.id } } } }],
+    ];
+    for (const [id, type, object] of cases) {
+      err.mockClear();
+      expect(await t.apply(ev(id, type, object)), type).toBe("ignored");
+      const logged = err.mock.calls.flat().join(" ");
+      expect(logged, type).toContain(t.venue.id);
+      expect(logged, type).toContain("cus_1");
+      expect(logged, type).toContain("cus_other");
+    }
+    expect(await t.get()).toMatchObject({ billing_status: null, stripe_subscription_id: null });
+    // an unpaid checkout and a plain subscription event stay warnings
+    err.mockClear();
+    await t.apply(ev("e4", "checkout.session.completed", { ...paid, payment_status: "unpaid" }));
+    await t.apply(ev("e5", "customer.subscription.updated", sub({ id: "sub_x", customer: "cus_other", metadata: { venue_id: t.venue.id } })));
+    expect(err).not.toHaveBeenCalled();
+    expect(warn).toHaveBeenCalled();
+    err.mockRestore();
     warn.mockRestore();
   });
 

@@ -184,6 +184,20 @@ describe("PlanPicker", () => {
     expect(bg).toContain("199 € еднократно, без ДДС");
   });
 
+  it("the required banner follows the ticked add-on, not only the locked one", () => {
+    expect(html({ required: true, addon: "optional" })).toContain("Nothing is charged today.");
+    const ticked = html({ required: true, addon: "optional", initialTicked: true });
+    expect(ticked).not.toContain("Nothing is charged today.");
+    expect(ticked).toContain("Today: €199 excl. VAT for the website; the plan starts after the trial.");
+    // Social media cannot carry the add-on, so a stale tick does not change the banner
+    expect(html({ required: true, addon: "optional", initialTicked: true, initialPlan: "social" })).toContain("Nothing is charged today.");
+  });
+
+  it("Add a website says excl. VAT (без ДДС)", () => {
+    expect(html({ subscribed: true, canBuyWebsite: true })).toContain("Add a website — €199 once, excl. VAT");
+    expect(renderToStaticMarkup(<PlanPicker {...base} lang="bg" addon="optional" subscribed canBuyWebsite />)).toContain("Добавете сайт — 199 € еднократно, без ДДС");
+  });
+
   it("?required=1 says nothing is charged today, unless the website is in the Checkout", () => {
     expect(html({ required: true })).toContain("Nothing is charged today.");
     const locked = html({ required: true, addon: "locked" });
@@ -271,6 +285,15 @@ describe("the dashboard's plan card", () => {
     expect(paused).toContain("Manage billing");
     expect(paused).not.toContain("Choose a plan");
     expect(card(b({ status: "paused", subscribed: false }))).toContain("Choose a plan");
+  });
+
+  it("Add a website says excl. VAT and is not offered right after paying (?billing=success)", () => {
+    const buy = b({ plan: "admin", status: "active", subscribed: true, can_buy_website: true });
+    expect(card(buy)).toContain("Add a website — €199 once, excl. VAT");
+    expect(card(buy, "bg")).toContain("Добавете сайт — 199 € еднократно, без ДДС");
+    const paidJustNow = renderToStaticMarkup(<LangProvider defaultLang="en"><BillingCard billing={buy} slug="coffique" justPaid /></LangProvider>);
+    expect(paidJustNow).not.toContain("Add a website");
+    expect(paidJustNow).toContain("Thank you");
   });
 
   it("a live Admin/Both subscriber without a site can add one for €199 once; Social is told a website comes with Admin or Both", () => {

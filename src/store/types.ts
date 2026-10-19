@@ -535,6 +535,11 @@ export interface Store {
   startTrialIfNone(venueId: string, trial: { trial_started_at: string; trial_ends_at: string }): Promise<boolean>;
   /** The venue with this Stripe customer id (stripe_customer_id is unique); null when none. */
   findVenueByStripeCustomer(customerId: string): Promise<Venue | null>;
+  /**
+   * Stores the Stripe customer on the venue only while it has none (one conditional update), and returns the venue as it is stored
+   * afterwards: with the customer just given, or with the one a concurrent call stored first. Throws on an unknown venue.
+   */
+  claimStripeCustomer(venueId: string, customerId: string): Promise<Venue>;
   /** The venue with this id; null when there is none (getVenue throws instead). */
   findVenueById(id: string): Promise<Venue | null>;
   /** Whether this Stripe event id was recorded as processed (billing_events). */

@@ -1124,6 +1124,22 @@ export function storeContract(
       }
     });
 
+    it("billing: claimStripeCustomer stores a customer only while there is none and returns what is stored", async () => {
+      const s = await make();
+      const v = await s.createVenue({ slug: "t-b6", name: "B6" });
+      try {
+        const [a, b] = [`cus_${crypto.randomUUID()}`, `cus_${crypto.randomUUID()}`];
+        const [r1, r2] = await Promise.all([s.claimStripeCustomer(v.id, a), s.claimStripeCustomer(v.id, b)]);
+        expect(r1.stripe_customer_id).toBe(r2.stripe_customer_id); // both see the one that won
+        expect([a, b]).toContain(r1.stripe_customer_id);
+        expect((await s.getVenue(v.id)).stripe_customer_id).toBe(r1.stripe_customer_id);
+        expect((await s.claimStripeCustomer(v.id, `cus_${crypto.randomUUID()}`)).stripe_customer_id).toBe(r1.stripe_customer_id); // later claims change nothing
+        await expect(s.claimStripeCustomer(crypto.randomUUID(), a)).rejects.toThrow();
+      } finally {
+        await s.deleteVenue(v.id);
+      }
+    });
+
     it("billing: a Stripe event id is recorded once, after applying; findVenueById is null for an unknown venue", async () => {
       const s = await make();
       const id = `evt_${crypto.randomUUID()}`;

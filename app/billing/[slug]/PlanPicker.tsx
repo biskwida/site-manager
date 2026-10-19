@@ -19,6 +19,8 @@ export interface PlanPickerProps {
   startsOn: string | null;
   addon: AddonMode;
   initialPlan: Plan;
+  /** For an optional add-on: start with the box ticked (a deep link, and tests). */
+  initialTicked?: boolean;
   /** TRIAL_REQUIRES_CARD: the owner was sent here before the checklist. */
   required: boolean;
   /** A Stripe subscription exists that is not canceled (live, paused or unpaid): change it, add a card or resume it in the Customer Portal. */
@@ -43,7 +45,7 @@ export function PlanPicker(p: PlanPickerProps) {
   const f = p.fetcher ?? defaultFetch;
   const go = p.go ?? defaultGo;
   const [plan, setPlan] = useState<Plan>(p.addon === "locked" && p.initialPlan === "social" ? "both" : p.initialPlan);
-  const [ticked, setTicked] = useState(false);
+  const [ticked, setTicked] = useState(p.initialTicked ?? false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -78,7 +80,7 @@ export function PlanPicker(p: PlanPickerProps) {
       <h1 className="mt-1.5 font-display text-4xl leading-tight">{t["plan.title"]}</h1>
       {p.required ? (
         <p role="note" className="mt-3 rounded-2xl bg-[var(--cl-accent-soft)] px-4 py-3 text-[var(--cl-ink)]">
-          {p.addon === "locked" ? fill(t["plan.requiredSetup"], { price: formatEuro(lang, WEBSITE_SETUP_EUR) }) : t["plan.required"]}
+          {addonOn ? fill(t["plan.requiredSetup"], { price: formatEuro(lang, WEBSITE_SETUP_EUR) }) : t["plan.required"]}
         </p>
       ) : null}
 

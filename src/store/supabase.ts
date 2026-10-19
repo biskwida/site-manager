@@ -697,6 +697,13 @@ export class SupabaseStore implements Store {
     if (error) throw new Error(`findVenueByStripeCustomer: ${error.message}`);
     return data ? this.venue(data) : null;
   }
+  async claimStripeCustomer(venueId: string, customerId: string) {
+    if (badVenue(venueId)) throw new Error(`claimStripeCustomer ${venueId}: not found`);
+    // One conditional UPDATE: the row filter is the claim, so of two concurrent callers only the first writes.
+    const { error } = await this.db.from("venues").update({ stripe_customer_id: customerId }).eq("id", venueId).is("stripe_customer_id", null).select("id");
+    if (error) throw new Error(`claimStripeCustomer ${venueId}: ${error.message}`);
+    return this.getVenue(venueId); // whichever customer is stored now (throws "not found" for an unknown venue)
+  }
   async findVenueById(id: string) {
     if (badVenue(id)) return null;
     const { data, error } = await this.db.from("venues").select("*").eq("id", id).maybeSingle();

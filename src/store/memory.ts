@@ -568,6 +568,11 @@ export class InMemoryStore implements Store {
     const s = [...this.sites.values()].find((x) => x.venue.stripe_customer_id === customerId);
     return s ? clone(s.venue) : null;
   }
+  async claimStripeCustomer(venueId: string, customerId: string) {
+    const v = this.site(venueId).venue;
+    if (v.stripe_customer_id === null) v.stripe_customer_id = customerId;
+    return clone(v);
+  }
   async findVenueById(id: string) {
     const s = this.sites.get(id);
     return s ? clone(s.venue) : null;
