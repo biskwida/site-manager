@@ -46,6 +46,9 @@ export function SiteCard({ overview: o, post, adminKey = "", refresh }: { overvi
   }
   const msgText = msg ? ("key" in msg ? t(msg.key) : msg[lang]) : null;
 
+  // No website at all (social media only): there is nothing to show, deploy or switch here.
+  if (o.site_mode === "none") return null;
+
   const statusTone = d?.status === "ready" ? "good" : d?.status === "error" ? "warn" : "plain";
   // Own site (built and hosted elsewhere, reads our feed): just the link and who runs it; no deploy rows, no template switch.
   if (o.own_site) {

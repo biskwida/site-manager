@@ -65,10 +65,11 @@ describe("publicSiteState", () => {
     const { store, venue } = await makeDemo();
     await store.setDeploy(venue.id, { provider: "vercel", project_id: "prj_secret", deployment_id: "dpl_1", url: "https://x.vercel.app", status: "error", error: "Build failed at /vercel/path0", template: "classic", updated_at: "2026-10-10T09:00:00.000Z" });
     await store.updateVenue(venue.id, { instagram_import: { fetched_at: "2026-10-10T09:00:00.000Z", username: "agala", items: [{ id: "1", url: "https://scontent.cdninstagram.com/secret.jpg", thumb: "https://scontent.cdninstagram.com/secret.jpg", caption: "", permalink: "", taken_at: "" }] } });
-    await store.updateVenue(venue.id, { site_url: "https://own.example" });
+    await store.updateVenue(venue.id, { site_mode: "own", site_url: "https://own.example" });
     const state = await store.getSite(venue.id);
     const pub = publicSiteState(state);
     expect("site_url" in pub.venue).toBe(false); // the feed keeps its shape: the own-site URL is a dashboard/bot field
+    expect("site_mode" in pub.venue).toBe(false); // so is how the venue's website is run
     expect("deploy" in pub.venue).toBe(false);
     expect("wizard_draft" in pub.venue).toBe(false);
     expect("instagram_import" in pub.venue).toBe(false);
@@ -77,12 +78,13 @@ describe("publicSiteState", () => {
     expect("comment_limit" in pub.venue).toBe(false);
     expect(JSON.stringify(pub)).not.toContain("prj_secret");
     expect(JSON.stringify(pub)).not.toContain("cdninstagram");
-    const { deploy: _d, wizard_draft: _w, instagram_import: _i, site_url: _s, change_limit: _l, comment_mode: _cm, comment_digest_hour: _ch, comment_limit: _cl, last_comment_digest_at: _cd, ...rest } = state.venue;
+    const { deploy: _d, wizard_draft: _w, instagram_import: _i, site_url: _s, site_mode: _sm, change_limit: _l, comment_mode: _cm, comment_digest_hour: _ch, comment_limit: _cl, last_comment_digest_at: _cd, ...rest } = state.venue;
     void _d;
     void _w;
     void _i;
     void _s;
     void _l;
+    void _sm;
     void _cm;
     void _ch;
     void _cl;
@@ -118,7 +120,7 @@ describe("ownSiteRedirect", () => {
     const { store, venue } = await makeDemo();
     const hosted = await loadSite(store, venue.slug);
     expect(ownSiteRedirect(hosted!)).toBeNull();
-    await store.updateVenue(venue.id, { site_url: "https://coffique.example" });
+    await store.updateVenue(venue.id, { site_mode: "own", site_url: "https://coffique.example" });
     const own = await loadSite(store, venue.slug);
     expect(ownSiteRedirect(own!)).toBe("https://coffique.example");
     expect(ownSiteRedirect({ ...own!, draft: { id: "d1", summary_bg: "", summary_en: "", apply_at: null } as never })).toBeNull();

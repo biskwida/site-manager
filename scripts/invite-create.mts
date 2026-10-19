@@ -34,10 +34,11 @@ if (!r.ok) {
 }
 const { venue } = r;
 console.log(`venue ${venue.slug} (${venue.id})${deps.isMemory ? " in the MEMORY store (lost on exit)" : ""}`);
-if (venue.site_url) {
+if (venue.site_mode === "own" && venue.site_url) {
   console.log(`own site:    ${venue.site_url}   (reads ${deps.config.publicBaseUrl}/api/site/${venue.slug}; no Vercel project is created)`);
   if (venue.deploy) console.log(`note: an earlier template deploy (${venue.deploy.provider} ${venue.deploy.project_id || "no project"}) stays where it is; the dashboard no longer shows it.`);
-} else console.log(`site:        ${deps.config.publicBaseUrl}/${venue.slug}`);
+} else if (venue.site_mode === "none") console.log("site:        none (social media only; no Vercel project is created)");
+else console.log(`site:        ${deps.config.publicBaseUrl}/${venue.slug}`);
 const note = r.reused ? "the open invite, reused; one use" : "valid 7 days, one use";
 for (const line of inviteLines(deps.config, [{ role: roleArg, code: r.code, note }])) console.log(line);
 console.log("This code links a chat to the venue and is shown once. Keep it out of git and chat logs.");

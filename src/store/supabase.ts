@@ -53,6 +53,8 @@ export function toVenue(r: Row): Venue {
     instagram_import: (r.instagram_import as InstagramImport | null) ?? null,
     // Missing before the column is added: read as null (a hosted or template site).
     site_url: strOrNull(r.site_url),
+    // Missing before the migration is applied (or any unknown value): a Claudia site, as before.
+    site_mode: r.site_mode === "own" || r.site_mode === "none" ? r.site_mode : "claudia",
     created_at: iso(r.created_at),
   };
 }

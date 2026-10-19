@@ -5,7 +5,7 @@ import { invertChanges } from "../domain/changes";
 import { isSoldOut } from "../domain/effective";
 import { baseLang, unkeep, unkeepTexts } from "../domain/format";
 import { renderPreview } from "../domain/preview";
-import { isBoostPlanSet, isBoostPlanUndoSet, TEMPLATE_IDS, type ChangeSet, type DeployInfo, type TemplateId, type Venue, type VenueStatus } from "../domain/types";
+import { isBoostPlanSet, isBoostPlanUndoSet, TEMPLATE_IDS, type ChangeSet, type DeployInfo, type SiteMode, type TemplateId, type Venue, type VenueStatus } from "../domain/types";
 import type { Deployer, DeployInput, DomainInstructions } from "../deploy/types";
 import { normalizeDomain } from "../deploy/vercel-domains";
 import type { DestinationStatus, Store, SyncStatus } from "../store/types";
@@ -24,8 +24,10 @@ export interface AdminOverview {
   status: VenueStatus;
   /** True when this server has no deployer (no VERCEL_TOKEN): the hosted /<slug> is the site; no deploy record, no custom domain. */
   hosted: boolean;
-  /** True when the venue has its own site (Venue.site_url, built and hosted elsewhere): no deploy, template switch or custom domain. */
+  /** True when the venue has its own site (Venue.site_mode "own", built and hosted elsewhere at Venue.site_url): no deploy, template switch or custom domain. */
   own_site?: boolean;
+  /** The venue's site mode; "none" (social media only) hides the site, template and domain cards like own_site does. */
+  site_mode?: SiteMode;
   /** Always null when `hosted` or `own_site`. */
   deploy: DeployInfo | null;
   /** The venue's own site when `own_site`; else the provider URL when the deploy is ready, otherwise our hosted copy. */
@@ -62,10 +64,10 @@ export async function adminOverview(store: Store, venue: Venue, now: Date, baseU
   ]);
   const nowMs = now.getTime();
   const hosted = opts.hosted ?? false;
-  const ownSite = venue.site_url !== null && venue.site_url !== "";
+  const ownSite = venue.site_mode === "own" && venue.site_url !== null && venue.site_url !== "";
   // In hosted mode a deploy record left from an earlier setup means nothing: no provider is reachable from this server.
-  // An own site is not ours to deploy either, whatever record an earlier template setup left behind.
-  const deploy = hosted || ownSite ? null : venue.deploy;
+  // An own site (or none) is not ours to deploy either, whatever record an earlier template setup left behind.
+  const deploy = hosted || venue.site_mode !== "claudia" ? null : venue.deploy;
   return {
     venue: { id: venue.id, slug: venue.slug, name: venue.name, tz: venue.tz, default_lang: venue.default_lang },
     now: now.toISOString(),
@@ -74,6 +76,7 @@ export async function adminOverview(store: Store, venue: Venue, now: Date, baseU
     status: venue.status,
     hosted,
     own_site: ownSite,
+    site_mode: venue.site_mode,
     deploy,
     site_url: ownSite ? (venue.site_url as string) : deploy?.status === "ready" && deploy.url ? deploy.url : `${baseUrl}/${venue.slug}`,
     custom_domain: deploy?.custom_domain ?? null,
@@ -221,11 +224,12 @@ export interface AdminSiteDeps {
 }
 export type SetTemplateResult =
   | { ok: true; template: TemplateId; deploy: DeployInfo | null }
-  | { ok: false; code: "unknown_template" | "busy" | "failed" | "own_site"; error: string; bg: string; en: string };
+  | { ok: false; code: "unknown_template" | "busy" | "failed" | "own_site" | "no_site"; error: string; bg: string; en: string };
 
 const UNKNOWN_TEMPLATE: SetTemplateResult = { ok: false, code: "unknown_template", error: "Unknown template.", bg: "Непознат шаблон.", en: "Unknown template." };
 const SAVE_FAILED: SetTemplateResult = { ok: false, code: "failed", error: "The template could not be saved.", bg: "Шаблонът не можа да бъде запазен. Опитайте отново.", en: "The template could not be saved. Try again." };
 const OWN_SITE: SetTemplateResult = { ok: false, code: "own_site", error: "This venue has its own site; templates do not apply.", bg: "Сайтът ви е изграден отделно и не използва шаблон.", en: "Your site is built separately and does not use a template." };
+const NO_WEBSITE: SetTemplateResult = { ok: false, code: "no_site", error: "This venue has no website; templates do not apply.", bg: "Нямате уебсайт, затова няма шаблон за смяна.", en: "You have no website, so there is no template to change." };
 const BUSY: SetTemplateResult = { ok: false, code: "busy", error: "The site is publishing right now.", bg: "Сайтът се публикува в момента. Опитайте след минута.", en: "The site is publishing right now. Try again in a minute." };
 
 /**
@@ -234,7 +238,8 @@ const BUSY: SetTemplateResult = { ok: false, code: "busy", error: "The site is p
  * concurrent switches cannot both start one. Never calls startDeploy. Refuses for a venue with its own site.
  */
 export async function setTemplate(d: AdminSiteDeps, venue: Venue, template: unknown): Promise<SetTemplateResult> {
-  if (venue.site_url) return OWN_SITE; // its own site never wears one of our templates
+  if (venue.site_mode === "own") return OWN_SITE; // its own site never wears one of our templates
+  if (venue.site_mode === "none") return NO_WEBSITE;
   if (typeof template !== "string" || !(TEMPLATE_IDS as readonly string[]).includes(template)) return UNKNOWN_TEMPLATE;
   const id = template as TemplateId;
   const deploy = venue.deploy;

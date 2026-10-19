@@ -51,17 +51,18 @@ export async function loadSite(store: Store, slug: string, opts: LoadSiteOptions
   return { state, draft };
 }
 
-/** The venue as the public feed sends it: no deploy record (provider ids, build errors), no wizard draft, no Instagram import list, no own-site URL, no change limit, no comment settings. */
-export type PublicVenue = Omit<Venue, "deploy" | "wizard_draft" | "instagram_import" | "site_url" | "change_limit" | "comment_mode" | "comment_digest_hour" | "comment_limit" | "last_comment_digest_at">;
+/** The venue as the public feed sends it: no deploy record (provider ids, build errors), no wizard draft, no Instagram import list, no own-site URL or site mode, no change limit, no comment settings. */
+export type PublicVenue = Omit<Venue, "deploy" | "wizard_draft" | "instagram_import" | "site_url" | "site_mode" | "change_limit" | "comment_mode" | "comment_digest_hour" | "comment_limit" | "last_comment_digest_at">;
 export type PublicSiteState = Omit<SiteState, "venue"> & { venue: PublicVenue };
 
 /** For GET /api/site/[slug]: everything templates and outside readers (Coffique) use, minus the owner-only venue fields. */
 export function publicSiteState(state: SiteState): PublicSiteState {
-  const { deploy, wizard_draft, instagram_import, site_url, change_limit, comment_mode, comment_digest_hour, comment_limit, last_comment_digest_at, ...venue } = state.venue;
+  const { deploy, wizard_draft, instagram_import, site_url, site_mode, change_limit, comment_mode, comment_digest_hour, comment_limit, last_comment_digest_at, ...venue } = state.venue;
   void deploy;
   void wizard_draft;
   void instagram_import;
   void site_url;
+  void site_mode; // how the venue's website is run is the owner's business
   void change_limit; // the plan's limit is the owner's business, not the public's
   void comment_mode; // how the owner hears about comments is the owner's business
   void comment_digest_hour;
@@ -77,7 +78,7 @@ export function publicSiteState(state: SiteState): PublicSiteState {
  * null = render the hosted page as usual.
  */
 export function ownSiteRedirect(site: { state: SiteState; draft: DraftInfo | null }): string | null {
-  const url = site.state.venue.site_url;
-  if (!url || site.draft) return null;
-  return url;
+  const { site_mode, site_url } = site.state.venue;
+  if (site_mode !== "own" || !site_url || site.draft) return null;
+  return site_url;
 }

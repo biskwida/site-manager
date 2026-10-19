@@ -137,7 +137,7 @@ describe("handleInbound", () => {
   });
   it("links an own-site venue's own site without a /menu path, plus the dashboard for the owner", async () => {
     const { d, messenger, store, venue } = await setup();
-    await store.updateVenue(venue.id, { site_url: "https://coffique.vercel.app" });
+    await store.updateVenue(venue.id, { site_mode: "own", site_url: "https://coffique.vercel.app" });
     const key = await store.getAdminToken(venue.id);
     await handleInbound(d, { chatRef: "tg:1001", kind: "text", text: "/menu" });
     expect(texts(messenger).at(-1)).toBe(`Сайтът: https://coffique.vercel.app\nQR код и табло: https://site.example/admin/agala?key=${key}`);
@@ -243,7 +243,7 @@ describe("handleInbound: own-site venues", () => {
   it("welcomes the owner with the venue's own site, says it is connected and managed, and never announces publishing", async () => {
     const joined: string[] = [];
     const { d, messenger, store, venue } = await setup({ onOwnerJoined: (id) => joined.push(id) });
-    await store.updateVenue(venue.id, { site_url: "https://coffique.vercel.app" });
+    await store.updateVenue(venue.id, { site_mode: "own", site_url: "https://coffique.vercel.app" });
     const bg = await store.createInvite(venue.id, "owner", "2026-10-10T00:00:00.000Z");
     await handleInbound(d, { chatRef: "fb:950", kind: "text", text: bg });
     const [welcomeBg, ownBg, ...restBg] = texts(messenger);
@@ -266,7 +266,7 @@ describe("handleInbound: own-site venues", () => {
 
   it("gives staff the venue's own site too", async () => {
     const { d, messenger, store, venue } = await setup();
-    await store.updateVenue(venue.id, { site_url: "https://coffique.vercel.app" });
+    await store.updateVenue(venue.id, { site_mode: "own", site_url: "https://coffique.vercel.app" });
     const code = await store.createInvite(venue.id, "staff", "2026-10-10T00:00:00.000Z");
     await handleInbound(d, { chatRef: "fb:952", kind: "text", text: code });
     expect(texts(messenger).at(-1)).toMatch(/Сайт: https:\/\/coffique\.vercel\.app$/);
@@ -279,7 +279,7 @@ describe("handleInbound: WordPress /connect and venue switching on Meta channels
     const { d, messenger, store, venue } = await setup({
       connect: async (venueId, siteUrl, code) => {
         calls.push([venueId, siteUrl, code]);
-        return { ok: true, site: { name: "Smoke Café" } as never, destination: { config: { site_url: "https://cafe.example" } } as never };
+        return { ok: true, site: { name: "Smoke Café" } as never, destination: { config: { site_mode: "own", site_url: "https://cafe.example" } } as never };
       },
     });
     await store.upsertMember({ venue_id: venue.id, chat_ref: "wa:359888123456", role: "owner", lang: "bg" });

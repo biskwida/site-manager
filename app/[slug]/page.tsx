@@ -17,7 +17,7 @@ export default async function Page(props: PageProps<"/[slug]">) {
   const { slug } = await props.params;
   const site = await loadPage(slug, await props.searchParams);
   if (!site) notFound();
-  // An own-site venue (site_url) lives elsewhere: send visitors there, so the hosted template is not a second public site.
+  // An own-site venue (site_mode "own") lives elsewhere: send visitors there, so the hosted template is not a second public site.
   const own = ownSiteRedirect(site);
   if (own) redirect(own);
   const { Component } = getTemplate(site.state.venue.template);

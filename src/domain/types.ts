@@ -40,6 +40,12 @@ export const TEMPLATE_IDS: readonly TemplateId[] = ["furna", "mehana", "kvartal"
 export type BusinessType = "cafe" | "bar" | "restaurant";
 export const BUSINESS_TYPES: readonly BusinessType[] = ["cafe", "bar", "restaurant"];
 export type VenueStatus = "draft" | "live";
+/**
+ * What the venue's website is. claudia = the hosted /<slug> or a template deploy that we build and run; own = a site built and hosted
+ * elsewhere (site_url) that reads our feed; none = no website of its own (social media only): no deploy, and /<slug> shows the default template with what data exists.
+ */
+export type SiteMode = "claudia" | "own" | "none";
+export const SITE_MODES: readonly SiteMode[] = ["claudia", "own", "none"];
 export type DeployStatus = "pending" | "building" | "ready" | "error";
 export interface DeployInfo {
   provider: "vercel" | "fake";
@@ -113,6 +119,8 @@ export interface Venue {
    * Not in the public feed.
    */
   site_url: string | null;
+  /** Server-only (never in the public feed). Replaces the old implicit rule "site_url set = own site"; site_url is only the address of an own site. */
+  site_mode: SiteMode;
   created_at: string;
 }
 

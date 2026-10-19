@@ -34,6 +34,9 @@ const BG = {
   badCode: "Кодът е невалиден, изтекъл или вече използван. Поискайте нов от нас.",
   welcome: (name: string, adminUrl: string, publicUrl: string, ch: Channel) =>
     `Свързахте се като собственик на ${name}.\n\nКак работи:\n1. Пишете или пращате гласово: „Капучиното става 3,20“, „Баницата свърши“, „Затворени сме на 24 декември“.\n2. Получавате преглед и го потвърждавате с ✅.\n3. Сайтът се обновява веднага; ${ch === "tg" ? "/undo връща последната промяна" : "„върни последната промяна“ (или /undo) я отменя"}.\n\nСайт: ${publicUrl}\nТабло (пазете линка, той е вашият ключ): ${adminUrl}`,
+  /** Owner welcome for a venue with no website (social media only): no site line, the posts go to their Instagram. */
+  welcomeSocial: (name: string, adminUrl: string, ch: Channel) =>
+    `Свързахте се като собственик на ${name}.\n\nКак работи:\n1. Пращате снимка или пишете какво искате да публикуваме: „Постни днешната торта“, „Затворени сме на 24 декември“.\n2. Получавате преглед и го потвърждавате с ✅.\n3. Публикувам го в твоя Instagram; ${ch === "tg" ? "/undo връща последната промяна" : "„върни последната промяна“ (или /undo) я отменя"}.\n\nТабло (пазете линка, той е вашият ключ): ${adminUrl}`,
   welcomeStaff: (name: string, publicUrl: string) =>
     `Свързахте се като персонал на ${name}. Можете да отбелязвате изчерпани продукти и да добавяте днешните предложения.\n\nСайт: ${publicUrl}`,
   welcomeBack: (name: string, adminUrl: string) => `Вече сте свързани с ${name}. Табло: ${adminUrl}`,
@@ -110,6 +113,8 @@ const EN: typeof BG = {
   badCode: "That code is invalid, expired or already used. Ask us for a new one.",
   welcome: (name, adminUrl, publicUrl, ch) =>
     `You are linked as the owner of ${name}.\n\nHow it works:\n1. Type or send a voice note: “Cappuccino is 3.20 now”, “Banitsa is sold out”, “We're closed on 24 December”.\n2. You get a preview and confirm it with ✅.\n3. The site updates right away; ${ch === "tg" ? "/undo reverts the last change" : "“undo the last change” (or /undo) reverts it"}.\n\nSite: ${publicUrl}\nDashboard (keep this link, it is your key): ${adminUrl}`,
+  welcomeSocial: (name, adminUrl, ch) =>
+    `You are linked as the owner of ${name}.\n\nHow it works:\n1. Send a photo or write what you want posted: “Post today's cake”, “We're closed on 24 December”.\n2. You get a preview and confirm it with ✅.\n3. I publish it to your Instagram; ${ch === "tg" ? "/undo reverts the last change" : "“undo the last change” (or /undo) reverts it"}.\n\nDashboard (keep this link, it is your key): ${adminUrl}`,
   welcomeStaff: (name, publicUrl) => `You are linked as staff of ${name}. You can mark items sold out and add today's specials.\n\nSite: ${publicUrl}`,
   welcomeBack: (name, adminUrl) => `You are already linked to ${name}. Dashboard: ${adminUrl}`,
   switched: (name) => `You now manage ${name}.`,

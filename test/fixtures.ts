@@ -44,6 +44,7 @@ export function venue(over: Partial<Venue> = {}): Venue {
     wizard_draft: null,
     instagram_import: null,
     site_url: null,
+    site_mode: "claudia",
     created_at: NOW,
     ...over,
   };

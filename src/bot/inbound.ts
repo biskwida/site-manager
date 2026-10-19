@@ -233,14 +233,17 @@ async function welcome(d: BotDeps, member: Member, previous: Member | null) {
   const c = copy(baseLang(member.lang));
   if (previous && previous.venue_id !== member.venue_id) await d.messenger.send(member.chat_ref, c.switched(keep(venue.name)));
   // An own site (built and hosted elsewhere, reads our feed) is the site the owner and staff know.
-  const site = venue.site_url || publicUrl(d.baseUrl, venue.slug);
+  const site = venue.site_mode === "own" && venue.site_url ? venue.site_url : publicUrl(d.baseUrl, venue.slug);
   if (member.role === "owner") {
-    await d.messenger.send(member.chat_ref, c.welcome(keep(venue.name), adminUrl(d.baseUrl, venue.slug, await d.store.getAdminToken(venue.id)), site, channelOf(member.chat_ref)));
-    if (venue.site_url) await d.messenger.send(member.chat_ref, c.ownSite(venue.site_url));
+    const admin = adminUrl(d.baseUrl, venue.slug, await d.store.getAdminToken(venue.id));
+    // No website at all (social media only): the welcome talks about their Instagram, not a site.
+    if (venue.site_mode === "none") await d.messenger.send(member.chat_ref, c.welcomeSocial(keep(venue.name), admin, channelOf(member.chat_ref)));
+    else await d.messenger.send(member.chat_ref, c.welcome(keep(venue.name), admin, site, channelOf(member.chat_ref)));
+    if (venue.site_mode === "own" && venue.site_url) await d.messenger.send(member.chat_ref, c.ownSite(venue.site_url));
     if (d.onOwnerJoined) {
       // The first owner join is the human check that publishes the site; startDeploy ignores venues that already have one
-      // and venues with their own site (nothing to publish, so no "being published" line either).
-      if (!venue.site_url && venue.status === "live" && venue.deploy === null) await d.messenger.send(member.chat_ref, c.publishing);
+      // and venues with their own site or none (nothing to publish, so no "being published" line either).
+      if (venue.site_mode === "claudia" && venue.status === "live" && venue.deploy === null) await d.messenger.send(member.chat_ref, c.publishing);
       try {
         d.onOwnerJoined(venue.id);
       } catch (e) {
@@ -278,9 +281,9 @@ async function runCommand(d: BotDeps, member: Member, channel: Channel, cmd: str
     case "menu": {
       const venue = await d.store.getVenue(member.venue_id);
       const admin = member.role === "owner" ? adminUrl(d.baseUrl, venue.slug, await d.store.getAdminToken(venue.id)) : null;
-      // An own-site venue (site_url) is linked as is: its site may not have a /menu path. Hosted venues get site and menu.
+      // An own-site venue is linked as is: its site may not have a /menu path. Hosted venues get site and menu.
       const hosted = publicUrl(d.baseUrl, venue.slug);
-      await d.messenger.send(member.chat_ref, venue.site_url ? c.menu(venue.site_url, null, admin) : c.menu(hosted, `${hosted}/menu`, admin));
+      await d.messenger.send(member.chat_ref, venue.site_mode === "own" && venue.site_url ? c.menu(venue.site_url, null, admin) : c.menu(hosted, `${hosted}/menu`, admin));
       return;
     }
     case "connect": {

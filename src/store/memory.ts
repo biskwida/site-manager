@@ -77,6 +77,7 @@ export class InMemoryStore implements Store {
       wizard_draft: v.wizard_draft ? clone(v.wizard_draft) : null,
       instagram_import: null,
       site_url: v.site_url ?? null,
+      site_mode: v.site_mode ?? "claudia",
       created_at: this.clock(),
     };
     if ([...this.sites.values()].some((s) => s.venue.slug === venue.slug)) throw new Error(`slug ${venue.slug} already exists`);

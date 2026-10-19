@@ -299,6 +299,11 @@ export function storeContract(name: string, make: () => Promise<Store>, storageH
         expect((await s.getVenueBySlug("t13a"))?.site_url).toBe("https://a.example");
         expect((await s.updateVenue(a.id, { name: "A2" })).site_url).toBe("https://a.example"); // untouched by other patches
         expect((await s.updateVenue(a.id, { site_url: null })).site_url).toBeNull();
+        expect(a.site_mode).toBe("claudia");
+        expect(b.site_mode).toBe("claudia"); // a URL alone changes nothing: the mode is explicit
+        expect((await s.updateVenue(a.id, { site_mode: "none" })).site_mode).toBe("none");
+        expect((await s.getVenueBySlug("t13a"))?.site_mode).toBe("none");
+        expect((await s.updateVenue(a.id, { name: "A3" })).site_mode).toBe("none"); // untouched by other patches
       } finally {
         await s.deleteVenue(a.id);
         await s.deleteVenue(b.id);

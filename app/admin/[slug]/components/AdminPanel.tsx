@@ -53,8 +53,8 @@ export function AdminPanel({ slug, adminKey, initial }: { slug: string; adminKey
         <WordPressCard overview={o.wordpress ?? null} slug={slug} adminKey={adminKey} baseUrl={o.public_url.replace(new RegExp(`/${slug}$`), "")} tz={tz} />
         <SocialCard overview={o.social ?? null} slug={slug} adminKey={adminKey} tz={tz} />
         <CommentsCard overview={o.comments ?? null} post={post} tz={tz} />
-        {/* Hosted mode (no deployer on this server) or an own site: there is no provider project of ours to attach a domain to. */}
-        {!o.hosted && !o.own_site && <DomainCard overview={o} post={post} />}
+        {/* Hosted mode (no deployer on this server), an own site or no website: there is no provider project of ours to attach a domain to. */}
+        {!o.hosted && !o.own_site && o.site_mode !== "none" && <DomainCard overview={o} post={post} />}
         <QrCard siteUrl={o.site_url} />
       </main>
     </div>

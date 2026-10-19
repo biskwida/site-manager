@@ -38,6 +38,7 @@ export function buildPreviewState(d: WizardDraft, media: Media[], now: Date): Si
     wizard_draft: null,
     instagram_import: null,
     site_url: null,
+    site_mode: "claudia",
   };
   const categories: Category[] = d.categories.map((c, i) => {
     const n = bothLangs(c.name_bg, c.name_en);

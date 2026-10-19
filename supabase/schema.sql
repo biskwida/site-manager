@@ -36,6 +36,12 @@ alter table public.venues add column if not exists publishing_at timestamptz;
 -- Own site: the venue's site is built and hosted elsewhere and reads our public feed (https URL); null = hosted or template deploy.
 -- When set, the first owner join creates no provider project. Owner-only: not granted to anon (policies.sql).
 alter table public.venues add column if not exists site_url text;
+-- Site mode (2026-10-19): claudia = hosted /<slug> or template deploy; own = site_url is an external site (no deploy); none = no website (social only).
+-- Replaces "site_url set = own site". Owner-only like site_url: not granted to anon (policies.sql).
+alter table public.venues add column if not exists site_mode text not null default 'claudia';
+alter table public.venues drop constraint if exists venues_site_mode_check;
+alter table public.venues add constraint venues_site_mode_check check (site_mode in ('claudia', 'own', 'none'));
+update public.venues set site_mode='own' where site_url is not null and site_mode='claudia';
 -- Monthly change limit (pricing plans; src/domain/limits.ts): applied change sets per calendar month in the venue's tz. null = unlimited.
 alter table public.venues add column if not exists change_limit integer;
 alter table public.venues drop constraint if exists venues_change_limit_check;
