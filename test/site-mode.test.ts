@@ -16,7 +16,7 @@ import { AdminPanel } from "@/app/admin/[slug]/components/AdminPanel";
 import { InMemoryStore } from "@/src/store/memory";
 import { getTemplate } from "@/src/templates";
 import { toVenue } from "@/src/store/supabase";
-import { prepareInvite, resolveSiteMode } from "../scripts/invite-lines.mts";
+import { prepareInvite, resolveSiteMode, siteLines } from "../scripts/invite-lines.mts";
 import { FakeMessenger, makeDemo } from "./helpers";
 
 const Provider = LangProvider as (props: { defaultLang: Lang; children?: ReactNode }) => ReactNode;
@@ -100,7 +100,8 @@ describe("welcome by site_mode", () => {
   it("a none venue's owner hears about their Instagram, not a website, in both languages, with no publishing line", async () => {
     const bg = await owner("none", "fb:960");
     expect(bg.texts).toHaveLength(1);
-    expect(bg.texts[0]).toContain("твоя Instagram");
+    expect(bg.texts[0]).toContain("вашия Instagram");
+    expect(bg.texts[0]).not.toContain("твоя");
     expect(bg.texts[0].replace(/https?:\/\/\S+/g, "")).not.toMatch(/сайт/i);
     expect(bg.texts[0]).toContain("/admin/agala?key=");
     const en = await owner("none", "tg:961", "en");
@@ -108,6 +109,23 @@ describe("welcome by site_mode", () => {
     expect(en.texts[0]).toContain("your Instagram");
     expect(en.texts[0].replace(/https?:\/\/\S+/g, "")).not.toMatch(/website|site/i);
     expect(en.joined).toEqual([en.venueId]); // startDeploy is called and skips it itself
+  });
+  it("a none venue's links are labelled as their page, not a website", async () => {
+    const demo = await makeDemo();
+    const messenger = new FakeMessenger();
+    const d: BotDeps = { token: "t", store: demo.store, messenger, baseUrl: "https://site.example", now: () => T0, startRun: () => {}, transcribe: null, download: async () => ({ bytes: new Uint8Array([1]), contentType: "image/jpeg" }) };
+    await demo.store.updateVenue(demo.venue.id, { site_mode: "none" });
+    const staff = await demo.store.createInvite(demo.venue.id, "staff", "2026-10-10T00:00:00.000Z");
+    await handleInbound(d, { chatRef: "fb:970", kind: "text", text: staff });
+    expect(messenger.sent.at(-1)?.text).toContain("Вашата страница: https://site.example/agala");
+    expect(messenger.sent.at(-1)?.text).not.toMatch(/Сайт/);
+    await handleInbound(d, { chatRef: "fb:970", kind: "text", text: "/menu" });
+    expect(messenger.sent.at(-1)?.text).toMatch(/^Вашата страница: https:\/\/site\.example\/agala\nМеню: /);
+    const en = await demo.store.createInvite(demo.venue.id, "staff", "2026-10-10T00:00:00.000Z");
+    await handleInbound(d, { chatRef: "tg:971", kind: "text", text: `/start ${en}`, langHint: "en" });
+    expect(messenger.sent.at(-1)?.text).toContain("Your page: https://site.example/agala");
+    await handleInbound(d, { chatRef: "tg:971", kind: "text", text: "/menu" });
+    expect(messenger.sent.at(-1)?.text).toMatch(/^Your page: /);
   });
   it("own keeps today's welcome; claudia still announces publishing", async () => {
     const own = await owner("own", "fb:962");
@@ -147,14 +165,23 @@ describe("admin overview by site_mode", () => {
   it("refuses a template switch for own and none", async () => {
     for (const mode of ["own", "none"] as const) {
       const { store, venue } = await makeDemo();
-      await store.updateVenue(venue.id, { site_mode: mode });
+      await store.updateVenue(venue.id, { site_mode: mode, ...(mode === "own" ? { site_url: "https://own.example" } : {}) });
       const r = await setTemplate({ store, deployer: null, feedUrlFor, now: () => T0 } as never, await store.getVenue(venue.id), "lumen");
-      expect(r.ok, mode).toBe(false);
+      expect(r, mode).toMatchObject({ ok: false, code: mode === "own" ? "own_site" : "no_site" });
+      expect((await store.getVenue(venue.id)).template, mode).toBe("classic"); // untouched
     }
   });
 });
 
 describe("dashboard by site_mode", () => {
+  it("control: a claudia venue still shows the site card with the template switch and the domain card", async () => {
+    const { store, venue } = await makeDemo();
+    const o = await adminOverview(store, await store.getVenue(venue.id), T0, "https://site.example");
+    const html = renderToStaticMarkup(createElement(Provider, { defaultLang: "en" }, createElement(AdminPanel, { slug: "agala", adminKey: "k", initial: o })));
+    expect(html).toContain("<select");
+    expect(html).toContain("Change template");
+    expect(html).toContain('id="your-site"');
+  });
   it("shows no site card, template switch or domain card for a none venue, and the QR card still has the hosted page", async () => {
     const { store, venue } = await makeDemo();
     await store.updateVenue(venue.id, { site_mode: "none" });
@@ -168,18 +195,49 @@ describe("dashboard by site_mode", () => {
   });
 });
 
+describe("an own venue always has a site URL (same rule as the database check)", () => {
+  it("the memory store refuses own without a URL on create and update, and removing the URL from an own venue", async () => {
+    const store = new InMemoryStore();
+    await expect(store.createVenue({ slug: "own-a", name: "A", site_mode: "own" })).rejects.toThrow(/site_url/);
+    await expect(store.createVenue({ slug: "own-b", name: "B", site_mode: "own", site_url: "" })).rejects.toThrow(/site_url/);
+    const v = await store.createVenue({ slug: "own-c", name: "C" });
+    await expect(store.updateVenue(v.id, { site_mode: "own" })).rejects.toThrow(/site_url/);
+    expect((await store.getVenue(v.id)).site_mode).toBe("claudia"); // refused patches change nothing
+    await store.updateVenue(v.id, { site_mode: "own", site_url: "https://c.example" });
+    await expect(store.updateVenue(v.id, { site_url: null })).rejects.toThrow(/site_url/);
+    expect((await store.getVenue(v.id)).site_url).toBe("https://c.example");
+    expect((await store.updateVenue(v.id, { site_mode: "none", site_url: null })).site_mode).toBe("none");
+  });
+});
+
 describe("migration", () => {
   const sql = readFileSync("supabase/migrations/2026-10-19-site-mode.sql", "utf8");
   it("adds the column, the check constraint and the backfill", () => {
     expect(sql).toContain("add column if not exists site_mode text not null default 'claudia'");
     expect(sql).toContain("drop constraint if exists venues_site_mode_check");
+    expect(sql).toContain("drop constraint if exists venues_site_mode_own_url_check");
+    expect(sql).toMatch(/check \(site_mode <> 'own' or \(site_url is not null and site_url <> ''\)\)/);
     expect(sql).toMatch(/check \(site_mode in \('claudia', 'own', 'none'\)\)/);
-    expect(sql).toContain("update public.venues set site_mode='own' where site_url is not null and site_mode='claudia'");
+    expect(sql).toContain("update public.venues set site_mode='own' where site_url is not null and site_url <> '' and site_mode='claudia'");
+  });
+  it("runs the backfill only when the column did not exist yet (inside a DO block, checked before the column is added)", () => {
+    for (const text of [sql, readFileSync("supabase/schema.sql", "utf8")]) {
+      const fromDo = text.slice(text.indexOf("do $$"));
+      const check = fromDo.indexOf("information_schema.columns");
+      const add = fromDo.indexOf("add column if not exists site_mode");
+      const fill = fromDo.indexOf("update public.venues set site_mode='own'");
+      expect(check).toBeGreaterThan(-1);
+      expect(check).toBeLessThan(add);
+      expect(add).toBeLessThan(fill);
+      expect(fromDo.indexOf("end $$")).toBeGreaterThan(fill);
+    }
+    expect(sql).not.toContain("a no-op"); // the old comment claimed something a plain UPDATE does not give
   });
   it("is mirrored in schema.sql", () => {
     const schema = readFileSync("supabase/schema.sql", "utf8");
     expect(schema).toContain("add column if not exists site_mode text not null default 'claudia'");
     expect(schema).toContain("venues_site_mode_check");
+    expect(schema).toContain("venues_site_mode_own_url_check");
   });
 });
 
@@ -198,5 +256,14 @@ describe("venue:create --site-mode", () => {
     const { store, venue } = await makeDemo();
     const r = await prepareInvite(store, { slug: venue.slug, role: "owner", siteUrl: "https://own.example", now: T0 });
     expect(r.ok && r.venue).toMatchObject({ site_mode: "own", site_url: "https://own.example" });
+  });
+});
+
+describe("venue:create site lines", () => {
+  const v = (site_mode: "claudia" | "own" | "none", site_url: string | null) => ({ slug: "agala", site_mode, site_url }) as never;
+  it("prints the site for claudia, the own URL for own, and the hosted page for none", () => {
+    expect(siteLines(v("claudia", null), "https://sm.example")).toEqual(["site:        https://sm.example/agala"]);
+    expect(siteLines(v("own", "https://own.example"), "https://sm.example")).toEqual(["own site:    https://own.example   (reads https://sm.example/api/site/agala; no Vercel project is created)"]);
+    expect(siteLines(v("none", null), "https://sm.example")).toEqual(["page:        https://sm.example/agala   (social media only: no website, no Vercel project is created)"]);
   });
 });

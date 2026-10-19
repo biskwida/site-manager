@@ -38,10 +38,19 @@ alter table public.venues add column if not exists publishing_at timestamptz;
 alter table public.venues add column if not exists site_url text;
 -- Site mode (2026-10-19): claudia = hosted /<slug> or template deploy; own = site_url is an external site (no deploy); none = no website (social only).
 -- Replaces "site_url set = own site". Owner-only like site_url: not granted to anon (policies.sql).
-alter table public.venues add column if not exists site_mode text not null default 'claudia';
+do $$
+begin
+  if not exists (select 1 from information_schema.columns where table_schema = 'public' and table_name = 'venues' and column_name = 'site_mode') then
+    alter table public.venues add column if not exists site_mode text not null default 'claudia';
+    -- Only on the run that adds the column: venues that had an own-site URL keep behaving as before. Later runs never touch site_mode,
+    -- so a venue the owner moved back to claudia or none is not pulled back to own.
+    update public.venues set site_mode='own' where site_url is not null and site_url <> '' and site_mode='claudia';
+  end if;
+end $$;
 alter table public.venues drop constraint if exists venues_site_mode_check;
 alter table public.venues add constraint venues_site_mode_check check (site_mode in ('claudia', 'own', 'none'));
-update public.venues set site_mode='own' where site_url is not null and site_mode='claudia';
+alter table public.venues drop constraint if exists venues_site_mode_own_url_check;
+alter table public.venues add constraint venues_site_mode_own_url_check check (site_mode <> 'own' or (site_url is not null and site_url <> ''));
 -- Monthly change limit (pricing plans; src/domain/limits.ts): applied change sets per calendar month in the venue's tz. null = unlimited.
 alter table public.venues add column if not exists change_limit integer;
 alter table public.venues drop constraint if exists venues_change_limit_check;

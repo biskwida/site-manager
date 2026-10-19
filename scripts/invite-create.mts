@@ -3,7 +3,7 @@
 // A one-use invite for an existing venue: reuses the open invite for that role, or creates one valid 7 days. With --site-url the
 // venue's own site is set first, so the owner's join creates no Vercel project. Prints the code ONCE. Keep it.
 import { makeServerDeps } from "../src/server/deps";
-import { inviteLines, parseArgs, parseSiteUrl, prepareInvite } from "./invite-lines.mts";
+import { inviteLines, parseArgs, parseSiteUrl, prepareInvite, siteLines } from "./invite-lines.mts";
 
 const USAGE = `Usage: npm run invite:create -- --slug my-cafe [--role owner|staff] [--site-url https://…]
   --role      owner (default) or staff
@@ -34,11 +34,8 @@ if (!r.ok) {
 }
 const { venue } = r;
 console.log(`venue ${venue.slug} (${venue.id})${deps.isMemory ? " in the MEMORY store (lost on exit)" : ""}`);
-if (venue.site_mode === "own" && venue.site_url) {
-  console.log(`own site:    ${venue.site_url}   (reads ${deps.config.publicBaseUrl}/api/site/${venue.slug}; no Vercel project is created)`);
-  if (venue.deploy) console.log(`note: an earlier template deploy (${venue.deploy.provider} ${venue.deploy.project_id || "no project"}) stays where it is; the dashboard no longer shows it.`);
-} else if (venue.site_mode === "none") console.log("site:        none (social media only; no Vercel project is created)");
-else console.log(`site:        ${deps.config.publicBaseUrl}/${venue.slug}`);
+for (const line of siteLines(venue, deps.config.publicBaseUrl)) console.log(line);
+if (venue.site_mode === "own" && venue.deploy) console.log(`note: an earlier template deploy (${venue.deploy.provider} ${venue.deploy.project_id || "no project"}) stays where it is; the dashboard no longer shows it.`);
 const note = r.reused ? "the open invite, reused; one use" : "valid 7 days, one use";
 for (const line of inviteLines(deps.config, [{ role: roleArg, code: r.code, note }])) console.log(line);
 console.log("This code links a chat to the venue and is shown once. Keep it out of git and chat logs.");

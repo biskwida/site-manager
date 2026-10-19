@@ -6,7 +6,7 @@ import { parseChangeLimit } from "../src/domain/limits";
 import { seedCoffique } from "../src/seed/coffique";
 import { seedDemo } from "../src/seed/demo";
 import { makeServerDeps } from "../src/server/deps";
-import { inviteLines, parseArgs, parseSiteUrl, resolveSiteMode } from "./invite-lines.mts";
+import { inviteLines, parseArgs, parseSiteUrl, resolveSiteMode, siteLines } from "./invite-lines.mts";
 
 const USAGE = `Usage: npm run venue:create -- --name "Name" --slug my-cafe [--lang bg|en] [--tz Europe/Sofia] [--seed demo|coffique] [--site-url https://…] [--site-mode claudia|own|none] [--change-limit 60|none]
   --change-limit   applied changes per calendar month (Menu plan 40, Everywhere plan 150); default none = unlimited
@@ -71,9 +71,7 @@ const owner = await deps.store.createInvite(venue.id, "owner", expires);
 const staff = await deps.store.createInvite(venue.id, "staff", expires);
 const token = await deps.store.getAdminToken(venue.id);
 console.log(`venue ${venue.slug} created (${venue.id})${deps.isMemory ? " in the MEMORY store (lost on exit)" : ""}`);
-console.log(`site:        ${deps.config.publicBaseUrl}/${venue.slug}`);
-if (venue.site_mode === "none") console.log("site mode:   none (social media only; no Vercel project is created)");
-if (venue.site_mode === "own" && venue.site_url) console.log(`own site:    ${venue.site_url}   (reads ${deps.config.publicBaseUrl}/api/site/${venue.slug}; no Vercel project is created)`);
+for (const line of siteLines(venue, deps.config.publicBaseUrl)) console.log(line);
 console.log(`change limit: ${changeLimit === null ? "unlimited" : `${changeLimit} per month`} (change it with npm run venue:set)`);
 console.log(`admin link:  ${deps.config.publicBaseUrl}/admin/${venue.slug}?key=${token}`);
 const note = "valid 7 days, one use";

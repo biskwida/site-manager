@@ -36,6 +36,13 @@ export function resolveSiteMode(mode: string | undefined, siteUrl: string | null
   return { ok: true, mode: m };
 }
 
+/** venue:create's site line: the hosted site for claudia, the own URL for own, the hosted page (not a website) for none. */
+export function siteLines(venue: Pick<Venue, "slug" | "site_mode" | "site_url">, baseUrl: string): string[] {
+  if (venue.site_mode === "own" && venue.site_url) return [`own site:    ${venue.site_url}   (reads ${baseUrl}/api/site/${venue.slug}; no Vercel project is created)`];
+  if (venue.site_mode === "none") return [`page:        ${baseUrl}/${venue.slug}   (social media only: no website, no Vercel project is created)`];
+  return [`site:        ${baseUrl}/${venue.slug}`];
+}
+
 export interface PrintedInvite {
   role: Role;
   code: string;

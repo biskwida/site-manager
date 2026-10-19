@@ -250,14 +250,14 @@ async function welcome(d: BotDeps, member: Member, previous: Member | null) {
         console.error("[bot] onOwnerJoined failed:", e instanceof Error ? e.message : e);
       }
     }
-  } else await d.messenger.send(member.chat_ref, c.welcomeStaff(keep(venue.name), site));
+  } else await d.messenger.send(member.chat_ref, c.welcomeStaff(keep(venue.name), site, venue.site_mode === "none")); // none: the hosted page is their simple page, labelled "Your page" on purpose (not a website)
 }
 
 async function welcomeBack(d: BotDeps, member: Member) {
   const venue = await d.store.getVenue(member.venue_id);
   const c = copy(baseLang(member.lang));
   if (member.role === "owner") await d.messenger.send(member.chat_ref, c.welcomeBack(keep(venue.name), adminUrl(d.baseUrl, venue.slug, await d.store.getAdminToken(venue.id))));
-  else await d.messenger.send(member.chat_ref, c.welcomeStaff(keep(venue.name), publicUrl(d.baseUrl, venue.slug)));
+  else await d.messenger.send(member.chat_ref, c.welcomeStaff(keep(venue.name), publicUrl(d.baseUrl, venue.slug), venue.site_mode === "none"));
 }
 
 async function runCommand(d: BotDeps, member: Member, channel: Channel, cmd: string) {
@@ -283,7 +283,7 @@ async function runCommand(d: BotDeps, member: Member, channel: Channel, cmd: str
       const admin = member.role === "owner" ? adminUrl(d.baseUrl, venue.slug, await d.store.getAdminToken(venue.id)) : null;
       // An own-site venue is linked as is: its site may not have a /menu path. Hosted venues get site and menu.
       const hosted = publicUrl(d.baseUrl, venue.slug);
-      await d.messenger.send(member.chat_ref, venue.site_mode === "own" && venue.site_url ? c.menu(venue.site_url, null, admin) : c.menu(hosted, `${hosted}/menu`, admin));
+      await d.messenger.send(member.chat_ref, venue.site_mode === "own" && venue.site_url ? c.menu(venue.site_url, null, admin) : c.menu(hosted, `${hosted}/menu`, admin, venue.site_mode === "none")); // none: "Your page", intended: its hosted page is not a website
       return;
     }
     case "connect": {

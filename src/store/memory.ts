@@ -1,7 +1,7 @@
 // src/store/memory.ts
 import { applyChanges } from "../domain/changes";
 import { COMMENT_LIMIT_DEFAULT, countsTowardLimit } from "../domain/limits";
-import type { Category, ChangeSet, ChatLang, Conversation, DeployInfo, DeployStatus, Item, Media, Member, Role, SiteState, SiteTextKey, Venue, VenueStatus } from "../domain/types";
+import type { Category, ChangeSet, ChatLang, Conversation, DeployInfo, DeployStatus, Item, Media, Member, Role, SiteMode, SiteState, SiteTextKey, Venue, VenueStatus } from "../domain/types";
 import { DEFAULT_HOURS, extensionFor, newInviteCode, newToken, PUBLISH_CLAIM_TTL_MS, type ChangeSetPatch, type ExpiredTimer, type NewCategory, type NewChangeSet, type NewItem, type NewVenue, type Store, type VenuePatch, type Destination, type DestinationKind, type DestinationPatch, type DestinationSync, type DestinationWithSecrets, type NewDestination, type NewSync, type SyncPatch, type ListSyncsOpts, type ApplyResult, checkLimitValue, checkMemberLang, CONFIG_KEY_RE, newConfirmationCode, type DataDeletionRequest, type DeletionProvider, type ListCommentsOpts, type NewSocialComment, type SocialComment, type SocialCommentPatch, COMMENT_REDACTED, redactCommentRow, type VenueSurroundings } from "./types";
 import { limitBlocks } from "./usage";
 
@@ -18,6 +18,11 @@ interface Invite {
 /** Like venues_comment_digest_hour_check in supabase/schema.sql: a whole hour 0–23 (undefined = not given). */
 function checkDigestHour(h: number | undefined): void {
   if (h !== undefined && !(Number.isInteger(h) && h >= 0 && h <= 23)) throw new Error(`comment_digest_hour must be a whole hour 0–23, got ${h}`);
+}
+
+/** Like venues_site_mode_own_url_check in supabase/schema.sql: an own-site venue always has a non-empty site URL. */
+function checkOwnUrl(mode: SiteMode, url: string | null): void {
+  if (mode === "own" && !url) throw new Error("site_url is required when site_mode is own");
 }
 
 export class InMemoryStore implements Store {
@@ -47,6 +52,7 @@ export class InMemoryStore implements Store {
 
   async createVenue(v: NewVenue): Promise<Venue> {
     checkDigestHour(v.comment_digest_hour);
+    checkOwnUrl(v.site_mode ?? "claudia", v.site_url ?? null);
     const venue: Venue = {
       id: crypto.randomUUID(),
       slug: v.slug,
@@ -101,6 +107,7 @@ export class InMemoryStore implements Store {
   async updateVenue(id: string, patch: VenuePatch): Promise<Venue> {
     const s = this.site(id);
     checkDigestHour(patch.comment_digest_hour);
+    checkOwnUrl(patch.site_mode ?? s.venue.site_mode, patch.site_url === undefined ? s.venue.site_url : patch.site_url);
     if (patch.slug !== undefined && [...this.sites.values()].some((x) => x.venue.id !== id && x.venue.slug === patch.slug)) throw new Error(`slug ${patch.slug} already exists`);
     for (const [k, v] of Object.entries(patch)) if (v !== undefined) (s.venue as unknown as Record<string, unknown>)[k] = clone(v);
     return clone(s.venue);

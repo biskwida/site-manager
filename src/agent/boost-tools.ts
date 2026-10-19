@@ -230,8 +230,9 @@ function rangeCheck(r: ReturnType<typeof planBoost>) {
   throw new Error("An ad runs 1–14 days; nothing was proposed. Tell the owner the allowed range in one short sentence.");
 }
 
-/** Whether the business has a website the ad can lead to: its own site, a template deployment or the hosted site of a live venue. */
-function hasWebsite(v: Pick<Venue, "site_url" | "deploy" | "status">): boolean {
+/** Whether the business has a website the ad can lead to: its own site, a template deployment or the hosted site of a live venue. A social-media-only venue (site_mode none) has none, whatever its hosted page shows. */
+function hasWebsite(v: Pick<Venue, "site_mode" | "site_url" | "deploy" | "status">): boolean {
+  if (v.site_mode === "none") return false;
   return Boolean(v.site_url) || Boolean(v.deploy?.url) || v.status === "live";
 }
 
