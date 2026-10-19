@@ -129,7 +129,7 @@ describe("GET /api/new/[id]/instagram/start", () => {
   });
   it("refuses a published venue", async () => {
     const { d, store, id } = await setup();
-    await store.updateVenue(id, { status: "live" });
+    await store.updateVenue(id, { status: "live", wizard_draft: null });
     const res = await handleInstagramStart(new Request(`${BASE}/api/new/${id}/instagram/start`), d, await store.getVenue(id));
     expect(res.status).toBe(409);
   });
@@ -204,7 +204,7 @@ describe("GET /api/new/instagram/callback", () => {
   });
 
   it("does not leave a list on a venue that was published while Instagram was being read", async () => {
-    const ig = instagram({ media: async () => { await s.store.updateVenue(s.id, { status: "live" }); return json({ data: [{ id: "10", media_type: "IMAGE", media_url: `${CDN}10.jpg` }] }); } });
+    const ig = instagram({ media: async () => { await s.store.updateVenue(s.id, { status: "live", wizard_draft: null }); return json({ data: [{ id: "10", media_type: "IMAGE", media_url: `${CDN}10.jpg` }] }); } });
     const s = await setup({ fetch: ig.f }); // the handler above runs later, during the callback
     const { state, cookie } = await startFlow(s);
     const res = await handleInstagramCallback(callback({ code: "C", state }, cookie), s.d);
@@ -249,7 +249,7 @@ describe("GET /api/new/instagram/callback", () => {
     const s = await setup({ fetch: ig.f });
     const { state, cookie } = await startFlow(s);
     expect((await handleInstagramCallback(callback({ code: "C", state }, `${IG_NONCE_COOKIE}=x`), s.d)).headers.get("location")).toBe(`${BASE}/new`);
-    await s.store.updateVenue(s.id, { status: "live" });
+    await s.store.updateVenue(s.id, { status: "live", wizard_draft: null });
     expect((await handleInstagramCallback(callback({ code: "C", state }, cookie), s.d)).headers.get("location")).toBe(`${BASE}/new/${s.id}`);
     expect(ig.calls).toHaveLength(0);
   });
@@ -424,7 +424,7 @@ describe("POST /api/new/[id]/instagram/import", () => {
     expect(await errorOf(await handleInstagramImport(importReq({ picks: [{ id: "10", target: "cover" }] }), none.d, await none.venue()))).toMatchObject({ code: "instagram_expired" });
     const off = await setup({ configured: false });
     expect((await handleInstagramImport(importReq({ picks: [{ id: "10", target: "cover" }] }), off.d, await off.venue())).status).toBe(503);
-    await s.store.updateVenue(s.id, { status: "live" });
+    await s.store.updateVenue(s.id, { status: "live", wizard_draft: null });
     expect((await handleInstagramImport(importReq({ picks: [{ id: "10", target: "cover" }] }), { ...s.d, now: () => T0 }, await s.venue())).status).toBe(409);
   });
 

@@ -187,6 +187,8 @@ const en = {
   "admin.copied": "Copied",
   // Wizard done page
   "done.title": "Your site is created",
+  "done.continueSetup": "Continue setup",
+  "done.continueSetupHint": "Connect Instagram and Facebook and the rest, one step at a time.",
   "done.lead": "One last step: press Start in Telegram so the bot knows you are the owner. Then we publish the site and message you when it is live.",
   "done.leadHosted": "One last step: press Start in Telegram so the bot knows you are the owner. Then you can change the site from Telegram.",
   "done.leadApps": "One last step: connect the app you will run the site from, so the bot knows you are the owner. Then we publish the site and message you when it is live.",
@@ -531,6 +533,8 @@ const bg: Record<MessageKey, string> = {
   "admin.copy": "Копирай",
   "admin.copied": "Копирано",
   "done.title": "Сайтът ви е създаден",
+  "done.continueSetup": "Продължете с настройката",
+  "done.continueSetupHint": "Свържете Инстаграм, Фейсбук и останалото, стъпка по стъпка.",
   "done.lead": "Последна стъпка: натиснете Start в Telegram, за да знае ботът, че вие сте собственикът. После публикуваме сайта и ви пишем, когато е готов.",
   "done.leadHosted": "Последна стъпка: натиснете Start в Telegram, за да знае ботът, че вие сте собственикът. След това променяте сайта направо от Telegram.",
   "done.leadApps": "Последна стъпка: свържете приложението, от което ще управлявате сайта, за да знае ботът, че вие сте собственикът. После публикуваме сайта и ви пишем, когато е готов.",

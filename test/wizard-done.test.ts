@@ -195,4 +195,11 @@ describe("DoneStatus: connect an app", () => {
     // one app enabled: as before, no extra button
     expect(render("en", joined, { code: null, links: [] })).not.toContain("Connect another app");
   });
+  it("Continue setup links to the checklist only when the page is given its address", () => {
+    expect(render("en", waiting)).not.toContain("Continue setup");
+    const withLink = render("en", waiting, { onboardingHref: "/onboarding/bar" });
+    expect(withLink).toContain('href="/onboarding/bar"');
+    expect(withLink).toContain("Continue setup");
+    expect(render("bg", waiting, { onboardingHref: "/onboarding/bar" })).toContain("Продължете с настройката");
+  });
 });

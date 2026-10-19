@@ -1,8 +1,8 @@
 // src/store/supabase.ts
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import { COMMENT_LIMIT_DEFAULT, countsTowardLimit } from "../domain/limits";
-import { isChatLang, isExternalEntity, isRecordOnlyEntity, type BoostEntity, type CommentMode, type SocialEntity, type WpEntity } from "../domain/types";
-import type { Announcement, BusinessType, Category, Change, ChangeSet, ChatLang, Conversation, DeployInfo, DeployStatus, Holiday, InstagramImport, Item, Lang, Media, Member, Role, SiteState, SiteText, SiteTextKey, TemplateId, Venue, VenueStatus } from "../domain/types";
+import { isChatLang, isExternalEntity, isRecordOnlyEntity, SITE_PLATFORMS, type BoostEntity, type CommentMode, type SocialEntity, type WpEntity } from "../domain/types";
+import type { Announcement, BusinessType, Category, Change, ChangeSet, ChatLang, Conversation, DeployInfo, DeployStatus, Holiday, InstagramImport, Item, Lang, Media, Member, Role, SitePlatform, SiteState, SiteText, SiteTextKey, TemplateId, Venue, VenueStatus } from "../domain/types";
 import type { Place } from "../geo/osm";
 import type { WizardDraft } from "../wizard/schema";
 import { legacyTelegramId } from "../channels/ref";
@@ -55,6 +55,8 @@ export function toVenue(r: Row): Venue {
     site_url: strOrNull(r.site_url),
     // Missing before the migration is applied (or any unknown value): a Claudia site, as before.
     site_mode: r.site_mode === "own" || r.site_mode === "none" ? r.site_mode : "claudia",
+    // Missing before the migration is applied (or any unknown value): not asked.
+    site_platform: SITE_PLATFORMS.includes(r.site_platform as SitePlatform) ? (r.site_platform as SitePlatform) : null,
     created_at: iso(r.created_at),
   };
 }
@@ -221,7 +223,10 @@ export class SupabaseStore implements Store {
   async claimPublish(id: string, now = new Date().toISOString()) {
     if (badVenue(id)) return false;
     const stale = new Date(Date.parse(now) - PUBLISH_CLAIM_TTL_MS).toISOString();
-    const { data, error } = await this.db.from("venues").update({ publishing_at: now }).eq("id", id).eq("status", "draft").or(`publishing_at.is.null,publishing_at.lt.${stale}`).select("id");
+    // A draft, or a live venue with an open website-setup draft (wizard_draft set); free, or held by a claim that went stale.
+    const open = ["status.eq.draft", "wizard_draft.not.is.null"];
+    const free = ["publishing_at.is.null", `publishing_at.lt.${stale}`];
+    const { data, error } = await this.db.from("venues").update({ publishing_at: now }).eq("id", id).or(open.flatMap((o) => free.map((f) => `and(${o},${f})`)).join(",")).select("id");
     if (error) throw new Error(`claimPublish ${id}: ${error.message}`);
     return (data?.length ?? 0) === 1;
   }

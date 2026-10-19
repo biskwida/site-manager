@@ -3,6 +3,7 @@
 import { INVITE_TTL_MS } from "../src/bot/links";
 import { startLinks, type LinkConfig } from "../src/channels/links";
 import type { Role, SiteMode, Venue } from "../src/domain/types";
+import { parseSiteUrl } from "../src/domain/site-url";
 import type { Store } from "../src/store/types";
 
 /** `--key value` pairs after the script name. */
@@ -12,17 +13,7 @@ export function parseArgs(argv: string[]): Map<string, string> {
   return args;
 }
 
-/** A plain https URL with a real hostname (no credentials, query or fragment), without a trailing slash; null otherwise. */
-export function parseSiteUrl(raw: string): string | null {
-  let u: URL;
-  try {
-    u = new URL(raw.trim());
-  } catch {
-    return null;
-  }
-  if (u.protocol !== "https:" || u.username || u.password || u.search || u.hash || !u.hostname.includes(".")) return null;
-  return `${u.origin}${u.pathname.replace(/\/+$/, "")}`;
-}
+export { parseSiteUrl };
 
 /**
  * venue:create's --site-mode with --site-url: --site-url alone implies "own"; no flags = "claudia". "own" needs a site URL and the

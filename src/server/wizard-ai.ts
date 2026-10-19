@@ -8,7 +8,7 @@ import type { Venue } from "../domain/types";
 import { base64Bytes, checkExtractFiles, EXTRACT_MAX_FILES, ExtractFilesSchema, extractMenu, type ExtractFile } from "../wizard/extract";
 import { EXTRACT_MAX_TOTAL_BYTES } from "../wizard/schema";
 import { draftTexts, TEXTS_MAX_FACTS } from "../wizard/texts";
-import { ALREADY_PUBLISHED, WizardError, wizardErrorResponse, type WizardDeps } from "./wizard";
+import { ALREADY_PUBLISHED, isOpenDraft, WizardError, wizardErrorResponse, type WizardDeps } from "./wizard";
 
 export interface WizardAiDeps extends Pick<WizardDeps, "store" | "now"> {
   /** null when ANTHROPIC_API_KEY is not set (offline mode): the routes answer 503 and the UI hides the buttons. */
@@ -50,7 +50,7 @@ const BAD_FILES = () => new WizardError("bad_request", 400, "Качете сни
 /** POST /api/new/[id]/extract `{ files: [{ media_type, data }] }` → `ExtractResult` for the owner to review (never inserted here). */
 export async function handleExtract(req: Request, d: WizardAiDeps, venue: Venue): Promise<Response> {
   try {
-    if (venue.status !== "draft") throw ALREADY_PUBLISHED(venue.slug);
+    if (!isOpenDraft(venue)) throw ALREADY_PUBLISHED(venue.slug);
     if (!d.anthropic) throw UNAVAILABLE();
     const declared = Number(req.headers.get("content-length"));
     if (Number.isFinite(declared) && declared > EXTRACT_MAX_BODY) throw TOTAL_TOO_LARGE();
@@ -79,7 +79,7 @@ export async function handleExtract(req: Request, d: WizardAiDeps, venue: Venue)
 /** POST /api/new/[id]/texts `{ facts }` → `DraftTexts`, written for the draft's default language first. */
 export async function handleTexts(req: Request, d: WizardAiDeps, venue: Venue): Promise<Response> {
   try {
-    if (venue.status !== "draft") throw ALREADY_PUBLISHED(venue.slug);
+    if (!isOpenDraft(venue)) throw ALREADY_PUBLISHED(venue.slug);
     if (!d.anthropic) throw UNAVAILABLE();
     const body = (await req.json().catch(() => null)) as { facts?: unknown } | null;
     const facts = typeof body?.facts === "string" ? body.facts.trim() : "";

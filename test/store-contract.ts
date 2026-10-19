@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import { planChanges } from "@/src/domain/changes";
 import type { Change } from "@/src/domain/types";
 import { COMMENT_REDACTED, type NewSocialComment, type Store } from "@/src/store/types";
+import { emptyDraft } from "@/src/wizard/schema";
 import { NOW } from "./fixtures";
 
 const LATER = "2026-10-09T10:00:00.000Z";
@@ -310,6 +311,31 @@ export function storeContract(
         expect((await s.updateVenue(a.id, { site_mode: "none" })).site_mode).toBe("none");
         expect((await s.getVenueBySlug("t13a"))?.site_mode).toBe("none");
         expect((await s.updateVenue(a.id, { name: "A3" })).site_mode).toBe("none"); // untouched by other patches
+      } finally {
+        await s.deleteVenue(a.id);
+        await s.deleteVenue(b.id);
+      }
+    });
+
+    it("stores an own-site venue's platform, null by default, and a live venue with an open wizard draft can be claimed for publish", async () => {
+      const s = await make();
+      const a = await s.createVenue({ slug: "t13p", name: "A", site_mode: "own", site_url: "https://own.example", site_platform: "wordpress" });
+      const b = await s.createVenue({ slug: "t13q", name: "B" });
+      try {
+        expect(a.site_platform).toBe("wordpress");
+        expect(b.site_platform).toBeNull();
+        expect((await s.getVenue(a.id)).site_platform).toBe("wordpress");
+        expect((await s.updateVenue(a.id, { site_platform: "wix" })).site_platform).toBe("wix");
+        expect((await s.updateVenue(a.id, { name: "A2" })).site_platform).toBe("wix"); // untouched by other patches
+        expect((await s.updateVenue(a.id, { site_platform: null })).site_platform).toBeNull();
+        // claimPublish: a draft, or a live venue carrying a wizard draft (the website add-on); never a plain live venue
+        expect(await s.claimPublish(b.id, NOW)).toBe(false);
+        await s.updateVenue(b.id, { wizard_draft: emptyDraft("classic") });
+        expect(await s.claimPublish(b.id, NOW)).toBe(true);
+        expect(await s.claimPublish(b.id, NOW)).toBe(false); // held
+        await s.releasePublish(b.id);
+        await s.updateVenue(b.id, { wizard_draft: null });
+        expect(await s.claimPublish(b.id, NOW)).toBe(false); // published: never again
       } finally {
         await s.deleteVenue(a.id);
         await s.deleteVenue(b.id);

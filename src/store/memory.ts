@@ -84,6 +84,7 @@ export class InMemoryStore implements Store {
       instagram_import: null,
       site_url: v.site_url ?? null,
       site_mode: v.site_mode ?? "claudia",
+      site_platform: v.site_platform ?? null,
       created_at: this.clock(),
     };
     if ([...this.sites.values()].some((s) => s.venue.slug === venue.slug)) throw new Error(`slug ${venue.slug} already exists`);
@@ -124,7 +125,7 @@ export class InMemoryStore implements Store {
   }
   async claimPublish(id: string, now = this.clock()) {
     const s = this.sites.get(id);
-    if (!s || s.venue.status !== "draft") return false;
+    if (!s || (s.venue.status !== "draft" && !s.venue.wizard_draft)) return false; // a draft, or a live venue with an open website-setup draft
     const prev = this.publishing.get(id);
     if (prev && Date.parse(now) - Date.parse(prev) < PUBLISH_CLAIM_TTL_MS) return false;
     this.publishing.set(id, now);

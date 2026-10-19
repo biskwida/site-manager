@@ -7,6 +7,7 @@ import { WIZARD } from "@/src/i18n/wizard";
 import { getServerDeps } from "@/src/server/deps";
 import { readDraftFromCookies } from "@/src/server/draft-cookie";
 import { sha256Hex } from "@/src/server/hash";
+import { isOpenDraft } from "@/src/server/wizard";
 import { enabledApps } from "@/src/server/connect-apps";
 import { instagramConfigured } from "@/src/server/instagram";
 import { emptyDraft } from "@/src/wizard/schema";
@@ -39,7 +40,8 @@ export default async function Page(props: PageProps<"/new/[id]">) {
       <LangProvider defaultLang="bg"><NoDraft /></LangProvider>
     );
   }
-  if (venue.status === "live") redirect(`/new/${id}/done`);
+  // A live venue with no open draft is finished; a live own-site/no-website venue whose owner started the website add-on carries a draft and stays here.
+  if (!isOpenDraft(venue)) redirect(`/new/${id}/done`);
   const draft = venue.wizard_draft ?? emptyDraft(venue.template);
   const site = await deps.store.getSite(venue.id);
   // eslint-disable-next-line react-hooks/purity -- a server component renders once per request; this is the request time the preview ticks from

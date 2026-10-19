@@ -91,3 +91,7 @@ body:has(.sm-brand)::before { background-image: radial-gradient(1100px 520px at 
   --cl-line: oklch(86% 0.014 60); --cl-accent: oklch(50% 0.15 45); --cl-accent-hover: oklch(45% 0.15 45); --cl-accent-soft: oklch(94.5% 0.045 50);
   --cl-error: oklch(46% 0.16 28); --accent: oklch(50% 0.15 45); background: var(--cl-bg); color: var(--cl-ink); }
 body:has(.cl-auth)::before { background-image: radial-gradient(1000px 520px at 88% -10%, oklch(62% 0.17 45 / 0.09), transparent 60%); }
+
+/* Account pages (/start, /onboarding): .cl-auth's tokens with the landing's faces, Sofia Sans for text and Sofia Sans Condensed for headings. */
+.cl-account { --cl-ok: oklch(46% 0.12 150); --font-display: var(--font-sofia-cond), var(--font-sofia), ui-sans-serif, system-ui, sans-serif; font-family: var(--font-sofia), ui-sans-serif, system-ui, sans-serif; }
+.cl-account :where(h1, h2, h3) { font-weight: 800; letter-spacing: -0.01em; text-wrap: balance; }

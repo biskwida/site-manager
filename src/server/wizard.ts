@@ -9,13 +9,14 @@ import { pollDeployments } from "../deploy/run";
 import type { Deployer } from "../deploy/types";
 import { planChanges } from "../domain/changes";
 import { renderPreview } from "../domain/preview";
-import { TEMPLATE_IDS, type ChangeOp, type TemplateId, type Venue } from "../domain/types";
+import { TEMPLATE_IDS, type ChangeOp, type SiteState, type TemplateId, type Venue } from "../domain/types";
 import { seedMenuFrom, type SeedCategory, type SeedItem, type SeedTexts } from "../seed/demo";
 import type { Store, VenuePatch } from "../store/types";
 import { bothLangs, DRAFT_SLUG_PREFIX, emptyDraft, slugError, WIZARD_MAX_IMAGE_BYTES, validateForPublish, WizardPatchSchema, type PublishError, type WizardDraft } from "../wizard/schema";
 import { connectedApps, newOwnerCode, type AppsConfig, type ConnectedApp, type OwnerCode } from "./connect-apps";
 import { readDraftFromRequest, serializeDraftCookie } from "./draft-cookie";
 import { newDraftToken, sha256Hex } from "./hash";
+import { afterVenueCreated } from "./after-venue-created";
 
 /** Error codes the wizard client can branch on. `ai_*` and `refused` come from the Claude-backed routes (src/server/wizard-ai.ts). */
 export type WizardErrorCode =
@@ -88,6 +89,15 @@ export function rateLimitKeys(ipHash: string): { ip: string; global: string } {
   return { ip: `new:ip:${ipHash}`, global: "new:global" };
 }
 
+/**
+ * The wizard can edit and publish this venue: a draft, or a LIVE own-site/no-website venue whose owner started the website add-on
+ * (startDraftForVenue puts a wizard_draft on the live row; it stays live and public until the draft is published). Every other live
+ * venue has no wizard_draft, so it is never editable here.
+ */
+export function isOpenDraft(venue: Pick<Venue, "status" | "wizard_draft">): boolean {
+  return venue.status === "draft" || venue.wizard_draft !== null;
+}
+
 function placeholderSlug(): string {
   return `${DRAFT_SLUG_PREFIX}${newDraftToken().slice(0, 8)}`;
 }
@@ -109,6 +119,72 @@ export async function createDraft(store: Store, template: TemplateId, now: Date)
   return { venue, token };
 }
 
+/** The wizard's draft for a venue that already exists: its details, menu, texts and pictures, so setting up the website loses nothing. Hidden (inactive) dishes and categories are not carried over. */
+export function draftFromSite(site: SiteState): WizardDraft {
+  const v = site.venue;
+  const base = emptyDraft(v.template);
+  const text = (key: "welcome" | "footer_note") => {
+    const t = site.texts.find((x) => x.key === key);
+    return { bg: t?.text_bg ?? "", en: t?.text_en ?? "" };
+  };
+  const byPosition = <T extends { position: number }>(a: T[]) => [...a].sort((x, y) => x.position - y.position);
+  const categories = byPosition(site.categories.filter((c) => c.active)).map((c) => ({
+    key: c.id,
+    name_bg: c.name_bg,
+    name_en: c.name_en,
+    items: byPosition(site.items.filter((i) => i.active && i.category_id === c.id)).map((i) => ({
+      key: i.id,
+      name_bg: i.name_bg,
+      name_en: i.name_en,
+      desc_bg: i.desc_bg,
+      desc_en: i.desc_en,
+      price_eur: i.price_eur,
+      allergens: [...i.allergens],
+      image_media_id: i.image_media_id,
+    })),
+  }));
+  return {
+    ...base,
+    business_type: v.business_type,
+    name: v.name,
+    slug: v.slug,
+    default_lang: v.default_lang,
+    address: v.address,
+    phone: v.phone,
+    instagram: v.instagram,
+    maps_url: v.maps_url,
+    hours: structuredClone(v.hours),
+    theme: { accent: v.theme.accent },
+    tagline_bg: v.tagline_bg,
+    tagline_en: v.tagline_en,
+    about_bg: v.about_bg,
+    about_en: v.about_en,
+    texts: { welcome: text("welcome"), footer_note: text("footer_note") },
+    logo_media_id: v.logo_media_id,
+    cover_media_id: v.cover_media_id,
+    gallery_media_ids: byPosition(site.media.filter((m) => m.is_gallery)).map((m) => m.id),
+    categories,
+    step: "template",
+  };
+}
+
+/**
+ * The website add-on: puts a wizard draft on an EXISTING own-site or no-website venue (it stays live and public), prefilled from the
+ * venue, and issues a draft token for the wizard cookie (only its hash is stored). Only an owner of the venue through their account
+ * (venue_users) may call it. A draft already in progress is kept as it is. Publishing it (publishDraft) keeps the slug and sets
+ * site_mode "claudia". Nothing else about the venue changes until then.
+ */
+export async function startDraftForVenue(store: Store, venueId: string, user: { id: string }): Promise<{ venue: Venue; token: string }> {
+  if (!(await store.isVenueOwner(venueId, user.id))) throw new WizardError("unauthorized", 403, "Само собственикът може да започне сайта.", "Only the owner can start the website.");
+  const venue = await store.getVenue(venueId);
+  if (venue.status !== "live") throw new WizardError("not_live", 409, "Първо публикувайте бизнеса.", "Publish the business first.");
+  if (venue.site_mode === "claudia") throw ALREADY_PUBLISHED(venue.slug);
+  const withDraft = venue.wizard_draft ? venue : await store.updateVenue(venue.id, { wizard_draft: draftFromSite(await store.getSite(venue.id)) });
+  const token = newDraftToken();
+  await store.setDraftToken(venue.id, sha256Hex(token));
+  return { venue: withDraft, token };
+}
+
 /** The slug is free when no OTHER live venue has it. Drafts keep their placeholder row slug until publish, so only live rows count. */
 async function assertSlugFree(store: Store, slug: string, selfId: string): Promise<void> {
   const other = await store.getVenueBySlug(slug);
@@ -117,7 +193,9 @@ async function assertSlugFree(store: Store, slug: string, selfId: string): Promi
 
 /** Validates the patch (unknown keys dropped), refuses reserved/placeholder/taken slugs, merges into the stored draft. */
 export async function updateDraft(store: Store, venue: Venue, patch: Partial<WizardDraft>): Promise<WizardDraft> {
-  if (venue.status !== "draft") throw ALREADY_PUBLISHED(venue.slug);
+  if (!isOpenDraft(venue)) throw ALREADY_PUBLISHED(venue.slug);
+  // A website add-on keeps the venue's address: the slug in the draft is always the live one.
+  const addon = venue.status !== "draft";
   const parsed = WizardPatchSchema.safeParse(patch);
   if (!parsed.success) {
     throw INVALID(
@@ -130,12 +208,12 @@ export async function updateDraft(store: Store, venue: Venue, patch: Partial<Wiz
     );
   }
   const clean = parsed.data;
-  if (clean.slug) {
+  if (clean.slug && !addon) {
     const why = slugError(clean.slug);
     if (why) throw INVALID([{ path: "slug", ...why }]);
     await assertSlugFree(store, clean.slug, venue.id);
   }
-  const merged: WizardDraft = { ...(venue.wizard_draft ?? emptyDraft(venue.template)), ...clean };
+  const merged: WizardDraft = { ...(venue.wizard_draft ?? emptyDraft(venue.template)), ...clean, ...(addon ? { slug: venue.slug } : {}) };
   await store.updateVenue(venue.id, { wizard_draft: merged, ...(clean.template ? { template: clean.template } : {}), ...(clean.business_type ? { business_type: clean.business_type } : {}) });
   return merged;
 }
@@ -150,9 +228,11 @@ export async function updateDraft(store: Store, venue: Venue, patch: Partial<Wiz
  *   4. owner invite (INVITE_TTL_MS) and the admin token.
  * The draft token hash is kept (R10: the done page and /status authenticate with the cookie). Does not start a deploy.
  */
-export async function publishDraft(store: Store, venue: Venue, now: Date): Promise<{ venue: Venue; inviteCode: string; adminToken: string }> {
-  if (venue.status !== "draft") throw ALREADY_PUBLISHED(venue.slug);
-  const d = venue.wizard_draft ?? emptyDraft(venue.template);
+export async function publishDraft(store: Store, venue: Venue, now: Date, opts: { userId?: string | null } = {}): Promise<{ venue: Venue; inviteCode: string; adminToken: string }> {
+  if (!isOpenDraft(venue)) throw ALREADY_PUBLISHED(venue.slug);
+  // A website add-on (live own-site/no-website venue) keeps its address; the draft's slug is whatever the venue has.
+  const addon = venue.status !== "draft";
+  const d = { ...(venue.wizard_draft ?? emptyDraft(venue.template)), ...(addon ? { slug: venue.slug } : {}) };
   const v = validateForPublish(d);
   if (!v.ok) throw INVALID(v.errors);
   await assertSlugFree(store, d.slug, venue.id);
@@ -160,15 +240,16 @@ export async function publishDraft(store: Store, venue: Venue, now: Date): Promi
   // R24: one publisher at a time; a crashed publish releases itself after PUBLISH_CLAIM_TTL_MS, a failed one right away (below).
   if (!(await store.claimPublish(venue.id, nowIso))) throw PUBLISH_IN_PROGRESS();
   try {
-    return await publishClaimed(store, venue, d, now);
+    return await publishClaimed(store, venue, d, now, opts.userId ?? null);
   } catch (e) {
     await store.releasePublish(venue.id).catch(() => {});
     throw e;
   }
 }
 
-async function publishClaimed(store: Store, venue: Venue, d: WizardDraft, now: Date): Promise<{ venue: Venue; inviteCode: string; adminToken: string }> {
+async function publishClaimed(store: Store, venue: Venue, d: WizardDraft, now: Date, userId: string | null): Promise<{ venue: Venue; inviteCode: string; adminToken: string }> {
   const nowIso = now.toISOString();
+  const addon = venue.status !== "draft";
 
   // Only media uploaded to this draft may be referenced (media rows key on the venue id, so uploads made before the slug was chosen count).
   const own = new Set((await store.getSite(venue.id)).media.map((m) => m.id));
@@ -196,6 +277,8 @@ async function publishClaimed(store: Store, venue: Venue, d: WizardDraft, now: D
     theme: { accent: d.theme.accent.toLowerCase() },
     template: d.template,
     business_type: d.business_type,
+    // The website add-on turns an own-site/no-website venue into a Claudia site: the old address and platform no longer apply.
+    ...(addon ? { site_mode: "claudia" as const, site_url: null, site_platform: null } : {}),
   };
   let updated: Venue;
   try {
@@ -261,13 +344,19 @@ async function publishClaimed(store: Store, venue: Venue, d: WizardDraft, now: D
   // 3. Live: the last write. From here on the venue is public and the wizard draft is gone, with any Instagram import list
   //    (written only when there is one, so a database without the instagram_import column still publishes).
   //    The list is checked on a fresh read: the Instagram callback may have stored one after this request read the venue.
+  //    The signed-in account (when there is one) becomes the owner just before that last write, so a failure still leaves a plain draft to publish again.
+  if (userId) await store.linkVenueUser(venue.id, userId, "owner");
   const latest = await store.getVenue(venue.id);
   await store.updateVenue(venue.id, { status: "live", wizard_draft: null, ...(latest.instagram_import ? { instagram_import: null } : {}) });
 
   // 4. Owner invite and admin token. A failure here leaves a live venue without a code; the done page issues a fresh invite.
-  const inviteCode = await store.createInvite(venue.id, "owner", new Date(now.getTime() + INVITE_TTL_MS).toISOString());
+  //    A website add-on whose owner is already in the chat needs no new code.
+  const ownerJoined = addon && (await store.listMembers(venue.id)).some((m) => m.role === "owner");
+  const inviteCode = ownerJoined ? "" : await store.createInvite(venue.id, "owner", new Date(now.getTime() + INVITE_TTL_MS).toISOString());
   const adminToken = await store.getAdminToken(venue.id);
-  return { venue: await store.getVenue(venue.id), inviteCode, adminToken };
+  const live = await store.getVenue(venue.id);
+  if (userId && !addon) await afterVenueCreated(live);
+  return { venue: live, inviteCode, adminToken };
 }
 
 /** Invite codes are 8 chars from the bot's alphabet. */
@@ -300,7 +389,7 @@ export const NEW_PER_IP_PER_HOUR = 5;
 export const MAX_DRAFT_MEDIA = 30;
 
 /** First x-forwarded-for value (the client on Vercel), else "unknown". Only its salted hash is ever stored. */
-function clientIp(req: Request): string {
+export function clientIp(req: Request): string {
   const first = req.headers.get("x-forwarded-for")?.split(",")[0]?.trim();
   return first || "unknown";
 }
@@ -373,7 +462,7 @@ export function sniffImageType(b: Uint8Array): "image/jpeg" | "image/png" | "ima
 
 export async function handleMedia(req: Request, d: WizardDeps, venue: Venue): Promise<Response> {
   try {
-    if (venue.status !== "draft") throw ALREADY_PUBLISHED(venue.slug);
+    if (!isOpenDraft(venue)) throw ALREADY_PUBLISHED(venue.slug);
     // Cheap refusals first, before the body is read.
     if ((await d.store.getSite(venue.id)).media.length >= MAX_DRAFT_MEDIA) throw TOO_MANY_MEDIA();
     const declared = Number(req.headers.get("content-length"));
@@ -395,15 +484,18 @@ export async function handleMedia(req: Request, d: WizardDeps, venue: Venue): Pr
   }
 }
 
-export async function handlePublish(d: WizardDeps, venue: Venue): Promise<Response> {
+/** `opts.userId`: the signed-in account, linked as the owner. `opts.startDeploy`: called for a website add-on (its owner is already in the chat, so the first-owner-join deploy will not run). */
+export async function handlePublish(d: WizardDeps, venue: Venue, opts: { userId?: string | null; startDeploy?: (venueId: string) => void } = {}): Promise<Response> {
   try {
-    const r = await publishDraft(d.store, venue, d.now());
+    const addon = venue.status !== "draft";
+    const r = await publishDraft(d.store, venue, d.now(), { userId: opts.userId ?? null });
+    if (addon) opts.startDeploy?.(venue.id);
     const bot = d.config.telegramBotUsername;
     return Response.json(
       {
         slug: r.venue.slug,
         invite_code: r.inviteCode,
-        start_url: bot ? `https://t.me/${bot}?start=${r.inviteCode}` : null,
+        start_url: bot && r.inviteCode ? `https://t.me/${bot}?start=${r.inviteCode}` : null,
         admin_url: adminUrl(d.config.publicBaseUrl, r.venue.slug, r.adminToken),
         site_url: publicUrl(d.config.publicBaseUrl, r.venue.slug),
       },

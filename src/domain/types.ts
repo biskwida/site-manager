@@ -46,6 +46,9 @@ export type VenueStatus = "draft" | "live";
  */
 export type SiteMode = "claudia" | "own" | "none";
 export const SITE_MODES: readonly SiteMode[] = ["claudia", "own", "none"];
+/** What an own-site venue's website is built with (asked at onboarding; picks how the website step of the checklist connects it). */
+export type SitePlatform = "wordpress" | "wix" | "squarespace" | "shopify" | "other" | "unknown";
+export const SITE_PLATFORMS: readonly SitePlatform[] = ["wordpress", "wix", "squarespace", "shopify", "other", "unknown"];
 export type DeployStatus = "pending" | "building" | "ready" | "error";
 export interface DeployInfo {
   provider: "vercel" | "fake";
@@ -121,6 +124,8 @@ export interface Venue {
   site_url: string | null;
   /** Server-only (never in the public feed). Replaces the old implicit rule "site_url set = own site"; site_url is only the address of an own site. */
   site_mode: SiteMode;
+  /** Server-only (never in the public feed). What an own-site venue's site is built with; null = not asked (every other venue). */
+  site_platform: SitePlatform | null;
   created_at: string;
 }
 

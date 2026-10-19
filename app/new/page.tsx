@@ -5,6 +5,7 @@ import { LangProvider } from "@/src/i18n";
 import { WIZARD } from "@/src/i18n/wizard";
 import { getServerDeps } from "@/src/server/deps";
 import { DRAFT_COOKIE, venueFromDraftCookie } from "@/src/server/draft-cookie";
+import { isOpenDraft } from "@/src/server/wizard";
 import { demoSiteState } from "@/src/wizard/demo-state";
 import type { Resume } from "./components/ResumeDraft";
 import { TemplateChooser } from "./components/TemplateChooser";
@@ -20,7 +21,7 @@ export default async function Page() {
   const deps = await getServerDeps((fn) => after(fn));
   const venue = await venueFromDraftCookie(deps.store, (await cookies()).get(DRAFT_COOKIE)?.value).catch(() => null);
   const resume: Resume | null = venue
-    ? { id: venue.id, kind: venue.status === "draft" ? "draft" : "live", name: venue.status === "draft" ? (venue.wizard_draft?.name ?? "") : venue.name }
+    ? { id: venue.id, kind: isOpenDraft(venue) ? "draft" : "live", name: isOpenDraft(venue) ? (venue.wizard_draft?.name ?? "") : venue.name }
     : null;
   return (
     <LangProvider defaultLang="bg">

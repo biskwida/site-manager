@@ -8,6 +8,7 @@ import { LangProvider } from "@/src/i18n";
 import { DICTS } from "@/src/i18n/dicts";
 import { connectedApps, connectLinks, enabledApps } from "@/src/server/connect-apps";
 import { getServerDeps } from "@/src/server/deps";
+import { getSessionUser } from "@/src/server/session";
 import { socialAvailability } from "@/src/server/social-connect";
 import { DRAFT_COOKIE, venueFromDraftCookie } from "@/src/server/draft-cookie";
 import { doneInviteCode } from "@/src/server/wizard";
@@ -31,7 +32,7 @@ export default async function Page(props: PageProps<"/new/[id]/done">) {
   const jar = await cookies();
   const venue = await venueFromDraftCookie(deps.store, jar.get(DRAFT_COOKIE)?.value, id);
   if (!venue) notFound();
-  if (venue.status !== "live") redirect(`/new/${encodeURIComponent(id)}`);
+  if (venue.status !== "live" || venue.wizard_draft) redirect(`/new/${encodeURIComponent(id)}`);
   // The publish redirect carries the fresh invite code; a reload without it shows the newest open one (a new one only when
   // none is open). No code once the owner pressed Start.
   const code = await doneInviteCode(deps.store, venue.id, one(sp.code), new Date());
@@ -47,9 +48,12 @@ export default async function Page(props: PageProps<"/new/[id]/done">) {
     hosted,
     connected_apps: connectedApps(await deps.store.listMembers(venue.id)),
   };
+  // The "Continue setup" link only for the signed-in account that owns this venue (the checklist is owner-only).
+  const user = await getSessionUser();
+  const onboardingHref = user && (await deps.store.isVenueOwner(venue.id, user.id)) ? `/onboarding/${encodeURIComponent(venue.slug)}` : undefined;
   return (
     <LangProvider defaultLang={venue.default_lang}>
-      <DoneStatus id={id} slug={venue.slug} code={code} links={code ? connectLinks(deps.config, code) : []} apps={enabledApps(deps.config)} adminKey={adminKey} baseUrl={deps.config.publicBaseUrl} initial={initial} social={Object.values(socialAvailability(deps.config, deps.destinationSecretKey)).some(Boolean)} />
+      <DoneStatus id={id} slug={venue.slug} code={code} links={code ? connectLinks(deps.config, code) : []} apps={enabledApps(deps.config)} adminKey={adminKey} baseUrl={deps.config.publicBaseUrl} initial={initial} onboardingHref={onboardingHref} social={Object.values(socialAvailability(deps.config, deps.destinationSecretKey)).some(Boolean)} />
     </LangProvider>
   );
 }

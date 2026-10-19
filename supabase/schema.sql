@@ -51,6 +51,10 @@ alter table public.venues drop constraint if exists venues_site_mode_check;
 alter table public.venues add constraint venues_site_mode_check check (site_mode in ('claudia', 'own', 'none'));
 alter table public.venues drop constraint if exists venues_site_mode_own_url_check;
 alter table public.venues add constraint venues_site_mode_own_url_check check (site_mode <> 'own' or (site_url is not null and site_url <> ''));
+-- Own-site venues: what the site is built with (2026-10-19, Task 5); decides how the onboarding checklist connects it. Owner-only (not granted to anon).
+alter table public.venues add column if not exists site_platform text;
+alter table public.venues drop constraint if exists venues_site_platform_check;
+alter table public.venues add constraint venues_site_platform_check check (site_platform is null or site_platform in ('wordpress', 'wix', 'squarespace', 'shopify', 'other', 'unknown'));
 -- Monthly change limit (pricing plans; src/domain/limits.ts): applied change sets per calendar month in the venue's tz. null = unlimited.
 alter table public.venues add column if not exists change_limit integer;
 alter table public.venues drop constraint if exists venues_change_limit_check;

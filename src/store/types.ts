@@ -1,6 +1,6 @@
 // src/store/types.ts
 import type {
-  BusinessType, Category, Change, ChangeSet, ChangeSetStatus, ChangeSource, ChatLang, CommentMode, CommentNetwork, Conversation, DeployInfo, DeployStatus, Item, Lang, Media, Member, Role, SiteMode, SiteState, SiteTextKey, TemplateId, Venue, VenueStatus, WeekHours,
+  BusinessType, Category, Change, ChangeSet, ChangeSetStatus, ChangeSource, ChatLang, CommentMode, CommentNetwork, Conversation, DeployInfo, DeployStatus, Item, Lang, Media, Member, Role, SiteMode, SitePlatform, SiteState, SiteTextKey, TemplateId, Venue, VenueStatus, WeekHours,
 } from "../domain/types";
 import { isChatLang } from "../domain/types";
 import type { Place } from "../geo/osm";
@@ -48,6 +48,8 @@ export interface NewVenue {
   site_url?: string | null;
   /** Default "claudia". */
   site_mode?: SiteMode;
+  /** Own-site venues only; default null. */
+  site_platform?: SitePlatform | null;
 }
 export interface NewCategory {
   venue_id: string;
@@ -88,7 +90,7 @@ export interface NewChangeSet {
 export type ChangeSetPatch = Partial<Pick<ChangeSet, "status" | "apply_at" | "reminded_at" | "decided_at" | "applied_at" | "reverted_by" | "message_ref" | "preview_bg" | "preview_en" | "proposal_refs" | "summary_bg" | "summary_en">>;
 export type VenuePatch = Partial<Pick<Venue,
   "slug" | "name" | "tagline_bg" | "tagline_en" | "about_bg" | "about_en" | "address" | "phone" | "maps_url" | "instagram" |
-  "hours" | "tz" | "default_lang" | "theme" | "template" | "business_type" | "status" | "wizard_draft" | "instagram_import" | "site_url" | "site_mode" |
+  "hours" | "tz" | "default_lang" | "theme" | "template" | "business_type" | "status" | "wizard_draft" | "instagram_import" | "site_url" | "site_mode" | "site_platform" |
   "comment_mode" | "comment_digest_hour" | "comment_limit" | "last_comment_digest_at">>;
 
 export interface InviteSummary {
