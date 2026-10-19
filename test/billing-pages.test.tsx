@@ -111,6 +111,25 @@ describe("/billing/[slug]", () => {
     expect(html).toContain("Add a card to start your free trial");
   });
 
+  it("a paused subscriber is also sent to Manage billing, not to a second Checkout", async () => {
+    const v = await mine({ billing_status: "paused", plan: "both", stripe_subscription_id: "sub_1", stripe_customer_id: "cus_1" });
+    sessionUser.mockResolvedValue(owner);
+    const { html } = (await outcome(() => BillingPage(slugSp(v.slug, { lang: "en" })))) as { html: string };
+    expect(html).toContain("Manage billing");
+    expect(html).not.toContain("Continue to secure payment");
+  });
+
+  it("a live Admin subscriber with an own site is offered Add a website; a canceled one chooses a plan again", async () => {
+    const v = await mine({ billing_status: "active", plan: "admin", stripe_subscription_id: "sub_1", stripe_customer_id: "cus_1", site_mode: "own", site_url: "https://own.example", created_via: "start" });
+    sessionUser.mockResolvedValue(owner);
+    const a = (await outcome(() => BillingPage(slugSp(v.slug, { lang: "en" })))) as { html: string };
+    expect(a.html).toContain("Add a website — €199 once");
+    await store.updateVenue(v.id, { billing_status: "canceled" });
+    const c = (await outcome(() => BillingPage(slugSp(v.slug, { lang: "en" })))) as { html: string };
+    expect(c.html).toContain("Continue to secure payment");
+    expect(c.html).not.toContain("Add a website");
+  });
+
   it("a subscriber is offered Manage billing instead of Checkout", async () => {
     const v = await mine({ billing_status: "active", plan: "both", stripe_subscription_id: "sub_1", stripe_customer_id: "cus_1" });
     sessionUser.mockResolvedValue(owner);
@@ -156,6 +175,29 @@ describe("PlanPicker", () => {
     expect(h).not.toContain("If you pay during the trial");
   });
 
+  it("price labels carry the period and the VAT note: €19 / month, excl. VAT and €199 once, excl. VAT (BG: 19 € / месец, без ДДС)", () => {
+    const text = (h: string) => h.replace(/<[^>]+>/g, "");
+    expect(text(html())).toContain("€19 / month, excl. VAT");
+    expect(text(html())).toContain("€199 once, excl. VAT");
+    const bg = text(renderToStaticMarkup(<PlanPicker {...base} lang="bg" addon="optional" />));
+    expect(bg).toContain("19 € / месец, без ДДС");
+    expect(bg).toContain("199 € еднократно, без ДДС");
+  });
+
+  it("?required=1 says nothing is charged today, unless the website is in the Checkout", () => {
+    expect(html({ required: true })).toContain("Nothing is charged today.");
+    const locked = html({ required: true, addon: "locked" });
+    expect(locked).not.toContain("Nothing is charged today.");
+    expect(locked).toContain("Today: €199 excl. VAT for the website; the plan starts after the trial.");
+  });
+
+  it("a subscriber who can buy a website later sees Add a website; Social sees the note", () => {
+    const sub = (over: Partial<Parameters<typeof PlanPicker>[0]>) => html({ subscribed: true, ...over });
+    expect(sub({ canBuyWebsite: true })).toContain("Add a website — €199 once");
+    expect(sub({})).not.toContain("Add a website");
+    expect(sub({ socialWebsiteNote: true })).toContain("A website comes with Admin or Both");
+  });
+
   it("a paid add-on has no box; an operator venue has none either", () => {
     expect(html({ addon: "paid" })).toContain("The website is paid for");
     expect(html({ addon: "paid" })).not.toContain('type="checkbox"');
@@ -178,7 +220,7 @@ describe("PlanPicker", () => {
 });
 
 describe("the dashboard's plan card", () => {
-  const b = (over: Partial<BillingOverview> = {}): BillingOverview => ({ plan: null, status: "trialing", trial_days_left: 9, trial_ends_at: "2026-11-02T09:00:00.000Z", subscribed: false, can_build_website: false, ...over });
+  const b = (over: Partial<BillingOverview> = {}): BillingOverview => ({ plan: null, status: "trialing", trial_days_left: 9, trial_ends_at: "2026-11-02T09:00:00.000Z", subscribed: false, has_customer: true, can_build_website: false, can_buy_website: false, website_note: false, ...over });
   const card = (billing: BillingOverview, lang: "bg" | "en" = "en") => renderToStaticMarkup(<LangProvider defaultLang={lang}><BillingCard billing={billing} slug="coffique" /></LangProvider>);
 
   it("a trial shows the days left, Choose a plan (to /billing/<slug>) and Manage billing", () => {
@@ -207,11 +249,38 @@ describe("the dashboard's plan card", () => {
     expect(card(b({ plan: "both", status: "active", subscribed: true, can_build_website: true }), "bg")).toContain("Направете сайта");
   });
 
-  it("past due, paused and canceled say what happens; canceled and paused offer a new plan", () => {
+  it("a grandfathered venue (active, no subscription, no customer) says Included/Включено and has no Manage billing", () => {
+    const g = b({ plan: "both", status: "active", subscribed: false, has_customer: false, trial_days_left: null });
+    const en = card(g);
+    expect(en).toContain("Included");
+    expect(en).not.toContain("Your subscription is active");
+    expect(en).not.toContain("Manage billing");
+    expect(card(g, "bg")).toContain("Включено");
+    expect(card(b({ has_customer: true }))).toContain("Manage billing");
+  });
+
+  it("past due, paused and canceled say what happens", () => {
     expect(card(b({ plan: "both", status: "past_due", subscribed: true }))).toContain("A payment failed");
-    expect(card(b({ status: "paused", subscribed: true }))).toContain("New changes are paused");
-    expect(card(b({ status: "paused", subscribed: true }))).toContain("Choose a plan");
-    expect(card(b({ status: "canceled", subscribed: true }))).toContain("Your subscription ended");
+    expect(card(b({ status: "canceled", subscribed: false }))).toContain("Your subscription ended");
+    expect(card(b({ status: "canceled", subscribed: false }))).toContain("Choose a plan");
+  });
+
+  it("a paused subscription goes to Manage billing (add a card, resume), not to a new Checkout; a paused venue with no subscription may choose a plan", () => {
+    const paused = card(b({ plan: "both", status: "paused", subscribed: true }));
+    expect(paused).toContain("Add a card or fix the payment in Manage billing");
+    expect(paused).toContain("Manage billing");
+    expect(paused).not.toContain("Choose a plan");
+    expect(card(b({ status: "paused", subscribed: false }))).toContain("Choose a plan");
+  });
+
+  it("a live Admin/Both subscriber without a site can add one for €199 once; Social is told a website comes with Admin or Both", () => {
+    const buy = b({ plan: "admin", status: "active", subscribed: true, can_buy_website: true });
+    expect(card(buy)).toContain("Add a website — €199 once");
+    expect(card(buy, "bg")).toContain("Добавете сайт — 199 € еднократно");
+    expect(card(b({ plan: "admin", status: "active", subscribed: true }))).not.toContain("Add a website");
+    const social = card(b({ plan: "social", status: "active", subscribed: true, website_note: true }));
+    expect(social).toContain("A website comes with Admin or Both");
+    expect(social).not.toContain("Add a website");
   });
 
   it("?billing=success shows the thank-you line", () => {

@@ -535,11 +535,13 @@ export interface Store {
   startTrialIfNone(venueId: string, trial: { trial_started_at: string; trial_ends_at: string }): Promise<boolean>;
   /** The venue with this Stripe customer id (stripe_customer_id is unique); null when none. */
   findVenueByStripeCustomer(customerId: string): Promise<Venue | null>;
+  /** The venue with this id; null when there is none (getVenue throws instead). */
+  findVenueById(id: string): Promise<Venue | null>;
+  /** Whether this Stripe event id was recorded as processed (billing_events). */
+  hasBillingEvent(eventId: string): Promise<boolean>;
   /**
-   * Records a processed Stripe event id (billing_events, primary key). True when this call recorded it (the caller applies the event);
-   * false when it was recorded before (a duplicate delivery: apply nothing).
+   * Records a Stripe event id as processed, AFTER the event was applied (applying is idempotent, so a concurrent double apply is
+   * harmless). True when this call recorded it; false when it was recorded already (the second insert of a race loses cleanly).
    */
-  claimBillingEvent(eventId: string, type: string, nowIso: string): Promise<boolean>;
-  /** Forgets a claimed event id after applying it failed, so Stripe's retry is applied instead of ignored as a duplicate. */
-  releaseBillingEvent(eventId: string): Promise<void>;
+  recordBillingEvent(eventId: string, type: string, nowIso: string): Promise<boolean>;
 }

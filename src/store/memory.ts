@@ -568,13 +568,17 @@ export class InMemoryStore implements Store {
     const s = [...this.sites.values()].find((x) => x.venue.stripe_customer_id === customerId);
     return s ? clone(s.venue) : null;
   }
-  async claimBillingEvent(eventId: string, type: string, nowIso: string) {
+  async findVenueById(id: string) {
+    const s = this.sites.get(id);
+    return s ? clone(s.venue) : null;
+  }
+  async hasBillingEvent(eventId: string) {
+    return this.billingEvents.has(eventId);
+  }
+  async recordBillingEvent(eventId: string, type: string, nowIso: string) {
     if (this.billingEvents.has(eventId)) return false;
     this.billingEvents.set(eventId, { type, at: nowIso });
     return true;
-  }
-  async releaseBillingEvent(eventId: string) {
-    this.billingEvents.delete(eventId);
   }
 
   // --- Meta data deletion (appended 2026-10-14) ---

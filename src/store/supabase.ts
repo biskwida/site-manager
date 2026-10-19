@@ -697,13 +697,21 @@ export class SupabaseStore implements Store {
     if (error) throw new Error(`findVenueByStripeCustomer: ${error.message}`);
     return data ? this.venue(data) : null;
   }
-  async claimBillingEvent(eventId: string, type: string, nowIso: string) {
-    // ON CONFLICT DO NOTHING: the row comes back only for the call that inserted it.
-    const rows = await must(this.db.from("billing_events").upsert({ id: eventId, type, received_at: nowIso }, { onConflict: "id", ignoreDuplicates: true }).select("id"), "claimBillingEvent");
-    return rows.length === 1;
+  async findVenueById(id: string) {
+    if (badVenue(id)) return null;
+    const { data, error } = await this.db.from("venues").select("*").eq("id", id).maybeSingle();
+    if (error) throw new Error(`findVenueById: ${error.message}`);
+    return data ? this.venue(data) : null;
   }
-  async releaseBillingEvent(eventId: string) {
-    await must(this.db.from("billing_events").delete().eq("id", eventId).select("id"), "releaseBillingEvent");
+  async hasBillingEvent(eventId: string) {
+    const { data, error } = await this.db.from("billing_events").select("id").eq("id", eventId).maybeSingle();
+    if (error) throw new Error(`hasBillingEvent: ${error.message}`);
+    return data !== null;
+  }
+  async recordBillingEvent(eventId: string, type: string, nowIso: string) {
+    // ON CONFLICT DO NOTHING: the row comes back only for the call that inserted it.
+    const rows = await must(this.db.from("billing_events").upsert({ id: eventId, type, received_at: nowIso }, { onConflict: "id", ignoreDuplicates: true }).select("id"), "recordBillingEvent");
+    return rows.length === 1;
   }
 
   // --- Meta data deletion (appended 2026-10-14) ---

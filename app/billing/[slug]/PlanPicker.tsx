@@ -2,7 +2,7 @@
 // app/billing/[slug]/PlanPicker.tsx — "Choose your plan": three plans, the 199 € "Build me a website" add-on (greyed out with Social media) and
 // the summary, then on to Stripe Checkout. Subscribers get "Manage billing" (the Customer Portal) instead.
 import { useState } from "react";
-import { btnPrimary, cardCls, eyebrowCls, pillCls } from "@/app/components/account-ui";
+import { btnGhost, btnPrimary, cardCls, eyebrowCls, pillCls } from "@/app/components/account-ui";
 import type { PageLang } from "@/src/auth/page-lang";
 import { PLAN_PRICE_EUR, WEBSITE_SETUP_EUR, planHasWebsite, type AddonMode } from "@/src/billing/plans";
 import { PLAN_IDS, type Plan } from "@/src/domain/types";
@@ -21,8 +21,12 @@ export interface PlanPickerProps {
   initialPlan: Plan;
   /** TRIAL_REQUIRES_CARD: the owner was sent here before the checklist. */
   required: boolean;
-  /** A Stripe subscription exists: change it in the Customer Portal. */
+  /** A Stripe subscription exists that is not canceled (live, paused or unpaid): change it, add a card or resume it in the Customer Portal. */
   subscribed: boolean;
+  /** A live Admin or Both subscriber with no Claudia site and an unpaid fee: "Add a website — €199 once" (a one-off Checkout). */
+  canBuyWebsite?: boolean;
+  /** A Social media subscriber with no Claudia site: a website comes with Admin or Both. */
+  socialWebsiteNote?: boolean;
   /** The Stripe key is a test key. */
   testMode: boolean;
   fetcher?: typeof fetch;
@@ -49,16 +53,13 @@ export function PlanPicker(p: PlanPickerProps) {
   const eyebrow =
     p.trialDaysLeft === 1 ? fill(t["plan.eyebrowTrialOne"], { name: p.name }) : p.trialDaysLeft > 1 ? fill(t["plan.eyebrowTrial"], { name: p.name, days: p.trialDaysLeft }) : fill(t["plan.eyebrowPlain"], { name: p.name });
 
-  async function send(path: "checkout" | "portal") {
+  async function send(path: "checkout" | "portal" | "website") {
     if (busy) return;
     setBusy(true);
     setError(null);
     try {
-      const res = await f(`/api/billing/${path}`, {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify(path === "checkout" ? { slug: p.slug, plan, website: p.addon === "optional" && addonOn, lang } : { slug: p.slug, lang }),
-      });
+      const body = path === "checkout" ? { slug: p.slug, plan, website: p.addon === "optional" && addonOn, lang } : path === "website" ? { slug: p.slug, kind: "website_setup", lang } : { slug: p.slug, lang };
+      const res = await f(`/api/billing/${path === "website" ? "checkout" : path}`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
       const data = (await res.json().catch(() => null)) as { url?: string; error?: { bg?: string; en?: string } } | null;
       if (res.ok && data?.url) {
         go(data.url);
@@ -75,14 +76,20 @@ export function PlanPicker(p: PlanPickerProps) {
     <div className="max-w-2xl">
       <span className={eyebrowCls}>{eyebrow}</span>
       <h1 className="mt-1.5 font-display text-4xl leading-tight">{t["plan.title"]}</h1>
-      {p.required ? <p role="note" className="mt-3 rounded-2xl bg-[var(--cl-accent-soft)] px-4 py-3 text-[var(--cl-ink)]">{t["plan.required"]}</p> : null}
+      {p.required ? (
+        <p role="note" className="mt-3 rounded-2xl bg-[var(--cl-accent-soft)] px-4 py-3 text-[var(--cl-ink)]">
+          {p.addon === "locked" ? fill(t["plan.requiredSetup"], { price: formatEuro(lang, WEBSITE_SETUP_EUR) }) : t["plan.required"]}
+        </p>
+      ) : null}
 
       {p.subscribed ? (
         <div className={`${cardCls} mt-6 grid gap-3`}>
           <p>{t.already}</p>
-          <div>
+          <div className="flex flex-wrap gap-2">
             <button type="button" onClick={() => void send("portal")} disabled={busy} className={btnPrimary}>{busy ? t["cta.busy"] : t["cta.manage"]}</button>
+            {p.canBuyWebsite ? <button type="button" onClick={() => void send("website")} disabled={busy} className={btnGhost}>{fill(t["addon.add"], { price: formatEuro(lang, WEBSITE_SETUP_EUR) })}</button> : null}
           </div>
+          {p.socialWebsiteNote ? <p className="text-sm text-[var(--cl-ink-2)]">{t["addon.socialNote"]}</p> : null}
           {error ? <p role="alert" className="text-sm text-[var(--cl-error)]">{error}</p> : null}
         </div>
       ) : (
@@ -101,7 +108,10 @@ export function PlanPicker(p: PlanPickerProps) {
                 <label key={id} className={`${cardCls} relative grid cursor-pointer content-start gap-1 has-[:checked]:border-[var(--cl-accent)] has-[:checked]:shadow-[inset_0_0_0_1px_var(--cl-accent)] has-[:disabled]:cursor-not-allowed has-[:disabled]:opacity-55`}>
                   <input type="radio" name="plan" value={id} checked={plan === id} disabled={disabled} onChange={() => setPlan(id)} className="absolute right-4 top-4 size-5 accent-[var(--cl-accent)]" />
                   <strong className="pr-8 text-lg">{t[`plan.${id}.name` as BillingKey]}</strong>
-                  <span className="font-display text-3xl">{formatEuro(lang, PLAN_PRICE_EUR[id])}</span>
+                  <span>
+                    <span className="font-display text-3xl">{formatEuro(lang, PLAN_PRICE_EUR[id])}</span>
+                    <span className="text-sm text-[var(--cl-ink-2)]">{t["price.month"]}</span>
+                  </span>
                   <span className="text-sm text-[var(--cl-ink-2)]">{t[`plan.${id}.note` as BillingKey]}</span>
                 </label>
               );
@@ -118,7 +128,10 @@ export function PlanPicker(p: PlanPickerProps) {
                 {p.addon === "locked" ? <><br /><span className="text-sm text-[var(--cl-ink-2)]">{t["addon.locked"]}</span></> : null}
                 {!websiteOk ? <><br /><span role="status" className="text-sm text-[var(--cl-ink-2)]">{t["addon.warn"]}</span></> : null}
               </span>
-              <span className="font-display text-2xl">{formatEuro(lang, WEBSITE_SETUP_EUR)} <small className="font-sans text-sm text-[var(--cl-ink-2)]">{t["addon.once"]}</small></span>
+              <span>
+                <span className="font-display text-2xl">{formatEuro(lang, WEBSITE_SETUP_EUR)}</span>
+                <small className="font-sans text-sm text-[var(--cl-ink-2)]">{t["price.once"]}</small>
+              </span>
             </label>
           ) : p.addon === "paid" ? (
             <p className="mt-3 text-sm text-[var(--cl-ink-2)]">{t["addon.paid"]}</p>

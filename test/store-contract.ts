@@ -1124,15 +1124,21 @@ export function storeContract(
       }
     });
 
-    it("billing: a Stripe event id is claimed once, and can be released for a retry", async () => {
+    it("billing: a Stripe event id is recorded once, after applying; findVenueById is null for an unknown venue", async () => {
       const s = await make();
       const id = `evt_${crypto.randomUUID()}`;
-      expect(await s.claimBillingEvent(id, "invoice.paid", NOW)).toBe(true);
-      expect(await s.claimBillingEvent(id, "invoice.paid", LATER)).toBe(false);
-      await s.releaseBillingEvent(id);
-      expect(await s.claimBillingEvent(id, "invoice.paid", LATER)).toBe(true);
-      await s.releaseBillingEvent(id);
-      await s.releaseBillingEvent(id); // releasing an unknown id is a no-op
+      expect(await s.hasBillingEvent(id)).toBe(false);
+      expect(await s.recordBillingEvent(id, "invoice.paid", NOW)).toBe(true);
+      expect(await s.hasBillingEvent(id)).toBe(true);
+      expect(await s.recordBillingEvent(id, "invoice.paid", LATER)).toBe(false); // the loser of a race
+      const v = await s.createVenue({ slug: "t-b5", name: "B5" });
+      try {
+        expect((await s.findVenueById(v.id))?.slug).toBe("t-b5");
+        expect(await s.findVenueById(crypto.randomUUID())).toBeNull();
+        expect(await s.findVenueById("not-a-uuid")).toBeNull();
+      } finally {
+        await s.deleteVenue(v.id);
+      }
     });
   });
 }

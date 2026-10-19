@@ -31,17 +31,29 @@ Product catalogue, "Add product". Create four prices, all in EUR, without tax in
 
 Copy each price's id (`price_...`, on the price's page) into the env var named in the table. Stripe Tax stays **off** until the company has a VAT registration (ask the accountant); Checkout collects the customer's VAT number.
 
-## 3. API key
+## 3. Account settings
+
+- Settings, Business, Public details: set the **business name** (it is shown on Checkout, receipts and invoices).
+- Settings, Payment methods: enable **cards only** for now (turn the other methods off in the default configuration). Delayed methods such as bank debits are handled by the code (the website fee waits for `checkout.session.async_payment_succeeded`), but cards are all that was tested.
+- Settings, Billing, Subscriptions and emails, **failed payment retries** ("Smart Retries" is the sensible choice, a few attempts over about two weeks), and when the retries run out, choose **"Mark the subscription as unpaid"** (not "cancel"). What each state means in Claudia:
+  - first failed payment: Stripe says `past_due` and Claudia says `past_due`; the owner is reminded and keeps working for a grace period (the 7 days are enforced in a later task);
+  - retries exhausted with "mark as unpaid": Stripe says `unpaid` and Claudia says `paused`: new owner changes stop; the website, menu page and published posts stay online. The owner fixes the card in Manage billing;
+  - the owner (or you) cancels, or retries are set to cancel: Stripe says `canceled` and Claudia says `canceled`. Nothing goes offline; the owner can start a new subscription from the plan page.
+  - A trial that ends with no card is paused by Stripe (`paused`), which Claudia also shows as `paused`.
+
+## 4. API key
 
 Developers, API keys: copy the secret key (`sk_test_...`) into `STRIPE_SECRET_KEY`. Test mode only for now; the plan page shows a "test mode" label while the key starts with `sk_test_`.
 
-## 4. Webhook
+## 5. Webhook
 
 Developers, Webhooks, "Add endpoint":
 
 - Endpoint URL: `https://getclaudia.app/api/stripe/webhook`
+- **API version: pick the one the app's Stripe library uses, `2026-09-30.endive`** (the `stripe` package is pinned to 23.0.0 and sends that version). An endpoint on another version delivers differently shaped events (for example where an invoice keeps its subscription id), and the app is only tested against this one.
 - Events to send:
   - `checkout.session.completed`
+  - `checkout.session.async_payment_succeeded`
   - `customer.subscription.created`
   - `customer.subscription.updated`
   - `customer.subscription.deleted`
@@ -50,12 +62,13 @@ Developers, Webhooks, "Add endpoint":
 
 Copy the endpoint's signing secret (`whsec_...`) into `STRIPE_WEBHOOK_SECRET`. For local tests, `stripe listen --forward-to localhost:3000/api/stripe/webhook` prints a secret for that session.
 
-The endpoint verifies the signature on the raw body (a bad one is 400), records each event id in `billing_events` and applies it once, so Stripe's retries and duplicates are harmless. It also derives the plan and status from the subscription's current state, so events arriving out of order end in the right place. It verifies and records even while `BILLING_ENABLED` is off.
+The endpoint verifies the signature on the raw body (a bad one is 400), applies each event and then records its id in `billing_events`. An event that failed to apply is not recorded, so Stripe's retry (after the 500) is applied; one that was recorded is ignored as a duplicate. Applying is idempotent, so two deliveries racing each other are harmless. It also derives the plan and status from the subscription's current state, so events arriving out of order end in the right place. It verifies and records even while `BILLING_ENABLED` is off.
 
-## 5. Customer Portal
+## 6. Customer Portal
 
 Settings, Billing, Customer portal (test mode), then:
 
+- **Save the default configuration**: open the page, set the options below and press "Save changes". Until it is saved once, Stripe has no default portal configuration and opening the portal from the app fails.
 - Turn it on and set the business information (name, support email, privacy and terms links).
 - **Customers can switch plans**: on, with the three monthly prices (`Admin`, `Social media`, `Both`) as the products they can switch between.
 - **Customers can cancel subscriptions**: on (cancel at the end of the period).
@@ -63,7 +76,7 @@ Settings, Billing, Customer portal (test mode), then:
 
 The dashboard's "Manage billing" button opens this portal. A plan switch comes back through `customer.subscription.updated`, and the plan follows the price.
 
-## 6. Vercel env
+## 7. Vercel env
 
 Add to the Vercel project (Production, and Preview if you test there):
 
@@ -87,13 +100,15 @@ TRIAL_REQUIRES_CARD=false
 
 `TRIAL_REQUIRES_CARD=true` sends a new owner to `/billing/<slug>?required=1` (Checkout, card collected, nothing charged today) before the checklist. Redeploy after changing env vars.
 
-## 7. Try it with the test card
+## 8. Try it with the test card
 
-1. Create a business at `https://getclaudia.app/start`. The free trial starts (14 days, 20 changes).
+1. Create a business at `https://getclaudia.app/start`. The free trial starts (14 days). The 20-change trial limit is stored as `TRIAL_CHANGE_LIMIT` but is not enforced yet (that comes with the limits task).
 2. The checklist's plan card (or the dashboard's "Plan and payment") links to `/billing/<slug>`. Pick a plan, tick "Build me a website" if it is offered, and continue.
 3. In Stripe Checkout pay with the test card `4242 4242 4242 4242`, any future expiry, any CVC, any postcode. Other useful test cards: `4000 0000 0000 0341` (card attaches, then payments fail, for the past-due path) and `4000 0025 0000 3155` (asks for 3-D Secure).
 4. You land on `/dashboard/<slug>?billing=success`. Within a few seconds the webhook has set the plan and status (check Stripe, Developers, Webhooks, the endpoint's delivery log: 200 for each event).
 5. "Manage billing" opens the portal. Cancel there and the venue goes to `canceled`; the website and posts stay online.
+
+A Social media subscriber has no website; an Admin or Both subscriber with an own site or no site can add the 199 € website later from the dashboard ("Add a website") or the plan page: a one-off Checkout, after which "Build your website" appears.
 
 Without a card, "if required" Checkout lets an owner with trial days left start the subscription with nothing charged yet; the plan starts when the trial ends. If no card is added by then, Stripe pauses the subscription and Claudia pauses new owner changes.
 

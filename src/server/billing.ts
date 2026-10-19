@@ -1,8 +1,9 @@
 // src/server/billing.ts
 // Server-only. The HTTP side of billing: Checkout and the Customer Portal (owner session only), the Stripe webhook, and the free trial's
 // start. With BILLING_ENABLED off the checkout and portal answer 404 as if they did not exist; the webhook still verifies and records.
-import { applyStripeEvent, BillingError, checkoutSession, makeStripe, type StripeLike } from "../billing/stripe";
-import { needsSetupFee, planHasWebsite, priceIdFor, trialDaysLeft } from "../billing/plans";
+import Stripe from "stripe";
+import { applyStripeEvent, BillingError, checkoutSession, describeError, makeStripe, websiteSetupSession, type StripeLike } from "../billing/stripe";
+import { canBuyWebsiteLater, hasLiveSubscription, hasStoredSubscription, needsSetupFee, planHasWebsite, priceIdFor, trialDaysLeft } from "../billing/plans";
 import type { Config } from "../config";
 import { PLAN_IDS, type Plan, type Venue } from "../domain/types";
 import type { Store } from "../store/types";
@@ -43,11 +44,14 @@ const NOT_FOUND = () => new Response("Not found", { status: 404, headers: NO_STO
 const UNAVAILABLE = () => new BillingError("unavailable", 503, "Плащането не е настроено още. Опитайте по-късно.", "Payments are not set up yet. Please try again later.");
 
 function failure(e: unknown): Response {
+  if (e instanceof Stripe.errors.StripeError) {
+    // The message of a Stripe error can carry a customer, an email or the request: only its type and code are logged, and the owner gets a plain line.
+    console.error(`[billing] ${describeError(e)}`);
+    return Response.json({ error: { code: "unavailable", bg: "Плащането не е достъпно в момента. Опитайте пак след малко.", en: "Payments are not available right now. Please try again in a moment." } }, { status: 502, headers: NO_STORE });
+  }
   if (e instanceof BillingError) return Response.json({ error: { code: e.code, bg: e.bg, en: e.en } }, { status: e.status, headers: NO_STORE });
   return wizardErrorResponse(e);
 }
-
-const LIVE_SUBSCRIPTION = new Set(["trialing", "active", "past_due"]);
 
 /** The venue with a Stripe customer: the stored one, else a new one made from the account's email (the id stored before Checkout opens). */
 async function ensureCustomer(d: BillingDeps & { stripe: StripeLike }, venue: Venue, user: { email: string }): Promise<Venue> {
@@ -56,6 +60,18 @@ async function ensureCustomer(d: BillingDeps & { stripe: StripeLike }, venue: Ve
   const fresh = await d.store.getVenue(venue.id);
   if (fresh.stripe_customer_id) return fresh; // a concurrent checkout stored its customer first
   return d.store.updateVenue(venue.id, { stripe_customer_id: created.id });
+}
+
+/** The website setup bought on its own: a live Admin or Both subscription, no Claudia site yet, the fee unpaid. 400/409 say why not. */
+async function buyWebsiteLater(d: BillingDeps, venue: Venue, user: { email: string }, o: { lang: "bg" | "en"; baseUrl: string }): Promise<Response> {
+  if (venue.site_mode === "claudia") throw new BillingError("invalid", 400, "Вече имате сайт от Claudia.", "You already have a website from Claudia.");
+  if (venue.website_fee_paid) throw new BillingError("conflict", 409, "Сайтът е вече платен. Направете го от таблото.", "The website is already paid for. Build it from your dashboard.");
+  if (!hasLiveSubscription(venue)) throw new BillingError("conflict", 409, "Първо изберете план.", "Choose a plan first.");
+  if (!canBuyWebsiteLater(venue)) throw new BillingError("invalid", 400, "Сайтът се добавя към Admin или Both.", "A website needs Admin or Both.");
+  if (!d.stripe || !d.config.stripePrices.websiteSetup) throw UNAVAILABLE();
+  const withCustomer = await ensureCustomer({ ...d, stripe: d.stripe }, venue, user);
+  const url = await websiteSetupSession(d.stripe, withCustomer, user, { ...o, prices: d.config.stripePrices, now: d.now() });
+  return Response.json({ url }, { headers: NO_STORE });
 }
 
 const pageLang = (v: unknown, fallback: "bg" | "en"): "bg" | "en" => (v === "bg" || v === "en" ? v : fallback);
@@ -71,7 +87,10 @@ export async function handleCheckout(req: Request, slug: string, d: BillingDeps)
   try {
     const gate = await ownerGate(req, slug, d);
     if ("response" in gate) return gate.response;
-    const body = (await req.json().catch(() => null)) as { plan?: unknown; website?: unknown; lang?: unknown } | null;
+    const body = (await req.json().catch(() => null)) as { plan?: unknown; website?: unknown; lang?: unknown; kind?: unknown } | null;
+    const lang = pageLang(body?.lang, gate.venue.default_lang);
+    const baseUrl = new URL(req.url).origin;
+    if (body?.kind === "website_setup") return await buyWebsiteLater(d, gate.venue, gate.user, { lang, baseUrl });
     const plan = PLAN_IDS.find((p) => p === body?.plan) as Plan | undefined;
     if (!plan) throw new WizardError("invalid", 400, "Изберете план.", "Choose a plan.");
     let venue = gate.venue;
@@ -79,7 +98,8 @@ export async function handleCheckout(req: Request, slug: string, d: BillingDeps)
     const ticked = body?.website === true && venue.site_mode !== "claudia";
     const withSetupFee = !venue.website_fee_paid && (needsSetupFee(venue) || ticked);
     if (withSetupFee && !planHasWebsite(plan)) throw new BillingError("invalid", 400, "Сайтът се добавя към Admin или Both.", "A website needs Admin or Both.");
-    if (venue.stripe_subscription_id && venue.billing_status && LIVE_SUBSCRIPTION.has(venue.billing_status))
+    // A subscription that is not canceled (live, paused or unpaid) is changed, resumed or given a card in the Customer Portal, never by a second Checkout.
+    if (hasStoredSubscription(venue))
       throw new BillingError("conflict", 409, "Вече имате абонамент. Променете го от „Управление на плащането“.", "You already have a subscription. Change it from Manage billing.");
     if (!d.stripe || !priceIdFor(d.config.stripePrices, plan) || (withSetupFee && !d.config.stripePrices.websiteSetup)) throw UNAVAILABLE(); // before a Stripe customer is made for nothing
     venue = await ensureCustomer({ ...d, stripe: d.stripe }, venue, gate.user);
@@ -87,9 +107,10 @@ export async function handleCheckout(req: Request, slug: string, d: BillingDeps)
       withSetupFee,
       trialDaysLeft: trialDaysLeft(venue, d.now()),
       requireCard: d.config.trialRequiresCard,
-      lang: pageLang(body?.lang, venue.default_lang),
-      baseUrl: new URL(req.url).origin,
+      lang,
+      baseUrl,
       prices: d.config.stripePrices,
+      now: d.now(),
     });
     return Response.json({ url }, { headers: NO_STORE });
   } catch (e) {
@@ -139,7 +160,7 @@ export async function handleStripeWebhook(req: Request, d: Pick<BillingDeps, "st
     const result = await applyStripeEvent(d.store, event, { config: d.config, stripe: d.stripe, now: d.now });
     return Response.json(result === "duplicate" ? { duplicate: true } : result === "ignored" ? { ignored: true } : { received: true }, { headers: NO_STORE });
   } catch (e) {
-    console.error(`[billing] webhook ${event.type} failed: ${e instanceof Error ? e.message : "error"}`);
+    console.error(`[billing] webhook ${event.type} failed: ${describeError(e)}`);
     return Response.json({ error: "failed" }, { status: 500, headers: NO_STORE });
   }
 }

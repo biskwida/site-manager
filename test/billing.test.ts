@@ -191,7 +191,7 @@ describe("startTrial on a new venue", () => {
 });
 
 describe("checkoutSession", () => {
-  const opts = (over: Record<string, unknown> = {}) => ({ withSetupFee: false, trialDaysLeft: 14, requireCard: false, lang: "bg" as const, baseUrl: BASE, prices: PRICES, ...over });
+  const opts = (over: Record<string, unknown> = {}) => ({ withSetupFee: false, trialDaysLeft: 14, requireCard: false, lang: "bg" as const, baseUrl: BASE, prices: PRICES, now: T0, ...over });
   const lines = (c: Record<string, unknown>) => (c.line_items as { price: string; quantity: number }[]).map((l) => l.price);
 
   it("path A with Admin: the plan price and the setup price once, a subscription, Bulgarian, VAT id on, no automatic tax", async () => {
@@ -326,6 +326,23 @@ describe("POST /api/billing/checkout (handleCheckout)", () => {
     expect((await handleCheckout(post("/api/billing/checkout", { plan: "admin" }), venue.slug, d)).status).toBe(409);
   });
 
+  it("any stored subscription that is not canceled blocks a second Checkout (paused and past due go to the Portal); a canceled one does not", async () => {
+    const { venue, d, store, stripe } = await setup({ plan: "both", stripe_subscription_id: "sub_1", stripe_customer_id: "cus_1" });
+    for (const billing_status of ["paused", "past_due", "trialing"] as const) {
+      await store.updateVenue(venue.id, { billing_status });
+      expect((await handleCheckout(post("/api/billing/checkout", { plan: "admin" }), venue.slug, d)).status, billing_status).toBe(409);
+    }
+    expect(stripe.checkoutCalls).toHaveLength(0);
+    await store.updateVenue(venue.id, { billing_status: "canceled" });
+    expect((await handleCheckout(post("/api/billing/checkout", { plan: "admin" }), venue.slug, d)).status).toBe(200);
+  });
+
+  it("a Checkout Session expires 31 minutes after it is made (Stripe's minimum is 30)", async () => {
+    const { venue, d, stripe } = await setup();
+    await handleCheckout(post("/api/billing/checkout", { plan: "both" }), venue.slug, d);
+    expect(stripe.checkoutCalls[0].expires_at).toBe(Math.floor(T0.getTime() / 1000) + 31 * 60);
+  });
+
   it("the language comes from the body (bg or en), else the venue's", async () => {
     const { stripe, venue, d } = await setup();
     await handleCheckout(post("/api/billing/checkout", { plan: "both", lang: "en" }), venue.slug, d);
@@ -352,6 +369,96 @@ describe("POST /api/billing/checkout (handleCheckout)", () => {
     const { venue, d } = await setup();
     expect((await handleCheckout(post("/api/billing/checkout", { plan: "both" }), venue.slug, { ...d, stripe: null })).status).toBe(503);
     expect((await handleCheckout(post("/api/billing/checkout", { plan: "both" }), venue.slug, { ...d, config: config({ stripePrices: { ...PRICES, both: null } }) })).status).toBe(503);
+  });
+});
+
+describe("buying the website later (one-off Checkout)", () => {
+  const live = { plan: "both" as const, billing_status: "active" as const, stripe_subscription_id: "sub_1", stripe_customer_id: "cus_1", site_mode: "own" as const, site_url: "https://own.example", created_via: "start" as const };
+  const ask = (venue: Venue, d: Parameters<typeof handleCheckout>[2], extra: Record<string, unknown> = {}) => handleCheckout(post("/api/billing/checkout", { kind: "website_setup", ...extra }), venue.slug, d);
+
+  it("an Admin or Both venue with a live subscription and no Claudia site gets a payment-mode session with the setup price only", async () => {
+    for (const plan of ["admin", "both"] as const) {
+      const { venue, d, stripe } = await setup({ ...live, plan });
+      const res = await ask(venue, d, { lang: "en" });
+      expect(res.status).toBe(200);
+      expect(((await res.json()) as { url: string }).url).toBe("https://checkout.stripe.test/c/cs_1");
+      const c = stripe.checkoutCalls[0];
+      expect((c.line_items as { price: string; quantity: number }[])).toEqual([{ price: "price_setup", quantity: 1 }]);
+      expect(c).toMatchObject({
+        mode: "payment",
+        customer: "cus_1",
+        locale: "en",
+        tax_id_collection: { enabled: true },
+        metadata: { venue_id: venue.id, kind: "website_setup" },
+        success_url: `${BASE}/dashboard/${venue.slug}?billing=success`,
+        cancel_url: `${BASE}/dashboard/${venue.slug}`,
+        expires_at: Math.floor(T0.getTime() / 1000) + 31 * 60,
+      });
+      expect(c).not.toHaveProperty("subscription_data");
+      expect(c).not.toHaveProperty("automatic_tax");
+    }
+  });
+
+  it("Social is 400 (a website comes with Admin or Both); no live subscription is 409; a site of ours or a paid fee is refused", async () => {
+    const social = await setup({ ...live, plan: "social" });
+    const r = await ask(social.venue, social.d);
+    expect(r.status).toBe(400);
+    expect(((await r.json()) as { error: { en: string } }).error.en).toMatch(/Admin or Both/);
+    expect((await ask((await setup({ ...live, billing_status: "paused" })).venue, (await setup({ ...live, billing_status: "paused" })).d)).status).toBe(409);
+    const noSub = await setup({ site_mode: "own", site_url: "https://own.example", created_via: "start" });
+    expect((await ask(noSub.venue, noSub.d)).status).toBe(409);
+    const claudia = await setup({ ...live, site_mode: "claudia", site_url: null });
+    expect((await ask(claudia.venue, claudia.d)).status).toBe(400);
+    const paid = await setup({ ...live, website_fee_paid: true });
+    expect((await ask(paid.venue, paid.d)).status).toBe(409);
+    for (const t of [social, noSub, claudia, paid]) expect(t.stripe.checkoutCalls).toHaveLength(0);
+  });
+
+  it("the setup price missing is 503; owner session and billing-off rules still apply", async () => {
+    const t = await setup(live);
+    expect((await ask(t.venue, { ...t.d, config: config({ stripePrices: { ...PRICES, websiteSetup: null } }) })).status).toBe(503);
+    expect((await ask(t.venue, { ...t.d, sessionUser: async () => null })).status).toBe(401);
+    expect((await ask(t.venue, { ...t.d, config: config({ billingEnabled: false }) })).status).toBe(404);
+  });
+});
+
+describe("Stripe errors", () => {
+  const boom = () => new Stripe.errors.StripeError({ type: "api_error", message: "No such customer: cus_SECRET for owner@example.com", code: "resource_missing" } as never);
+
+  it("checkout and portal answer 502 and log only the error's type and code, never its message", async () => {
+    const { venue, d, stripe } = await setup({ stripe_customer_id: "cus_SECRET" });
+    stripe.checkout.sessions.create = async () => {
+      throw boom();
+    };
+    stripe.billingPortal.sessions.create = async () => {
+      throw boom();
+    };
+    const spy = vi.spyOn(console, "error").mockImplementation(() => {});
+    const a = await handleCheckout(post("/api/billing/checkout", { plan: "both" }), venue.slug, d);
+    const b = await handlePortal(post("/api/billing/portal", {}), venue.slug, d);
+    expect([a.status, b.status]).toEqual([502, 502]);
+    const logged = spy.mock.calls.flat().map(String).join(" ");
+    expect(logged).toContain("stripe error type=");
+    expect(logged).toContain("resource_missing");
+    expect(logged).not.toContain("cus_SECRET");
+    expect(logged).not.toContain("owner@example.com");
+    expect(JSON.stringify([await a.json(), await b.json()])).not.toContain("cus_SECRET");
+    spy.mockRestore();
+  });
+
+  it("the webhook logs a Stripe error the same way and answers 500 so Stripe retries", async () => {
+    const s = await setup({ stripe_customer_id: "cus_1" });
+    s.stripe.subscriptions.retrieve = async () => {
+      throw boom();
+    };
+    const payload = JSON.stringify({ id: "evt_e", object: "event", type: "customer.subscription.updated", data: { object: sub({ metadata: { venue_id: s.venue.id } }) } });
+    const req = new Request(`${BASE}/api/stripe/webhook`, { method: "POST", headers: { "stripe-signature": realStripe.webhooks.generateTestHeaderString({ payload, secret: SECRET }) }, body: payload });
+    const spy = vi.spyOn(console, "error").mockImplementation(() => {});
+    expect((await handleStripeWebhook(req, s.d)).status).toBe(500);
+    const logged = spy.mock.calls.flat().map(String).join(" ");
+    expect(logged).toContain("resource_missing");
+    expect(logged).not.toContain("cus_SECRET");
+    spy.mockRestore();
   });
 });
 
@@ -482,14 +589,163 @@ describe("applyStripeEvent", () => {
     expect((t.store as InMemoryStore).billingEvents.has("e2")).toBe(false);
   });
 
-  it("a failure while applying releases the event id, so Stripe's retry is applied", async () => {
+  it("an event whose apply failed is not recorded, so Stripe's retry is applied; a recorded one is a duplicate", async () => {
     const t = await ready();
     const e = ev("evt_retry", "customer.subscription.updated", sub({ metadata: { venue_id: t.venue.id } })); // no sub_1 in the fake: retrieve throws
     await expect(t.apply(e)).rejects.toThrow();
     expect((t.store as InMemoryStore).billingEvents.has("evt_retry")).toBe(false);
     t.stripe.subs.set("sub_1", sub());
     expect(await t.apply(e)).toBe("applied");
+    expect((t.store as InMemoryStore).billingEvents.has("evt_retry")).toBe(true);
     expect((await t.get()).billing_status).toBe("active");
+    expect(await t.apply(e)).toBe("duplicate");
+  });
+
+  it("the same event applied concurrently ends in one correct state and one record", async () => {
+    const t = await ready();
+    t.stripe.subs.set("sub_1", sub());
+    const e = ev("evt_race", "customer.subscription.updated", sub({ metadata: { venue_id: t.venue.id } }));
+    const results = await Promise.all([t.apply(e), t.apply(e)]);
+    expect(results).toContain("applied");
+    expect(await t.get()).toMatchObject({ billing_status: "active", plan: "both", stripe_subscription_id: "sub_1" });
+    expect((t.store as InMemoryStore).billingEvents.size).toBe(1);
+  });
+
+  it("a store error while looking up the venue fails the event (so it is retried) instead of being ignored", async () => {
+    const t = await ready();
+    t.stripe.subs.set("sub_1", sub());
+    const original = t.store.findVenueById.bind(t.store);
+    t.store.findVenueById = async () => {
+      throw new Error("database down");
+    };
+    await expect(t.apply(ev("evt_db", "customer.subscription.updated", sub({ metadata: { venue_id: t.venue.id } })))).rejects.toThrow("database down");
+    t.store.findVenueById = original;
+    expect((t.store as InMemoryStore).billingEvents.has("evt_db")).toBe(false);
+  });
+
+  it("an event of the venue named in the metadata but another Stripe customer is ignored with a warning", async () => {
+    const t = await ready({ stripe_customer_id: "cus_1" });
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    t.stripe.subs.set("sub_x", sub({ id: "sub_x", customer: "cus_other" }));
+    expect(await t.apply(ev("evt_m", "customer.subscription.updated", sub({ id: "sub_x", customer: "cus_other", metadata: { venue_id: t.venue.id } })))).toBe("ignored");
+    expect(await t.get()).toMatchObject({ billing_status: null, stripe_subscription_id: null });
+    expect(warn).toHaveBeenCalled();
+    expect(warn.mock.calls.flat().join(" ")).toContain(t.venue.id);
+    warn.mockRestore();
+  });
+
+  it("adoption: a newer LIVE subscription replaces a paused or canceled stored one; every other case keeps the stored one", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const adopt = async (stored: Partial<Venue>, incomingStatus: string) => {
+      const t = await ready({ plan: "both", stripe_subscription_id: "sub_old", ...stored });
+      t.stripe.subs.set("sub_new", sub({ id: "sub_new", status: incomingStatus, price: "price_admin" }));
+      await t.apply(ev(`e-${Math.random()}`, "customer.subscription.updated", sub({ id: "sub_new", status: incomingStatus, price: "price_admin", metadata: { venue_id: t.venue.id } })));
+      return (await t.get()).stripe_subscription_id;
+    };
+    expect(await adopt({ billing_status: "paused" }, "active")).toBe("sub_new"); // paused old, newer live
+    expect(await adopt({ billing_status: "paused" }, "trialing")).toBe("sub_new");
+    expect(await adopt({ billing_status: "canceled" }, "past_due")).toBe("sub_new");
+    expect(await adopt({ billing_status: "canceled" }, "paused")).toBe("sub_old"); // a newer paused one must not win
+    expect(await adopt({ billing_status: "paused" }, "paused")).toBe("sub_old");
+    expect(await adopt({ billing_status: "canceled" }, "canceled")).toBe("sub_old");
+    expect(await adopt({ billing_status: "active" }, "active")).toBe("sub_old"); // the stored one is live: it stays
+    expect(await adopt({ billing_status: "past_due" }, "active")).toBe("sub_old");
+    warn.mockRestore();
+  });
+
+  it("checkout.session.completed with a second live subscription does not adopt it and warns with both ids and the venue id", async () => {
+    const t = await ready({ plan: "both", billing_status: "active", stripe_subscription_id: "sub_old" });
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    t.stripe.subs.set("sub_new", sub({ id: "sub_new", status: "active" }));
+    const session = { id: "cs_2", mode: "subscription", customer: "cus_1", subscription: "sub_new", payment_status: "paid", metadata: { venue_id: t.venue.id, plan: "both", setup_fee: "0" } };
+    await t.apply(ev("evt_dup", "checkout.session.completed", session));
+    expect(await t.get()).toMatchObject({ stripe_subscription_id: "sub_old", billing_status: "active" });
+    const logged = warn.mock.calls.flat().join(" ");
+    expect(logged).toContain("sub_old");
+    expect(logged).toContain("sub_new");
+    expect(logged).toContain(t.venue.id);
+    warn.mockRestore();
+  });
+
+  it("a price that is none of ours: a warning with the price id, and the plan and status stay as they were", async () => {
+    const t = await ready({ plan: "both", billing_status: "active", stripe_subscription_id: "sub_1" });
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    t.stripe.subs.set("sub_1", sub({ status: "canceled", price: "price_mystery" }));
+    await t.apply(ev("e1", "customer.subscription.updated", sub({ price: "price_mystery" })));
+    expect(await t.get()).toMatchObject({ plan: "both", billing_status: "active" });
+    expect(warn.mock.calls.flat().join(" ")).toContain("price_mystery");
+    warn.mockRestore();
+  });
+
+  describe("the setup fee", () => {
+    const session = (venueId: string, over: Record<string, unknown> = {}, meta: Record<string, string> = {}) => ({
+      id: "cs_f",
+      mode: "subscription",
+      customer: "cus_1",
+      subscription: "sub_1",
+      payment_status: "paid",
+      amount_total: 19900,
+      metadata: { venue_id: venueId, plan: "admin", setup_fee: "1", ...meta },
+      ...over,
+    });
+    it("is marked paid only when the session is paid; unpaid, and no_payment_required with an amount, are not", async () => {
+      for (const [status, amount, expected] of [["paid", 19900, true], ["unpaid", 19900, false], ["no_payment_required", 0, true], ["no_payment_required", 19900, false]] as const) {
+        const t = await ready();
+        t.stripe.subs.set("sub_1", sub());
+        await t.apply(ev("e1", "checkout.session.completed", session(t.venue.id, { payment_status: status, amount_total: amount })));
+        expect((await t.get()).website_fee_paid, `${status}/${amount}`).toBe(expected);
+      }
+    });
+    it("a session that carried no setup line never marks it", async () => {
+      const t = await ready();
+      t.stripe.subs.set("sub_1", sub());
+      await t.apply(ev("e1", "checkout.session.completed", session(t.venue.id, {}, { setup_fee: "0" })));
+      expect((await t.get()).website_fee_paid).toBe(false);
+    });
+    it("checkout.session.async_payment_succeeded marks it like a paid completed session (a delayed method)", async () => {
+      const t = await ready();
+      t.stripe.subs.set("sub_1", sub());
+      await t.apply(ev("e1", "checkout.session.completed", session(t.venue.id, { payment_status: "unpaid" })));
+      expect((await t.get()).website_fee_paid).toBe(false);
+      await t.apply(ev("e2", "checkout.session.async_payment_succeeded", session(t.venue.id)));
+      expect((await t.get()).website_fee_paid).toBe(true);
+    });
+    it("a one-off website_setup session (no subscription) marks it when paid, and touches nothing else", async () => {
+      const t = await ready({ plan: "both", billing_status: "active", stripe_subscription_id: "sub_1" });
+      const oneOff = { id: "cs_w", mode: "payment", customer: "cus_1", subscription: null, payment_status: "paid", amount_total: 19900, metadata: { venue_id: t.venue.id, kind: "website_setup" } };
+      await t.apply(ev("e1", "checkout.session.completed", oneOff));
+      expect(await t.get()).toMatchObject({ website_fee_paid: true, plan: "both", billing_status: "active", stripe_subscription_id: "sub_1" });
+      const t2 = await ready();
+      await t2.apply(ev("e2", "checkout.session.completed", { ...oneOff, metadata: { venue_id: t2.venue.id, kind: "website_setup" }, payment_status: "unpaid" }));
+      expect((await t2.get()).website_fee_paid).toBe(false);
+    });
+  });
+
+  describe("without a Stripe client (ctx.stripe null) the event's own state is used", () => {
+    const bare = async (venueOver: Partial<Venue> = {}) => {
+      const t = await ready(venueOver);
+      const ctx = { config: { stripePrices: PRICES }, stripe: null, now: () => T0 };
+      return { ...t, apply: (e: StripeEventLike) => applyStripeEvent(t.store, e, ctx) };
+    };
+    it("subscription.updated applies the event object; deleted forces canceled", async () => {
+      const t = await bare();
+      await t.apply(ev("e1", "customer.subscription.updated", sub({ status: "active", price: "price_admin", metadata: { venue_id: t.venue.id } })));
+      expect(await t.get()).toMatchObject({ plan: "admin", billing_status: "active" });
+      await t.apply(ev("e2", "customer.subscription.deleted", sub({ status: "active", metadata: { venue_id: t.venue.id } })));
+      expect((await t.get()).billing_status).toBe("canceled");
+    });
+    it("invoice.paid sets active and clears past_due_since; invoice.payment_failed sets past_due once", async () => {
+      const t = await bare({ billing_status: "active", plan: "both", stripe_subscription_id: "sub_1" });
+      await t.apply(ev("e1", "invoice.payment_failed", { id: "in_1", customer: "cus_1", subscription: "sub_1" }));
+      expect(await t.get()).toMatchObject({ billing_status: "past_due", past_due_since: T0.toISOString() });
+      await t.apply(ev("e2", "invoice.paid", { id: "in_2", customer: "cus_1", subscription: "sub_1" }));
+      expect(await t.get()).toMatchObject({ billing_status: "active", past_due_since: null });
+    });
+    it("checkout.session.completed stores the customer and the fee without a subscription to read", async () => {
+      const t = await bare({ stripe_customer_id: null });
+      await t.apply(ev("e1", "checkout.session.completed", { id: "cs", customer: "cus_5", subscription: "sub_5", payment_status: "paid", amount_total: 19900, metadata: { venue_id: t.venue.id, setup_fee: "1" } }));
+      expect(await t.get()).toMatchObject({ stripe_customer_id: "cus_5", website_fee_paid: true });
+    });
   });
 
   it("the paid setup fee is never turned back to unpaid by a later event", async () => {
@@ -642,6 +898,15 @@ describe("the dashboard and checklist read the plan", () => {
     const s = await setup({ billing_status: "trialing", trial_ends_at: "2026-11-02T09:00:00.000Z", site_mode: "own", site_url: "https://own.example", created_via: "start", plan: "both", website_fee_paid: true });
     const v = await s.store.getVenue(s.venue.id);
     expect((await adminOverview(s.store, v, T0, BASE)).billing).toBeUndefined();
-    expect((await adminOverview(s.store, v, T0, BASE, { billing: true })).billing).toEqual({ plan: "both", status: "trialing", trial_days_left: 14, trial_ends_at: "2026-11-02T09:00:00.000Z", subscribed: false, can_build_website: true });
+    expect((await adminOverview(s.store, v, T0, BASE, { billing: true })).billing).toEqual({ plan: "both", status: "trialing", trial_days_left: 14, trial_ends_at: "2026-11-02T09:00:00.000Z", subscribed: false, has_customer: false, can_build_website: true, can_buy_website: false, website_note: false });
+    // a live Admin subscription on an own-site venue that has not paid for the website can buy it; Social gets the note instead
+    const sub1 = await s.store.updateVenue(s.venue.id, { website_fee_paid: false, billing_status: "active", stripe_subscription_id: "sub_1", stripe_customer_id: "cus_1" });
+    expect((await adminOverview(s.store, sub1, T0, BASE, { billing: true })).billing).toMatchObject({ subscribed: true, has_customer: true, can_build_website: false, can_buy_website: true, website_note: false });
+    const social = await s.store.updateVenue(s.venue.id, { plan: "social" });
+    expect((await adminOverview(s.store, social, T0, BASE, { billing: true })).billing).toMatchObject({ can_buy_website: false, website_note: true });
+    const paused = await s.store.updateVenue(s.venue.id, { plan: "both", billing_status: "paused" });
+    expect((await adminOverview(s.store, paused, T0, BASE, { billing: true })).billing).toMatchObject({ subscribed: true, can_buy_website: false });
+    const canceled = await s.store.updateVenue(s.venue.id, { billing_status: "canceled" });
+    expect((await adminOverview(s.store, canceled, T0, BASE, { billing: true })).billing).toMatchObject({ subscribed: false, has_customer: true });
   });
 });

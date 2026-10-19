@@ -6,7 +6,7 @@ import { notFound, redirect } from "next/navigation";
 import { after } from "next/server";
 import { AccountShell, otherLangHref } from "@/app/components/AccountShell";
 import { PlanPicker } from "./PlanPicker";
-import { addonMode, trialDaysLeft } from "@/src/billing/plans";
+import { addonMode, canBuyWebsiteLater, hasStoredSubscription, socialWebsiteNote, trialDaysLeft } from "@/src/billing/plans";
 import { BILLING } from "@/src/i18n/billing";
 import { authorizeAdminAccess } from "@/src/server/admin-auth";
 import { getServerDeps } from "@/src/server/deps";
@@ -37,7 +37,7 @@ export default async function Page(props: PageProps<"/billing/[slug]">) {
   const now = new Date();
   const days = trialDaysLeft(venue, now);
   const startsOn = days > 0 && venue.trial_ends_at ? new Intl.DateTimeFormat(lang === "bg" ? "bg-BG" : "en-GB", { day: "numeric", month: "long", timeZone: venue.tz }).format(new Date(venue.trial_ends_at)) : null;
-  const subscribed = venue.stripe_subscription_id !== null && (venue.billing_status === "trialing" || venue.billing_status === "active" || venue.billing_status === "past_due");
+  const subscribed = hasStoredSubscription(venue);
   return (
     <AccountShell lang={lang} wide otherLangHref={otherLangHref(`/billing/${encodeURIComponent(slug)}`, { required: required ? "1" : undefined }, lang)}>
       <PlanPicker
@@ -50,6 +50,8 @@ export default async function Page(props: PageProps<"/billing/[slug]">) {
         initialPlan={venue.plan ?? "both"}
         required={required}
         subscribed={subscribed}
+        canBuyWebsite={canBuyWebsiteLater(venue)}
+        socialWebsiteNote={socialWebsiteNote(venue)}
         testMode={deps.config.stripeSecretKey?.startsWith("sk_test_") ?? false}
       />
       <p className="mt-8">

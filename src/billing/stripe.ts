@@ -5,7 +5,7 @@
 import Stripe from "stripe";
 import type { Plan, Venue } from "../domain/types";
 import type { Store, VenuePatch } from "../store/types";
-import { isDeadStripeStatus, planFromPrice, priceIdFor, statusFromStripe, planHasWebsite, type StripePrices } from "./plans";
+import { hasLiveSubscription, planFromPrice, priceIdFor, statusFromStripe, planHasWebsite, type StripePrices } from "./plans";
 
 // ---------------------------------------------------------------------------------------------------------------------
 // The client
@@ -26,21 +26,24 @@ export interface StripeEventLike {
 }
 
 export interface CheckoutParams {
-  mode: "subscription";
+  /** subscription = a plan (with the setup fee as a one-time line when due); payment = the website setup bought on its own later. */
+  mode: "subscription" | "payment";
   customer?: string;
   customer_email?: string;
   customer_update?: { name: "auto" };
   line_items: { price: string; quantity: number }[];
   locale: "bg" | "en";
   tax_id_collection: { enabled: boolean };
-  payment_method_collection: "if_required" | "always";
-  client_reference_id: string;
+  payment_method_collection?: "if_required" | "always";
+  client_reference_id?: string;
   metadata: Record<string, string>;
-  subscription_data: {
+  subscription_data?: {
     metadata: Record<string, string>;
     trial_period_days?: number;
     trial_settings?: { end_behavior: { missing_payment_method: "pause" } };
   };
+  /** Unix seconds. */
+  expires_at: number;
   success_url: string;
   cancel_url: string;
 }
@@ -86,13 +89,22 @@ export class BillingError extends Error {
   }
 }
 
+/**
+ * A log-safe description of an error. A Stripe error carries the customer, the email or the request in its message, so only its `type`
+ * and `code` are kept; any other error is ours and its message is fine.
+ */
+export function describeError(e: unknown): string {
+  if (e instanceof Stripe.errors.StripeError) return `stripe error type=${e.type} code=${e.code ?? "none"}`;
+  return e instanceof Error ? e.message : "error";
+}
+
 // ---------------------------------------------------------------------------------------------------------------------
 // Checkout
 
 export interface CheckoutOptions {
   /** Add the one-time website setup (199 €) as a second line, once. */
   withSetupFee: boolean;
-  /** Whole days of our free trial left; the subscription starts after them. 0 = none (no trial_period_days). */
+  /** Whole days of our free trial left (trialDaysLeft rounds up: Stripe takes whole days); the subscription starts after them. 0 = none (no trial_period_days). */
   trialDaysLeft: number;
   /** TRIAL_REQUIRES_CARD: always collect a card. Otherwise Checkout asks for one only when there is something to charge today. */
   requireCard: boolean;
@@ -100,7 +112,12 @@ export interface CheckoutOptions {
   /** The origin of the app, for the return URLs. */
   baseUrl: string;
   prices: StripePrices;
+  now: Date;
 }
+
+/** A Checkout Session is open for 31 minutes: Stripe's minimum is 30, and the call itself takes a moment. */
+const SESSION_TTL_S = 31 * 60;
+const expiresAt = (now: Date) => Math.floor(now.getTime() / 1000) + SESSION_TTL_S;
 
 /**
  * A subscription Checkout Session for `plan`; returns its URL. The venue id rides in the session's and the subscription's metadata (the
@@ -135,9 +152,35 @@ export async function checkoutSession(stripe: Pick<StripeLike, "checkout">, venu
       // No card at the end of the trial: the subscription pauses (we pause new owner changes) instead of failing or charging nothing.
       ...(trial && !opts.requireCard ? { trial_settings: { end_behavior: { missing_payment_method: "pause" as const } } } : {}),
     },
+    expires_at: expiresAt(opts.now),
     success_url: `${base}/dashboard/${slug}?billing=success`,
     cancel_url: `${base}/billing/${slug}`,
   });
+  return sessionUrl(session);
+}
+
+/** A one-off Checkout Session for the website setup alone (an Admin or Both venue that did not take it with the plan); returns its URL. */
+export async function websiteSetupSession(stripe: Pick<StripeLike, "checkout">, venue: Venue, user: { email: string }, opts: Pick<CheckoutOptions, "lang" | "baseUrl" | "prices" | "now">): Promise<string> {
+  if (!opts.prices.websiteSetup) throw new BillingError("unavailable", 503, "Плащането не е настроено още.", "The price for the website setup is not set up yet.");
+  const slug = encodeURIComponent(venue.slug);
+  const base = opts.baseUrl.replace(/\/+$/, "");
+  const customer = venue.stripe_customer_id;
+  const session = await stripe.checkout.sessions.create({
+    mode: "payment",
+    ...(customer ? { customer, customer_update: { name: "auto" as const } } : { customer_email: user.email }),
+    line_items: [{ price: opts.prices.websiteSetup, quantity: 1 }],
+    locale: opts.lang,
+    tax_id_collection: { enabled: true },
+    client_reference_id: venue.id,
+    metadata: { venue_id: venue.id, kind: "website_setup" },
+    expires_at: expiresAt(opts.now),
+    success_url: `${base}/dashboard/${slug}?billing=success`,
+    cancel_url: `${base}/dashboard/${slug}`,
+  });
+  return sessionUrl(session);
+}
+
+function sessionUrl(session: { url: string | null }): string {
   if (!session.url) throw new BillingError("unavailable", 502, "Не успяхме да отворим плащането. Опитайте пак.", "We could not open the payment page. Please try again.");
   return session.url;
 }
@@ -147,6 +190,7 @@ export async function checkoutSession(stripe: Pick<StripeLike, "checkout">, venu
 
 const HANDLED = new Set([
   "checkout.session.completed",
+  "checkout.session.async_payment_succeeded",
   "customer.subscription.created",
   "customer.subscription.updated",
   "customer.subscription.deleted",
@@ -164,7 +208,6 @@ export interface ApplyContext {
 export type ApplyResult = "applied" | "duplicate" | "ignored";
 
 type Obj = Record<string, unknown>;
-const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 /** A Stripe reference is an id, or the expanded object (with its id). */
 function idOf(x: unknown): string | null {
@@ -175,16 +218,23 @@ function idOf(x: unknown): string | null {
 const obj = (x: unknown): Obj => (x && typeof x === "object" ? (x as Obj) : {});
 const strMap = (x: unknown): Record<string, string> => Object.fromEntries(Object.entries(obj(x)).filter(([, v]) => typeof v === "string")) as Record<string, string>;
 
-/** The venue an event belongs to: the venue id we put in the metadata, else the Stripe customer we stored. */
+/**
+ * The venue an event belongs to: the venue id we put in the metadata, else the Stripe customer we stored. A store error is NOT a
+ * "no such venue": it propagates, the webhook answers 500 and Stripe retries. An event whose customer is not the one stored for the venue
+ * its metadata names is ignored with a warning.
+ */
 async function findVenue(store: Store, venueId: string | null | undefined, customer: unknown): Promise<Venue | null> {
-  if (venueId && UUID.test(venueId)) {
-    try {
-      return await store.getVenue(venueId);
-    } catch {
-      // an id of no venue of ours (another product on the same Stripe account): try the customer
+  const cid = idOf(customer);
+  if (venueId) {
+    const venue = await store.findVenueById(venueId);
+    if (venue) {
+      if (venue.stripe_customer_id && cid && venue.stripe_customer_id !== cid) {
+        console.warn(`[billing] ignoring an event for venue ${venue.id}: its Stripe customer is not the one stored for the venue`);
+        return null;
+      }
+      return venue;
     }
   }
-  const cid = idOf(customer);
   return cid ? store.findVenueByStripeCustomer(cid) : null;
 }
 
@@ -193,20 +243,35 @@ async function currentSubscription(ctx: ApplyContext, id: string, eventState: St
   return eventState;
 }
 
-/** Writes the venue's billing state from a subscription's state: plan from its price, status from its status. */
-async function applySubscription(store: Store, venue: Venue, sub: StripeSubscription, ctx: ApplyContext, extra: VenuePatch = {}): Promise<void> {
+const LIVE_STRIPE = new Set(["trialing", "active", "past_due"]);
+
+/**
+ * Writes the venue's billing state from a subscription's state: plan from its price, status from its status.
+ * With a different subscription already stored, the incoming one is adopted only when it is live and the stored one is not (a paused or
+ * canceled one is being replaced); in every other case the stored one stays. A price that is none of ours changes neither plan nor status.
+ * `extra` (the setup fee) is written in every case. `source` "checkout" warns when a second live subscription is refused: it needs a manual refund.
+ */
+async function applySubscription(store: Store, venue: Venue, sub: StripeSubscription, ctx: ApplyContext, extra: VenuePatch = {}, source: "checkout" | "event" = "event"): Promise<void> {
+  const keepOnly = async () => {
+    if (Object.keys(extra).length) await store.updateVenue(venue.id, extra);
+  };
   const status = statusFromStripe(sub.status);
-  if (status === null) {
-    if (Object.keys(extra).length) await store.updateVenue(venue.id, extra);
-    return; // incomplete: the first payment has not gone through; nothing about a running subscription
-  }
+  if (status === null) return keepOnly(); // incomplete: the first payment has not gone through; nothing about a running subscription
   const stored = venue.stripe_subscription_id;
-  // A subscription that ended must not cancel a venue that has moved on to a newer one.
-  if (stored && stored !== sub.id && isDeadStripeStatus(sub.status)) {
-    if (Object.keys(extra).length) await store.updateVenue(venue.id, extra);
-    return;
+  if (stored && stored !== sub.id) {
+    const incomingLive = LIVE_STRIPE.has(sub.status);
+    if (!(incomingLive && !hasLiveSubscription(venue))) {
+      if (source === "checkout" && incomingLive)
+        console.warn(`[billing] venue ${venue.id} already has live subscription ${stored}; checkout subscription ${sub.id} was not adopted (refund it manually)`);
+      return keepOnly();
+    }
   }
-  const plan = sub.items.data.map((i) => planFromPrice(ctx.config.stripePrices, i.price?.id)).find((p) => p !== null) ?? venue.plan;
+  const priceIds = sub.items.data.map((i) => i.price?.id).filter((id): id is string => Boolean(id));
+  const plan = priceIds.map((id) => planFromPrice(ctx.config.stripePrices, id)).find((p) => p !== null) ?? null;
+  if (plan === null) {
+    console.warn(`[billing] subscription ${sub.id} of venue ${venue.id} has no price of ours (${priceIds.join(", ") || "none"}); plan and status left unchanged`);
+    return keepOnly();
+  }
   const customer = idOf(sub.customer);
   await store.updateVenue(venue.id, {
     ...(customer && !venue.stripe_customer_id ? { stripe_customer_id: customer } : {}),
@@ -221,15 +286,20 @@ async function applySubscription(store: Store, venue: Venue, sub: StripeSubscrip
 async function applyEvent(store: Store, event: StripeEventLike, ctx: ApplyContext): Promise<"applied" | "ignored"> {
   const o = obj(event.data.object);
   switch (event.type) {
-    case "checkout.session.completed": {
-      const venue = await findVenue(store, strMap(o.metadata).venue_id ?? (typeof o.client_reference_id === "string" ? o.client_reference_id : null), o.customer);
+    case "checkout.session.completed":
+    case "checkout.session.async_payment_succeeded": {
+      const meta = strMap(o.metadata);
+      const venue = await findVenue(store, meta.venue_id ?? (typeof o.client_reference_id === "string" ? o.client_reference_id : null), o.customer);
       if (!venue) return "ignored";
       const customer = idOf(o.customer);
-      const feePaid = strMap(o.metadata).setup_fee === "1" && o.payment_status !== "unpaid";
-      const extra: VenuePatch = { ...(customer && !venue.stripe_customer_id ? { stripe_customer_id: customer } : {}), ...(feePaid && !venue.website_fee_paid ? { website_fee_paid: true } : {}) };
+      // The 199 € is paid only when Stripe says so: `paid`, or `no_payment_required` for a total of 0 (a full discount). A delayed method
+      // sends `unpaid` first and checkout.session.async_payment_succeeded when the money arrives.
+      const carriedFee = meta.setup_fee === "1" || meta.kind === "website_setup";
+      const paid = event.type === "checkout.session.async_payment_succeeded" || o.payment_status === "paid" || (o.payment_status === "no_payment_required" && o.amount_total === 0);
+      const extra: VenuePatch = { ...(customer && !venue.stripe_customer_id ? { stripe_customer_id: customer } : {}), ...(carriedFee && paid && !venue.website_fee_paid ? { website_fee_paid: true } : {}) };
       const subId = idOf(o.subscription);
       const sub = subId ? await currentSubscription(ctx, subId, null) : null;
-      if (sub) await applySubscription(store, venue, sub, ctx, extra);
+      if (sub) await applySubscription(store, venue, sub, ctx, extra, "checkout");
       else if (Object.keys(extra).length) await store.updateVenue(venue.id, extra);
       return "applied";
     }
@@ -271,18 +341,16 @@ async function applyEvent(store: Store, event: StripeEventLike, ctx: ApplyContex
 }
 
 /**
- * Applies one verified Stripe event, once. The event id is recorded first (billing_events): a second delivery is "duplicate" and changes
- * nothing. If applying fails the id is released and the error thrown, so the 500 that follows makes Stripe retry it for real. What an event
- * writes comes from the subscription's current state (re-read through `ctx.stripe`), never from the order events arrive in. "ignored" =
- * a type we do not handle (not recorded), or an event of no venue of ours.
+ * Applies one verified Stripe event, once. Applying comes FIRST and the event id is recorded AFTER (billing_events): applying is
+ * idempotent (what it writes comes from the subscription's current state, re-read through `ctx.stripe`, never from the order events
+ * arrive in), so two deliveries racing both apply harmlessly and the second record loses cleanly. An event whose apply failed is not
+ * recorded, so Stripe's retry (after the 500) is applied; a recorded one is a "duplicate" and changes nothing. "ignored" = a type we do
+ * not handle (not recorded), or an event of no venue of ours.
  */
 export async function applyStripeEvent(store: Store, event: StripeEventLike, ctx: ApplyContext): Promise<ApplyResult> {
   if (!HANDLED.has(event.type)) return "ignored";
-  if (!(await store.claimBillingEvent(event.id, event.type, ctx.now().toISOString()))) return "duplicate";
-  try {
-    return await applyEvent(store, event, ctx);
-  } catch (e) {
-    await store.releaseBillingEvent(event.id).catch(() => {});
-    throw e;
-  }
+  if (await store.hasBillingEvent(event.id)) return "duplicate";
+  const result = await applyEvent(store, event, ctx);
+  const recorded = await store.recordBillingEvent(event.id, event.type, ctx.now().toISOString());
+  return recorded ? result : "duplicate";
 }

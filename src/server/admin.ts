@@ -6,7 +6,7 @@ import { isSoldOut } from "../domain/effective";
 import { baseLang, unkeep, unkeepTexts } from "../domain/format";
 import { renderPreview } from "../domain/preview";
 import { isBoostPlanSet, isBoostPlanUndoSet, TEMPLATE_IDS, type BillingStatus, type ChangeSet, type DeployInfo, type Plan, type SiteMode, type TemplateId, type Venue, type VenueStatus } from "../domain/types";
-import { trialDaysLeft, websiteAllowed } from "../billing/plans";
+import { canBuyWebsiteLater, hasStoredSubscription, socialWebsiteNote, trialDaysLeft, websiteAllowed } from "../billing/plans";
 import type { Deployer, DeployInput, DomainInstructions } from "../deploy/types";
 import { normalizeDomain } from "../deploy/vercel-domains";
 import type { DestinationStatus, Store, SyncStatus } from "../store/types";
@@ -59,10 +59,16 @@ export interface BillingOverview {
   /** Whole days of free trial left while the status is "trialing"; null otherwise. */
   trial_days_left: number | null;
   trial_ends_at: string | null;
-  /** A Stripe subscription exists (Manage billing has something to manage). */
+  /** A Stripe subscription exists that is not canceled (live, paused or unpaid): it is managed in the Customer Portal, not by a new Checkout. */
   subscribed: boolean;
+  /** A Stripe customer exists, so the Customer Portal can open. */
+  has_customer: boolean;
   /** The website add-on is paid and the venue has no Claudia site yet: the dashboard offers "Build your website". */
   can_build_website: boolean;
+  /** An Admin or Both subscriber with no Claudia site who has not paid the 199 € website yet: the dashboard offers "Add a website". */
+  can_buy_website: boolean;
+  /** A Social media subscriber with no Claudia site: the dashboard says a website comes with Admin or Both. */
+  website_note: boolean;
 }
 
 function billingOverview(venue: Venue, now: Date): BillingOverview {
@@ -71,8 +77,11 @@ function billingOverview(venue: Venue, now: Date): BillingOverview {
     status: venue.billing_status,
     trial_days_left: venue.billing_status === "trialing" && venue.trial_ends_at ? trialDaysLeft(venue, now) : null,
     trial_ends_at: venue.trial_ends_at,
-    subscribed: venue.stripe_subscription_id !== null,
+    subscribed: hasStoredSubscription(venue),
+    has_customer: venue.stripe_customer_id !== null,
     can_build_website: venue.site_mode !== "claudia" && venue.status === "live" && websiteAllowed(venue),
+    can_buy_website: canBuyWebsiteLater(venue),
+    website_note: socialWebsiteNote(venue),
   };
 }
 

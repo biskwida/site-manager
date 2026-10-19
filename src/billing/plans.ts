@@ -35,7 +35,11 @@ export function startTrial(now: Date, config: { trialDays: number }): { trial_st
   };
 }
 
-/** Whole days of trial left, rounded up (a trial with 3 hours left has 1 day left); 0 when it has ended or there is none. */
+/**
+ * Whole days of trial left, rounded UP (a trial with 3 hours left has 1 day left); 0 when it has ended or there is none. Stripe's
+ * `trial_period_days` takes whole days only, so Checkout passes this number: rounding up means the owner never loses a part day of the
+ * trial they were promised (the subscription may start up to 23 hours after our trial_ends_at, never before it).
+ */
 export function trialDaysLeft(venue: Pick<Venue, "trial_ends_at">, now: Date): number {
   if (!venue.trial_ends_at) return 0;
   const ms = Date.parse(venue.trial_ends_at) - now.getTime();
@@ -142,4 +146,32 @@ export function parseTrialEndsArg(raw: string): string | null | Error {
   if (!/^\d{4}-\d{2}-\d{2}(T[\d:.]+(Z|[+-]\d{2}:\d{2})?)?$/.test(v)) return new Error(`--trial-ends must be an ISO date like 2026-11-02 (or date and time), or "none", got "${raw}"`);
   const t = Date.parse(/T/.test(v) && !/(Z|[+-]\d{2}:\d{2})$/.test(v) ? `${v}Z` : v);
   return Number.isNaN(t) ? new Error(`--trial-ends is not a real date: "${raw}"`) : new Date(t).toISOString();
+}
+
+// ---------------------------------------------------------------------------------------------------------------------
+// Subscription states of a venue
+
+const LIVE: readonly BillingStatus[] = ["trialing", "active", "past_due"];
+
+/** A subscription is running: Stripe has one for this venue and it is trialing, active or past due. */
+export function hasLiveSubscription(v: Pick<Venue, "stripe_subscription_id" | "billing_status">): boolean {
+  return v.stripe_subscription_id !== null && v.billing_status !== null && LIVE.includes(v.billing_status);
+}
+
+/** The venue still has a Stripe subscription that is not canceled (live, paused or unpaid): changes go through the Customer Portal, not a second Checkout. */
+export function hasStoredSubscription(v: Pick<Venue, "stripe_subscription_id" | "billing_status">): boolean {
+  return v.stripe_subscription_id !== null && v.billing_status !== "canceled";
+}
+
+/**
+ * The 199 € website can be bought on its own (a one-off Checkout): a live Admin or Both subscription, no Claudia site yet and no fee paid.
+ * (A wizard-built site pays it with the first subscription payment; Social media never has a website.)
+ */
+export function canBuyWebsiteLater(v: Pick<Venue, "stripe_subscription_id" | "billing_status" | "plan" | "site_mode" | "website_fee_paid">): boolean {
+  return hasLiveSubscription(v) && (v.plan === "admin" || v.plan === "both") && v.site_mode !== "claudia" && !v.website_fee_paid;
+}
+
+/** A Social media venue without a website of ours: the dashboard says a website comes with Admin or Both. */
+export function socialWebsiteNote(v: Pick<Venue, "stripe_subscription_id" | "billing_status" | "plan" | "site_mode">): boolean {
+  return hasLiveSubscription(v) && v.plan === "social" && v.site_mode !== "claudia";
 }
