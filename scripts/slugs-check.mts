@@ -15,3 +15,5 @@ if (!clashes.length) {
   for (const v of clashes) console.log(`  ${v.slug}  (${v.name})`);
   process.exitCode = 1;
 }
+// The Supabase client can keep the process open.
+process.exit(process.exitCode ?? 0);

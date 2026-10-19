@@ -1,11 +1,12 @@
-// proxy.ts (Next 16's name for middleware): sends owner pages that are opened on another host, such as the old
-// site-manager-lovat.vercel.app, to the app host. Chat bots, webhooks and venue sites are not touched (see hostRedirect).
+// proxy.ts (Next 16's name for middleware): sends owner pages opened on a legacy host (LEGACY_HOSTS, such as the old
+// site-manager-lovat.vercel.app) to APP_HOST. Off until both are set in env. Chat bots, webhooks and venue sites are never touched.
 import { NextResponse, type NextRequest } from "next/server";
-import { hostRedirect, resolveAppHost } from "@/src/server/host";
+import { explicitAppHost, hostRedirect, parseLegacyHosts } from "@/src/server/host";
 
 export function proxy(request: NextRequest) {
-  const target = hostRedirect(request.nextUrl, resolveAppHost(process.env));
+  const target = hostRedirect(request.nextUrl, explicitAppHost(process.env), parseLegacyHosts(process.env));
   return target ? NextResponse.redirect(target, 308) : NextResponse.next();
 }
 
-export const config = { matcher: ["/((?!api/|_next/).*)"] };
+// Not /api, /_next, favicon.ico or any other file with an extension.
+export const config = { matcher: ["/((?!api|_next|.*\\..*).*)"] };

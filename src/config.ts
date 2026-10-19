@@ -76,7 +76,7 @@ export interface Config {
   metaAppId: string | null;
   /** Facebook Login for Business configuration id; when set the login sends config_id instead of a scope list. */
   metaLoginConfigId: string | null;
-  /** Host that serves the owner's browser pages (APP_HOST, default app.getclaudia.app); /dashboard, /login, /start, /onboarding and /admin on another host are redirected here (proxy.ts). */
+  /** Host that serves the owner's browser pages (APP_HOST, default app.getclaudia.app, used to build links). proxy.ts redirects to it only when APP_HOST is set explicitly and the request's host is in LEGACY_HOSTS. */
   appHost: string;
   /** The public landing (LANDING_URL, else the older NEXT_PUBLIC_LANDING_URL, default https://getclaudia.app); `/` sends visitors there. https only, no trailing slash. */
   landingUrl: string;

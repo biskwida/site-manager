@@ -1,13 +1,15 @@
 import { describe, expect, it } from "vitest";
 import { NextRequest } from "next/server";
-import { hostRedirect, resolveAppHost } from "@/src/server/host";
+import { explicitAppHost, hostRedirect, parseLegacyHosts, resolveAppHost } from "@/src/server/host";
 import { RESERVED_SLUGS } from "@/src/wizard/schema";
 import { loadConfig } from "@/src/config";
 import { config as proxyConfig, proxy } from "@/proxy";
 
 const APP = "app.getclaudia.app";
-const OLD = "https://site-manager-lovat.vercel.app";
-const to = (url: string) => hostRedirect(new URL(url), APP)?.toString() ?? null;
+const OLD_HOST = "site-manager-lovat.vercel.app";
+const OLD = `https://${OLD_HOST}`;
+const LEGACY = [OLD_HOST];
+const to = (url: string, app: string | null = APP, legacy: readonly string[] = LEGACY) => hostRedirect(new URL(url), app, legacy)?.toString() ?? null;
 
 describe("hostRedirect", () => {
   it("moves an admin link to the app host and keeps the query", () => {
@@ -19,20 +21,47 @@ describe("hostRedirect", () => {
     expect(to(`${OLD}/start?plan=both&lang=bg`)).toBe(`https://${APP}/start?plan=both&lang=bg`);
     expect(to(`${OLD}/onboarding/x`)).toBe(`https://${APP}/onboarding/x`);
   });
+  it("handles /admin alone and a trailing slash", () => {
+    expect(to(`${OLD}/admin`)).toBe(`https://${APP}/admin`);
+    expect(to(`${OLD}/admin/coffique/?key=abc`)).toBe(`https://${APP}/admin/coffique/?key=abc`);
+    expect(to(`${OLD}/dashboard/`)).toBe(`https://${APP}/dashboard/`);
+  });
   it("leaves APIs, venue pages and the wizard alone", () => {
     for (const p of ["/api/telegram", "/api/site/coffique", "/coffique", "/coffique/menu", "/new", "/new/abc", "/"]) expect(to(`${OLD}${p}`)).toBeNull();
   });
   it("matches whole path segments only", () => {
-    expect(to(`${OLD}/startup`)).toBeNull();
-    expect(to(`${OLD}/administrator`)).toBeNull();
-    expect(to(`${OLD}/login-help`)).toBeNull();
+    for (const p of ["/startup", "/starter", "/administrator", "/login-help", "/dashboards"]) expect(to(`${OLD}${p}`)).toBeNull();
   });
-  it("does nothing on the app host or on localhost", () => {
-    expect(to(`https://${APP}/dashboard`)).toBeNull();
-    expect(to("https://APP.getclaudia.app/dashboard")).toBeNull();
-    expect(to("http://localhost:3000/dashboard")).toBeNull();
-    expect(to("http://127.0.0.1:3000/admin/x?key=1")).toBeNull();
-    expect(to("http://[::1]:3000/login")).toBeNull();
+  it("is off unless LEGACY_HOSTS and an explicit APP_HOST are both set", () => {
+    expect(to(`${OLD}/dashboard`, APP, [])).toBeNull();
+    expect(to(`${OLD}/dashboard`, null, LEGACY)).toBeNull();
+    expect(to(`${OLD}/dashboard`, null, [])).toBeNull();
+  });
+  it("matches the hostname lowercased and ignores the port", () => {
+    expect(to(`https://${OLD_HOST.toUpperCase()}/dashboard`)).toBe(`https://${APP}/dashboard`);
+    expect(to(`http://${OLD_HOST}:3000/dashboard`)).toBe(`https://${APP}/dashboard`);
+  });
+  it("leaves every host that is not listed alone", () => {
+    for (const u of ["https://site-manager-git-x.vercel.app", "http://192.168.1.20:3000", "http://localhost:3000", "http://127.0.0.1:3000", "http://[::1]:3000", `https://${APP}`]) {
+      expect(to(`${u}/dashboard`)).toBeNull();
+      expect(to(`${u}/admin/x?key=1`)).toBeNull();
+    }
+  });
+  it("never redirects the app host to itself even if it is listed", () => {
+    expect(to(`https://${APP}/dashboard`, APP, [APP])).toBeNull();
+  });
+});
+
+describe("parseLegacyHosts and explicitAppHost", () => {
+  it("has no default", () => {
+    expect(parseLegacyHosts({})).toEqual([]);
+    expect(parseLegacyHosts({ LEGACY_HOSTS: " , " })).toEqual([]);
+    expect(explicitAppHost({})).toBeNull();
+    expect(explicitAppHost({ APP_HOST: "  " })).toBeNull();
+  });
+  it("cleans a comma-separated list", () => {
+    expect(parseLegacyHosts({ LEGACY_HOSTS: "Old.Example.com, https://other.example.com/ ,third.example.com:3000" })).toEqual(["old.example.com", "other.example.com", "third.example.com"]);
+    expect(explicitAppHost({ APP_HOST: "App.Example.com" })).toBe("app.example.com");
   });
 });
 
@@ -65,20 +94,51 @@ describe("config hosts", () => {
 });
 
 describe("proxy", () => {
-  it("answers 308 to the app host", () => {
-    const res = proxy(new NextRequest(`${OLD}/admin/coffique?key=abc`));
-    expect(res.status).toBe(308);
-    expect(res.headers.get("location")).toBe(`https://${APP}/admin/coffique?key=abc`);
+  const withEnv = (vars: Record<string, string | undefined>, fn: () => void) => {
+    const saved = { APP_HOST: process.env.APP_HOST, LEGACY_HOSTS: process.env.LEGACY_HOSTS };
+    for (const [k, v] of Object.entries({ APP_HOST: undefined, LEGACY_HOSTS: undefined, ...vars })) {
+      if (v === undefined) delete process.env[k];
+      else process.env[k] = v;
+    }
+    try {
+      fn();
+    } finally {
+      for (const [k, v] of Object.entries(saved)) {
+        if (v === undefined) delete process.env[k];
+        else process.env[k] = v;
+      }
+    }
+  };
+  const on = { APP_HOST: APP, LEGACY_HOSTS: OLD_HOST };
+  it("answers 308 to the app host when switched on", () => {
+    withEnv(on, () => {
+      const res = proxy(new NextRequest(`${OLD}/admin/coffique?key=abc`));
+      expect(res.status).toBe(308);
+      expect(res.headers.get("location")).toBe(`https://${APP}/admin/coffique?key=abc`);
+    });
   });
-  it("passes other requests through", () => {
-    const res = proxy(new NextRequest(`${OLD}/coffique`));
-    expect(res.headers.get("location")).toBeNull();
-    expect(res.headers.get("x-middleware-next")).toBe("1");
+  it("passes everything through while LEGACY_HOSTS or APP_HOST is unset", () => {
+    for (const vars of [{}, { APP_HOST: APP }, { LEGACY_HOSTS: OLD_HOST }]) {
+      withEnv(vars, () => {
+        const res = proxy(new NextRequest(`${OLD}/admin/coffique?key=abc`));
+        expect(res.headers.get("location")).toBeNull();
+        expect(res.headers.get("x-middleware-next")).toBe("1");
+      });
+    }
   });
-  it("keeps /api and /_next out of the matcher", () => {
+  it("passes a preview host, venue pages and /api/telegram through", () => {
+    withEnv(on, () => {
+      for (const u of ["https://site-manager-git-x.vercel.app/dashboard", `${OLD}/coffique`, `${OLD}/api/telegram`]) {
+        const res = proxy(new NextRequest(u));
+        expect(res.headers.get("location")).toBeNull();
+        expect(res.headers.get("x-middleware-next")).toBe("1");
+      }
+    });
+  });
+  it("keeps /api, /_next and files out of the matcher", () => {
     const re = new RegExp(`^${proxyConfig.matcher[0]}$`);
     expect(re.test("/dashboard")).toBe(true);
-    expect(re.test("/api/telegram")).toBe(false);
-    expect(re.test("/_next/static/x.js")).toBe(false);
+    expect(re.test("/admin/coffique")).toBe(true);
+    for (const p of ["/api/telegram", "/_next/static/x.js", "/favicon.ico", "/robots.txt", "/logo.png"]) expect(re.test(p)).toBe(false);
   });
 });
