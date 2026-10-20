@@ -17,7 +17,8 @@ export const copy = {
       watch: "Play with sound",
       playing: "Playing",
       demo: "Watch the demo",
-      trial: "2 weeks free · 20 changes · no card",
+      trial: "2 weeks free · 20 changes",
+      noCard: "no card",
     },
     proof: { award: "Winner of the Crossroads 2026 hackathon", live: "Live at Coffique, Sofia" },
     steps: {
@@ -63,7 +64,8 @@ export const copy = {
       watch: "Пусни със звук",
       playing: "Върви",
       demo: "Виж демото",
-      trial: "2 седмици безплатно · 20 промени · без карта",
+      trial: "2 седмици безплатно · 20 промени",
+      noCard: "без карта",
     },
     proof: { award: "Победител в хакатона Crossroads 2026", live: "Работи в Coffique, София" },
     steps: {
@@ -105,3 +107,8 @@ export const copy = {
 
 export type Copy = (typeof copy)["en"];
 
+
+/** "2 weeks free · 20 changes · no card": "no card" only while TRIAL_REQUIRES_CARD is off. */
+export function trialLine(t: Copy, requiresCard: boolean): string {
+  return requiresCard ? t.hero.trial : `${t.hero.trial} · ${t.hero.noCard}`;
+}

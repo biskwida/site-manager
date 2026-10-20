@@ -20,8 +20,9 @@ function fromAcceptLanguage(header: string | null | undefined): PageLang | null 
   return ranked.map((r) => r.lang).find(isPageLang) ?? null;
 }
 
-export function resolvePageLang(input: { query?: string | null; cookie?: string | null; acceptLanguage?: string | null }): PageLang {
+/** `fallback` is the language when nothing names bg or en: Bulgarian for the app pages, English for the public landing. */
+export function resolvePageLang(input: { query?: string | null; cookie?: string | null; acceptLanguage?: string | null }, fallback: PageLang = "bg"): PageLang {
   if (isPageLang(input.query)) return input.query;
   if (isPageLang(input.cookie)) return input.cookie;
-  return fromAcceptLanguage(input.acceptLanguage) ?? "bg";
+  return fromAcceptLanguage(input.acceptLanguage) ?? fallback;
 }

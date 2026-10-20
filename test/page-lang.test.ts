@@ -29,6 +29,13 @@ describe("resolvePageLang", () => {
     expect(resolvePageLang({ acceptLanguage: "" })).toBe("bg");
   });
 
+  it("takes the caller's fallback when nothing names bg or en (the landing falls back to English)", () => {
+    expect(resolvePageLang({ acceptLanguage: "de,fr;q=0.5" }, "en")).toBe("en");
+    expect(resolvePageLang({}, "en")).toBe("en");
+    expect(resolvePageLang({ acceptLanguage: "bg" }, "en")).toBe("bg");
+    expect(resolvePageLang({ cookie: "bg" }, "en")).toBe("bg");
+  });
+
   it("names the cookie claudia-lang", () => {
     expect(LANG_COOKIE).toBe("claudia-lang");
   });

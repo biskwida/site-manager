@@ -10,9 +10,13 @@
   every component class is `lp-` prefixed. Preflight is not imported again: globals.css already provides it.
 */
 @import "tailwindcss/theme.css" layer(theme) theme(reference);
-@import "tailwindcss/utilities.css" layer(utilities);
+@import "tailwindcss/utilities.css" layer(utilities) source(none);
+/* Scan only the landing's own files, so this sheet carries only the landing's utilities. */
+@source "./";
 
-.lp {
+/* The tokens live on .lp and, while the landing is on screen, on <html> too, so the overscroll area behind the page matches in light and dark. */
+.lp,
+html:has(.lp) {
   color-scheme: light dark;
   --lp-bg: oklch(98.6% 0.005 60);
   --lp-bg-2: oklch(96.2% 0.009 60);
@@ -26,12 +30,15 @@
   --lp-accent-soft: oklch(94.5% 0.045 50);
   --lp-shadow: oklch(35% 0.04 45);
   --lp-ease-out: cubic-bezier(0.23, 1, 0.32, 1);
+}
+.lp {
   --radius-media: 20px;
   --accent: var(--lp-accent);
 }
 
 @media (prefers-color-scheme: dark) {
-  .lp {
+  .lp,
+  html:has(.lp) {
     --lp-bg: oklch(18% 0.012 50);
     --lp-bg-2: oklch(22% 0.014 50);
     --lp-ink: oklch(95% 0.006 60);

@@ -89,7 +89,7 @@ describe("/data-deletion", () => {
 
 describe("landing footer and slugs", () => {
   it("links to both pages", () => {
-    const html = renderToStaticMarkup(<Landing initialLang="bg" signedIn={false} contactEmail={null} />);
+    const html = renderToStaticMarkup(<Landing initialLang="bg" signedIn={false} contactEmail={null} requiresCard={false} />);
     expect(html).toContain('href="/privacy"');
     expect(html).toContain('href="/data-deletion"');
     expect(text(html)).toContain(DICTS.bg["legal.privacy"]);

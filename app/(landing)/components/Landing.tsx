@@ -6,62 +6,64 @@ import Link from "next/link";
 import { motion, useReducedMotion } from "motion/react";
 import { ArrowRight, SpeakerHigh, Trophy, Storefront, Check } from "@phosphor-icons/react";
 import { siTelegram, siMessenger, siWhatsapp, siInstagram } from "simple-icons";
-import { LANG_COOKIE } from "@/src/auth/page-lang";
 import { startPath } from "@/src/auth/start-links";
-import { copy, COFFIQUE_URL, TELEGRAM_URL, type Copy, type Lang } from "@/src/landing/copy";
+import { copy, COFFIQUE_URL, TELEGRAM_URL, trialLine, type Copy, type Lang } from "@/src/landing/copy";
+import { LANG_STORAGE_KEY, persistLang, resolveClientLang } from "@/src/landing/lang";
 
 const EASE = [0.23, 1, 0.32, 1] as const;
-const STORAGE = "claudia-lang";
+
+/** localStorage, or null when the browser blocks it (reading the property itself can throw). */
+function safeStorage(): Storage | null {
+  try {
+    return window.localStorage;
+  } catch {
+    return null;
+  }
+}
 
 export interface LandingProps {
-  /** The language the server chose (?lang=, the claudia-lang cookie, Accept-Language). The visitor's saved choice can still replace it after hydration. */
+  /** The language the server chose (?lang=, the claudia-lang cookie, Accept-Language, English). The visitor's saved choice can still replace it after hydration. */
   initialLang: Lang;
   /** A signed-in visitor sees "Dashboard" instead of "Log in". */
   signedIn: boolean;
   /** NEXT_PUBLIC_CONTACT_EMAIL; null hides the "Talk to us" line. */
   contactEmail: string | null;
+  /** TRIAL_REQUIRES_CARD: "no card" is part of the trial line only when no card is asked for. */
+  requiresCard: boolean;
 }
 
-export function Landing({ initialLang, signedIn, contactEmail }: LandingProps) {
+export function Landing({ initialLang, signedIn, contactEmail, requiresCard }: LandingProps) {
   const [lang, setLang] = useState<Lang>(initialLang);
   useEffect(() => {
-    // An explicit ?lang= wins. Otherwise a stored choice replaces the server's guess; read once on mount, because the server cannot see localStorage.
+    // Read once on mount: the server cannot see localStorage.
     try {
-      if (new URLSearchParams(window.location.search).get("lang")) return;
-      const stored = localStorage.getItem(STORAGE);
-      if ((stored === "bg" || stored === "en") && stored !== initialLang) {
-        // eslint-disable-next-line react-hooks/set-state-in-effect
-        setLang(stored);
-      }
+      const next = resolveClientLang({ search: window.location.search, stored: localStorage.getItem(LANG_STORAGE_KEY), initial: initialLang });
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+      setLang(next);
     } catch {
       /* no storage: keep the server's language */
     }
   }, [initialLang]);
   useEffect(() => {
     document.documentElement.lang = lang;
-    try {
-      localStorage.setItem(STORAGE, lang);
-      // The same choice for the server-rendered pages (/start, /login), which read this cookie.
-      document.cookie = `${LANG_COOKIE}=${lang}; Path=/; Max-Age=31536000; SameSite=Lax${location.protocol === "https:" ? "; Secure" : ""}`;
-    } catch {
-      /* ignore */
-    }
+    persistLang(lang, { storage: safeStorage(), setCookie: (c) => void (document.cookie = c), secure: location.protocol === "https:" });
   }, [lang]);
   const t = copy[lang];
   return (
-    <>
+    // `lang` here (not only on <html>) so the server's HTML already announces the right language before hydration.
+    <div lang={lang} className="contents">
       <Nav t={t} lang={lang} signedIn={signedIn} onToggle={() => setLang(lang === "en" ? "bg" : "en")} />
       <main>
-        <Hero t={t} lang={lang} />
+        <Hero t={t} lang={lang} requiresCard={requiresCard} />
         <Proof t={t} />
         <Steps t={t} />
         <Channels t={t} />
         <Trust t={t} />
         <Pricing t={t} lang={lang} />
-        <Closing t={t} lang={lang} contactEmail={contactEmail} />
+        <Closing t={t} lang={lang} contactEmail={contactEmail} requiresCard={requiresCard} />
       </main>
       <Footer t={t} />
-    </>
+    </div>
   );
 }
 
@@ -121,7 +123,7 @@ function Nav({ t, lang, signedIn, onToggle }: { t: Copy; lang: Lang; signedIn: b
   );
 }
 
-function Hero({ t, lang }: { t: Copy; lang: Lang }) {
+function Hero({ t, lang, requiresCard }: { t: Copy; lang: Lang; requiresCard: boolean }) {
   const reduce = useReducedMotion();
   const rise = (i: number) => (reduce ? {} : { initial: { opacity: 0, y: 22 }, animate: { opacity: 1, y: 0 }, transition: { duration: 0.7, delay: 0.08 * i, ease: EASE } });
   return (
@@ -145,7 +147,7 @@ function Hero({ t, lang }: { t: Copy; lang: Lang }) {
               </a>
             </motion.div>
             <motion.p {...rise(3)} className="mt-4 text-[15px] font-medium text-lp-ink-2">
-              {t.hero.trial}
+              {trialLine(t, requiresCard)}
             </motion.p>
           </div>
           <motion.div {...rise(1)}>
@@ -361,7 +363,7 @@ function Pricing({ t, lang }: { t: Copy; lang: Lang }) {
   );
 }
 
-function Closing({ t, lang, contactEmail }: { t: Copy; lang: Lang; contactEmail: string | null }) {
+function Closing({ t, lang, contactEmail, requiresCard }: { t: Copy; lang: Lang; contactEmail: string | null; requiresCard: boolean }) {
   return (
     <section className="border-t border-lp-line py-24 text-center md:py-32">
       <Container>
@@ -376,7 +378,7 @@ function Closing({ t, lang, contactEmail }: { t: Copy; lang: Lang; contactEmail:
             {t.nav.start}
             <ArrowRight size={20} weight="bold" />
           </Link>
-          <p className="mt-4 text-[15px] font-medium text-lp-ink-2">{t.hero.trial}</p>
+          <p className="mt-4 text-[15px] font-medium text-lp-ink-2">{trialLine(t, requiresCard)}</p>
           {contactEmail ? (
             <p className="mt-6 text-[15px] text-lp-ink-3">
               {t.nav.contact}: <a href={`mailto:${contactEmail}`} className="select-text font-medium text-lp-ink-2 underline-offset-4 hover:underline">{contactEmail}</a>

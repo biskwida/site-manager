@@ -1,7 +1,8 @@
 // app/(landing)/page.tsx — `/`: the getclaudia.app landing page, for everyone (no redirect). The server picks the language
-// (?lang=, the claudia-lang cookie, Accept-Language) and reads the session, so the nav says "Log in" or "Dashboard" in the first HTML.
+// (?lang=, the claudia-lang cookie, Accept-Language, then English: the landing's own fallback, unlike the app's Bulgarian) and reads the session, so the nav says "Log in" or "Dashboard" in the first HTML.
 import type { Metadata, Viewport } from "next";
 import { Landing } from "./components/Landing";
+import { loadConfig } from "@/src/config";
 import { resolveAppHost } from "@/src/server/host";
 import { firstParam, readPageLang } from "@/src/server/request-lang";
 import { getSessionUser } from "@/src/server/session";
@@ -29,7 +30,7 @@ const EMAIL_RE = /^[^\s@<>"']{1,64}@[^\s@<>"']{1,190}\.[A-Za-z]{2,24}$/;
 
 export default async function Page({ searchParams }: PageProps<"/">) {
   const sp = await searchParams;
-  const [initialLang, user] = await Promise.all([readPageLang(firstParam(sp.lang)), getSessionUser()]);
+  const [initialLang, user] = await Promise.all([readPageLang(firstParam(sp.lang), "en"), getSessionUser()]);
   const email = process.env.NEXT_PUBLIC_CONTACT_EMAIL?.trim();
-  return <Landing initialLang={initialLang} signedIn={user !== null} contactEmail={email && EMAIL_RE.test(email) ? email : null} />;
+  return <Landing initialLang={initialLang} signedIn={user !== null} contactEmail={email && EMAIL_RE.test(email) ? email : null} requiresCard={loadConfig(process.env, { lenient: true }).trialRequiresCard} />;
 }

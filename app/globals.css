@@ -1,4 +1,6 @@
 @import "tailwindcss";
+/* The landing page (app/(landing)) has its own stylesheet; its utilities must not also land in this global one. */
+@source not "./(landing)";
 
 @theme {
   --color-paper: #faf7f2;
