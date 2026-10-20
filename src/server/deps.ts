@@ -124,6 +124,7 @@ export async function makeServerDeps(o: DepsOptions): Promise<ServerDeps> {
         config: billingConfigOf(config),
         ownerEmails: isMemory ? memoryOwnerEmails : supabaseOwnerEmails(config.supabaseUrl, config.supabaseServiceKey),
         sendEmail: (msg) => sendEmail(msg, { apiKey: config.resendApiKey, from: config.emailFrom }, o.fetch),
+        emailEnabled: Boolean(config.resendApiKey),
       }
     : null;
   if (billing) s.billingConfig = billing.config;

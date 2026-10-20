@@ -16,9 +16,15 @@ export function ownerEmailsFrom(db: Pick<SupabaseClient, "from" | "auth">): Owne
     if (error) throw new Error(`ownerEmails: ${error.message}`);
     const emails = new Set<string>();
     for (const row of data ?? []) {
-      const { data: got, error: userError } = await db.auth.admin.getUserById(String(row.user_id));
-      const email = userError ? null : got.user?.email;
-      if (email) emails.add(email.trim().toLowerCase());
+      // One account that cannot be read never stops the others (or the reminder): log the venue id and skip it.
+      try {
+        const { data: got, error: userError } = await db.auth.admin.getUserById(String(row.user_id));
+        if (userError) throw new Error("lookup failed");
+        const email = got.user?.email;
+        if (email) emails.add(email.trim().toLowerCase());
+      } catch {
+        console.error(`[tick] owner email lookup failed for venue ${venueId}`);
+      }
     }
     return [...emails];
   };

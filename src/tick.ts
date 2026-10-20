@@ -15,6 +15,7 @@ import { COMMENT_POST_WINDOW_MS, pollVenueComments, purgeOldComments } from "./s
 import { COMMENT_PROPOSAL_TTL_MS, commentsOfSet, proposalTargets, proposalTtlHours, proposeForComments } from "./social/comments-propose";
 import type { DraftFn } from "./social/comments-draft";
 import { runCommentDigests } from "./social/comments-digest";
+import { planIncludes } from "./billing/entitlements";
 import { pauseExpiredTrials, sendTrialReminders, type TrialBilling } from "./billing/reminders";
 
 export interface TickDeps {
@@ -198,6 +199,9 @@ export async function runTick(d: TickDeps): Promise<TickReport> {
     //    "off" venues only show them on the dashboard). The per-venue tick runs before an owner's agent turn inside the webhook
     //    budget: it makes no Graph read and no model call, and only re-sends that venue's held comments (deferred, drafts
     //    stored), so the owner who just wrote gets them at once. Keep 30 days: the purge runs on the global tick only.
+    // With billing on, comments are read and drafted only for venues whose plan includes them (a free trial with no plan has every feature).
+    // Paused venues are not gated here: the owner decides what to do with replies, and nothing is posted before their tap.
+    const commentsAllowed = (venue: Pick<Venue, "plan">) => !d.billing?.config.billingEnabled || planIncludes(venue.plan, "comments");
     report.comments_found = 0;
     report.comments_proposed = 0;
     let venues: Venue[] = [];
@@ -209,6 +213,7 @@ export async function runTick(d: TickDeps): Promise<TickReport> {
     for (const venue of venues) {
       // One venue's failure (Graph, drafting) never stops the others.
       try {
+        if (!commentsAllowed(venue)) continue; // billing on: the plan has no comments, so nothing is read or drafted for it
         if (!d.venueId) {
           const r = await pollVenueComments(d.sync, venue, d.now);
           report.comments_found += r.inserted.length;
@@ -233,7 +238,7 @@ export async function runTick(d: TickDeps): Promise<TickReport> {
     //     per-venue tick before an owner's message leaves it to the cron.
     if (!d.venueId && d.comments && d.messenger) {
       try {
-        const r = await runCommentDigests({ store: d.store, messenger: d.messenger, now: () => d.now, draft: d.comments.draft, log: d.sync.log }, { now: d.now });
+        const r = await runCommentDigests({ store: d.store, messenger: d.messenger, now: () => d.now, draft: d.comments.draft, log: d.sync.log }, { now: d.now, eligible: commentsAllowed });
         report.digests = r.sent;
       } catch (e) {
         console.error("[tick] comment digests failed:", e instanceof Error ? e.name : "error");

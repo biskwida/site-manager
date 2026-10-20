@@ -13,7 +13,7 @@ import type { Deployer, DeployInput, DomainInstructions } from "../deploy/types"
 import { normalizeDomain } from "../deploy/vercel-domains";
 import type { DestinationStatus, Store, SyncStatus } from "../store/types";
 import { formatDateTime } from "../time";
-import { changeUsage } from "../store/usage";
+import { changeUsage, type ChangeUsage } from "../store/usage";
 import { accentAfterTemplateSwitch } from "../wizard/schema";
 import { connectedApps, type ConnectedApp } from "./connect-apps";
 import { publishedIn, safeLink } from "../destinations/social-common";
@@ -80,8 +80,7 @@ export interface BillingOverview {
   locked?: Feature[];
 }
 
-async function billingOverview(store: Store, venue: Venue, now: Date): Promise<BillingOverview> {
-  const usage = venue.billing_status === "trialing" && venue.stripe_subscription_id === null && venue.change_limit === null ? await changeUsage(store, venue, now) : null;
+function billingOverview(venue: Venue, now: Date, usage: ChangeUsage): BillingOverview {
   const planStates: (Venue["billing_status"])[] = ["trialing", "active", "past_due"]; // a paused or canceled venue shows its status, not locked cards
   return {
     plan: venue.plan,
@@ -93,7 +92,7 @@ async function billingOverview(store: Store, venue: Venue, now: Date): Promise<B
     can_build_website: venue.site_mode !== "claudia" && venue.status === "live" && websiteAllowed(venue),
     can_buy_website: canBuyWebsiteLater(venue),
     website_note: socialWebsiteNote(venue),
-    trial_changes: usage && usage.kind === "trial" && usage.limit !== null ? { used: usage.used, limit: usage.limit } : null,
+    trial_changes: usage.kind === "trial" && usage.limit !== null ? { used: usage.used, limit: usage.limit } : null,
     locked: planStates.includes(venue.billing_status) ? lockedFeatures(venue, { billingEnabled: true }) : [],
   };
 }
@@ -111,6 +110,7 @@ export async function adminOverview(store: Store, venue: Venue, now: Date, baseU
     store.listMembers(venue.id),
   ]);
   const nowMs = now.getTime();
+  const usage = await changeUsage(store, venue, now); // one count for "changes this month" / the trial counter and the billing card
   const hosted = opts.hosted ?? false;
   const ownSite = venue.site_mode === "own" && venue.site_url !== null && venue.site_url !== "";
   // In hosted mode a deploy record left from an earlier setup means nothing: no provider is reachable from this server.
@@ -137,14 +137,13 @@ export async function adminOverview(store: Store, venue: Venue, now: Date, baseU
     wordpress: await wordPressOverview(store, venue.id),
     connected_apps: connectedApps(members),
     social: await socialOverview(store, venue.id, opts.social ?? { facebook: false, instagram: false }),
-    changes_this_month: await changesThisMonth(store, venue, now),
+    changes_this_month: changesThisMonth(usage),
     comments: await commentsOverview(store, venue, now),
-    ...(opts.billing ? { billing: await billingOverview(store, venue, now) } : {}),
+    ...(opts.billing ? { billing: billingOverview(venue, now, usage) } : {}),
   };
 }
 
-async function changesThisMonth(store: Store, venue: Venue, now: Date): Promise<{ used: number; limit: number | null; trial?: true }> {
-  const u = await changeUsage(store, venue, now);
+function changesThisMonth(u: ChangeUsage): { used: number; limit: number | null; trial?: true } {
   return { used: u.used, limit: u.limit, ...(u.kind === "trial" ? { trial: true as const } : {}) };
 }
 

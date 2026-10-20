@@ -8,7 +8,7 @@ import type { Lang, TrialReminder, Venue } from "../domain/types";
 import type { EmailMessage, EmailResult } from "../server/email";
 import type { Store } from "../store/types";
 import { localDate } from "../time";
-import { billingUrl, freeTrialOver, TRIAL_SOON_DAYS, TRIAL_SOON_SHARE, type BillingConfig } from "./entitlements";
+import { billingUrl, effectiveLimit, freeTrialOver, TRIAL_SOON_DAYS, TRIAL_SOON_SHARE, type BillingConfig } from "./entitlements";
 import { trialDaysLeft } from "./plans";
 
 /** What the tick needs to run the trial end. `ownerEmails` lists the sign-in emails of a venue's account owners (none in memory mode). */
@@ -16,6 +16,8 @@ export interface TrialBilling {
   config: BillingConfig;
   ownerEmails: (venueId: string) => Promise<string[]>;
   sendEmail: (msg: EmailMessage) => Promise<EmailResult>;
+  /** False when no email can go out (no RESEND_API_KEY): a reminder with no chat to go to is then not claimed, so a later tick retries. Default true. */
+  emailEnabled?: boolean;
 }
 
 export interface ReminderDeps {
@@ -51,30 +53,34 @@ export async function pauseExpiredTrials(d: ReminderDeps, now: Date): Promise<st
 
 type Why = "days" | "used" | "limit" | "time";
 
-/** Which reminder is due for this venue now (null = none), and the reason that decides its words. */
-async function dueReminder(d: ReminderDeps, v: Venue, now: Date): Promise<{ kind: TrialReminder; why: Why; used: number } | null> {
-  const { trialChangeLimit: limit } = d.billing.config;
+/** Which reminder is due for this venue now (null = none), the reason that decides its words and the trial limit the words quote (null = not limit-based). */
+type Due = { kind: TrialReminder; why: Why; used: number; limit: number | null };
+
+async function dueReminder(d: ReminderDeps, v: Venue, now: Date): Promise<Due | null> {
   if (v.status !== "live" || v.stripe_subscription_id !== null || v.trial_started_at === null || v.trial_ends_at === null) return null;
   if (v.billing_status !== "trialing" && v.billing_status !== "paused") return null;
   if (v.trial_reminder_sent === "ended") return null;
   const over = Date.parse(v.trial_ends_at) <= now.getTime();
   if (v.billing_status === "paused" && !over) return null; // paused by hand or by Stripe, not by the trial running out
-  if (over) return { kind: "ended", why: "time", used: 0 };
-  // Same counting rules as the limit itself (src/domain/limits.ts), over the whole trial.
-  const used = limit > 0 ? await d.store.countAppliedChangeSets(v.id, v.trial_started_at, v.trial_ends_at) : 0;
-  if (limit > 0 && used >= limit) return { kind: "ended", why: "limit", used };
+  if (over) return { kind: "ended", why: "time", used: 0, limit: null };
+  // The same limit the agent enforces (effectiveLimit): the free trial's, counted over the whole trial. A venue whose own change_limit
+  // overrides it has no trial limit, so only the day-based reminders apply to it.
+  const eff = effectiveLimit(v, d.billing.config, now);
+  const limit = eff.kind === "trial" && eff.window && eff.limit !== null && eff.limit > 0 ? eff.limit : null;
+  const used = limit !== null && eff.window ? await d.store.countAppliedChangeSets(v.id, eff.window.from, eff.window.to) : 0;
+  if (limit !== null && used >= limit) return { kind: "ended", why: "limit", used, limit };
   if (v.trial_reminder_sent !== null) return null;
-  if (trialDaysLeft(v, now) <= TRIAL_SOON_DAYS) return { kind: "soon", why: "days", used };
-  if (limit > 0 && used >= Math.ceil(limit * TRIAL_SOON_SHARE)) return { kind: "soon", why: "used", used };
+  if (trialDaysLeft(v, now) <= TRIAL_SOON_DAYS) return { kind: "soon", why: "days", used, limit };
+  if (limit !== null && used >= Math.ceil(limit * TRIAL_SOON_SHARE)) return { kind: "soon", why: "used", used, limit };
   return null;
 }
 
-function reminderLine(lang: Lang, due: { kind: TrialReminder; why: Why; used: number }, v: Venue, config: BillingConfig, now: Date): string {
+function reminderLine(lang: Lang, due: Due, v: Venue, config: BillingConfig, now: Date): string {
   const c = copy(lang);
   const url = billingUrl(config, v.slug);
-  if (due.why === "limit") return c.trialLimitReached(config.trialChangeLimit, url);
+  if (due.why === "limit") return c.trialLimitReached(due.limit ?? config.trialChangeLimit, url);
   if (due.why === "time") return c.trialEnded(url);
-  if (due.why === "used") return c.trialChangesSoon(due.used, config.trialChangeLimit, url);
+  if (due.why === "used") return c.trialChangesSoon(due.used, due.limit ?? config.trialChangeLimit, url);
   return c.trialEndsSoon(trialDaysLeft(v, now), dayMonthLabel(localDate(new Date(v.trial_ends_at as string), v.tz), lang), url);
 }
 
@@ -105,22 +111,31 @@ export async function sendTrialReminders(d: ReminderDeps, now: Date): Promise<nu
       if (!due) continue;
       const owners = (await d.store.listMembers(v.id)).filter((m) => m.role === "owner");
       const emails = await d.billing.ownerEmails(v.id).catch(() => [] as string[]);
-      if (owners.length === 0 && emails.length === 0) continue;
+      const chats = d.messenger ? owners : [];
+      const mailable = d.billing.emailEnabled !== false ? emails : [];
+      // Nothing can be delivered (no owner chat or no messenger, and no email address or no mail service): not claimed, so a later tick retries.
+      if (chats.length === 0 && mailable.length === 0) continue;
       // The claim comes before any send: at most once, even if a send fails or two ticks overlap.
       if (!(await d.store.claimTrialReminder(v.id, due.kind))) continue;
       sent++;
-      if (d.messenger) {
-        for (const m of owners) {
-          try {
-            await d.messenger.send(m.chat_ref, reminderLine(baseLang(m.lang), due, v, d.billing.config, now), { proactive: true });
-          } catch (e) {
-            console.error(`[tick] trial reminder chat for ${v.id} failed:`, e instanceof Error ? e.name : "error");
-          }
+      let chatsSent = 0;
+      let chatsFailed = 0;
+      for (const m of chats) {
+        try {
+          await d.messenger!.send(m.chat_ref, reminderLine(baseLang(m.lang), due, v, d.billing.config, now), { proactive: true });
+          chatsSent++;
+        } catch {
+          chatsFailed++;
         }
       }
       const lang: Lang = owners[0] ? baseLang(owners[0].lang) : v.default_lang;
       const mail = reminderEmail(lang, due.kind, v.name, reminderLine(lang, due, v, d.billing.config, now));
-      for (const to of emails) await d.billing.sendEmail({ to, ...mail });
+      const mails = { sent: 0, disabled: 0, failed: 0 };
+      for (const to of mailable) mails[(await d.billing.sendEmail({ to, ...mail })).status]++;
+      // Only counts and statuses: never an address, never the provider's error text.
+      const line = `[tick] trial reminder "${due.kind}" for venue ${v.id}: chats sent ${chatsSent}, failed ${chatsFailed}; emails sent ${mails.sent}, disabled ${mails.disabled}, failed ${mails.failed}`;
+      if (chatsFailed > 0 || mails.failed > 0 || mails.disabled > 0) console.error(line);
+      else console.log(line);
     } catch (e) {
       console.error(`[tick] trial reminder for ${v.id} failed:`, e instanceof Error ? e.message : e);
     }

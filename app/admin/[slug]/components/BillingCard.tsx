@@ -1,11 +1,13 @@
 "use client";
 import Link from "next/link";
 import { useState } from "react";
-import { WEBSITE_SETUP_EUR } from "@/src/billing/plans";
+import { dayMonthLabel } from "@/src/bot/copy";
+import { PLAN_PRICE_EUR, PLANS, WEBSITE_SETUP_EUR } from "@/src/billing/plans";
 import { useLang } from "@/src/i18n";
 import { formatEuro } from "@/src/i18n/billing";
 import type { MessageKey } from "@/src/i18n/dicts";
 import type { BillingOverview } from "@/src/server/admin";
+import { localDate } from "@/src/time";
 import { Chip, Section } from "./bits";
 
 const defaultGo = (url: string) => window.location.assign(url);
@@ -15,7 +17,7 @@ const defaultGo = (url: string) => window.location.assign(url);
  * "Manage billing" (the Stripe Customer Portal) and, once the website add-on is paid, "Build your website" (the wizard on this venue).
  * `justPaid` is the ?billing=success return from Checkout; `go` and `fetcher` are for tests.
  */
-export function BillingCard({ billing: b, slug, justPaid = false, go = defaultGo, fetcher }: { billing: BillingOverview; slug: string; justPaid?: boolean; go?: (url: string) => void; fetcher?: typeof fetch }) {
+export function BillingCard({ billing: b, slug, tz = "Europe/Sofia", justPaid = false, go = defaultGo, fetcher }: { billing: BillingOverview; slug: string; tz?: string; justPaid?: boolean; go?: (url: string) => void; fetcher?: typeof fetch }) {
   const { lang, t } = useLang();
   const [busy, setBusy] = useState<"portal" | "website" | "buy" | null>(null);
   const [failed, setFailed] = useState<string | true | false>(false);
@@ -50,7 +52,16 @@ export function BillingCard({ billing: b, slug, justPaid = false, go = defaultGo
 
   const days = b.trial_days_left;
   let status: string;
-  if (b.status === "trialing" && !b.subscribed) status = days === null || days <= 0 ? t("admin.billing.trialEnded") : days === 1 ? t("admin.billing.trialOne") : t("admin.billing.trial", { n: String(days) });
+  // The trial banner (mockup screen 8): days and changes left; the plan and its price from the end of the trial only once a plan is chosen or subscribed.
+  const tc = b.trial_changes;
+  const left = tc ? String(Math.max(0, tc.limit - tc.used)) : "";
+  const planFrom =
+    b.plan && b.trial_ends_at
+      ? " " + t("admin.billing.trialPlanFrom", { plan: t(`admin.billing.plan.${b.plan}` as MessageKey), date: dayMonthLabel(localDate(new Date(b.trial_ends_at), tz), lang), price: formatEuro(lang, PLAN_PRICE_EUR[b.plan]) })
+      : "";
+  const thenPlan = b.plan ?? "both"; // no plan chosen yet: the limit of the plan most owners pick (Both), as in the mockup
+  const thenLimit = PLANS[thenPlan].changeLimit;
+  if (b.status === "trialing" && !b.subscribed) status = days === null || days <= 0 ? t("admin.billing.trialEnded") : tc ? (days === 1 ? t("admin.billing.trialBannerOne", { left, limit: String(tc.limit) }) : t("admin.billing.trialBanner", { n: String(days), left, limit: String(tc.limit) })) + planFrom : days === 1 ? t("admin.billing.trialOne") : t("admin.billing.trial", { n: String(days) });
   else if (b.status === "past_due") status = t("admin.billing.pastDue");
   else if (b.status === "paused") status = b.subscribed ? t("admin.billing.pausedCard") : t("admin.billing.paused");
   else if (b.status === "canceled") status = t("admin.billing.canceled");
@@ -71,6 +82,7 @@ export function BillingCard({ billing: b, slug, justPaid = false, go = defaultGo
         {b.trial_changes ? (
           <div className="mt-3">
             <p className="font-semibold">{t("admin.billing.trialChanges", { used: String(b.trial_changes.used), limit: String(b.trial_changes.limit) })}</p>
+            {thenLimit !== null ? <p className="mt-1 text-sm text-ink-soft">{t("admin.billing.trialThen", { n: String(thenLimit), plan: t(`admin.billing.plan.${thenPlan}` as MessageKey) })}</p> : null}
             <p className="mt-1 text-sm text-ink-soft">{t("admin.billing.trialChangesNote")}</p>
           </div>
         ) : null}

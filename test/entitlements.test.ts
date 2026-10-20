@@ -1,5 +1,5 @@
 // test/entitlements.test.ts — plan gating in the agent, paused never offline, the free trial's 20-change limit, the trial end and its reminders.
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { makeTools, type AgentDeps } from "@/src/agent/tools";
 import { handleDecision } from "@/src/bot/approvals";
 import { copy } from "@/src/bot/copy";
@@ -13,7 +13,9 @@ import { ownerEmailsFrom } from "@/src/server/owner-emails";
 import { handleTickRequest } from "@/src/server/tick";
 import type { InMemoryStore } from "@/src/store/memory";
 import { changeUsage } from "@/src/store/usage";
+import { SupabaseStore } from "@/src/store/supabase";
 import { runTick } from "@/src/tick";
+import { at as commentAt, connectedVenue, MIN as COMMENT_MIN, T0 as COMMENT_T0 } from "./comments-helpers";
 import { FakeMessenger, makeDemo } from "./helpers";
 import { call } from "./tool-call";
 
@@ -117,10 +119,10 @@ describe("effectiveLimit()", () => {
     expect(effectiveLimit(venue({ change_limit: 7, billing_status: "trialing" }), undefined)).toMatchObject({ kind: "override", limit: 7 });
   });
   it("plan limits when change_limit is null: Admin 40, Both 150, Social none; an explicit change_limit wins", () => {
-    expect(effectiveLimit(venue({ plan: "admin", billing_status: "active" }), CONFIG)).toMatchObject({ kind: "plan", limit: 40 });
-    expect(effectiveLimit(venue({ plan: "both", billing_status: "active" }), CONFIG)).toMatchObject({ kind: "plan", limit: 150 });
-    expect(effectiveLimit(venue({ plan: "social", billing_status: "active" }), CONFIG)).toMatchObject({ kind: "none", limit: null });
-    expect(effectiveLimit(venue({ plan: "admin", billing_status: "active", change_limit: 5 }), CONFIG)).toMatchObject({ kind: "override", limit: 5 });
+    expect(effectiveLimit(venue({ plan: "admin", billing_status: "active", stripe_subscription_id: "sub_1" }), CONFIG)).toMatchObject({ kind: "plan", limit: 40 });
+    expect(effectiveLimit(venue({ plan: "both", billing_status: "active", stripe_subscription_id: "sub_1" }), CONFIG)).toMatchObject({ kind: "plan", limit: 150 });
+    expect(effectiveLimit(venue({ plan: "social", billing_status: "active", stripe_subscription_id: "sub_1" }), CONFIG)).toMatchObject({ kind: "none", limit: null });
+    expect(effectiveLimit(venue({ plan: "admin", billing_status: "active", stripe_subscription_id: "sub_1", change_limit: 5 }), CONFIG)).toMatchObject({ kind: "override", limit: 5 });
   });
   it("a free trial counts TRIAL_CHANGE_LIMIT over [trial_started_at, trial_ends_at); a subscription switches to the plan's number", () => {
     const trial = venue({ billing_status: "trialing", trial_started_at: iso(-5), trial_ends_at: iso(9) });
@@ -181,9 +183,10 @@ describe("plan gating in the agent", () => {
 
   it("an English owner gets the English line", async () => {
     const s = await setup({ venue: { plan: "social", billing_status: "active" } });
-    const member = (await s.store.findMember("tg:1002"))!; // staff, en
-    const tools = makeTools({ ...s.deps, member });
-    const r = await call(tools, "propose_changes", { summary_bg: "x", summary_en: "x", changes: [{ op: "set_sold_out", item_id: s.items.Cappuccino.id, until: null }] });
+    await s.store.upsertMember({ venue_id: s.venue.id, chat_ref: "tg:1003", role: "owner", lang: "en" });
+    const member = (await s.store.findMember("tg:1003"))!;
+    const tools = makeTools({ ...s.deps, member, chatRef: "tg:1003" });
+    const r = await call(tools, "propose_changes", { summary_bg: "x", summary_en: "x", changes: [{ op: "set_price", item_id: s.items.Cappuccino.id, price_eur: 3.3 }] });
     expect(r.error).toContain(copy("en").notInPlanRefusal("site", "Social media", LINK));
   });
 });
@@ -253,7 +256,7 @@ describe("TRIAL_REQUIRES_CARD", () => {
 
 describe("plan limits when change_limit is null", () => {
   it("an Admin venue gets 40 a month: the 41st proposal is refused with the monthly line", async () => {
-    const s = await setup({ venue: { plan: "admin", billing_status: "active" }, seed: async ({ store, venue }) => { for (let i = 0; i < 40; i++) await applied(store, venue.id, "2026-10-05T10:00:00.000Z"); } });
+    const s = await setup({ venue: { plan: "admin", billing_status: "active", stripe_subscription_id: "sub_1" }, seed: async ({ store, venue }) => { for (let i = 0; i < 40; i++) await applied(store, venue.id, "2026-10-05T10:00:00.000Z"); } });
     expect(await changeUsage(s.store, await s.store.getVenue(s.venue.id), T0)).toMatchObject({ used: 40, limit: 40, reached: true, kind: "plan" });
     const r = await s.propose();
     expect(r.error).toContain("(40/40 this month)");
@@ -261,9 +264,9 @@ describe("plan limits when change_limit is null", () => {
   });
 
   it("a Both venue gets 150; a Social venue has no site-change limit", async () => {
-    const s = await setup({ venue: { plan: "both", billing_status: "active" } });
+    const s = await setup({ venue: { plan: "both", billing_status: "active", stripe_subscription_id: "sub_1" } });
     expect(await changeUsage(s.store, await s.store.getVenue(s.venue.id), T0)).toMatchObject({ limit: 150, kind: "plan" });
-    const social = await setup({ venue: { plan: "social", billing_status: "active" } });
+    const social = await setup({ venue: { plan: "social", billing_status: "active", stripe_subscription_id: "sub_1" } });
     expect(await changeUsage(social.store, await social.store.getVenue(social.venue.id), T0)).toMatchObject({ limit: null, kind: "none" });
   });
 
@@ -549,7 +552,182 @@ describe("the dashboard", () => {
     expect((await adminOverview(s.store, paused, T0, BASE, { billing: true })).billing).toMatchObject({ locked: [] });
   });
 
+  it("counts the applied changes once for the whole overview", async () => {
+    const { adminOverview } = await import("@/src/server/admin");
+    const s = await setup({ venue: TRIALING });
+    const count = vi.spyOn(s.store, "countAppliedChangeSets");
+    await adminOverview(s.store, await s.store.getVenue(s.venue.id), T0, BASE, { billing: true });
+    expect(count).toHaveBeenCalledTimes(1);
+  });
+
   it("billingUrl builds the /billing/<slug> link on the public base", () => {
     expect(billingUrl({ publicBaseUrl: "https://getclaudia.app/" }, "café bar")).toBe("https://getclaudia.app/billing/caf%C3%A9%20bar");
+  });
+});
+
+describe("fix round 1", () => {
+  const SUB: VenuePatch = { stripe_subscription_id: "sub_1" };
+
+  it("a grandfathered venue (active, no subscription) is unlimited with billing on; a subscribed Both venue gets 150", async () => {
+    const old = await setup({ venue: { plan: "both", billing_status: "active" }, seed: async ({ store, venue }) => { for (let i = 0; i < 155; i++) await applied(store, venue.id, "2026-10-05T10:00:00.000Z"); } });
+    expect(await changeUsage(old.store, await old.store.getVenue(old.venue.id), T0)).toMatchObject({ used: 155, limit: null, kind: "none", reached: false });
+    expect((await old.propose()).status).toBe("proposed");
+    const paying = await setup({ venue: { plan: "both", billing_status: "active", ...SUB }, seed: async ({ store, venue }) => { for (let i = 0; i < 150; i++) await applied(store, venue.id, "2026-10-05T10:00:00.000Z"); } });
+    expect(await changeUsage(paying.store, await paying.store.getVenue(paying.venue.id), T0)).toMatchObject({ used: 150, limit: 150, reached: true, kind: "plan" });
+    expect((await paying.propose()).error).toContain(copy("bg").limitReached(150, 150, "2026-11-01"));
+    // an explicit change_limit still overrides everything
+    await old.store.setChangeLimit(old.venue.id, 10);
+    expect((await old.propose()).error).toContain("Monthly change limit reached");
+  });
+
+  describe("marking an item sold out is always allowed", () => {
+    const soldOut = (s: Awaited<ReturnType<typeof setup>>) => call(s.tools, "propose_changes", { summary_bg: "Свърши", summary_en: "Sold out", changes: [{ op: "set_sold_out", item_id: s.items.Cappuccino.id, until: null }] });
+    const states: [string, VenuePatch, Partial<BillingConfig>][] = [
+      ["paused", { billing_status: "paused", trial_started_at: iso(-15), trial_ends_at: iso(-1) }, {}],
+      ["past_due_expired", { plan: "both", billing_status: "past_due", past_due_since: iso(-9), ...SUB }, {}],
+      ["card_required", TRIALING, { trialRequiresCard: true }],
+      ["not in plan (Social)", { plan: "social", billing_status: "active", ...SUB }, {}],
+    ];
+    for (const [name, venue, config] of states) {
+      it(`while ${name}`, async () => {
+        const s = await setup({ venue, config });
+        expect((await s.propose()).error).toBeTruthy(); // an ordinary change is refused
+        const r = await soldOut(s);
+        expect(r.error).toBeUndefined();
+        expect(r.status).toBe("applied");
+      });
+    }
+    it("while the trial limit is reached (20 of 20), and the apply-time stop lets it through", async () => {
+      const s = await setup({ venue: { billing_status: "trialing", trial_started_at: "2026-10-05T08:00:00.000Z", trial_ends_at: iso(9) }, seed: async ({ store, venue }) => { for (let i = 0; i < 20; i++) await applied(store, venue.id, "2026-10-06T10:00:00.000Z"); } });
+        expect((await s.propose()).error).toContain("Trial change limit reached");
+      const r = await soldOut(s);
+      expect(r.status).toBe("applied");
+    });
+    it("but a change_limit set on the venue itself still stops it", async () => {
+      const s = await setup({ venue: { plan: "both", billing_status: "active", ...SUB }, seed: async ({ store, venue }) => { for (let i = 0; i < 2; i++) await applied(store, venue.id, "2026-10-05T10:00:00.000Z"); } });
+      await s.store.setChangeLimit(s.venue.id, 2);
+      expect((await soldOut(s)).error).toContain("Monthly change limit reached");
+    });
+  });
+
+  it("the trial-ended line needs a trial end and no subscription; otherwise the paused line", async () => {
+    const noTrial = await setup({ venue: { plan: "both", billing_status: "paused" } });
+    expect((await noTrial.propose()).error).toContain(copy("bg").planPausedRefusal(LINK));
+    const trial = await setup({ venue: { billing_status: "paused", trial_ends_at: iso(-1) } });
+    expect((await trial.propose()).error).toContain(copy("bg").trialEndedRefusal(LINK));
+  });
+
+  describe("reminders follow the same limit as the agent", () => {
+    it("with change_limit 100 there is no 20th-change message at 20, and the end-of-trial message still goes out", async () => {
+      const mails: unknown[] = [];
+      const s = await setup({ venue: { billing_status: "trialing", trial_started_at: iso(-4), trial_ends_at: iso(10) }, seed: async ({ store, venue }) => { for (let i = 0; i < 20; i++) await applied(store, venue.id, iso(-2)); } });
+      await s.store.setChangeLimit(s.venue.id, 100);
+      const billing: TrialBilling = { config: CONFIG, ownerEmails: async () => ["owner@example.com"], sendEmail: async (m) => (mails.push(m), { status: "sent" }) };
+      expect((await runTick({ store: s.store, messenger: s.messenger, now: T0, billing })).trial_reminders).toBe(0); // 20 used (and 15): nothing
+      expect(s.messenger.sent).toEqual([]);
+      const end = new Date(T0.getTime() + 11 * DAY);
+      const r = await runTick({ store: s.store, messenger: s.messenger, now: end, billing });
+      expect(r.trial_reminders).toBe(1);
+      expect(s.messenger.sent.map((m) => m.text)).toEqual([copy("bg").trialEnded(LINK)]);
+    });
+  });
+
+  describe("undelivered reminders", () => {
+    const trialing: VenuePatch = { billing_status: "trialing", trial_started_at: iso(-11), trial_ends_at: iso(3) };
+    it("logs counts and statuses, never an address", async () => {
+      const s = await setup({ venue: trialing });
+      s.messenger.send = async () => { throw new Error("chat down for owner@example.com"); };
+      const logged = vi.spyOn(console, "error").mockImplementation(() => undefined);
+      const billing: TrialBilling = { config: CONFIG, ownerEmails: async () => ["owner@example.com"], sendEmail: async () => ({ status: "failed", error: "Resend 422: owner@example.com is invalid" }) };
+      expect(await sendTrialReminders({ store: s.store, messenger: s.messenger, billing }, T0)).toBe(1);
+      const text = logged.mock.calls.flat().map(String).join("\n");
+      logged.mockRestore();
+      expect(text).toContain("chats sent 0, failed 1");
+      expect(text).toContain("emails sent 0, disabled 0, failed 1");
+      expect(text).toContain(s.venue.id);
+      expect(text).not.toContain("owner@example.com");
+      expect(text).not.toContain("Resend 422");
+    });
+    it("does not claim when nothing can be delivered (no messenger, mail disabled), so a later tick retries", async () => {
+      const s = await setup({ venue: trialing });
+      const off: TrialBilling = { config: CONFIG, emailEnabled: false, ownerEmails: async () => ["owner@example.com"], sendEmail: async () => ({ status: "disabled" }) };
+      expect(await sendTrialReminders({ store: s.store, messenger: null, billing: off }, T0)).toBe(0);
+      expect((await s.store.getVenue(s.venue.id)).trial_reminder_sent).toBeNull();
+      // a messenger appears: delivered
+      expect(await sendTrialReminders({ store: s.store, messenger: s.messenger, billing: off }, T0)).toBe(1);
+      expect(s.messenger.sent).toHaveLength(1);
+    });
+  });
+
+  it("an owner whose account cannot be read is skipped and logged by venue id; the others still count", async () => {
+    const db = {
+      from: () => { const q = { select: () => q, eq: () => q, then: (ok: (r: unknown) => void) => ok({ data: [{ user_id: "u1" }, { user_id: "u2" }], error: null }) }; return q; },
+      auth: { admin: { getUserById: async (id: string) => { if (id === "u1") throw new Error("boom for a@x.com"); return { data: { user: { email: "b@x.com" } }, error: null }; } } },
+    };
+    const logged = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    expect(await ownerEmailsFrom(db as never)("venue-9")).toEqual(["b@x.com"]);
+    const text = logged.mock.calls.flat().map(String).join("\n");
+    logged.mockRestore();
+    expect(text).toContain("venue-9");
+    expect(text).not.toContain("a@x.com");
+  });
+
+  describe("comment polling and drafting need the plan to include comments", () => {
+    async function commentsTick(venue: VenuePatch, billingOn = true) {
+      const v = await connectedVenue();
+      await v.store.updateVenue(v.venue.id, venue);
+      const { igMediaId } = await v.publishPost(["instagram_post"]);
+      v.meta.addInstagramComment(igMediaId!, { text: "Супер!", from_id: "1784", username: "maria.k", created: commentAt(-COMMENT_MIN) });
+      const drafts: string[] = [];
+      const draft = async (ctx: { comment: { text: string } }) => (drafts.push(ctx.comment.text), { reply: "Благодарим!", kind: "praise" as const, fallback: false });
+      const billing: TrialBilling | null = billingOn ? { config: CONFIG, ownerEmails: async () => [], sendEmail: async () => ({ status: "disabled" }) } : null;
+      const r = await runTick({ store: v.store, messenger: v.messenger, now: COMMENT_T0, sync: v.d, comments: { draft: draft as never }, billing });
+      return { r, drafts };
+    }
+    it("an Admin plan: nothing is read or drafted", async () => {
+      const { r, drafts } = await commentsTick({ plan: "admin", billing_status: "active", stripe_subscription_id: "sub_1" });
+      expect(r.comments_found).toBe(0);
+      expect(r.comments_proposed).toBe(0);
+      expect(drafts).toEqual([]);
+    });
+    it("a Social or Both plan, and a free trial with no plan: read and proposed", async () => {
+      for (const venue of [{ plan: "social" as const, billing_status: "active" as const, stripe_subscription_id: "sub_1" }, { plan: "both" as const, billing_status: "active" as const, stripe_subscription_id: "sub_1" }, { billing_status: "trialing" as const, trial_started_at: COMMENT_T0.toISOString(), trial_ends_at: commentAt(9 * DAY).toISOString() }]) {
+        const { r, drafts } = await commentsTick(venue);
+        expect(r.comments_found).toBe(1);
+        expect(r.comments_proposed).toBe(1);
+        expect(drafts).toEqual(["Супер!"]);
+      }
+    });
+    it("a paused venue with the plan is not gated here; billing off gates nothing", async () => {
+      expect((await commentsTick({ plan: "both", billing_status: "paused", stripe_subscription_id: "sub_1" })).r.comments_found).toBe(1);
+      expect((await commentsTick({ plan: "admin", billing_status: "active", stripe_subscription_id: "sub_1" }, false)).r.comments_found).toBe(1);
+    });
+  });
+
+  describe("Supabase conditional updates (fake client)", () => {
+    function fakeStore() {
+      const calls: [string, ...unknown[]][] = [];
+      const q: Record<string, unknown> = {
+        then: (ok: (r: unknown) => void) => ok({ data: [{ id: "x" }], error: null }),
+      };
+      for (const m of ["update", "eq", "is", "lte", "or", "select"]) q[m] = (...args: unknown[]) => (calls.push([m, ...args]), q);
+      const store = new SupabaseStore("https://x.supabase.co", "service-key");
+      (store as unknown as { db: unknown }).db = { from: (t: string) => (calls.push(["from", t]), q) };
+      return { store, calls };
+    }
+    const id = "0b1f6c1e-6a5c-4b8e-9a56-1d2f3a4b5c6d";
+    it("pauseExpiredTrial: only a trialing venue with no subscription whose trial is over", async () => {
+      const { store, calls } = fakeStore();
+      expect(await store.pauseExpiredTrial(id, "2026-11-02T09:00:00.000Z")).toBe(true);
+      expect(calls).toEqual([["from", "venues"], ["update", { billing_status: "paused" }], ["eq", "id", id], ["eq", "billing_status", "trialing"], ["is", "stripe_subscription_id", null], ["lte", "trial_ends_at", "2026-11-02T09:00:00.000Z"], ["select", "id"]]);
+    });
+    it("claimTrialReminder: 'soon' only while no marker; 'ended' unless already ended (null counts)", async () => {
+      const soon = fakeStore();
+      expect(await soon.store.claimTrialReminder(id, "soon")).toBe(true);
+      expect(soon.calls).toEqual([["from", "venues"], ["update", { trial_reminder_sent: "soon" }], ["eq", "id", id], ["is", "trial_reminder_sent", null], ["select", "id"]]);
+      const ended = fakeStore();
+      expect(await ended.store.claimTrialReminder(id, "ended")).toBe(true);
+      expect(ended.calls).toEqual([["from", "venues"], ["update", { trial_reminder_sent: "ended" }], ["eq", "id", id], ["or", "trial_reminder_sent.is.null,trial_reminder_sent.neq.ended"], ["select", "id"]]);
+    });
   });
 });

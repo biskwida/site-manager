@@ -81,7 +81,8 @@ export interface EffectiveLimit {
 
 /**
  * The change limit that applies now. An explicit `change_limit` wins. Then, with billing on: a free trial (no subscription) gets
- * TRIAL_CHANGE_LIMIT over the whole trial; a venue with a plan gets that plan's monthly number (Social has none for site changes).
+ * TRIAL_CHANGE_LIMIT over the whole trial; a venue with a plan AND a Stripe subscription gets that plan's monthly number (Social has none
+ * for site changes); a grandfathered venue (active, no subscription) stays unlimited.
  * Same counting rules as src/domain/limits.ts in every case. A free trial that is over by `now` stops nothing (it is paused: only new
  * proposals are refused, by `entitlement`; a scheduled set that comes due still applies).
  */
@@ -93,7 +94,8 @@ export function effectiveLimit(venue: Pick<Venue, "change_limit"> & Partial<Bill
     const window = venue.trial_started_at && venue.trial_ends_at ? { from: venue.trial_started_at, to: venue.trial_ends_at } : null;
     return { kind: "trial", limit: config.trialChangeLimit, window };
   }
-  if (venue.plan) {
+  // A plan's monthly number applies to venues that pay through Stripe. A grandfathered venue (active, no subscription) stays unlimited.
+  if (venue.plan && venue.stripe_subscription_id) {
     const limit = PLANS[venue.plan].changeLimit;
     return limit === null ? { kind: "none", limit: null, window: null } : { kind: "plan", limit, window: null };
   }

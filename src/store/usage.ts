@@ -6,6 +6,11 @@ import type { Change, ChangeSet, Venue } from "../domain/types";
 import { localDate } from "../time";
 import type { Store } from "./types";
 
+/** A set made only of set_sold_out rows (a dish ran out): allowed whatever the trial, plan or payment state says. */
+export function isSoldOutOnly(changes: readonly Pick<Change, "op">[] | undefined): boolean {
+  return !!changes && changes.length > 0 && changes.every((c) => c.op === "set_sold_out");
+}
+
 export interface ChangeUsage extends LimitState {
   /** YYYY-MM-DD in the venue's zone: the 1st of next month, when the count starts again (a free trial: the day the trial ends). */
   resets_on: string;
@@ -60,6 +65,9 @@ export async function limitBlocks(store: Pick<Store, "getVenue" | "countAppliedC
   }
   if (!countsTowardLimit(cs.source, cs.changes)) return false;
   const venue = await store.getVenue(cs.venue_id);
-  if (effectiveLimit(venue, store.billingConfig, new Date(nowIso)).limit === null) return false;
+  const eff = effectiveLimit(venue, store.billingConfig, new Date(nowIso));
+  if (eff.limit === null) return false;
+  // Marking something sold out is operational: the trial's and the plan's limits never stop it. Only a limit set on the venue itself does.
+  if (eff.kind !== "override" && isSoldOutOnly(cs.changes)) return false;
   return (await changeUsage(store, venue, new Date(nowIso))).reached;
 }

@@ -19,7 +19,7 @@ export function digestDue(venue: Pick<Venue, "comment_mode" | "comment_digest_ho
 const log = (d: ProposeDeps, s: string) => (d.log ?? ((x: string) => console.log(x)))(s);
 
 /** Sends the due digests (one venue with `venueId`, else every live venue); returns venue ids. Never throws. */
-export async function runCommentDigests(d: ProposeDeps, o: { venueId?: string; now: Date }): Promise<{ sent: string[]; skipped: string[] }> {
+export async function runCommentDigests(d: ProposeDeps, o: { venueId?: string; now: Date; eligible?: (venue: Venue) => boolean }): Promise<{ sent: string[]; skipped: string[] }> {
   const out = { sent: [] as string[], skipped: [] as string[] };
   let venues: Venue[];
   try {
@@ -29,6 +29,7 @@ export async function runCommentDigests(d: ProposeDeps, o: { venueId?: string; n
     return out;
   }
   for (const venue of venues) {
+    if (o.eligible && !o.eligible(venue)) continue; // e.g. a plan without comments (billing)
     if (!digestDue(venue, o.now)) {
       if (venue.comment_mode === "digest") out.skipped.push(venue.id);
       continue;

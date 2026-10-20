@@ -44,7 +44,7 @@ export function AdminPanel({ slug, adminKey, initial, showAccountBanner = false,
       <main className="mx-auto w-full max-w-3xl flex-1 px-4 pb-16 sm:px-6">
         {showAccountBanner && <AccountBanner />}
         {/* Plan and payment: the account dashboard only (a legacy key page is unchanged), and only while billing is on. */}
-        {!adminKey && o.billing && <BillingCard billing={o.billing} slug={slug} justPaid={billingJustPaid} />}
+        {!adminKey && o.billing && <BillingCard billing={o.billing} slug={slug} tz={tz} justPaid={billingJustPaid} />}
         <SiteCard overview={o} post={post} adminKey={adminKey} refresh={refresh} />
         <PendingList sets={o.pending} slug={slug} adminKey={adminKey} tz={tz} decide={decide} />
         <ScheduledList sets={o.scheduled} tz={tz} decide={decide} />

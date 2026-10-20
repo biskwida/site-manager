@@ -114,9 +114,9 @@ Without a card, "if required" Checkout lets an owner with trial days left start 
 
 ## What the limits and the tick do (with `BILLING_ENABLED=true`)
 
-- **Plan limits** when a venue has no `change_limit`: Admin 40 a month, Both 150, Social none for site changes (it refuses site changes as "not in plan"). A venue's own `change_limit` still overrides. Existing venues were set to `active` / `both` by the migration, so they now have the 150 a month limit; give one a high `change_limit` (`npm run venue:set -- --slug <slug> --change-limit 100000`) to keep it practically unlimited (`--change-limit none` clears the override, so the plan's number applies).
+- **Plan limits** when a venue has no `change_limit`: they apply to venues with a Stripe subscription: Admin 40 a month, Both 150, Social none for site changes (it refuses site changes as "not in plan"). A venue's own `change_limit` still overrides. Existing venues (set to `active` / `both` by the migration, no subscription) stay unlimited until they subscribe.
 - **Trial:** a free trial (no Stripe subscription) counts `TRIAL_CHANGE_LIMIT` over `trial_started_at`..`trial_ends_at`. Paying during the trial switches straight to the plan's monthly limit.
-- **Paused / canceled / past due more than 7 days:** only new owner proposals are refused (the reply carries the `/billing/<slug>` link). Scheduled changes already due, the auto sold-out reverts and undo still run; the website, menu page and posts stay online.
+- **Paused / canceled / past due more than 7 days:** only new owner proposals are refused (marking an item sold out is always allowed) (the reply carries the `/billing/<slug>` link). Scheduled changes already due, the auto sold-out reverts and undo still run; the website, menu page and posts stay online.
 - **The cron tick** (`/api/tick`) pauses free trials whose `trial_ends_at` has passed (no Stripe subscription; a Stripe trial is left to the webhook) and sends two reminders, each once (`trial_reminder_sent`): `soon` at 3 days left or 15 of 20 changes used, `ended` at the end or the 20th change. Each goes to the owner chats and, with `RESEND_API_KEY` set, by email to the account owners.
 - **`TRIAL_REQUIRES_CARD=true`:** while a venue is in a free trial with no subscription, the agent refuses proposals with an "add a card" line and the billing link.
 

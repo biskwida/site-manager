@@ -15,7 +15,7 @@ import type { Store } from "../store/types";
 import { formatDateTime, nowText } from "../time";
 import { copy } from "../bot/copy";
 import { usageLine } from "../bot/limit";
-import { changeUsage } from "../store/usage";
+import { changeUsage, isSoldOutOnly } from "../store/usage";
 import { countsTowardLimit } from "../domain/limits";
 import { billingUrl, effectiveLimit, entitlement } from "../billing/entitlements";
 import type { Feature } from "../billing/plans";
@@ -216,7 +216,7 @@ export function makeTools(deps: AgentDeps) {
     const url = billingUrl(cfg, venue.slug);
     const c = copy(lang);
     const line =
-      r.reason === "paused" ? (venue.stripe_subscription_id === null && venue.billing_status !== "canceled" ? c.trialEndedRefusal(url) : c.planPausedRefusal(url))
+      r.reason === "paused" ? (venue.trial_ends_at !== null && venue.stripe_subscription_id === null && venue.billing_status !== "canceled" ? c.trialEndedRefusal(url) : c.planPausedRefusal(url))
       : r.reason === "past_due_expired" ? c.pastDueRefusal(url)
       : r.reason === "card_required" ? c.cardRequiredRefusal(url)
       : c.notInPlanRefusal(feature, venue.plan ? c.planName[venue.plan] : "", url);
@@ -228,9 +228,11 @@ export function makeTools(deps: AgentDeps) {
    * anything is created. The limit is the venue's own, else the free trial's (TRIAL_CHANGE_LIMIT over the whole trial) or its plan's
    * monthly number (src/billing/entitlements.ts effectiveLimit). Undo never calls it. The apply-time stop in the store covers the rest.
    */
-  const ensureWithinLimit = async () => {
+  const ensureWithinLimit = async (opts: { overrideOnly?: boolean } = {}) => {
     const venue = await d.store.getVenue(d.venueId);
-    if (effectiveLimit(venue, d.store.billingConfig, d.now()).limit === null) return;
+    const eff = effectiveLimit(venue, d.store.billingConfig, d.now());
+    if (eff.limit === null) return;
+    if (opts.overrideOnly && eff.kind !== "override") return; // a sold-out mark: only the venue's own limit applies
     const u = await changeUsage(d.store, venue, d.now());
     if (!u.reached || u.limit === null) return;
     if (u.kind === "trial" && d.store.billingConfig) {
@@ -244,9 +246,11 @@ export function makeTools(deps: AgentDeps) {
   /** Shared by propose_changes and schedule_changes. */
   const propose = async (input: ProposeInput, applyAt: string | null) => {
     // The plan and payment gate first: a set made only of set_comment_mode rows is a comments feature, anything else is a site change.
-    await ensureEntitled(input.changes.every((c) => c.op === "set_comment_mode") ? "comments" : "site");
+    // Marking items sold out is always allowed (paused, trial-limited, overdue, card needed): no feature gate, and only the venue's own change_limit applies.
+    const soldOutOnly = isSoldOutOnly(input.changes);
+    if (!soldOutOnly) await ensureEntitled(input.changes.every((c) => c.op === "set_comment_mode") ? "comments" : "site");
     // A set made only of set_comment_mode rows never counts toward the limit (countsTowardLimit), so it is never refused here.
-    if (countsTowardLimit(d.source ?? "text", input.changes)) await ensureWithinLimit();
+    if (countsTowardLimit(d.source ?? "text", input.changes)) await ensureWithinLimit({ overrideOnly: soldOutOnly });
     const s = await site();
     const ops = resolveTokens(input.changes, s, d.now());
     requireRole(d.member, ops);
@@ -261,7 +265,7 @@ export function makeTools(deps: AgentDeps) {
     if (instant) {
       if ((await d.store.applyChangeSet(cs.id, d.now().toISOString())) === "limited") {
         // Another apply used up the last change since the check above; the store cancelled this set.
-        await ensureWithinLimit(); // throws with the owner's line
+        await ensureWithinLimit({ overrideOnly: soldOutOnly }); // throws with the owner's line
         throw new Error("Monthly change limit reached: nothing was applied. Do not retry.");
       }
       const usage = await usageLine(d.store, d.venueId, d.now(), lang);
@@ -388,7 +392,7 @@ export interface ToolKit {
   getSet: (id: string) => Promise<ChangeSet>;
   ensureNoPending: () => Promise<void>;
   /** Throws the owner's limit line when the venue's monthly change limit is reached; call before creating any non-undo set. */
-  ensureWithinLimit: () => Promise<void>;
+  ensureWithinLimit: (opts?: { overrideOnly?: boolean }) => Promise<void>;
   /** Throws the owner's plan/payment line when the venue may not use this feature now (not in its plan, trial over, plan paused, payment overdue); a no-op while billing is off. Call before any new owner proposal, not for undo. */
   ensureEntitled: (feature: Feature) => Promise<void>;
   /** Ids of the sets this turn cancelled itself (per makeTools call); an owner's ❌ in an earlier turn is not in it. */

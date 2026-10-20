@@ -1,6 +1,6 @@
 // scripts/venue-set.mts
 // npm run venue:set -- --slug coffique --change-limit 60      (sets the monthly change limit)
-// npm run venue:set -- --slug coffique --change-limit none    (clears it: unlimited)
+// npm run venue:set -- --slug coffique --change-limit none    (clears it: unlimited; with billing on, a trial or subscribed venue then follows its trial or plan limit)
 // npm run venue:set -- --slug coffique --plan both --billing-status active --trial-ends 2026-11-02   (billing, 2026-10-19)
 // Patches one venue's settings and prints the result. Never prints secrets: no admin token, no env values, no Stripe ids.
 import { parseBillingStatusArg, parsePlanArg, parseTrialEndsArg } from "../src/billing/plans";
@@ -11,7 +11,7 @@ import { changeUsage } from "../src/store/usage";
 import { parseArgs } from "./invite-lines.mts";
 
 const USAGE = `Usage: npm run venue:set -- --slug my-cafe [--change-limit 60|none] [--plan admin|social|both|none] [--billing-status trialing|active|past_due|paused|canceled|none] [--trial-ends 2026-11-02|none]
-  --change-limit    applied change sets per calendar month in the venue's time zone (undo and automatic sets do not count); none = unlimited
+  --change-limit    applied change sets per calendar month in the venue's time zone (undo and automatic sets do not count); none = no override (unlimited; with billing on, a free trial or a Stripe subscription follows the trial's or plan's limit)
   --plan            the venue's billing plan; none = no plan chosen
   --billing-status  the venue's billing status; none = billing does not touch the venue
   --trial-ends      when the free trial ends: an ISO date (00:00 UTC) or date and time; none = no trial end

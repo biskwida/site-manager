@@ -21,9 +21,24 @@ describe("the dashboard's trial counter", () => {
   it("shows 'Changes in your trial: 6 / 20' with the days left, in both languages", () => {
     const b = billing({ trial_changes: { used: 6, limit: 20 } });
     expect(card(b, "en")).toContain("Changes in your trial: 6 / 20");
-    expect(card(b, "en")).toContain("Free trial: 9 days left.");
+    expect(card(b, "en")).toContain("Free trial: 9 days and 14 of 20 changes left.");
     expect(card(b, "bg")).toContain("Промени в пробния период: 6 / 20");
-    expect(card(b, "bg")).toContain("остават 9 дни");
+    expect(card(b, "bg")).toContain("Безплатен пробен период: още 9 дни и 14 от 20 промени.");
+  });
+  it("the banner adds the plan, its start date and price only once a plan exists (mockup screen 8)", () => {
+    const tc = { used: 6, limit: 20 };
+    expect(card(billing({ trial_changes: tc }), "en")).not.toContain("plan from");
+    const both = billing({ trial_changes: tc, plan: "both" });
+    expect(card(both, "en")).toContain("Free trial: 9 days and 14 of 20 changes left. Both plan from 28 October, €49 + VAT.");
+    expect(card(both, "bg")).toContain("Безплатен пробен период: още 9 дни и 14 от 20 промени. План Both от 28 октомври, 49 € + ДДС.");
+    expect(card(billing({ trial_changes: tc, plan: "admin", trial_days_left: 1 }), "en")).toContain("Free trial: 1 day and 14 of 20 changes left. Admin plan from 28 October, €19 + VAT.");
+  });
+  it("under the counter: what the chosen plan gives after the trial (Both when none is chosen)", () => {
+    const tc = { used: 6, limit: 20 };
+    expect(card(billing({ trial_changes: tc }), "en")).toContain("Then 150 a month on Both.");
+    expect(card(billing({ trial_changes: tc }), "bg")).toContain("После 150 на месец с Both.");
+    expect(card(billing({ trial_changes: tc, plan: "admin" }), "en")).toContain("Then 40 a month on Admin.");
+    expect(card(billing({ trial_changes: tc, plan: "social" }), "en")).not.toContain("a month on");
   });
   it("shows no counter outside a free trial", () => {
     expect(card(billing({ trial_changes: null, status: "active", plan: "both", subscribed: true }), "en")).not.toContain("Changes in your trial");
