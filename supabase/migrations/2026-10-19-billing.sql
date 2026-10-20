@@ -29,7 +29,7 @@ alter table public.venues drop constraint if exists venues_trial_reminder_sent_c
 alter table public.venues add constraint venues_trial_reminder_sent_check check (trial_reminder_sent is null or trial_reminder_sent in ('soon', 'ended'));
 create unique index if not exists venues_stripe_customer_idx on public.venues(stripe_customer_id) where stripe_customer_id is not null;
 
--- Stripe event ids already handled (the webhook records an id before applying the event; a second delivery of it is ignored).
+-- Stripe event ids already handled (the webhook applies the event first and then records its id; a second delivery of a recorded id is ignored, and an event that failed to apply is not recorded, so Stripe's retry is applied).
 create table if not exists public.billing_events (
   id text primary key,
   type text not null,

@@ -79,7 +79,7 @@ function reminderLine(lang: Lang, due: Due, v: Venue, config: BillingConfig, now
   const c = copy(lang);
   const url = billingUrl(config, v.slug);
   if (due.why === "limit") return c.trialLimitReached(due.limit ?? config.trialChangeLimit, url);
-  if (due.why === "time") return c.trialEnded(url);
+  if (due.why === "time") return c.trialEnded(url, v.site_mode === "none");
   if (due.why === "used") return c.trialChangesSoon(due.used, due.limit ?? config.trialChangeLimit, url);
   return c.trialEndsSoon(trialDaysLeft(v, now), dayMonthLabel(localDate(new Date(v.trial_ends_at as string), v.tz), lang), url);
 }

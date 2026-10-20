@@ -59,8 +59,14 @@ alter table public.account_invites enable row level security;
 revoke all on public.account_invites from anon, authenticated;
 
 -- Billing (2026-10-19): Stripe event ids already handled. Server-only, like the tables above (RLS on, no policies, no grants).
-alter table public.billing_events enable row level security;
-revoke all on public.billing_events from anon, authenticated;
+-- Guarded: this file also runs on a database that has not had 2026-10-19-billing.sql yet (the migration does the same two statements itself).
+do $$
+begin
+  if to_regclass('public.billing_events') is not null then
+    alter table public.billing_events enable row level security;
+    revoke all on public.billing_events from anon, authenticated;
+  end if;
+end $$;
 
 -- 2. No RPCs: the owner dashboard and the public site read through the app's server (service-role key, never in the browser).
 

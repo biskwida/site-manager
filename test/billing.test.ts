@@ -511,12 +511,12 @@ describe("buying the website twice", () => {
   const live = { plan: "admin" as const, billing_status: "active" as const, stripe_subscription_id: "sub_1", stripe_customer_id: "cus_1", site_mode: "own" as const, site_url: "https://own.example", created_via: "start" as const };
   const ask = (venue: Venue, d: Parameters<typeof handleCheckout>[2]) => handleCheckout(post("/api/billing/checkout", { kind: "website_setup" }), venue.slug, d);
 
-  it("the one-off Checkout carries website-<venue id>-<30-minute bucket> as its idempotency key; a double click returns the same session", async () => {
+  it("the one-off Checkout carries website-<venue id>-<lang>-<30-minute bucket> as its idempotency key; a double click returns the same session", async () => {
     const { venue, d, stripe } = await setup(live);
     const bucket = Math.floor(T0.getTime() / (30 * 60_000));
     const [a, b] = await Promise.all([ask(venue, d), ask(venue, d)]);
     const urls = [((await a.json()) as { url: string }).url, ((await b.json()) as { url: string }).url];
-    expect(stripe.checkoutKeys).toEqual([`website-${venue.id}-${bucket}`, `website-${venue.id}-${bucket}`]);
+    expect(stripe.checkoutKeys).toEqual([`website-${venue.id}-bg-${bucket}`, `website-${venue.id}-bg-${bucket}`]);
     expect(urls[0]).toBe(urls[1]);
     expect(stripe.sessionsMade).toBe(1);
     expect(stripe.checkoutCalls[0]).toEqual(stripe.checkoutCalls[1]); // same parameters, as Stripe's idempotency requires

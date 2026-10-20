@@ -72,6 +72,7 @@ describe("/new/[id]/done: saving the business to an account", () => {
   });
   it("back signed in: the venue is linked once and the checklist link appears", async () => {
     const live = await published();
+    afterCreated.mockClear(); // the account-less publish already ran the hook; this counts the claim only
     jar[DRAFT_ACCOUNT_COOKIE] = live.id;
     sessionUser.mockResolvedValue(user);
     const html = await render(live.id);

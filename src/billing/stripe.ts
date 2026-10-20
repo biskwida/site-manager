@@ -187,7 +187,7 @@ export async function websiteSetupSession(stripe: Pick<StripeLike, "checkout">, 
       success_url: `${base}/dashboard/${slug}?billing=success`,
       cancel_url: `${base}/dashboard/${slug}`,
     },
-    { idempotencyKey: `website-${venue.id}-${bucket}` },
+    { idempotencyKey: `website-${venue.id}-${opts.lang}-${bucket}` },
   );
   return sessionUrl(session);
 }

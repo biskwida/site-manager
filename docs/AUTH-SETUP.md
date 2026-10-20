@@ -4,10 +4,15 @@ Claudia owners sign in with an email link or Google (`/login`). This is what the
 
 ## 1. Database
 
+Follow the "Database first" list in [DOMAIN-SWITCH.md](DOMAIN-SWITCH.md#a-database-first-before-deploying-this-branch) (all five migrations, then `policies.sql`). For the accounts alone it is:
+
 ```
 npm run db:apply -- supabase/migrations/2026-10-19-venue-users.sql
+npm run db:apply -- supabase/migrations/2026-10-19-billing.sql
 npm run db:apply -- supabase/policies.sql
 ```
+
+`policies.sql` also covers `billing_events`; it skips that table when the billing migration has not been applied, so the order is forgiving, but apply the billing migration first so the table gets its protection in the same run.
 
 `venue_users` and `account_invites` are server-only (RLS on, nothing granted to anon or authenticated). `npm run check:rls` proves it.
 
@@ -19,7 +24,7 @@ npm run db:apply -- supabase/policies.sql
 
 **Authentication, URL Configuration:**
 - Site URL: `https://getclaudia.app`
-- Redirect URLs: `https://getclaudia.app/auth/callback` and `http://localhost:3000/auth/callback`
+- Redirect URLs: `https://getclaudia.app/auth/callback`, `http://localhost:3000/auth/callback` and, for the testing window before the domain moves, `https://site-manager-lovat.vercel.app/auth/callback` (remove it once the app is only used on getclaudia.app)
 
 **Authentication, SMTP Settings:** turn on custom SMTP and point it at Resend (host `smtp.resend.com`, port 465, user `resend`, password = the Resend API key, sender `Claudia <hello@getclaudia.app>`). The built-in Supabase mailer is rate-limited to a few emails an hour and sends from a shared address; the sign-in link email would be throttled and often land in spam.
 

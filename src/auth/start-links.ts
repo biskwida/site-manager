@@ -23,3 +23,10 @@ export function startQuery(o: { plan?: StartPlan | null; lang?: PageLang | null 
 export function startPath(path: string, o: { plan?: StartPlan | null; lang?: PageLang | null }): string {
   return `${path}${startQuery(o)}`;
 }
+
+/** `to` with `lang=` set: appended with `?` or, when `to` already has a query, `&`. A lang already there is replaced. */
+export function withLang(to: string, lang: PageLang): string {
+  const u = new URL(to, "http://x.invalid");
+  u.searchParams.set("lang", lang);
+  return `${u.pathname}${u.search}${u.hash}`;
+}

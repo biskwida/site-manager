@@ -215,9 +215,10 @@ export function makeTools(deps: AgentDeps) {
     if (r.ok) return;
     const url = billingUrl(cfg, venue.slug);
     const c = copy(lang);
+    const page = venue.site_mode === "none"; // no website: say "your page", not "your website"
     const line =
-      r.reason === "paused" ? (venue.trial_ends_at !== null && venue.stripe_subscription_id === null && venue.billing_status !== "canceled" ? c.trialEndedRefusal(url) : c.planPausedRefusal(url))
-      : r.reason === "past_due_expired" ? c.pastDueRefusal(url)
+      r.reason === "paused" ? (venue.trial_ends_at !== null && venue.stripe_subscription_id === null && venue.billing_status !== "canceled" ? c.trialEndedRefusal(url, page) : c.planPausedRefusal(url, page))
+      : r.reason === "past_due_expired" ? c.pastDueRefusal(url, page)
       : r.reason === "card_required" ? c.cardRequiredRefusal(url)
       : c.notInPlanRefusal(feature, venue.plan ? c.planName[venue.plan] : "", url);
     throw new Error(`Plan or billing state (${r.reason}): nothing was proposed. Do not retry, split or rephrase this request and do not offer a workaround; reply to the owner with exactly this line: "${line}" Undo still works.`);

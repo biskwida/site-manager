@@ -483,7 +483,9 @@ async function publishClaimed(store: Store, venue: Venue, d: WizardDraft, now: D
   const inviteCode = ownerJoined ? "" : ((await store.findOpenInvite(venue.id, "owner", nowIso)) ?? (await store.createInvite(venue.id, "owner", new Date(now.getTime() + INVITE_TTL_MS).toISOString())));
   const adminToken = await store.getAdminToken(venue.id);
   const live = await store.getVenue(venue.id);
-  if (userId && !addon) await runAfterVenueCreated(live);
+  // Every new (non-add-on) venue starts its trial when billing is on, signed in or not: afterVenueCreated is a no-op while billing is off and
+  // never restarts a trial, so a later claim of the venue by an account is harmless.
+  if (!addon) await runAfterVenueCreated(live);
   return { venue: live, inviteCode, adminToken };
 }
 

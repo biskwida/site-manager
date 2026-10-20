@@ -53,8 +53,9 @@ describe("supabase/policies.sql venue grants", () => {
   });
 
   it("billing_events is server-only: RLS on, no policy, everything revoked from anon/authenticated, never granted", () => {
-    expect(statements).toContain("alter table public.billing_events enable row level security");
-    expect(statements).toContain("revoke all on public.billing_events from anon, authenticated");
+    // inside a do block guarded by to_regclass (the file also runs on a database without the billing migration), so the statements carry its prefix
+    expect(statements.some((s) => s.endsWith("alter table public.billing_events enable row level security"))).toBe(true);
+    expect(statements.some((s) => s.startsWith("revoke all on public.billing_events from anon, authenticated"))).toBe(true);
     expect(statements.filter((s) => /^(grant|create policy) /i.test(s)).join(" ")).not.toMatch(/billing_events/);
   });
 

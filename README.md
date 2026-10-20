@@ -284,11 +284,12 @@ Owners see the same list in the chat with `/members`; removing access is deliber
 2. Link the project from this folder: `vercel link`.
 3. Add every required key from the table above for Production, either in the Vercel dashboard (Project → Settings → Environment Variables) or one by one with `vercel env add ANTHROPIC_API_KEY production` (it asks for the value). `SUPABASE_DB_URL` is not needed on Vercel. For the wizard also add `RATE_SALT`, `TELEGRAM_BOT_USERNAME` and, for real site deploys, `VERCEL_TOKEN` and `VERCEL_TEAM_ID`.
 4. Add `CRON_SECRET` with the same value as `TICK_SECRET`. Vercel Cron sends it as `Authorization: Bearer …`, and `/api/tick` accepts that.
-5. Deploy: `vercel --prod`. Note the deployment URL.
-6. Set `PUBLIC_BASE_URL` to the production domain (`https://<deployment>`, no trailing slash; not a preview URL, because every venue project gets it as its feed origin) and deploy again (`vercel --prod`).
-7. Point Telegram at the deployment: `npm run telegram:set-webhook -- https://<deployment>` (it appends `/api/telegram` and the webhook secret). Stop any `bot:dev` first; Telegram allows a webhook or polling, never both.
-8. Check the tick: `curl -H "x-tick-secret: <TICK_SECRET>" https://<deployment>/api/tick` should answer `{"ok":true,…}`.
-9. If the venue was created against `http://localhost:3000`, its admin link changes only in the host: replace it with the deployment URL (the key stays the same).
+5. Apply the database migrations first (accounts, billing and the new venue columns): the exact order is in [docs/DOMAIN-SWITCH.md, "Database first"](docs/DOMAIN-SWITCH.md#a-database-first-before-deploying-this-branch), and the whole launch order (deploy, accounts, domain, billing) is at the top of that file. The code writes the new columns, so a deploy against an old database breaks publishing.
+6. Deploy: `vercel --prod`. Note the deployment URL.
+7. Set `PUBLIC_BASE_URL` to the production domain (`https://<deployment>`, no trailing slash; not a preview URL, because every venue project gets it as its feed origin) and deploy again (`vercel --prod`).
+8. Point Telegram at the deployment: `npm run telegram:set-webhook -- https://<deployment>` (it appends `/api/telegram` and the webhook secret). Stop any `bot:dev` first; Telegram allows a webhook or polling, never both.
+9. Check the tick: `curl -H "x-tick-secret: <TICK_SECRET>" https://<deployment>/api/tick` should answer `{"ok":true,…}`.
+10. If the venue was created against `http://localhost:3000`, its admin link changes only in the host: replace it with the deployment URL (the key stays the same).
 
 Cron: `vercel.json` runs `/api/tick` every 5 minutes (`*/5 * * * *`; the team is on Pro). On Hobby, which allows only daily crons, change it to `0 3 * * *` or call the tick every 5 minutes from Supabase with `pg_cron` + `pg_net` using `supabase/cron.sql`. Little depends on it: sold-out returns and expired specials are computed when the page is read, every webhook call runs the tick for its venue, a deploy is watched in the background for 4 minutes after it starts, and the done page and the dashboard nudge `POST /api/tick?key=` while a deploy is in flight. The cron finishes slower deploys and deletes abandoned drafts. The webhook route has `maxDuration = 300`; the agent runs after the response (`after()`), so Telegram never retries.
 

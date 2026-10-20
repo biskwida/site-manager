@@ -371,7 +371,7 @@ create table if not exists public.account_invites (
 );
 create index if not exists account_invites_email_idx on public.account_invites(email);
 
--- Stripe event ids already handled (the webhook records an id before applying the event; a second delivery of it is ignored).
+-- Stripe event ids already handled (the webhook applies the event first and then records its id; a second delivery of a recorded id is ignored, and an event that failed to apply is not recorded, so Stripe's retry is applied).
 create table if not exists public.billing_events (
   id text primary key,
   type text not null,

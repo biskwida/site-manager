@@ -76,13 +76,13 @@ const BG = {
   /** Reminder "soon" by use: 15 of the 20 trial changes are used. */
   trialChangesSoon: (used: number, limit: number, url: string) => `Използвахте ${used} от ${limit} промени в пробния период. За да не спират новите промени, изберете план: ${url}`,
   /** Reminder "ended": the trial time is over. */
-  trialEnded: (url: string) => `Безплатният ви пробен период приключи, затова новите промени са на пауза. Сайтът и постовете ви остават онлайн. За да продължите, изберете план: ${url}`,
+  trialEnded: (url: string, page = false) => `Безплатният ви пробен период приключи, затова новите промени са на пауза. ${page ? "Страницата и публикациите ви остават онлайн." : "Сайтът и постовете ви остават онлайн."} За да продължите, изберете план: ${url}`,
   /** The refusal of an owner request once the trial is over. */
-  trialEndedRefusal: (url: string) => `Пробният ви период приключи, затова спрях новите промени. Сайтът и постовете ви остават онлайн. Изберете план и ще го направя веднага: ${url}`,
+  trialEndedRefusal: (url: string, page = false) => `Пробният ви период приключи, затова спрях новите промени. ${page ? "Страницата и публикациите ви остават онлайн." : "Сайтът и постовете ви остават онлайн."} Изберете план и ще го направя веднага: ${url}`,
   /** The refusal when a paid plan is paused or canceled. */
-  planPausedRefusal: (url: string) => `Планът ви е на пауза, затова новите промени са спрени. Сайтът и постовете ви остават онлайн. Подновете го тук и ще го направя веднага: ${url}`,
+  planPausedRefusal: (url: string, page = false) => `Планът ви е на пауза, затова новите промени са спрени. ${page ? "Страницата и публикациите ви остават онлайн." : "Сайтът и постовете ви остават онлайн."} Подновете го тук и ще го направя веднага: ${url}`,
   /** The refusal when a payment failed more than 7 days ago. */
-  pastDueRefusal: (url: string) => `Плащането ви не мина преди повече от 7 дни, затова новите промени са спрени. Сайтът и постовете ви остават онлайн. Обновете картата си и ще го направя веднага: ${url}`,
+  pastDueRefusal: (url: string, page = false) => `Плащането ви не мина преди повече от 7 дни, затова новите промени са спрени. ${page ? "Страницата и публикациите ви остават онлайн." : "Сайтът и постовете ви остават онлайн."} Обновете картата си и ще го направя веднага: ${url}`,
   /** The refusal when TRIAL_REQUIRES_CARD is on and no card was added. */
   cardRequiredRefusal: (url: string) => `Добавете карта, за да започне пробният ви период, и ще го направя веднага: ${url}`,
   /** A feature the plan does not include; `plan` is its name. */
@@ -169,10 +169,10 @@ const EN: typeof BG = {
   trialLimitReached: (limit, url) => `That was your ${ordinalEn(limit)} trial change, so new changes are paused until you choose a plan. Undo still works: ${url}`,
   trialEndsSoon: (days, when, url) => `Your free trial ends in ${days === 1 ? "1 day" : `${days} days`}, on ${when}. To keep going, choose a plan: ${url}`,
   trialChangesSoon: (used, limit, url) => `You've used ${used} of your ${limit} trial changes. To keep new changes coming, choose a plan: ${url}`,
-  trialEnded: (url) => `Your free trial has ended, so new changes are paused. Your website and posts stay online. To keep going, choose a plan: ${url}`,
-  trialEndedRefusal: (url) => `Your trial has ended, so I've paused new changes. Your website and posts stay online. Choose a plan and I'll do this right away: ${url}`,
-  planPausedRefusal: (url) => `Your plan is paused, so new changes are on hold. Your website and posts stay online. Restart it here and I'll do this right away: ${url}`,
-  pastDueRefusal: (url) => `Your payment failed more than 7 days ago, so new changes are on hold. Your website and posts stay online. Update your card and I'll do this right away: ${url}`,
+  trialEnded: (url, page = false) => `Your free trial has ended, so new changes are paused. ${page ? "Your page and posts stay online." : "Your website and posts stay online."} To keep going, choose a plan: ${url}`,
+  trialEndedRefusal: (url, page = false) => `Your trial has ended, so I've paused new changes. ${page ? "Your page and posts stay online." : "Your website and posts stay online."} Choose a plan and I'll do this right away: ${url}`,
+  planPausedRefusal: (url, page = false) => `Your plan is paused, so new changes are on hold. ${page ? "Your page and posts stay online." : "Your website and posts stay online."} Restart it here and I'll do this right away: ${url}`,
+  pastDueRefusal: (url, page = false) => `Your payment failed more than 7 days ago, so new changes are on hold. ${page ? "Your page and posts stay online." : "Your website and posts stay online."} Update your card and I'll do this right away: ${url}`,
   cardRequiredRefusal: (url) => `Add a card to start your trial and I'll do this right away: ${url}`,
   notInPlanRefusal: (feature, plan, url) => {
     const what = { site: "Website changes", social: "Social media posts", comments: "Comment replies", boost: "Ads" }[feature];

@@ -320,7 +320,7 @@ describe("path A: publish with a session", () => {
     expect(done2.venue.status).toBe("live");
     expect(await store.listVenuesForUser(owner.id)).toHaveLength(1);
     expect(await store.hasOwnerAccount(done2.venue.id)).toBe(false);
-    expect(afterCreated).toHaveBeenCalledTimes(1);
+    expect(afterCreated).toHaveBeenCalledTimes(2); // the trial starts for an account-less publish too (it is idempotent, so a later claim is harmless)
   });
   it("a failed link leaves a draft that publishes again", async () => {
     const store = new InMemoryStore();

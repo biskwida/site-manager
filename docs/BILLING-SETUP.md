@@ -2,7 +2,7 @@
 
 Claudia charges through Stripe. This is what the owner configures once, in the Stripe dashboard (test mode first), Supabase and Vercel. Code: `src/billing`, `src/server/billing.ts`, `app/api/billing`, `app/api/stripe/webhook`, `app/billing/[slug]`.
 
-Everything stays free and unlimited until `BILLING_ENABLED=true`. Do the steps in this order.
+Everything stays free and unlimited until `BILLING_ENABLED=true`. Do the steps in this order. **Do this guide only after the domain switch** ([DOMAIN-SWITCH.md](DOMAIN-SWITCH.md), section D): the webhook below points at `https://getclaudia.app`. For a test before the switch, use the old host's webhook URL (`https://site-manager-lovat.vercel.app/api/stripe/webhook`) and change the endpoint afterwards.
 
 ## 1. Database first
 
@@ -36,7 +36,7 @@ Copy each price's id (`price_...`, on the price's page) into the env var named i
 - Settings, Business, Public details: set the **business name** (it is shown on Checkout, receipts and invoices).
 - Settings, Payment methods: enable **cards only** for now (turn the other methods off in the default configuration). Delayed methods such as bank debits are handled by the code (the website fee waits for `checkout.session.async_payment_succeeded`), but cards are all that was tested.
 - Settings, Billing, Subscriptions and emails, **failed payment retries** ("Smart Retries" is the sensible choice, a few attempts over about two weeks), and when the retries run out, choose **"Mark the subscription as unpaid"** (not "cancel"). What each state means in Claudia:
-  - first failed payment: Stripe says `past_due` and Claudia says `past_due`; the owner is reminded and keeps working for a grace period (the 7 days are enforced in a later task);
+  - first failed payment: Stripe says `past_due` and Claudia says `past_due`; the owner keeps working for a 7-day grace period, after which new owner changes stop. **There is no past-due reminder from Claudia yet** (a follow-up); until then, turn on Stripe's own failed-payment customer emails (Settings, Billing, Subscriptions and emails).
   - retries exhausted with "mark as unpaid": Stripe says `unpaid` and Claudia says `paused`: new owner changes stop; the website, menu page and published posts stay online. The owner fixes the card in Manage billing;
   - the owner (or you) cancels, or retries are set to cancel: Stripe says `canceled` and Claudia says `canceled`. Nothing goes offline; the owner can start a new subscription from the plan page.
   - A trial that ends with no card is paused by Stripe (`paused`), which Claudia also shows as `paused`.
@@ -116,7 +116,7 @@ Without a card, "if required" Checkout lets an owner with trial days left start 
 
 - **Plan limits** when a venue has no `change_limit`: they apply to venues with a Stripe subscription: Admin 40 a month, Both 150, Social none for site changes (it refuses site changes as "not in plan"). A venue's own `change_limit` still overrides. Existing venues (set to `active` / `both` by the migration, no subscription) stay unlimited until they subscribe.
 - **Trial:** a free trial (no Stripe subscription) counts `TRIAL_CHANGE_LIMIT` over `trial_started_at`..`trial_ends_at`. Paying during the trial switches straight to the plan's monthly limit.
-- **Paused / canceled / past due more than 7 days:** only new owner proposals are refused (marking an item sold out is always allowed) (the reply carries the `/billing/<slug>` link). Scheduled changes already due, the auto sold-out reverts and undo still run; the website, menu page and posts stay online.
+- **Paused / canceled / past due more than 7 days:** only new owner proposals are refused (marking an item sold out is always allowed); the reply carries the `/billing/<slug>` link. Scheduled changes already due, the auto sold-out reverts and undo still run; the website, menu page and posts stay online.
 - **The cron tick** (`/api/tick`) pauses free trials whose `trial_ends_at` has passed (no Stripe subscription; a Stripe trial is left to the webhook) and sends two reminders, each once (`trial_reminder_sent`): `soon` at 3 days left or 15 of 20 changes used, `ended` at the end or the 20th change. Each goes to the owner chats and, with `RESEND_API_KEY` set, by email to the account owners.
 - **`TRIAL_REQUIRES_CARD=true`:** while a venue is in a free trial with no subscription, the agent refuses proposals with an "add a card" line and the billing link.
 

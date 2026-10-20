@@ -4,6 +4,7 @@
 import { useEffect, useRef, useState, type FormEvent } from "react";
 import { btnGhost, btnPrimary, eyebrowCls, inputCls } from "@/app/components/account-ui";
 import type { PageLang } from "@/src/auth/page-lang";
+import { withLang } from "@/src/auth/start-links";
 import { ONBOARDING, type OnboardingKey } from "@/src/i18n/onboarding";
 import { SITE_PLATFORMS } from "@/src/domain/types";
 
@@ -49,7 +50,7 @@ export function StartVenueForm({ path, lang, backHref, fetcher = defaultFetch, g
     setFields({});
     const r = await postStartVenue(fetcher, { path, name: get("name"), address: get("address"), city: get("city"), instagram: get("instagram"), lang, ...(path === "own" ? { site_url: get("site_url"), platform: get("platform") } : {}) });
     if (r.ok) {
-      go(`${r.to}?lang=${lang}`);
+      go(withLang(r.to, lang));
       return;
     }
     if (r.fields) setFields(r.fields);

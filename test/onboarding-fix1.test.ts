@@ -357,7 +357,7 @@ describe("6. the account link after a wizard publish without a session", () => {
     const live = (await publishDraft(store, await store.getVenue(d.venue.id), T0)).venue;
     expect(await claimVenueForSession(store, live, owner)).toBe(true);
     expect(await store.isVenueOwner(live.id, owner.id)).toBe(true);
-    expect(afterCreated).toHaveBeenCalledTimes(1);
+    expect(afterCreated).toHaveBeenCalledTimes(2); // once at the account-less publish, once at the claim (afterVenueCreated is idempotent)
   });
   it("refuses a venue that already has an owner account, another account's second claim, a draft and an add-on draft", async () => {
     const store = new InMemoryStore();
