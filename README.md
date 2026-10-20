@@ -136,7 +136,7 @@ npm run env:set -- ANTHROPIC_API_KEY   # asks for the value with echo off, write
 | `PUBLIC_BASE_URL` | `http://localhost:3000` locally; in production the app's production domain (no trailing slash), never a preview URL: it is copied into every venue project as `SITE_MANAGER_URL` (where the deployed site reads its feed) and used in admin links, QR codes and bot messages | Yes |
 | `TICK_SECRET` | Any random string: `openssl rand -hex 32` | Yes |
 | `DEMO_VENUE_SLUG` | Default `agala` | No |
-| `NEXT_PUBLIC_LANDING_URL` | The published Lovable landing (`https://…`). When set, `/` redirects there. Read at build time | No |
+| `NEXT_PUBLIC_CONTACT_EMAIL` | The address the landing page (`/`) shows as "Talk to us" in its closing section, as selectable text. Hidden when empty | No |
 | `VERCEL_TOKEN` | vercel.com → Settings → Tokens → Create: set the scope to the **team** that owns the site projects, never a full-account token; expiry per your policy. The wizard creates one Vercel project per venue with it. Server-only | For per-venue Vercel projects; without it sites are served from the hosted `/<slug>` (the fake deployer is used only with `SITE_MANAGER_STORE=memory`) |
 | `VERCEL_TEAM_ID` | Vercel → Team Settings → General → Team ID (`team_…`). Needed with a team-scoped token; empty for a personal account | With `VERCEL_TOKEN` |
 | `RATE_SALT` | Any random string: `openssl rand -hex 16`. Hashed with the visitor's IP for the wizard's rate limits, so raw IPs are never stored. When unset it falls back to `dev-salt`, which works but makes the hashes guessable | Yes in production |
@@ -274,9 +274,9 @@ Who can manage a venue:
 
 Owners see the same list in the chat with `/members`; removing access is deliberately left to these scripts for now.
 
-## Landing page (Lovable)
+## Landing page
 
-The public marketing landing is built in [Lovable](https://lovable.dev) from the prompt pack in [docs/lovable/LANDING-PROMPT.md](docs/lovable/LANDING-PROMPT.md) (bilingual copy, the pitch facts, design tokens, the "Create your site" button to `/new` and the demo link). After publishing it in Lovable, set `NEXT_PUBLIC_LANDING_URL` to its address and redeploy: `/` then redirects there. The variable is baked in at build time, so setting it without a redeploy changes nothing. Without it, the app's own `/` renders a short fallback landing.
+`/` is the getclaudia.app marketing page, part of this app (route group `app/(landing)/`, copy in `src/landing/copy.ts`, videos and pictures in `public/landing/`). It never redirects: signed out it shows "Log in" (to `/login`), signed in "Dashboard" (to `/dashboard`). Every button leads into onboarding: "Start free" to `/start?lang=`, each plan to `/start?plan=admin|social|both&lang=`. Its fonts and tokens load for that route group only (`app/(landing)/landing.css`, every class namespaced `lp-`), so the wizard, the dashboard and the venue sites look as before.
 
 ## Deploy to Vercel
 
@@ -285,7 +285,7 @@ The public marketing landing is built in [Lovable](https://lovable.dev) from the
 3. Add every required key from the table above for Production, either in the Vercel dashboard (Project → Settings → Environment Variables) or one by one with `vercel env add ANTHROPIC_API_KEY production` (it asks for the value). `SUPABASE_DB_URL` is not needed on Vercel. For the wizard also add `RATE_SALT`, `TELEGRAM_BOT_USERNAME` and, for real site deploys, `VERCEL_TOKEN` and `VERCEL_TEAM_ID`.
 4. Add `CRON_SECRET` with the same value as `TICK_SECRET`. Vercel Cron sends it as `Authorization: Bearer …`, and `/api/tick` accepts that.
 5. Deploy: `vercel --prod`. Note the deployment URL.
-6. Set `PUBLIC_BASE_URL` to the production domain (`https://<deployment>`, no trailing slash; not a preview URL, because every venue project gets it as its feed origin) and deploy again (`vercel --prod`). If you have the Lovable landing, set `NEXT_PUBLIC_LANDING_URL` before this deploy too.
+6. Set `PUBLIC_BASE_URL` to the production domain (`https://<deployment>`, no trailing slash; not a preview URL, because every venue project gets it as its feed origin) and deploy again (`vercel --prod`).
 7. Point Telegram at the deployment: `npm run telegram:set-webhook -- https://<deployment>` (it appends `/api/telegram` and the webhook secret). Stop any `bot:dev` first; Telegram allows a webhook or polling, never both.
 8. Check the tick: `curl -H "x-tick-secret: <TICK_SECRET>" https://<deployment>/api/tick` should answer `{"ok":true,…}`.
 9. If the venue was created against `http://localhost:3000`, its admin link changes only in the host: replace it with the deployment URL (the key stays the same).
@@ -360,7 +360,6 @@ Checked on 2026-10-11 on `build/templates`:
 - The full loop (wizard → phone `/start` → deployed site → a Telegram edit showing on it) has not been run end to end.
 - `npm run e2e` does not cover the wizard.
 - The real phone run: `/start` with an invite code, voice notes, the whiteboard photo, the cover photo, the approval buttons and `/undo` on a phone have not been run end to end against the deployment.
-- The Lovable landing is not published yet, so the `/` redirect has not been seen with a real `NEXT_PUBLIC_LANDING_URL`.
 - Voice transcription with the configured provider and image turns at `high` effort were not part of the live smoke run.
 - Instagram live: the Instagram professional account is not yet linked to the Page as far as the Graph API sees it, and the owner's Instagram account is not yet an Instagram Tester. The webhook object is registered. Remaining: link the account (Page → Settings → Linked accounts), add the tester, then send code via `ig.me/m/<username>?ref=<code>`.
 - Not yet tried on the phone: a voice note and a photo on WhatsApp/Messenger, a dashboard undo inside the 24 h window, and a proactive reminder being skipped after 24 h of silence (covered offline by `npm run e2e`). The WhatsApp API Setup token lasts 24 hours; replace it with a system-user token before relying on WhatsApp.

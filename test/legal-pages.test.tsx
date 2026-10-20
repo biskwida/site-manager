@@ -4,8 +4,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { afterEach, describe, expect, it } from "vitest";
 import DataDeletionPage from "@/app/data-deletion/page";
 import PrivacyPage from "@/app/privacy/page";
-import { Landing } from "@/app/components/Landing";
-import { LangProvider } from "@/src/i18n";
+import { Landing } from "@/app/(landing)/components/Landing";
 import { DICTS } from "@/src/i18n/dicts";
 import { makeServerDeps, type ServerDeps } from "@/src/server/deps";
 import { privacyContactEmail } from "@/src/server/legal";
@@ -90,7 +89,7 @@ describe("/data-deletion", () => {
 
 describe("landing footer and slugs", () => {
   it("links to both pages", () => {
-    const html = renderToStaticMarkup(<LangProvider defaultLang="bg"><Landing demoSlug="agala" /></LangProvider>);
+    const html = renderToStaticMarkup(<Landing initialLang="bg" signedIn={false} contactEmail={null} />);
     expect(html).toContain('href="/privacy"');
     expect(html).toContain('href="/data-deletion"');
     expect(text(html)).toContain(DICTS.bg["legal.privacy"]);

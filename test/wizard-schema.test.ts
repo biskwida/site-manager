@@ -35,7 +35,7 @@ describe("slug rules", () => {
     expect(SLUG_RE.test(`a-${"b".repeat(38)}`)).toBe(false); // 40
   });
   it("lists the reserved words", () => {
-    expect(RESERVED_SLUGS).toEqual(["new", "admin", "api", "embed", "draft", "demo", "www", "static", "_next", "privacy", "data-deletion", "start", "login", "dashboard", "onboarding", "auth", "app", "billing"]);
+    expect(RESERVED_SLUGS).toEqual(["new", "admin", "api", "embed", "draft", "demo", "www", "static", "_next", "privacy", "data-deletion", "start", "login", "dashboard", "onboarding", "auth", "app", "billing", "pricing"]);
     expect(DRAFT_SLUG_PREFIX).toBe("draft-");
   });
 });

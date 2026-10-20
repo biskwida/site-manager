@@ -1,6 +1,6 @@
 // src/config.ts
 // Server-only: never import from app/ client components or src/i18n.
-import { DEFAULT_LANDING_URL, resolveAppHost } from "./server/host";
+import { resolveAppHost } from "./server/host";
 
 export type Effort = "low" | "medium" | "high";
 
@@ -82,8 +82,6 @@ export interface Config {
   resendApiKey: string | null;
   /** The From header of mail Claudia sends (EMAIL_FROM, default "Claudia <hello@getclaudia.app>"). */
   emailFrom: string;
-  /** The public landing (LANDING_URL, else the older NEXT_PUBLIC_LANDING_URL, default https://getclaudia.app); `/` sends visitors there. https only, no trailing slash. */
-  landingUrl: string;
   /**
    * BILLING_ENABLED (default false): off = everything stays free and unlimited, exactly as before (no trial, no gating, no billing pages or
    * routes). On only after supabase/migrations/2026-10-19-billing.sql is applied (docs/BILLING-SETUP.md). The Stripe webhook still verifies
@@ -129,15 +127,6 @@ export function parseHandle(raw: string | null, hosts: readonly string[]): strin
   }
   v = v.replace(/^@/, "");
   return HANDLE.test(v) ? v : null;
-}
-
-function httpsUrl(raw: string | null): string | null {
-  if (!raw) return null;
-  try {
-    return new URL(raw).protocol === "https:" ? raw.replace(/\/+$/, "") : null;
-  } catch {
-    return null;
-  }
 }
 
 /** `lenient` (offline memory-store mode) returns "" for missing secrets instead of throwing. */
@@ -209,7 +198,6 @@ export function loadConfig(env: Env = process.env, opts: { lenient?: boolean } =
     appHost: resolveAppHost(env),
     resendApiKey: optional("RESEND_API_KEY"),
     emailFrom: optional("EMAIL_FROM") ?? "Claudia <hello@getclaudia.app>",
-    landingUrl: httpsUrl(optional("LANDING_URL")) ?? httpsUrl(optional("NEXT_PUBLIC_LANDING_URL")) ?? DEFAULT_LANDING_URL,
     billingEnabled: /^(1|true)$/i.test(optional("BILLING_ENABLED") ?? ""),
     trialDays,
     trialChangeLimit,

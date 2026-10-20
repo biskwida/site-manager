@@ -1,0 +1,159 @@
+/*
+  getclaudia.app landing page (route group app/(landing)). Imported only by app/(landing)/layout.tsx.
+
+  Claudia: one warm accent (terracotta) on neutrals tinted toward the same hue. Shape rule: interactive elements are pills,
+  media and panels are 20px.
+
+  Scoping: the app's own pages (wizard, dashboard, venue sites) share globals.css with different tokens, so nothing here may
+  touch :root, html or body. Every token is a custom property on the .lp wrapper (rendered by the layout), every utility token is
+  namespaced `lp-` (text-lp-ink, bg-lp-bg-2 …) so it cannot collide with the app's `ink`, `line`, `accent` or `font-display`, and
+  every component class is `lp-` prefixed. Preflight is not imported again: globals.css already provides it.
+*/
+@import "tailwindcss/theme.css" layer(theme) theme(reference);
+@import "tailwindcss/utilities.css" layer(utilities);
+
+.lp {
+  color-scheme: light dark;
+  --lp-bg: oklch(98.6% 0.005 60);
+  --lp-bg-2: oklch(96.2% 0.009 60);
+  --lp-ink: oklch(23% 0.022 50);
+  --lp-ink-2: oklch(44% 0.02 50);
+  --lp-ink-3: oklch(60% 0.016 50);
+  --lp-line: oklch(89% 0.012 60);
+  --lp-accent: oklch(62% 0.17 45);
+  --lp-accent-hover: oklch(57% 0.17 45);
+  --lp-accent-ink: oklch(99% 0.004 60);
+  --lp-accent-soft: oklch(94.5% 0.045 50);
+  --lp-shadow: oklch(35% 0.04 45);
+  --lp-ease-out: cubic-bezier(0.23, 1, 0.32, 1);
+  --radius-media: 20px;
+  --accent: var(--lp-accent);
+}
+
+@media (prefers-color-scheme: dark) {
+  .lp {
+    --lp-bg: oklch(18% 0.012 50);
+    --lp-bg-2: oklch(22% 0.014 50);
+    --lp-ink: oklch(95% 0.006 60);
+    --lp-ink-2: oklch(76% 0.01 60);
+    --lp-ink-3: oklch(62% 0.012 60);
+    --lp-line: oklch(30% 0.014 50);
+    --lp-accent: oklch(72% 0.15 48);
+    --lp-accent-hover: oklch(77% 0.14 48);
+    --lp-accent-ink: oklch(18% 0.03 45);
+    --lp-accent-soft: oklch(28% 0.05 45);
+    --lp-shadow: oklch(5% 0.02 45);
+  }
+}
+
+@theme inline {
+  --color-lp-bg: var(--lp-bg);
+  --color-lp-bg-2: var(--lp-bg-2);
+  --color-lp-ink: var(--lp-ink);
+  --color-lp-ink-2: var(--lp-ink-2);
+  --color-lp-ink-3: var(--lp-ink-3);
+  --color-lp-line: var(--lp-line);
+  --color-lp-accent: var(--lp-accent);
+  --color-lp-accent-hover: var(--lp-accent-hover);
+  --color-lp-accent-ink: var(--lp-accent-ink);
+  --color-lp-accent-soft: var(--lp-accent-soft);
+}
+
+/* The wrapper paints the page, over the app's body background and its faint body::before grain. */
+.lp {
+  background: var(--lp-bg);
+  color: var(--lp-ink);
+  font-family: var(--font-lp-body), system-ui, sans-serif;
+  font-optical-sizing: auto;
+  -webkit-font-smoothing: antialiased;
+  min-height: 100dvh;
+}
+.lp :where(h1, h2, h3) {
+  font-family: inherit;
+  font-variation-settings: normal;
+}
+.lp ::selection {
+  background: var(--lp-accent-soft);
+  color: var(--lp-ink);
+}
+/* Document-level behaviour of the original landing, applied only while the landing is on screen. */
+html:has(.lp) {
+  scroll-behavior: smooth;
+  background: var(--lp-bg);
+  font-size: 100%;
+}
+body:has(.lp)::before {
+  display: none;
+}
+@media (prefers-reduced-motion: reduce) {
+  html:has(.lp) {
+    scroll-behavior: auto;
+  }
+}
+
+.lp .lp-display {
+  font-family: var(--font-lp-display), var(--font-lp-body), system-ui, sans-serif;
+  font-weight: 700;
+  letter-spacing: -0.015em;
+  line-height: 0.98;
+}
+
+/* Pressable: feedback on the press itself, exit faster than enter. */
+.lp .lp-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  min-height: 48px;
+  padding: 0 1.4rem;
+  border-radius: 999px;
+  font-weight: 600;
+  font-size: 1rem;
+  white-space: nowrap;
+  transition:
+    transform 160ms var(--lp-ease-out),
+    background-color 160ms ease,
+    color 160ms ease,
+    border-color 160ms ease;
+}
+.lp .lp-btn:active {
+  transform: scale(0.97);
+}
+.lp .lp-btn-primary {
+  background: var(--lp-accent);
+  color: var(--lp-accent-ink);
+}
+.lp .lp-btn-primary:hover {
+  background: var(--lp-accent-hover);
+}
+.lp .lp-btn-ghost {
+  color: var(--lp-ink);
+  border: 1.5px solid var(--lp-line);
+  background: transparent;
+}
+.lp .lp-btn-ghost:hover {
+  border-color: var(--lp-ink-3);
+}
+.lp :where(.lp-btn, a, button):focus-visible {
+  outline: 3px solid var(--lp-accent);
+  outline-offset: 3px;
+}
+
+.lp .lp-media-shadow {
+  box-shadow:
+    0 1px 2px color-mix(in oklch, var(--lp-shadow) 8%, transparent),
+    0 30px 70px -24px color-mix(in oklch, var(--lp-shadow) 35%, transparent);
+}
+
+.lp .lp-nav-glass {
+  background: color-mix(in oklch, var(--lp-bg) 78%, transparent);
+  backdrop-filter: blur(18px) saturate(160%);
+  -webkit-backdrop-filter: blur(18px) saturate(160%);
+}
+@media (prefers-reduced-transparency: reduce) {
+  .lp .lp-nav-glass {
+    background: var(--lp-bg);
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
+  }
+}

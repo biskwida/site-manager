@@ -1,7 +1,6 @@
-import { renderToStaticMarkup } from "react-dom/server";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { describe, expect, it } from "vitest";
 import { NextRequest, type NextResponse } from "next/server";
-import { explicitAppHost, hostRedirect, landingRedirect, parseLegacyHosts, resolveAppHost } from "@/src/server/host";
+import { explicitAppHost, hostRedirect, parseLegacyHosts, resolveAppHost } from "@/src/server/host";
 import { RESERVED_SLUGS } from "@/src/wizard/schema";
 import { loadConfig } from "@/src/config";
 import { config as proxyConfig, proxy } from "@/proxy";
@@ -77,21 +76,16 @@ describe("resolveAppHost", () => {
 
 describe("reserved slugs", () => {
   it("holds the account and app words", () => {
-    expect(RESERVED_SLUGS).toEqual(expect.arrayContaining(["start", "login", "dashboard", "onboarding", "auth", "app", "billing"]));
+    expect(RESERVED_SLUGS).toEqual(expect.arrayContaining(["start", "login", "dashboard", "onboarding", "auth", "app", "billing", "pricing"]));
   });
 });
 
 describe("config hosts", () => {
-  it("defaults appHost and landingUrl", () => {
-    expect(loadConfig({}, { lenient: true })).toMatchObject({ appHost: "getclaudia.app", landingUrl: "https://getclaudia.app" });
+  it("defaults appHost", () => {
+    expect(loadConfig({}, { lenient: true })).toMatchObject({ appHost: "getclaudia.app" });
   });
-  it("reads APP_HOST and LANDING_URL, LANDING_URL before the old NEXT_PUBLIC_LANDING_URL", () => {
-    expect(loadConfig({ APP_HOST: "app.example.com", LANDING_URL: "https://example.com/" }, { lenient: true })).toMatchObject({ appHost: "app.example.com", landingUrl: "https://example.com" });
-    expect(loadConfig({ NEXT_PUBLIC_LANDING_URL: "https://old.example.com" }, { lenient: true }).landingUrl).toBe("https://old.example.com");
-    expect(loadConfig({ LANDING_URL: "https://new.example.com", NEXT_PUBLIC_LANDING_URL: "https://old.example.com" }, { lenient: true }).landingUrl).toBe("https://new.example.com");
-  });
-  it("ignores a landing URL that is not https", () => {
-    expect(loadConfig({ LANDING_URL: "http://example.com" }, { lenient: true }).landingUrl).toBe("https://getclaudia.app");
+  it("reads APP_HOST", () => {
+    expect(loadConfig({ APP_HOST: "app.example.com" }, { lenient: true })).toMatchObject({ appHost: "app.example.com" });
   });
 });
 
@@ -142,46 +136,5 @@ describe("proxy", () => {
     expect(re.test("/dashboard")).toBe(true);
     expect(re.test("/admin/coffique")).toBe(true);
     for (const p of ["/api/telegram", "/_next/static/x.js", "/favicon.ico", "/robots.txt", "/logo.png"]) expect(re.test(p)).toBe(false);
-  });
-});
-
-describe("landing redirect", () => {
-  it("redirects to a landing on another host", () => {
-    expect(landingRedirect("https://getclaudia.app", "site-manager-lovat.vercel.app")).toBe("https://getclaudia.app");
-    expect(landingRedirect("https://landing.example.com", "getclaudia.app")).toBe("https://landing.example.com");
-  });
-  it("never redirects to its own host (any case, any port)", () => {
-    expect(landingRedirect("https://getclaudia.app", "getclaudia.app")).toBeNull();
-    expect(landingRedirect("https://getclaudia.app", "GetClaudia.app:443")).toBeNull();
-  });
-  it("redirects when the request host is unknown", () => {
-    expect(landingRedirect("https://getclaudia.app", null)).toBe("https://getclaudia.app");
-  });
-});
-
-const hostHeader = vi.hoisted(() => ({ value: "getclaudia.app" as string | null }));
-const redirected = vi.hoisted(() => ({ to: null as string | null }));
-vi.mock("next/headers", () => ({ headers: async () => ({ get: (k: string) => (k === "host" ? hostHeader.value : null) }) }));
-vi.mock("next/navigation", () => ({ redirect: (to: string) => void (redirected.to = to) }));
-
-describe("app/page.tsx", () => {
-  afterEach(() => {
-    redirected.to = null;
-    delete process.env.LANDING_URL;
-  });
-  it("renders the fallback landing on getclaudia.app while LANDING_URL is getclaudia.app", async () => {
-    const { default: Page } = await import("@/app/page");
-    hostHeader.value = "getclaudia.app";
-    process.env.LANDING_URL = "https://getclaudia.app";
-    const html = renderToStaticMarkup(await Page());
-    expect(redirected.to).toBeNull();
-    expect(html.length).toBeGreaterThan(100);
-  });
-  it("redirects on any other host", async () => {
-    const { default: Page } = await import("@/app/page");
-    hostHeader.value = "site-manager-lovat.vercel.app";
-    process.env.LANDING_URL = "https://getclaudia.app";
-    await Page();
-    expect(redirected.to).toBe("https://getclaudia.app");
   });
 });
