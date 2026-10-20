@@ -30,15 +30,19 @@ export interface StartDeployDeps {
 
 /**
  * Creates the venue's site (or redeploys into its existing project after an error). Sets deploy to pending, then building or error.
- * No-op when the venue has its own site (site_url), is not live, or already has a deployment that is not in error. Never throws.
+ * No-op when the venue has its own site or none (site_mode), is not live, or already has a deployment that is not in error. Never throws.
  */
 export async function startDeploy(d: StartDeployDeps, venueId: string): Promise<void> {
   const log = d.log ?? ((s: string) => console.log(s));
   try {
     const venue = await d.store.getVenue(venueId);
-    // Own site (built and hosted elsewhere, reads our feed): never create a provider project for it.
-    if (venue.site_url) {
+    // Own site (built and hosted elsewhere, reads our feed) or no website at all: never create a provider project for it.
+    if (venue.site_mode === "own") {
       log(`[deploy] ${venue.slug}: own site, skipped`);
+      return;
+    }
+    if (venue.site_mode === "none") {
+      log(`[deploy] ${venue.slug}: no website, skipped`);
       return;
     }
     if (venue.status !== "live") {

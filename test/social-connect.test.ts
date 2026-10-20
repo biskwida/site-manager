@@ -1,6 +1,7 @@
 // test/social-connect.test.ts — connecting the venue's Facebook Page and Instagram account for posting: signed state + nonce
 // cookie, the OAuth callbacks (one page, a chooser for several, a personal Instagram account refused), disconnect, and the
 // admin routes. Offline: every Meta call goes to test/fake-meta.ts.
+import { createHmac } from "node:crypto";
 import { afterEach, describe, expect, it } from "vitest";
 import { POST as socialPost } from "@/app/api/admin/[slug]/social/route";
 import { GET as fbStartRoute } from "@/app/api/admin/[slug]/social/facebook/start/route";
@@ -13,7 +14,7 @@ import { decryptSecrets, parseSecretKey } from "@/src/destinations/secrets";
 import { makeServerDeps, type ServerDeps } from "@/src/server/deps";
 import { IG_AUTHORIZE_URL, IG_SCOPE } from "@/src/server/instagram";
 import {
-  disconnectSocial, FB_CALLBACK_PATH, FB_SCOPES, handleFacebookCallback, handleFacebookSelect, handleInstagramPublishCallback, handleSocialStart, IG_PUBLISH_CALLBACK_PATH,
+  disconnectSocial, FB_CALLBACK_PATH, returnTargetOf, signSocialState, FB_SCOPES, handleFacebookCallback, handleFacebookSelect, handleInstagramPublishCallback, handleSocialStart, IG_PUBLISH_CALLBACK_PATH,
   IG_PUBLISH_SCOPES, SOCIAL_NONCE_COOKIE, SOCIAL_STATE_TTL_MS, socialAvailability, type SocialConnectDeps,
 } from "@/src/server/social-connect";
 import { FakeMeta } from "./fake-meta";
@@ -256,6 +257,141 @@ describe("Instagram callback", () => {
     expect(await isGeneric(await callback("instagram", `error=access_denied&state=${s1.state}`, s1.cookie))).toBe(true);
     const s2 = await start("instagram");
     expect(resultOf(await callback("instagram", `code=nope&state=${s2.state}`, s2.cookie)).result).toBe("instagram_error");
+  });
+});
+
+describe("session auth (dashboard on an account)", () => {
+  /** A venue whose owner account u1 starts the connect; `as` picks who is signed in at the callback. */
+  async function sessionSetup() {
+    const s = await setup();
+    await s.store.linkVenueUser(s.venue.id, "u1", "owner");
+    await s.store.linkVenueUser(s.venue.id, "u2", "staff");
+    let who: string | null = "u1";
+    const d: SocialConnectDeps = { ...s.d, sessionUser: async () => (who ? { id: who } : null) };
+    const start = async (kind: "facebook" | "instagram") => {
+      const res = await handleSocialStart(d, s.venue, { via: "session" }, kind);
+      const loc = new URL(res.headers.get("location") ?? "about:blank");
+      const nonce = (res.headers.get("set-cookie") ?? "").match(new RegExp(`${SOCIAL_NONCE_COOKIE}=([^;]*)`))?.[1] ?? "";
+      return { loc, state: loc.searchParams.get("state") ?? "", cookie: `${SOCIAL_NONCE_COOKIE}=${nonce}` };
+    };
+    const callback = (kind: "facebook" | "instagram", q: string, cookie: string) =>
+      (kind === "facebook" ? handleFacebookCallback : handleInstagramPublishCallback)(new Request(`${BASE}${kind === "facebook" ? FB_CALLBACK_PATH : IG_PUBLISH_CALLBACK_PATH}?${q}`, { headers: { cookie } }), d);
+    return { ...s, d, start, callback, as: (id: string | null) => (who = id) };
+  }
+
+  it("returns to /dashboard/<slug> without any key; a key start still returns to /admin/<slug>?key=", async () => {
+    const { start, callback, meta, store, venue } = await sessionSetup();
+    meta.addPage("Кафе Агала");
+    const { state, cookie, loc } = await start("facebook");
+    expect(loc.toString()).not.toContain("key");
+    const res = await callback("facebook", `code=${meta.issueFacebookCode()}&state=${state}`, cookie);
+    expect(res.status).toBe(303);
+    const back = new URL(res.headers.get("location") ?? "about:blank");
+    expect(`${back.pathname}${back.search}${back.hash}`).toBe(`/dashboard/${venue.slug}?social_result=facebook_connected#social`);
+    expect(await store.getDestination(venue.id, "facebook")).toMatchObject({ status: "connected" });
+  });
+
+  it("works for Instagram too", async () => {
+    const { start, callback, meta, venue } = await sessionSetup();
+    const ig = meta.addInstagramUser("agala.cafe");
+    const { state, cookie } = await start("instagram");
+    const res = await callback("instagram", `code=${meta.issueInstagramCode(ig.user_id)}&state=${state}`, cookie);
+    expect(new URL(res.headers.get("location") ?? "about:blank").pathname).toBe(`/dashboard/${venue.slug}`);
+  });
+
+  it("refuses at the callback when nobody is signed in, or the signed-in account is not an owner of the venue", async () => {
+    const { start, callback, meta, store, venue, as } = await sessionSetup();
+    meta.addPage("A");
+    for (const who of [null, "u2", "u3"]) {
+      const { state, cookie } = await start("facebook");
+      as(who);
+      expect(await isGeneric(await callback("facebook", `code=${meta.issueFacebookCode()}&state=${state}`, cookie))).toBe(true);
+    }
+    expect(await store.getDestination(venue.id, "facebook")).toBeNull();
+  });
+
+  it("a session state is refused by a callback with no session reader (the key path never accepts it)", async () => {
+    const { start, meta, s0 } = await sessionSetup().then((x) => ({ ...x, s0: x.d }));
+    meta.addPage("A");
+    const { state, cookie } = await start("facebook");
+    const res = await handleFacebookCallback(new Request(`${BASE}${FB_CALLBACK_PATH}?code=${meta.issueFacebookCode()}&state=${state}`, { headers: { cookie } }), { ...s0, sessionUser: undefined });
+    expect(await isGeneric(res)).toBe(true);
+  });
+
+  it("the chooser keeps the session mode through to the dashboard", async () => {
+    const { start, callback, meta, venue, d } = await sessionSetup();
+    meta.addPage("A");
+    const b = meta.addPage("B");
+    const { state, cookie } = await start("facebook");
+    const html = await (await callback("facebook", `code=${meta.issueFacebookCode()}&state=${state}`, cookie)).text();
+    const selectState = html.match(/name="state" value="([^"]+)"/)?.[1] ?? "";
+    const sel = await handleFacebookSelect(new Request(`${BASE}/api/social/facebook/select`, { method: "POST", body: new URLSearchParams({ state: selectState, page: b.id }), headers: { cookie, "content-type": "application/x-www-form-urlencoded" } }), d);
+    expect(new URL(sel.headers.get("location") ?? "about:blank").pathname).toBe(`/dashboard/${venue.slug}`);
+  });
+});
+
+describe("return target (the onboarding checklist)", () => {
+  async function onboardingSetup() {
+    const s = await setup();
+    await s.store.linkVenueUser(s.venue.id, "u1", "owner");
+    const d: SocialConnectDeps = { ...s.d, sessionUser: async () => ({ id: "u1" }) };
+    const start = async (kind: "facebook" | "instagram", opts?: { ret?: "onboarding" }, auth: string | { via: "session" } = { via: "session" }) => {
+      const res = await handleSocialStart(d, s.venue, auth, kind, opts);
+      const loc = new URL(res.headers.get("location") ?? "about:blank");
+      const nonce = (res.headers.get("set-cookie") ?? "").match(new RegExp(`${SOCIAL_NONCE_COOKIE}=([^;]*)`))?.[1] ?? "";
+      return { state: loc.searchParams.get("state") ?? "", cookie: `${SOCIAL_NONCE_COOKIE}=${nonce}` };
+    };
+    const callback = (kind: "facebook" | "instagram", q: string, cookie: string) =>
+      (kind === "facebook" ? handleFacebookCallback : handleInstagramPublishCallback)(new Request(`${BASE}${kind === "facebook" ? FB_CALLBACK_PATH : IG_PUBLISH_CALLBACK_PATH}?${q}`, { headers: { cookie } }), d);
+    return { ...s, d, start, callback };
+  }
+  const where = (res: Response) => {
+    const back = new URL(res.headers.get("location") ?? "about:blank");
+    return `${back.pathname}${back.search}${back.hash}`;
+  };
+
+  it("a session connect started from the checklist returns to /onboarding/<slug>, Facebook and Instagram", async () => {
+    const { start, callback, meta, venue } = await onboardingSetup();
+    meta.addPage("Кафе Агала");
+    const fb = await start("facebook", { ret: "onboarding" });
+    expect(where(await callback("facebook", `code=${meta.issueFacebookCode()}&state=${fb.state}`, fb.cookie))).toBe(`/onboarding/${venue.slug}?social_result=facebook_connected`);
+    const ig = meta.addInstagramUser("agala.cafe");
+    const i = await start("instagram", { ret: "onboarding" });
+    expect(where(await callback("instagram", `code=${meta.issueInstagramCode(ig.user_id)}&state=${i.state}`, i.cookie))).toBe(`/onboarding/${venue.slug}?social_result=instagram_connected`);
+  });
+  it("the Page chooser keeps the target", async () => {
+    const { start, callback, meta, venue, d } = await onboardingSetup();
+    meta.addPage("A");
+    const b = meta.addPage("B");
+    const { state, cookie } = await start("facebook", { ret: "onboarding" });
+    const html = await (await callback("facebook", `code=${meta.issueFacebookCode()}&state=${state}`, cookie)).text();
+    const selectState = html.match(/name="state" value="([^"]+)"/)?.[1] ?? "";
+    const sel = await handleFacebookSelect(new Request(`${BASE}/api/social/facebook/select`, { method: "POST", body: new URLSearchParams({ state: selectState, page: b.id }), headers: { cookie, "content-type": "application/x-www-form-urlencoded" } }), d);
+    expect(where(sel)).toBe(`/onboarding/${venue.slug}?social_result=facebook_connected`);
+  });
+  it("without a target the dashboard is still where it returns", async () => {
+    const { start, callback, meta, venue } = await onboardingSetup();
+    meta.addPage("A");
+    const { state, cookie } = await start("facebook");
+    expect(where(await callback("facebook", `code=${meta.issueFacebookCode()}&state=${state}`, cookie))).toBe(`/dashboard/${venue.slug}?social_result=facebook_connected#social`);
+  });
+  it("a key start ignores the target and returns to the key page", async () => {
+    const { start, callback, meta, venue, adminKey } = await onboardingSetup();
+    meta.addPage("A");
+    const { state, cookie } = await start("facebook", { ret: "onboarding" }, adminKey);
+    expect(where(await callback("facebook", `code=${meta.issueFacebookCode()}&state=${state}`, cookie))).toBe(`/admin/${venue.slug}?key=${encodeURIComponent(adminKey)}&social_result=facebook_connected#social`);
+  });
+  it("a state signed with any other target is refused", async () => {
+    const { callback, meta, venue, d } = await onboardingSetup();
+    meta.addPage("A");
+    const key = createHmac("sha256", d.config.metaAppSecret!).update("site-manager:social-oauth-state:v1").digest();
+    const sign = (ret: unknown) => signSocialState({ k: "facebook", v: venue.id, n: "abc", exp: T0.getTime() + SOCIAL_STATE_TTL_MS, r: "", a: "session", ret } as never, key);
+    expect(await isGeneric(await callback("facebook", `code=${meta.issueFacebookCode()}&state=${sign("https://evil.example")}`, `${SOCIAL_NONCE_COOKIE}=abc`))).toBe(true);
+    expect(where(await callback("facebook", `code=${meta.issueFacebookCode()}&state=${sign("onboarding")}`, `${SOCIAL_NONCE_COOKIE}=abc`))).toBe(`/onboarding/${venue.slug}?social_result=facebook_connected`);
+  });
+  it("the start routes read ?return=onboarding, and only that value", () => {
+    expect(returnTargetOf(`${BASE}/api/admin/agala/social/facebook/start?return=onboarding`)).toBe("onboarding");
+    for (const q of ["", "?return=dashboard", "?return=https://evil.example", "?return="]) expect(returnTargetOf(`${BASE}/x${q}`)).toBeUndefined();
   });
 });
 

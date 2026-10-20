@@ -1,5 +1,7 @@
 # Lovable landing: prompt pack
 
+> **Superseded 19 Oct 2026: the landing now lives in the app** (`app/(landing)/`, copy in `src/landing/copy.ts`). Kept as history only.
+
 The public marketing landing for Site Manager is built in Lovable. This file is the prompt for it.
 
 How to use it:

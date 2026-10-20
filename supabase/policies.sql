@@ -19,8 +19,9 @@ revoke execute on function public.bump_rate_limit(text, int, int, timestamptz) f
 revoke insert, update, delete, truncate on public.venues, public.site_texts, public.categories, public.items, public.holidays, public.announcements, public.media from anon, authenticated;
 grant select on public.site_texts, public.categories, public.items, public.holidays, public.announcements, public.media to anon, authenticated;
 -- R27: venues are readable column by column. The list is exactly PublicVenue (src/server/site.ts, the public feed's venue), so
--- deploy, wizard_draft, draft_token_hash, publishing_at, instagram_import, site_url, change_limit, comment_mode, comment_digest_hour, comment_limit
--- and last_comment_digest_at are never readable with the anon key, not even on a live row. Revoking the table privilege also
+-- deploy, wizard_draft, draft_token_hash, publishing_at, instagram_import, site_url, site_mode, site_platform, created_via, change_limit, comment_mode, comment_digest_hour, comment_limit
+-- last_comment_digest_at and the billing columns (plan, billing_status, trial_started_at, trial_ends_at, past_due_since, stripe_customer_id,
+-- stripe_subscription_id, trial_reminder_sent, website_fee_paid) are never readable with the anon key, not even on a live row. Revoking the table privilege also
 -- drops every column grant, so a re-run (db:apply) starts clean each time.
 -- test/policies-grants.test.ts keeps this list equal to PublicVenue.
 revoke select on public.venues from anon, authenticated;
@@ -50,6 +51,22 @@ revoke all on public.translations from anon, authenticated;
 -- What is around the café (2026-10-18): server-only, like the tables above (RLS on, no policies, no grants).
 alter table public.venue_surroundings enable row level security;
 revoke all on public.venue_surroundings from anon, authenticated;
+
+-- Accounts (2026-10-19): server-only, like the tables above (RLS on, no policies, no grants). The app reads them with the service-role key.
+alter table public.venue_users enable row level security;
+revoke all on public.venue_users from anon, authenticated;
+alter table public.account_invites enable row level security;
+revoke all on public.account_invites from anon, authenticated;
+
+-- Billing (2026-10-19): Stripe event ids already handled. Server-only, like the tables above (RLS on, no policies, no grants).
+-- Guarded: this file also runs on a database that has not had 2026-10-19-billing.sql yet (the migration does the same two statements itself).
+do $$
+begin
+  if to_regclass('public.billing_events') is not null then
+    alter table public.billing_events enable row level security;
+    revoke all on public.billing_events from anon, authenticated;
+  end if;
+end $$;
 
 -- 2. No RPCs: the owner dashboard and the public site read through the app's server (service-role key, never in the browser).
 

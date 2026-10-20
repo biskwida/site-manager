@@ -28,7 +28,7 @@ function referencedMedia(d: WizardDraft): Set<string> {
   return new Set(ids.filter((x): x is string => typeof x === "string"));
 }
 
-export function Wizard({ id, initialDraft, initialMedia, baseUrl, aiAvailable, now, instagramAvailable = false, igReturn = null, apps }: {
+export function Wizard({ id, initialDraft, initialMedia, baseUrl, aiAvailable, now, instagramAvailable = false, igReturn = null, apps, slugLocked = false }: {
   id: string; initialDraft: WizardDraft; initialMedia: Media[]; baseUrl: string; aiAvailable: boolean; now: number;
   /** INSTAGRAM_APP_ID/SECRET are set on this server. */
   instagramAvailable?: boolean;
@@ -36,6 +36,8 @@ export function Wizard({ id, initialDraft, initialMedia, baseUrl, aiAvailable, n
   apps?: AppChannel[];
   /** Back from Instagram's sign-in (`?step=…&ig=…`): opens that step and tells it how the sign-in went. */
   igReturn?: IgReturn | null;
+  /** A website add-on: the business keeps its address. */
+  slugLocked?: boolean;
 }) {
   const { t, lang } = useT();
   const router = useRouter();
@@ -132,7 +134,7 @@ export function Wizard({ id, initialDraft, initialMedia, baseUrl, aiAvailable, n
   }
 
   const closePreview = useCallback(() => setPreviewOpen(false), []);
-  const stepProps: StepProps = { id, draft, media: shownMedia, update, addMedia, baseUrl, aiAvailable, fieldErrors, instagramAvailable, apps, igReturn: ig, onIgConsumed: consumeIg, flush: () => flush() };
+  const stepProps: StepProps = { slugLocked, id, draft, media: shownMedia, update, addMedia, baseUrl, aiAvailable, fieldErrors, instagramAvailable, apps, igReturn: ig, onIgConsumed: consumeIg, flush: () => flush() };
   const saveText = {
     idle: "",
     saving: t("save.saving"),

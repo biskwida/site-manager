@@ -1,8 +1,9 @@
 // src/store/memory.ts
+import type { BillingConfig } from "../billing/entitlements";
 import { applyChanges } from "../domain/changes";
 import { COMMENT_LIMIT_DEFAULT, countsTowardLimit } from "../domain/limits";
-import type { Category, ChangeSet, ChatLang, Conversation, DeployInfo, DeployStatus, Item, Media, Member, Role, SiteState, SiteTextKey, Venue, VenueStatus } from "../domain/types";
-import { DEFAULT_HOURS, extensionFor, newInviteCode, newToken, PUBLISH_CLAIM_TTL_MS, type ChangeSetPatch, type ExpiredTimer, type NewCategory, type NewChangeSet, type NewItem, type NewVenue, type Store, type VenuePatch, type Destination, type DestinationKind, type DestinationPatch, type DestinationSync, type DestinationWithSecrets, type NewDestination, type NewSync, type SyncPatch, type ListSyncsOpts, type ApplyResult, checkLimitValue, checkMemberLang, CONFIG_KEY_RE, newConfirmationCode, type DataDeletionRequest, type DeletionProvider, type ListCommentsOpts, type NewSocialComment, type SocialComment, type SocialCommentPatch, COMMENT_REDACTED, redactCommentRow, type VenueSurroundings } from "./types";
+import type { Category, ChangeSet, ChatLang, Conversation, DeployInfo, DeployStatus, Item, Media, Member, Role, SiteMode, SiteState, SiteTextKey, TrialReminder, Venue, VenueStatus } from "../domain/types";
+import { DEFAULT_HOURS, extensionFor, newInviteCode, newToken, PUBLISH_CLAIM_TTL_MS, type ChangeSetPatch, type ExpiredTimer, type NewCategory, type NewChangeSet, type NewItem, type NewVenue, type Store, type VenuePatch, SlugTakenError, type Destination, type DestinationKind, type DestinationPatch, type DestinationSync, type DestinationWithSecrets, type NewDestination, type NewSync, type SyncPatch, type ListSyncsOpts, type ApplyResult, checkLimitValue, checkMemberLang, CONFIG_KEY_RE, newConfirmationCode, type DataDeletionRequest, type DeletionProvider, type ListCommentsOpts, type NewSocialComment, type SocialComment, type SocialCommentPatch, COMMENT_REDACTED, redactCommentRow, type VenueSurroundings } from "./types";
 import { limitBlocks } from "./usage";
 
 const clone = <T>(v: T): T => structuredClone(v);
@@ -18,6 +19,11 @@ interface Invite {
 /** Like venues_comment_digest_hour_check in supabase/schema.sql: a whole hour 0–23 (undefined = not given). */
 function checkDigestHour(h: number | undefined): void {
   if (h !== undefined && !(Number.isInteger(h) && h >= 0 && h <= 23)) throw new Error(`comment_digest_hour must be a whole hour 0–23, got ${h}`);
+}
+
+/** Like venues_site_mode_own_url_check in supabase/schema.sql: an own-site venue always has a non-empty site URL. */
+function checkOwnUrl(mode: SiteMode, url: string | null): void {
+  if (mode === "own" && !url) throw new Error("site_url is required when site_mode is own");
 }
 
 export class InMemoryStore implements Store {
@@ -47,6 +53,7 @@ export class InMemoryStore implements Store {
 
   async createVenue(v: NewVenue): Promise<Venue> {
     checkDigestHour(v.comment_digest_hour);
+    checkOwnUrl(v.site_mode ?? "claudia", v.site_url ?? null);
     const venue: Venue = {
       id: crypto.randomUUID(),
       slug: v.slug,
@@ -77,9 +84,21 @@ export class InMemoryStore implements Store {
       wizard_draft: v.wizard_draft ? clone(v.wizard_draft) : null,
       instagram_import: null,
       site_url: v.site_url ?? null,
+      site_mode: v.site_mode ?? "claudia",
+      site_platform: v.site_platform ?? null,
+      created_via: v.created_via ?? "operator",
+      plan: null,
+      billing_status: null,
+      trial_started_at: null,
+      trial_ends_at: null,
+      past_due_since: null,
+      stripe_customer_id: null,
+      stripe_subscription_id: null,
+      trial_reminder_sent: null,
+      website_fee_paid: false,
       created_at: this.clock(),
     };
-    if ([...this.sites.values()].some((s) => s.venue.slug === venue.slug)) throw new Error(`slug ${venue.slug} already exists`);
+    if ([...this.sites.values()].some((s) => s.venue.slug === venue.slug)) throw new SlugTakenError(venue.slug);
     this.sites.set(venue.id, { venue, categories: [], items: [], holidays: [], announcements: [], media: [], texts: [] });
     return clone(venue);
   }
@@ -94,13 +113,14 @@ export class InMemoryStore implements Store {
     return [...this.sites.values()]
       .map((s) => s.venue)
       .filter((v) => (!opts.status || v.status === opts.status) && (!opts.deploying || (v.deploy !== null && (v.deploy.status === "pending" || v.deploy.status === "building"))))
-      .sort((a, b) => a.created_at.localeCompare(b.created_at))
+      .sort((a, b) => a.created_at.localeCompare(b.created_at) || a.id.localeCompare(b.id))
       .map(clone);
   }
   async updateVenue(id: string, patch: VenuePatch): Promise<Venue> {
     const s = this.site(id);
     checkDigestHour(patch.comment_digest_hour);
-    if (patch.slug !== undefined && [...this.sites.values()].some((x) => x.venue.id !== id && x.venue.slug === patch.slug)) throw new Error(`slug ${patch.slug} already exists`);
+    checkOwnUrl(patch.site_mode ?? s.venue.site_mode, patch.site_url === undefined ? s.venue.site_url : patch.site_url);
+    if (patch.slug !== undefined && [...this.sites.values()].some((x) => x.venue.id !== id && x.venue.slug === patch.slug)) throw new SlugTakenError(patch.slug);
     for (const [k, v] of Object.entries(patch)) if (v !== undefined) (s.venue as unknown as Record<string, unknown>)[k] = clone(v);
     return clone(s.venue);
   }
@@ -116,7 +136,7 @@ export class InMemoryStore implements Store {
   }
   async claimPublish(id: string, now = this.clock()) {
     const s = this.sites.get(id);
-    if (!s || s.venue.status !== "draft") return false;
+    if (!s || (s.venue.status !== "draft" && !s.venue.wizard_draft)) return false; // a draft, or a live venue with an open website-setup draft
     const prev = this.publishing.get(id);
     if (prev && Date.parse(now) - Date.parse(prev) < PUBLISH_CLAIM_TTL_MS) return false;
     this.publishing.set(id, now);
@@ -149,6 +169,8 @@ export class InMemoryStore implements Store {
     for (const [sid, s] of this.syncs) if (s.venue_id === id) this.syncs.delete(sid);
     for (const [cid, c] of this.comments) if (c.venue_id === id) this.comments.delete(cid);
     this.surroundings.delete(id);
+    for (const [k, r] of this.venueUsers) if (r.venue_id === id) this.venueUsers.delete(k);
+    for (const [k, r] of this.accountInvites) if (r.venue_id === id) this.accountInvites.delete(k);
   }
   async getSite(venueId: string) {
     return clone(this.site(venueId));
@@ -171,11 +193,11 @@ export class InMemoryStore implements Store {
       price_eur: i.price_eur,
       allergens: [...i.allergens],
       image_media_id: i.image_media_id ?? null,
-      sold_out_until: null,
+      sold_out_until: i.sold_out_until ?? null,
       is_special: i.is_special ?? false,
       special_expires_at: i.special_expires_at ?? null,
       position: i.position,
-      active: true,
+      active: i.active ?? true,
       created_at: now,
       updated_at: now,
     };
@@ -533,6 +555,51 @@ export class InMemoryStore implements Store {
     return this.getVenue(venueId);
   }
 
+  // --- Billing (appended 2026-10-19) ---
+  billingEvents = new Map<string, { type: string; at: string }>();
+  async startTrialIfNone(venueId: string, trial: { trial_started_at: string; trial_ends_at: string }) {
+    const v = this.site(venueId).venue;
+    if (v.trial_started_at !== null || v.billing_status !== null) return false;
+    v.trial_started_at = trial.trial_started_at;
+    v.trial_ends_at = trial.trial_ends_at;
+    v.billing_status = "trialing";
+    return true;
+  }
+  billingConfig?: BillingConfig;
+  async pauseExpiredTrial(venueId: string, nowIso: string) {
+    const v = this.site(venueId).venue;
+    if (v.billing_status !== "trialing" || v.stripe_subscription_id !== null || v.trial_ends_at === null || Date.parse(v.trial_ends_at) > Date.parse(nowIso)) return false;
+    v.billing_status = "paused";
+    return true;
+  }
+  async claimTrialReminder(venueId: string, kind: TrialReminder) {
+    const v = this.site(venueId).venue;
+    if (kind === "soon" ? v.trial_reminder_sent !== null : v.trial_reminder_sent === "ended") return false;
+    v.trial_reminder_sent = kind;
+    return true;
+  }
+  async findVenueByStripeCustomer(customerId: string) {
+    const s = [...this.sites.values()].find((x) => x.venue.stripe_customer_id === customerId);
+    return s ? clone(s.venue) : null;
+  }
+  async claimStripeCustomer(venueId: string, customerId: string) {
+    const v = this.site(venueId).venue;
+    if (v.stripe_customer_id === null) v.stripe_customer_id = customerId;
+    return clone(v);
+  }
+  async findVenueById(id: string) {
+    const s = this.sites.get(id);
+    return s ? clone(s.venue) : null;
+  }
+  async hasBillingEvent(eventId: string) {
+    return this.billingEvents.has(eventId);
+  }
+  async recordBillingEvent(eventId: string, type: string, nowIso: string) {
+    if (this.billingEvents.has(eventId)) return false;
+    this.billingEvents.set(eventId, { type, at: nowIso });
+    return true;
+  }
+
   // --- Meta data deletion (appended 2026-10-14) ---
   deletionRequests = new Map<string, DataDeletionRequest>();
   async findDestinationsByConfig(kind: DestinationKind, key: string, value: string) {
@@ -648,5 +715,50 @@ export class InMemoryStore implements Store {
   async putSurroundings(row: VenueSurroundings) {
     this.site(row.venue_id); // the table's foreign key: the venue must exist
     this.surroundings.set(row.venue_id, clone(row));
+  }
+  // --- Accounts (appended 2026-10-19) ---
+  /** By "<venue id>:<user id>". */
+  venueUsers = new Map<string, { venue_id: string; user_id: string; role: Role; created_at: string }>();
+  /** By "<venue id>:<lower-case email>". */
+  accountInvites = new Map<string, { venue_id: string; email: string; created_at: string; claimed_at: string | null }>();
+  async linkVenueUser(venueId: string, userId: string, role: Role) {
+    this.site(venueId); // the table's foreign key: the venue must exist
+    const key = `${venueId}:${userId}`;
+    if (this.venueUsers.has(key)) return;
+    this.venueUsers.set(key, { venue_id: venueId, user_id: userId, role, created_at: this.clock() });
+  }
+  async listVenuesForUser(userId: string) {
+    return [...this.venueUsers.values()]
+      .filter((r) => r.user_id === userId && this.sites.has(r.venue_id))
+      .map((r) => this.site(r.venue_id).venue)
+      .sort((a, b) => a.created_at.localeCompare(b.created_at))
+      .map(clone);
+  }
+  async isVenueOwner(venueId: string, userId: string) {
+    return this.venueUsers.get(`${venueId}:${userId}`)?.role === "owner";
+  }
+  async hasOwnerAccount(venueId: string) {
+    return [...this.venueUsers.values()].some((r) => r.venue_id === venueId && r.role === "owner");
+  }
+  async createPendingAccountInvite(venueId: string, email: string) {
+    this.site(venueId);
+    const e = email.trim().toLowerCase();
+    const key = `${venueId}:${e}`;
+    const prev = this.accountInvites.get(key);
+    if (prev && prev.claimed_at === null) return;
+    this.accountInvites.set(key, { venue_id: venueId, email: e, created_at: this.clock(), claimed_at: null });
+  }
+  async claimAccountInvites(userId: string, email: string) {
+    const e = email.trim().toLowerCase();
+    const claimed: string[] = [];
+    for (const inv of this.accountInvites.values()) {
+      if (inv.email !== e || inv.claimed_at !== null || !this.sites.has(inv.venue_id)) continue;
+      await this.linkVenueUser(inv.venue_id, userId, "owner");
+      // An owner link already there stays; an earlier staff link is lifted to owner by the invite.
+      this.venueUsers.get(`${inv.venue_id}:${userId}`)!.role = "owner";
+      inv.claimed_at = this.clock();
+      claimed.push(inv.venue_id);
+    }
+    return claimed;
   }
 }

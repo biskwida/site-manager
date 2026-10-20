@@ -195,4 +195,18 @@ describe("DoneStatus: connect an app", () => {
     // one app enabled: as before, no extra button
     expect(render("en", joined, { code: null, links: [] })).not.toContain("Connect another app");
   });
+  it("Continue setup links to the checklist only when the page is given its address", () => {
+    expect(render("en", waiting)).not.toContain("Continue setup");
+    const withLink = render("en", waiting, { onboardingHref: "/onboarding/bar" });
+    expect(withLink).toContain('href="/onboarding/bar"');
+    expect(withLink).toContain("Continue setup");
+    expect(render("bg", waiting, { onboardingHref: "/onboarding/bar" })).toContain("Продължете с настройката");
+  });
+  it("Log in to save appears only with the login address, in both languages", () => {
+    expect(render("en", waiting)).not.toContain("Log in to save");
+    const en = render("en", waiting, { loginHref: "/login?next=%2Fnew%2Fv1%2Fdone" });
+    expect(en).toContain('href="/login?next=%2Fnew%2Fv1%2Fdone"');
+    expect(en).toContain("Log in to save this business to your account");
+    expect(render("bg", waiting, { loginHref: "/login?next=x" })).toContain("Влезте, за да запазите бизнеса в профила си");
+  });
 });

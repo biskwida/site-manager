@@ -1,0 +1,101 @@
+// src/i18n/billing.ts
+// Copy for /billing/[slug] (choose a plan). Client-safe: no server imports. {name} style placeholders are filled by fill() (./onboarding).
+// Prices are written 19 € (BG) / €19 (EN), always without VAT (formatEuro, "без ДДС" / "excl. VAT").
+import type { Lang } from "../domain/types";
+
+const bg = {
+  "plan.eyebrowTrial": "{name} · пробен период, остават {days} дни",
+  "plan.eyebrowTrialOne": "{name} · пробен период, остава 1 ден",
+  "plan.eyebrowPlain": "{name}",
+  "plan.title": "Изберете плана си",
+  "plan.required": "Добавете карта, за да започнете безплатния си пробен период. Днес не се таксува нищо.",
+  "plan.requiredSetup": "Добавете карта, за да започнете безплатния си пробен период. Днес: {price} без ДДС за сайта; планът започва след пробния период.",
+  "plan.legend": "План",
+  "plan.admin.name": "Admin",
+  "plan.admin.note": "Промени по сайта, 40 на месец",
+  "plan.social.name": "Социални мрежи",
+  "plan.social.note": "Постове, истории, отговори на коментари, рекламни планове",
+  "plan.both.name": "Both",
+  "plan.both.note": "Всичко, 150 промени на месец",
+  "price.month": " / месец, без ДДС",
+  "addon.title": "Направете ми сайт",
+  "addon.text": "Готов сайт от Claudia: вашият дизайн, меню и снимки, домейн и хостинг безплатно за първата година. Идва с Admin или Both.",
+  "price.once": " еднократно, без ДДС",
+  "addon.add": "Добавете сайт — {price} еднократно, без ДДС",
+  "addon.socialNote": "Сайтът идва с Admin или Both. Сменете плана от „Управление на плащането“.",
+  "addon.warn": "Изберете Admin или Both, за да добавите сайт.",
+  "addon.locked": "Сайтът ви е вече направен. Таксата за настройка се плаща с първото плащане.",
+  "addon.paid": "Сайтът е платен. Можете да го направите от таблото.",
+  "sum.title": "Обобщение",
+  "sum.plan": "{plan}, на месец",
+  "sum.setup": "Настройка на сайта",
+  "sum.setupOnce": "{price} (еднократно)",
+  "sum.setupNone": "{price} (имате свой сайт)",
+  "sum.today": "Днес",
+  "sum.vat": "без ДДС",
+  "sum.startsOn": "Планът започва на {date}: {price} на месец. Отказвате по всяко време от „Управление на плащането“.",
+  "sum.startsNow": "Планът започва веднага. Отказвате по всяко време от „Управление на плащането“.",
+  "sum.siteNext": "След плащането създавате сайта в конструктора: шаблон, меню, снимки. Около 20 минути.",
+  "sum.fullNow": "Ако платите по време на пробния период, получавате пълния месечен лимит веднага.",
+  cta: "Продължете към сигурно плащане",
+  "cta.busy": "Отваряме плащането…",
+  "cta.manage": "Управление на плащането",
+  "already": "Вече имате абонамент. Променете плана, картата или отказа от „Управление на плащането“.",
+  "error.generic": "Не успяхме да отворим плащането. Опитайте пак след малко.",
+  "stripe.note": "Плащанията минават през Stripe",
+  "stripe.test": "тестов режим",
+  back: "Към таблото",
+} as const;
+
+export type BillingKey = keyof typeof bg;
+
+const en: Record<BillingKey, string> = {
+  "plan.eyebrowTrial": "{name} · trial, {days} days left",
+  "plan.eyebrowTrialOne": "{name} · trial, 1 day left",
+  "plan.eyebrowPlain": "{name}",
+  "plan.title": "Choose your plan",
+  "plan.required": "Add a card to start your free trial. Nothing is charged today.",
+  "plan.requiredSetup": "Add a card to start your free trial. Today: {price} excl. VAT for the website; the plan starts after the trial.",
+  "plan.legend": "Plan",
+  "plan.admin.name": "Admin",
+  "plan.admin.note": "Website changes, 40 a month",
+  "plan.social.name": "Social media",
+  "plan.social.note": "Posts, stories, comment replies, ad plans",
+  "plan.both.name": "Both",
+  "plan.both.note": "Everything, 150 changes a month",
+  "price.month": " / month, excl. VAT",
+  "addon.title": "Build me a website",
+  "addon.text": "Ready website by Claudia: your design, menu and photos, domain and hosting free for the first year. Comes with Admin or Both.",
+  "price.once": " once, excl. VAT",
+  "addon.add": "Add a website — {price} once, excl. VAT",
+  "addon.socialNote": "A website comes with Admin or Both. Switch plans in Manage billing.",
+  "addon.warn": "Choose Admin or Both to add a website.",
+  "addon.locked": "Your website is already built. The setup fee is paid with your first payment.",
+  "addon.paid": "The website is paid for. You can build it from your dashboard.",
+  "sum.title": "Summary",
+  "sum.plan": "{plan}, monthly",
+  "sum.setup": "Website setup",
+  "sum.setupOnce": "{price} (once)",
+  "sum.setupNone": "{price} (you have your own site)",
+  "sum.today": "Today",
+  "sum.vat": "excl. VAT",
+  "sum.startsOn": "Your plan starts on {date}: {price} a month. Cancel any time in Manage billing.",
+  "sum.startsNow": "Your plan starts right away. Cancel any time in Manage billing.",
+  "sum.siteNext": "After payment you design the website in the builder: template, menu, photos. About 20 minutes.",
+  "sum.fullNow": "If you pay during the trial, you get the full monthly limit right away.",
+  cta: "Continue to secure payment",
+  "cta.busy": "Opening payment…",
+  "cta.manage": "Manage billing",
+  "already": "You already have a subscription. Change the plan, the card or cancel from Manage billing.",
+  "error.generic": "We could not open the payment page. Please try again in a moment.",
+  "stripe.note": "Payments by Stripe",
+  "stripe.test": "test mode",
+  back: "Back to your dashboard",
+};
+
+export const BILLING: Record<Lang, Record<BillingKey, string>> = { bg, en };
+
+/** 19 → "19 €" (BG) / "€19" (EN). Whole euro only; cents are never shown. */
+export function formatEuro(lang: Lang, amount: number): string {
+  return lang === "bg" ? `${amount} €` : `€${amount}`;
+}

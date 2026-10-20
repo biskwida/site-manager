@@ -17,6 +17,10 @@ describe("loadConfig", () => {
     const c = loadConfig(full);
     expect(c).toMatchObject({ agentModel: "claude-haiku-5-5", agentEffort: "medium", sttApiKey: null, sttBaseUrl: "https://api.groq.com/openai/v1", sttModel: "whisper-large-v3", demoVenueSlug: "agala", publicBaseUrl: "https://site.example", commentDraftModel: "claude-haiku-5-5" });
   });
+  it("reads RESEND_API_KEY (optional) and EMAIL_FROM (default Claudia <hello@getclaudia.app>)", () => {
+    expect(loadConfig(full)).toMatchObject({ resendApiKey: null, emailFrom: "Claudia <hello@getclaudia.app>" });
+    expect(loadConfig({ ...full, RESEND_API_KEY: " re_x ", EMAIL_FROM: "Claudia <a@b.example>" })).toMatchObject({ resendApiKey: "re_x", emailFrom: "Claudia <a@b.example>" });
+  });
   it("reads COMMENT_DRAFT_MODEL", () => {
     expect(loadConfig({ ...full, COMMENT_DRAFT_MODEL: "claude-sonnet-5-5" }).commentDraftModel).toBe("claude-sonnet-5-5");
   });

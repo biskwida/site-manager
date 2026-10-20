@@ -144,6 +144,7 @@ export function commentTools(d: AgentDeps, k: ToolKit) {
     run: (input) =>
       k.attempt(async () => {
         requireOwner();
+        await k.ensureEntitled("comments");
         const venue = await d.store.getVenue(d.venueId);
         const limit = await commentLimitState(d.store, venue, d.now());
         if (limit.reached) {

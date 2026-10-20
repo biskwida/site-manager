@@ -1,8 +1,9 @@
 // src/store/types.ts
 import type {
-  BusinessType, Category, Change, ChangeSet, ChangeSetStatus, ChangeSource, ChatLang, CommentMode, CommentNetwork, Conversation, DeployInfo, DeployStatus, Item, Lang, Media, Member, Role, SiteState, SiteTextKey, TemplateId, Venue, VenueStatus, WeekHours,
+  BusinessType, Category, Change, ChangeSet, ChangeSetStatus, ChangeSource, ChatLang, CommentMode, CommentNetwork, Conversation, DeployInfo, DeployStatus, Item, Lang, Media, Member, Role, CreatedVia, SiteMode, SitePlatform, SiteState, SiteTextKey, TemplateId, TrialReminder, Venue, VenueStatus, WeekHours,
 } from "../domain/types";
 import { isChatLang } from "../domain/types";
+import type { BillingConfig } from "../billing/entitlements";
 import type { Place } from "../geo/osm";
 import type { WizardDraft } from "../wizard/schema";
 
@@ -18,6 +19,14 @@ export const DEFAULT_HOURS: WeekHours = {
   sat: { open: "09:00", close: "16:00" },
   sun: null,
 };
+
+/** A venue slug that another venue already has (Postgres unique violation 23505 on venues.slug; the memory store throws it too). */
+export class SlugTakenError extends Error {
+  constructor(public readonly slug: string) {
+    super(`slug ${slug} already exists`);
+    this.name = "SlugTakenError";
+  }
+}
 
 export interface NewVenue {
   slug: string;
@@ -46,12 +55,20 @@ export interface NewVenue {
   wizard_draft?: WizardDraft | null;
   /** The venue's own external site (https); see Venue.site_url. */
   site_url?: string | null;
+  /** Default "claudia". */
+  site_mode?: SiteMode;
+  /** Own-site venues only; default null. */
+  site_platform?: SitePlatform | null;
+  /** Default "operator". */
+  created_via?: CreatedVia;
 }
 export interface NewCategory {
   venue_id: string;
   name_bg: string;
   name_en: string;
   position: number;
+  /** Default true; false = hidden. */
+  active?: boolean;
 }
 export interface NewItem {
   venue_id: string;
@@ -66,6 +83,9 @@ export interface NewItem {
   is_special?: boolean;
   special_expires_at?: string | null;
   image_media_id?: string | null;
+  sold_out_until?: string | null;
+  /** Default true; false = hidden. */
+  active?: boolean;
 }
 export interface NewChangeSet {
   venue_id: string;
@@ -86,8 +106,9 @@ export interface NewChangeSet {
 export type ChangeSetPatch = Partial<Pick<ChangeSet, "status" | "apply_at" | "reminded_at" | "decided_at" | "applied_at" | "reverted_by" | "message_ref" | "preview_bg" | "preview_en" | "proposal_refs" | "summary_bg" | "summary_en">>;
 export type VenuePatch = Partial<Pick<Venue,
   "slug" | "name" | "tagline_bg" | "tagline_en" | "about_bg" | "about_en" | "address" | "phone" | "maps_url" | "instagram" |
-  "hours" | "tz" | "default_lang" | "theme" | "template" | "business_type" | "status" | "wizard_draft" | "instagram_import" | "site_url" |
-  "comment_mode" | "comment_digest_hour" | "comment_limit" | "last_comment_digest_at">>;
+  "hours" | "tz" | "default_lang" | "theme" | "template" | "business_type" | "status" | "wizard_draft" | "instagram_import" | "site_url" | "site_mode" | "site_platform" | "created_via" |
+  "comment_mode" | "comment_digest_hour" | "comment_limit" | "last_comment_digest_at" |
+  "plan" | "billing_status" | "trial_started_at" | "trial_ends_at" | "past_due_since" | "stripe_customer_id" | "stripe_subscription_id" | "trial_reminder_sent" | "website_fee_paid">>;
 
 export interface InviteSummary {
   role: Role;
@@ -478,4 +499,71 @@ export function redactCommentRow(row: Record<string, unknown> | null): Record<st
   if ("comment_text" in out) out.comment_text = "";
   if ("author_name" in out) out.author_name = "";
   return out;
+}
+
+// --- Accounts (appended 2026-10-19; supabase/migrations/2026-10-19-venue-users.sql) ---
+/** A Supabase Auth user linked to a venue (venue_users). */
+// Declaration merging: the Store interface above gains the account methods.
+export interface Store {
+  /** Links an account to a venue. Idempotent: a second call changes nothing, and an existing "owner" is never downgraded to "staff". Throws on an unknown venue. */
+  linkVenueUser(venueId: string, userId: string, role: Role): Promise<void>;
+  /** The venues this account is linked to (any role), oldest venue first. */
+  listVenuesForUser(userId: string): Promise<Venue[]>;
+  isVenueOwner(venueId: string, userId: string): Promise<boolean>;
+  /** True when some account is linked to the venue as owner (venue_users). The chat then sends the dashboard link instead of the key link. */
+  hasOwnerAccount(venueId: string): Promise<boolean>;
+  /** Promises the venue to whoever signs in with this email (compared ignoring case). Idempotent; inviting again after a claim opens a new pending invite. Throws on an unknown venue. */
+  createPendingAccountInvite(venueId: string, email: string): Promise<void>;
+  /**
+   * Links `userId` as owner to every venue with an unclaimed invite for `email` (ignoring case), marks those invites claimed, and returns their venue ids. A second call returns [].
+   * SECURITY: an invite is a promise to whoever proves they own the email, so this runs ONLY in /auth/callback (src/server/auth-callback.ts),
+   * right after a successful code exchange or OTP verify, with the email Supabase confirmed. Never call it from anywhere else (a
+   * dashboard load, a signup form, a script): a caller that passes an email nobody verified hands the venue to a stranger.
+   */
+  claimAccountInvites(userId: string, email: string): Promise<string[]>;
+}
+
+// --- Billing (appended 2026-10-19; supabase/migrations/2026-10-19-billing.sql) ---
+// Declaration merging: the Store interface above gains the billing methods. The billing columns themselves are read with the venue
+// and written with updateVenue (VenuePatch); these methods are the ones that must be atomic.
+export interface Store {
+  /**
+   * Starts the free trial of a venue that has none: sets trial_started_at, trial_ends_at and billing_status "trialing" in ONE conditional
+   * update, only while trial_started_at and billing_status are both still null. True when this call started it; false when the venue
+   * already has a trial or a billing status (a second call, a grandfathered venue, a subscriber): nothing changes, a trial is never
+   * restarted or extended. Throws on an unknown venue.
+   */
+  startTrialIfNone(venueId: string, trial: { trial_started_at: string; trial_ends_at: string }): Promise<boolean>;
+  /** The venue with this Stripe customer id (stripe_customer_id is unique); null when none. */
+  findVenueByStripeCustomer(customerId: string): Promise<Venue | null>;
+  /**
+   * Stores the Stripe customer on the venue only while it has none (one conditional update), and returns the venue as it is stored
+   * afterwards: with the customer just given, or with the one a concurrent call stored first. Throws on an unknown venue.
+   */
+  claimStripeCustomer(venueId: string, customerId: string): Promise<Venue>;
+  /** The venue with this id; null when there is none (getVenue throws instead). */
+  findVenueById(id: string): Promise<Venue | null>;
+  /** Whether this Stripe event id was recorded as processed (billing_events). */
+  hasBillingEvent(eventId: string): Promise<boolean>;
+  /**
+   * Records a Stripe event id as processed, AFTER the event was applied (applying is idempotent, so a concurrent double apply is
+   * harmless). True when this call recorded it; false when it was recorded already (the second insert of a race loses cleanly).
+   */
+  recordBillingEvent(eventId: string, type: string, nowIso: string): Promise<boolean>;
+  /**
+   * Billing settings the store reads for the apply-time change limit and the usage lines (src/billing/entitlements.ts effectiveLimit).
+   * Set once at startup (makeServerDeps); absent = billing off, the monthly limit is venues.change_limit alone, as before billing.
+   */
+  billingConfig?: BillingConfig;
+  /**
+   * The free trial ran out: sets billing_status "paused" in ONE conditional update, only while the venue is still "trialing" with no
+   * Stripe subscription and trial_ends_at is at or before `nowIso`. True when this call paused it; false otherwise (already paused,
+   * subscribed, not over yet), so a tick that runs twice, or races the Stripe webhook, changes nothing twice. Throws on an unknown venue.
+   */
+  pauseExpiredTrial(venueId: string, nowIso: string): Promise<boolean>;
+  /**
+   * Marks a trial reminder as sent, in ONE conditional update, so two ticks never both send it. "soon" is claimed only while no
+   * reminder is marked; "ended" while the marker is not "ended" yet (it may be "soon"). True when this call claimed it. Throws on an unknown venue.
+   */
+  claimTrialReminder(venueId: string, kind: TrialReminder): Promise<boolean>;
 }

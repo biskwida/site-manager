@@ -1,12 +1,13 @@
 // src/store/supabase.ts
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
+import type { BillingConfig } from "../billing/entitlements";
 import { COMMENT_LIMIT_DEFAULT, countsTowardLimit } from "../domain/limits";
-import { isChatLang, isExternalEntity, isRecordOnlyEntity, type BoostEntity, type CommentMode, type SocialEntity, type WpEntity } from "../domain/types";
-import type { Announcement, BusinessType, Category, Change, ChangeSet, ChatLang, Conversation, DeployInfo, DeployStatus, Holiday, InstagramImport, Item, Lang, Media, Member, Role, SiteState, SiteText, SiteTextKey, TemplateId, Venue, VenueStatus } from "../domain/types";
+import { BILLING_STATUSES, isChatLang, isExternalEntity, isRecordOnlyEntity, PLAN_IDS, SITE_PLATFORMS, type BillingStatus, type BoostEntity, type CommentMode, type SocialEntity, type WpEntity } from "../domain/types";
+import type { Announcement, BusinessType, Category, Change, ChangeSet, ChatLang, Conversation, DeployInfo, DeployStatus, Holiday, InstagramImport, Item, Lang, Media, Member, Plan, Role, SitePlatform, SiteState, SiteText, SiteTextKey, TemplateId, TrialReminder, Venue, VenueStatus } from "../domain/types";
 import type { Place } from "../geo/osm";
 import type { WizardDraft } from "../wizard/schema";
 import { legacyTelegramId } from "../channels/ref";
-import { DEFAULT_HOURS, extensionFor, newInviteCode, newToken, PUBLISH_CLAIM_TTL_MS, type ChangeSetPatch, type ExpiredTimer, type NewCategory, type NewChangeSet, type NewItem, type NewVenue, type Store, type VenuePatch, type Destination, type DestinationKind, type DestinationPatch, type DestinationSync, type DestinationWithSecrets, type NewDestination, type NewSync, type SyncPatch, type SyncStatus, type ListSyncsOpts, type ApplyResult, checkLimitValue, checkMemberLang, CONFIG_KEY_RE, newConfirmationCode, type DataDeletionRequest, type DeletionProvider, type DeletionStatus, type CommentStatus, type ListCommentsOpts, type NewSocialComment, type SocialComment, type SocialCommentPatch, COMMENT_REDACTED, redactCommentRow, type VenueSurroundings } from "./types";
+import { DEFAULT_HOURS, extensionFor, newInviteCode, newToken, PUBLISH_CLAIM_TTL_MS, type ChangeSetPatch, type ExpiredTimer, type NewCategory, type NewChangeSet, type NewItem, type NewVenue, type Store, type VenuePatch, SlugTakenError, type Destination, type DestinationKind, type DestinationPatch, type DestinationSync, type DestinationWithSecrets, type NewDestination, type NewSync, type SyncPatch, type SyncStatus, type ListSyncsOpts, type ApplyResult, checkLimitValue, checkMemberLang, CONFIG_KEY_RE, newConfirmationCode, type DataDeletionRequest, type DeletionProvider, type DeletionStatus, type CommentStatus, type ListCommentsOpts, type NewSocialComment, type SocialComment, type SocialCommentPatch, COMMENT_REDACTED, redactCommentRow, type VenueSurroundings } from "./types";
 import { limitBlocks } from "./usage";
 
 type Row = Record<string, unknown>;
@@ -53,6 +54,21 @@ export function toVenue(r: Row): Venue {
     instagram_import: (r.instagram_import as InstagramImport | null) ?? null,
     // Missing before the column is added: read as null (a hosted or template site).
     site_url: strOrNull(r.site_url),
+    // Missing before the migration is applied (or any unknown value): a Claudia site, as before.
+    site_mode: r.site_mode === "own" || r.site_mode === "none" ? r.site_mode : "claudia",
+    // Missing before the migration is applied (or any unknown value): not asked.
+    created_via: r.created_via === "wizard" || r.created_via === "start" ? r.created_via : "operator",
+    site_platform: SITE_PLATFORMS.includes(r.site_platform as SitePlatform) ? (r.site_platform as SitePlatform) : null,
+    // Billing (2026-10-19). Missing before the migration is applied (or any unknown value): not set.
+    plan: PLAN_IDS.includes(r.plan as Plan) ? (r.plan as Plan) : null,
+    billing_status: BILLING_STATUSES.includes(r.billing_status as BillingStatus) ? (r.billing_status as BillingStatus) : null,
+    trial_started_at: isoOrNull(r.trial_started_at),
+    trial_ends_at: isoOrNull(r.trial_ends_at),
+    past_due_since: isoOrNull(r.past_due_since),
+    stripe_customer_id: strOrNull(r.stripe_customer_id),
+    stripe_subscription_id: strOrNull(r.stripe_subscription_id),
+    trial_reminder_sent: r.trial_reminder_sent === "soon" || r.trial_reminder_sent === "ended" ? r.trial_reminder_sent : null,
+    website_fee_paid: r.website_fee_paid === true,
     created_at: iso(r.created_at),
   };
 }
@@ -175,7 +191,10 @@ export class SupabaseStore implements Store {
       status: v.status ?? "live",
       wizard_draft: v.wizard_draft ?? null,
     };
-    return this.venue(await must(this.db.from("venues").insert(row).select("*").single(), "createVenue"));
+    const { data, error } = await this.db.from("venues").insert(row).select("*").single();
+    if (error?.code === "23505") throw new SlugTakenError(v.slug);
+    if (error) throw new Error(`createVenue: ${error.message}${error.code ? ` [${error.code}]` : ""}`);
+    return this.venue(data);
   }
   async getVenue(id: string) {
     return this.venue(await must(this.db.from("venues").select("*").eq("id", id).single(), `getVenue ${id}`));
@@ -196,7 +215,8 @@ export class SupabaseStore implements Store {
     if (typeof clean.slug === "string") clean.slug = `${this.slugPrefix}${clean.slug}`;
     if (Object.keys(clean).length === 0) return this.getVenue(id);
     const { data, error } = await this.db.from("venues").update(clean).eq("id", id).select("*").maybeSingle();
-    if (error) throw new Error(error.code === "23505" ? `slug ${patch.slug} already exists` : `updateVenue ${id}: ${error.message} [${error.code ?? ""}]`);
+    if (error?.code === "23505" && typeof patch.slug === "string") throw new SlugTakenError(patch.slug);
+    if (error) throw new Error(`updateVenue ${id}: ${error.message} [${error.code ?? ""}]`);
     if (!data) throw new Error(`updateVenue ${id}: not found`);
     return this.venue(data);
   }
@@ -219,7 +239,10 @@ export class SupabaseStore implements Store {
   async claimPublish(id: string, now = new Date().toISOString()) {
     if (badVenue(id)) return false;
     const stale = new Date(Date.parse(now) - PUBLISH_CLAIM_TTL_MS).toISOString();
-    const { data, error } = await this.db.from("venues").update({ publishing_at: now }).eq("id", id).eq("status", "draft").or(`publishing_at.is.null,publishing_at.lt.${stale}`).select("id");
+    // A draft, or a live venue with an open website-setup draft (wizard_draft set); free, or held by a claim that went stale.
+    const open = ["status.eq.draft", "wizard_draft.not.is.null"];
+    const free = ["publishing_at.is.null", `publishing_at.lt.${stale}`];
+    const { data, error } = await this.db.from("venues").update({ publishing_at: now }).eq("id", id).or(open.flatMap((o) => free.map((f) => `and(${o},${f})`)).join(",")).select("id");
     if (error) throw new Error(`claimPublish ${id}: ${error.message}`);
     return (data?.length ?? 0) === 1;
   }
@@ -660,6 +683,65 @@ export class SupabaseStore implements Store {
     return this.venue(data);
   }
 
+  // --- Billing (appended 2026-10-19) ---
+  async startTrialIfNone(venueId: string, trial: { trial_started_at: string; trial_ends_at: string }) {
+    if (badVenue(venueId)) throw new Error(`startTrialIfNone ${venueId}: not found`);
+    // One conditional UPDATE: the row filter is the claim, so two concurrent callers cannot both start (or restart) a trial.
+    const { data, error } = await this.db.from("venues").update({ ...trial, billing_status: "trialing" }).eq("id", venueId).is("trial_started_at", null).is("billing_status", null).select("id");
+    if (error) throw new Error(`startTrialIfNone ${venueId}: ${error.message}`);
+    if ((data?.length ?? 0) === 1) return true;
+    await this.getVenue(venueId); // throws "not found" for an unknown venue
+    return false;
+  }
+  billingConfig?: BillingConfig;
+  async pauseExpiredTrial(venueId: string, nowIso: string) {
+    if (badVenue(venueId)) throw new Error(`pauseExpiredTrial ${venueId}: not found`);
+    // One conditional UPDATE: the row filter is the claim, so a racing webhook (a subscription just started) or a second tick changes nothing.
+    const { data, error } = await this.db.from("venues").update({ billing_status: "paused" }).eq("id", venueId).eq("billing_status", "trialing").is("stripe_subscription_id", null).lte("trial_ends_at", nowIso).select("id");
+    if (error) throw new Error(`pauseExpiredTrial ${venueId}: ${error.message}`);
+    if ((data?.length ?? 0) === 1) return true;
+    await this.getVenue(venueId); // throws "not found" for an unknown venue
+    return false;
+  }
+  async claimTrialReminder(venueId: string, kind: TrialReminder) {
+    if (badVenue(venueId)) throw new Error(`claimTrialReminder ${venueId}: not found`);
+    let q = this.db.from("venues").update({ trial_reminder_sent: kind }).eq("id", venueId);
+    q = kind === "soon" ? q.is("trial_reminder_sent", null) : q.or("trial_reminder_sent.is.null,trial_reminder_sent.neq.ended");
+    const { data, error } = await q.select("id");
+    if (error) throw new Error(`claimTrialReminder ${venueId}: ${error.message}`);
+    if ((data?.length ?? 0) === 1) return true;
+    await this.getVenue(venueId);
+    return false;
+  }
+  async findVenueByStripeCustomer(customerId: string) {
+    const { data, error } = await this.db.from("venues").select("*").eq("stripe_customer_id", customerId).maybeSingle();
+    if (error) throw new Error(`findVenueByStripeCustomer: ${error.message}`);
+    return data ? this.venue(data) : null;
+  }
+  async claimStripeCustomer(venueId: string, customerId: string) {
+    if (badVenue(venueId)) throw new Error(`claimStripeCustomer ${venueId}: not found`);
+    // One conditional UPDATE: the row filter is the claim, so of two concurrent callers only the first writes.
+    const { error } = await this.db.from("venues").update({ stripe_customer_id: customerId }).eq("id", venueId).is("stripe_customer_id", null).select("id");
+    if (error) throw new Error(`claimStripeCustomer ${venueId}: ${error.message}`);
+    return this.getVenue(venueId); // whichever customer is stored now (throws "not found" for an unknown venue)
+  }
+  async findVenueById(id: string) {
+    if (badVenue(id)) return null;
+    const { data, error } = await this.db.from("venues").select("*").eq("id", id).maybeSingle();
+    if (error) throw new Error(`findVenueById: ${error.message}`);
+    return data ? this.venue(data) : null;
+  }
+  async hasBillingEvent(eventId: string) {
+    const { data, error } = await this.db.from("billing_events").select("id").eq("id", eventId).maybeSingle();
+    if (error) throw new Error(`hasBillingEvent: ${error.message}`);
+    return data !== null;
+  }
+  async recordBillingEvent(eventId: string, type: string, nowIso: string) {
+    // ON CONFLICT DO NOTHING: the row comes back only for the call that inserted it.
+    const rows = await must(this.db.from("billing_events").upsert({ id: eventId, type, received_at: nowIso }, { onConflict: "id", ignoreDuplicates: true }).select("id"), "recordBillingEvent");
+    return rows.length === 1;
+  }
+
   // --- Meta data deletion (appended 2026-10-14) ---
   async findDestinationsByConfig(kind: DestinationKind, key: string, value: string) {
     if (!CONFIG_KEY_RE.test(key)) throw new Error(`findDestinationsByConfig: bad key ${key}`);
@@ -787,6 +869,50 @@ export class SupabaseStore implements Store {
   }
   async putSurroundings(row: VenueSurroundings) {
     await must(this.db.from("venue_surroundings").upsert(row, { onConflict: "venue_id" }).select("venue_id"), "putSurroundings");
+  }
+
+  // --- Accounts (appended 2026-10-19) ---
+  async linkVenueUser(venueId: string, userId: string, role: Role) {
+    // ON CONFLICT DO NOTHING: a second link changes nothing, so an owner is never downgraded.
+    await must(this.db.from("venue_users").upsert({ venue_id: venueId, user_id: userId, role }, { onConflict: "venue_id,user_id", ignoreDuplicates: true }).select("venue_id"), "linkVenueUser");
+  }
+  async listVenuesForUser(userId: string) {
+    if (badVenue(userId)) return [];
+    const links = await must(this.db.from("venue_users").select("venue_id").eq("user_id", userId), "listVenuesForUser");
+    if (links.length === 0) return [];
+    const rows = await must(this.db.from("venues").select("*").in("id", links.map((l) => l.venue_id as string)).order("created_at").order("id"), "listVenuesForUser venues");
+    return rows.map((r) => this.venue(r));
+  }
+  async isVenueOwner(venueId: string, userId: string) {
+    if (badVenue(venueId) || badVenue(userId)) return false;
+    const { data, error } = await this.db.from("venue_users").select("role").eq("venue_id", venueId).eq("user_id", userId).maybeSingle();
+    if (error) throw new Error(`isVenueOwner: ${error.message}`);
+    return data?.role === "owner";
+  }
+  async hasOwnerAccount(venueId: string) {
+    if (badVenue(venueId)) return false;
+    const { data, error } = await this.db.from("venue_users").select("user_id").eq("venue_id", venueId).eq("role", "owner").limit(1);
+    if (error) throw new Error(`hasOwnerAccount: ${error.message}`);
+    return (data?.length ?? 0) > 0;
+  }
+  async createPendingAccountInvite(venueId: string, email: string) {
+    // A pending invite stays as it is (like the memory store); a claimed one is reopened with a fresh created_at.
+    const e = email.trim().toLowerCase();
+    const { data, error } = await this.db.from("account_invites").select("claimed_at").eq("venue_id", venueId).eq("email", e).maybeSingle();
+    if (error) throw new Error(`createPendingAccountInvite: ${error.message}`);
+    if (data && data.claimed_at === null) return;
+    await must(this.db.from("account_invites").upsert({ venue_id: venueId, email: e, created_at: new Date().toISOString(), claimed_at: null }, { onConflict: "venue_id,email" }).select("venue_id"), "createPendingAccountInvite");
+  }
+  async claimAccountInvites(userId: string, email: string) {
+    const e = email.trim().toLowerCase();
+    const pending = await must(this.db.from("account_invites").select("venue_id").eq("email", e).is("claimed_at", null), "claimAccountInvites");
+    if (pending.length === 0) return [];
+    const ids = pending.map((r) => r.venue_id as string);
+    // Link first (an invite makes the account an owner, lifting an earlier staff link), then mark claimed: a crash in between retries next sign-in.
+    await must(this.db.from("venue_users").upsert(ids.map((venue_id) => ({ venue_id, user_id: userId, role: "owner" })), { onConflict: "venue_id,user_id" }).select("venue_id"), "claimAccountInvites link");
+    // Only the call that flips claimed_at gets the ids, so two concurrent sign-ins never both report them.
+    const claimed = await must(this.db.from("account_invites").update({ claimed_at: new Date().toISOString() }).eq("email", e).is("claimed_at", null).in("venue_id", ids).select("venue_id"), "claimAccountInvites mark");
+    return claimed.map((r) => r.venue_id as string);
   }
 }
 

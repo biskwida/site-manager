@@ -27,6 +27,20 @@ describe("loadSite", () => {
     expect(applied?.state.items.find((i) => i.id === items.Cappuccino.id)?.price_eur).toBe(3.2);
   });
 
+  it("previews a draft for the signed-in owner (userId), never for staff or a stranger, and the draft info carries no key", async () => {
+    const { store, venue, items } = await makeDemo();
+    const site = await store.getSite(venue.id);
+    const cs = await store.createChangeSet({ venue_id: venue.id, chat_ref: "tg:1001", summary_bg: "c", summary_en: "c", preview_bg: "p", preview_en: "p", source: "text", status: "proposed", changes: planChanges(site, [{ op: "set_price", item_id: items.Cappuccino.id, price_eur: 3.2 }], { newId: () => "n", now: "2026-10-09T09:00:00.000Z" }) });
+    await store.linkVenueUser(venue.id, "owner-1", "owner");
+    await store.linkVenueUser(venue.id, "staff-1", "staff");
+    const seen = await loadSite(store, "agala", { draftId: cs.id, userId: "owner-1" });
+    expect(seen?.draft).toMatchObject({ id: cs.id, key: "" });
+    expect(seen?.state.items.find((i) => i.id === items.Cappuccino.id)?.price_eur).toBe(3.2);
+    for (const userId of ["staff-1", "stranger", null]) expect((await loadSite(store, "agala", { draftId: cs.id, userId }))?.draft).toBeNull();
+    // a wrong key is not rescued by the session
+    expect((await loadSite(store, "agala", { draftId: cs.id, key: "wrong", userId: "owner-1" }))?.draft).toBeNull();
+  });
+
   it("hides a draft venue unless the draft token matches, and passes the key into the draft info", async () => {
     const { store, venue } = await makeDemo();
     const draft = await store.createVenue({ slug: "mydraft", name: "Draft", status: "draft" });
@@ -65,28 +79,34 @@ describe("publicSiteState", () => {
     const { store, venue } = await makeDemo();
     await store.setDeploy(venue.id, { provider: "vercel", project_id: "prj_secret", deployment_id: "dpl_1", url: "https://x.vercel.app", status: "error", error: "Build failed at /vercel/path0", template: "classic", updated_at: "2026-10-10T09:00:00.000Z" });
     await store.updateVenue(venue.id, { instagram_import: { fetched_at: "2026-10-10T09:00:00.000Z", username: "agala", items: [{ id: "1", url: "https://scontent.cdninstagram.com/secret.jpg", thumb: "https://scontent.cdninstagram.com/secret.jpg", caption: "", permalink: "", taken_at: "" }] } });
-    await store.updateVenue(venue.id, { site_url: "https://own.example" });
+    await store.updateVenue(venue.id, { site_mode: "own", site_url: "https://own.example" });
     const state = await store.getSite(venue.id);
     const pub = publicSiteState(state);
     expect("site_url" in pub.venue).toBe(false); // the feed keeps its shape: the own-site URL is a dashboard/bot field
+    expect("site_mode" in pub.venue).toBe(false); // so is how the venue's website is run
     expect("deploy" in pub.venue).toBe(false);
     expect("wizard_draft" in pub.venue).toBe(false);
     expect("instagram_import" in pub.venue).toBe(false);
+    expect("site_platform" in pub.venue).toBe(false);
     expect("change_limit" in pub.venue).toBe(false);
     expect("comment_mode" in pub.venue).toBe(false);
     expect("comment_limit" in pub.venue).toBe(false);
     expect(JSON.stringify(pub)).not.toContain("prj_secret");
     expect(JSON.stringify(pub)).not.toContain("cdninstagram");
-    const { deploy: _d, wizard_draft: _w, instagram_import: _i, site_url: _s, change_limit: _l, comment_mode: _cm, comment_digest_hour: _ch, comment_limit: _cl, last_comment_digest_at: _cd, ...rest } = state.venue;
+    const { deploy: _d, wizard_draft: _w, instagram_import: _i, site_url: _s, site_mode: _sm, site_platform: _sp, created_via: _cv, change_limit: _l, comment_mode: _cm, comment_digest_hour: _ch, comment_limit: _cl, last_comment_digest_at: _cd, plan: _bp, billing_status: _bs, trial_started_at: _bts, trial_ends_at: _bte, past_due_since: _bpd, stripe_customer_id: _bc, stripe_subscription_id: _bsub, trial_reminder_sent: _btr, website_fee_paid: _bw, ...rest } = state.venue;
     void _d;
     void _w;
     void _i;
     void _s;
     void _l;
+    void _sm;
+    void _sp;
+    void _cv;
     void _cm;
     void _ch;
     void _cl;
     void _cd;
+    void [_bp, _bs, _bts, _bte, _bpd, _bc, _bsub, _btr, _bw];
     expect(pub).toEqual({ ...state, venue: { ...rest, theme: { ...rest.theme, background: null } } }); // background always present
     expect(state.venue.deploy).not.toBeNull(); // the input is not mutated
   });
@@ -118,7 +138,7 @@ describe("ownSiteRedirect", () => {
     const { store, venue } = await makeDemo();
     const hosted = await loadSite(store, venue.slug);
     expect(ownSiteRedirect(hosted!)).toBeNull();
-    await store.updateVenue(venue.id, { site_url: "https://coffique.example" });
+    await store.updateVenue(venue.id, { site_mode: "own", site_url: "https://coffique.example" });
     const own = await loadSite(store, venue.slug);
     expect(ownSiteRedirect(own!)).toBe("https://coffique.example");
     expect(ownSiteRedirect({ ...own!, draft: { id: "d1", summary_bg: "", summary_en: "", apply_at: null } as never })).toBeNull();

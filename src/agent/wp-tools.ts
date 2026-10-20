@@ -61,6 +61,7 @@ export function wpTools(d: AgentDeps, k: ToolKit) {
   };
 
   const propose = async (summary_bg: string, summary_en: string, changes: Change[], extra: Record<string, unknown> = {}) => {
+    await k.ensureEntitled("site");
     await k.ensureWithinLimit();
     await k.ensureNoPending();
     const s = await k.site();
@@ -116,6 +117,7 @@ export function wpTools(d: AgentDeps, k: ToolKit) {
       k.attempt(async () => {
         requireOwner();
         // Refuse before the plugin stores a pending preview, so a refused proposal leaves nothing behind on the site.
+        await k.ensureEntitled("site");
         await k.ensureWithinLimit();
         await k.ensureNoPending();
         const page = await api(() => wp.page(input.page_id));

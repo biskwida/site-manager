@@ -36,6 +36,55 @@ alter table public.venues add column if not exists publishing_at timestamptz;
 -- Own site: the venue's site is built and hosted elsewhere and reads our public feed (https URL); null = hosted or template deploy.
 -- When set, the first owner join creates no provider project. Owner-only: not granted to anon (policies.sql).
 alter table public.venues add column if not exists site_url text;
+-- Site mode (2026-10-19): claudia = hosted /<slug> or template deploy; own = site_url is an external site (no deploy); none = no website (social only).
+-- Replaces "site_url set = own site". Owner-only like site_url: not granted to anon (policies.sql).
+do $$
+begin
+  if not exists (select 1 from information_schema.columns where table_schema = 'public' and table_name = 'venues' and column_name = 'site_mode') then
+    alter table public.venues add column if not exists site_mode text not null default 'claudia';
+    -- Only on the run that adds the column: venues that had an own-site URL keep behaving as before. Later runs never touch site_mode,
+    -- so a venue the owner moved back to claudia or none is not pulled back to own.
+    update public.venues set site_mode='own' where site_url is not null and site_url <> '' and site_mode='claudia';
+  end if;
+end $$;
+alter table public.venues drop constraint if exists venues_site_mode_check;
+alter table public.venues add constraint venues_site_mode_check check (site_mode in ('claudia', 'own', 'none'));
+alter table public.venues drop constraint if exists venues_site_mode_own_url_check;
+alter table public.venues add constraint venues_site_mode_own_url_check check (site_mode <> 'own' or (site_url is not null and site_url <> ''));
+-- Own-site venues: what the site is built with (2026-10-19, Task 5); decides how the onboarding checklist connects it. Owner-only (not granted to anon).
+alter table public.venues add column if not exists site_platform text;
+alter table public.venues drop constraint if exists venues_site_platform_check;
+alter table public.venues add constraint venues_site_platform_check check (site_platform is null or site_platform in ('wordpress', 'wix', 'squarespace', 'shopify', 'other', 'unknown'));
+-- How the venue was made (2026-10-19): operator (default) | wizard | start. Only operator-made own sites redirect off our domain. Owner-only (not granted to anon).
+alter table public.venues add column if not exists created_via text not null default 'operator';
+alter table public.venues drop constraint if exists venues_created_via_check;
+alter table public.venues add constraint venues_created_via_check check (created_via in ('operator', 'wizard', 'start'));
+-- Billing (2026-10-19, Task 6): plan, free trial and Stripe ids. Owner-only (not granted to anon). Existing venues are grandfathered to plan 'both', status 'active'
+-- on the run that adds the columns. billing_events (below) holds the Stripe event ids already handled.
+do $$
+begin
+  if not exists (select 1 from information_schema.columns where table_schema = 'public' and table_name = 'venues' and column_name = 'billing_status') then
+    alter table public.venues add column if not exists plan text;
+    alter table public.venues add column if not exists billing_status text;
+    alter table public.venues add column if not exists trial_started_at timestamptz;
+    alter table public.venues add column if not exists trial_ends_at timestamptz;
+    alter table public.venues add column if not exists past_due_since timestamptz;
+    alter table public.venues add column if not exists stripe_customer_id text;
+    alter table public.venues add column if not exists stripe_subscription_id text;
+    alter table public.venues add column if not exists trial_reminder_sent text;
+    alter table public.venues add column if not exists website_fee_paid boolean not null default false;
+    -- Only on the run that adds the columns: every venue that exists today keeps working exactly as before (all features, no trial).
+    -- Later runs never touch plan or billing_status, so a venue moved to another plan or status is not pulled back.
+    update public.venues set plan='both', billing_status='active';
+  end if;
+end $$;
+alter table public.venues drop constraint if exists venues_plan_check;
+alter table public.venues add constraint venues_plan_check check (plan is null or plan in ('admin', 'social', 'both'));
+alter table public.venues drop constraint if exists venues_billing_status_check;
+alter table public.venues add constraint venues_billing_status_check check (billing_status is null or billing_status in ('trialing', 'active', 'past_due', 'paused', 'canceled'));
+alter table public.venues drop constraint if exists venues_trial_reminder_sent_check;
+alter table public.venues add constraint venues_trial_reminder_sent_check check (trial_reminder_sent is null or trial_reminder_sent in ('soon', 'ended'));
+create unique index if not exists venues_stripe_customer_idx on public.venues(stripe_customer_id) where stripe_customer_id is not null;
 -- Monthly change limit (pricing plans; src/domain/limits.ts): applied change sets per calendar month in the venue's tz. null = unlimited.
 alter table public.venues add column if not exists change_limit integer;
 alter table public.venues drop constraint if exists venues_change_limit_check;
@@ -297,4 +346,34 @@ create table if not exists public.venue_surroundings (
   places jsonb not null default '[]',
   fetched_at timestamptz,
   failed_at timestamptz
+);
+
+-- Accounts (2026-10-19, docs/superpowers/plans/2026-10-19-getclaudia-onboarding.md, Task 3): who may open a venue's dashboard
+-- without the ?key= link. venue_users links a Supabase Auth user (email link or Google) to a venue; account_invites holds an email
+-- that is promised a venue before its owner has signed in once (npm run account:invite): the first sign-in with that email
+-- claims it (claimed_at) and links the user as owner. Emails are stored lower case (no citext extension needed). Server-only
+-- (policies.sql). Apply only this: npm run db:apply -- supabase/migrations/2026-10-19-venue-users.sql
+create table if not exists public.venue_users (
+  venue_id uuid not null references public.venues(id) on delete cascade,
+  user_id uuid not null references auth.users(id) on delete cascade,
+  role text not null check (role in ('owner', 'staff')),
+  created_at timestamptz not null default now(),
+  primary key (venue_id, user_id)
+);
+create index if not exists venue_users_user_idx on public.venue_users(user_id);
+
+create table if not exists public.account_invites (
+  venue_id uuid not null references public.venues(id) on delete cascade,
+  email text not null check (email = lower(email)),
+  created_at timestamptz not null default now(),
+  claimed_at timestamptz,
+  primary key (venue_id, email)
+);
+create index if not exists account_invites_email_idx on public.account_invites(email);
+
+-- Stripe event ids already handled (the webhook applies the event first and then records its id; a second delivery of a recorded id is ignored, and an event that failed to apply is not recorded, so Stripe's retry is applied).
+create table if not exists public.billing_events (
+  id text primary key,
+  type text not null,
+  received_at timestamptz not null default now()
 );

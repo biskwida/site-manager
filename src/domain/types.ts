@@ -40,6 +40,48 @@ export const TEMPLATE_IDS: readonly TemplateId[] = ["furna", "mehana", "kvartal"
 export type BusinessType = "cafe" | "bar" | "restaurant";
 export const BUSINESS_TYPES: readonly BusinessType[] = ["cafe", "bar", "restaurant"];
 export type VenueStatus = "draft" | "live";
+/**
+ * What the venue's website is. claudia = the hosted /<slug> or a template deploy that we build and run; own = a site built and hosted
+ * elsewhere (site_url) that reads our feed; none = no website of its own (social media only): no deploy, and /<slug> shows the default template with what data exists.
+ */
+export type SiteMode = "claudia" | "own" | "none";
+export const SITE_MODES: readonly SiteMode[] = ["claudia", "own", "none"];
+/**
+ * How the venue was made. operator = by us (venue:create, the demo, seeds; the default, and every venue before this column), wizard =
+ * published from the website wizard, start = created by the owner on /start (paths B and C). Self-serve own sites ("start") never redirect
+ * visitors off our domain (see ownSiteRedirect).
+ */
+export type CreatedVia = "operator" | "wizard" | "start";
+export const CREATED_VIA: readonly CreatedVia[] = ["operator", "wizard", "start"];
+
+/** Billing plans (2026-10-19): admin = website changes, social = social media, comments and boosts, both = everything. */
+export type Plan = "admin" | "social" | "both";
+export const PLAN_IDS: readonly Plan[] = ["admin", "social", "both"];
+/** trialing = in the free trial (or in a Stripe trial); active = paying; past_due = a payment failed; paused = no new owner changes; canceled = the subscription ended. */
+export type BillingStatus = "trialing" | "active" | "past_due" | "paused" | "canceled";
+export const BILLING_STATUSES: readonly BillingStatus[] = ["trialing", "active", "past_due", "paused", "canceled"];
+/** Which trial reminder has gone out: 3 days before the end ("soon"), or after it ended ("ended"). */
+export type TrialReminder = "soon" | "ended";
+
+/** Server-only billing columns of a venue (supabase/migrations/2026-10-19-billing.sql). Never in PublicVenue, never granted to anon. */
+export interface VenueBilling {
+  /** null = not chosen yet (a venue in its free trial). */
+  plan: Plan | null;
+  /** null = billing never touched this venue (it was made while BILLING_ENABLED was off). */
+  billing_status: BillingStatus | null;
+  trial_started_at: string | null;
+  trial_ends_at: string | null;
+  /** ISO of the first failed payment of the current run of failures; cleared when a payment succeeds. */
+  past_due_since: string | null;
+  stripe_customer_id: string | null;
+  stripe_subscription_id: string | null;
+  trial_reminder_sent: TrialReminder | null;
+  /** The 199 € website setup was paid in Checkout. Never turned back to false. */
+  website_fee_paid: boolean;
+}
+/** What an own-site venue's website is built with (asked at onboarding; picks how the website step of the checklist connects it). */
+export type SitePlatform = "wordpress" | "wix" | "squarespace" | "shopify" | "other" | "unknown";
+export const SITE_PLATFORMS: readonly SitePlatform[] = ["wordpress", "wix", "squarespace", "shopify", "other", "unknown"];
 export type DeployStatus = "pending" | "building" | "ready" | "error";
 export interface DeployInfo {
   provider: "vercel" | "fake";
@@ -71,7 +113,7 @@ export interface DraftInfo {
   key: string;
 }
 
-export interface Venue {
+export interface Venue extends VenueBilling {
   id: string;
   slug: string;
   name: string;
@@ -113,6 +155,12 @@ export interface Venue {
    * Not in the public feed.
    */
   site_url: string | null;
+  /** Server-only (never in the public feed). Replaces the old implicit rule "site_url set = own site"; site_url is only the address of an own site. */
+  site_mode: SiteMode;
+  /** Server-only (never in the public feed). What an own-site venue's site is built with; null = not asked (every other venue). */
+  site_platform: SitePlatform | null;
+  /** Server-only (never in the public feed). */
+  created_via: CreatedVia;
   created_at: string;
 }
 

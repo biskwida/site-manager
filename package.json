@@ -16,6 +16,7 @@
     "db:dry-run": "tsx --env-file-if-exists=.env.local scripts/db-dry-run.mts",
     "check:rls": "tsx --env-file-if-exists=.env.local scripts/check-rls.mts",
     "venue:create": "tsx --env-file-if-exists=.env.local scripts/venue-create.mts",
+    "account:invite": "tsx --env-file-if-exists=.env.local scripts/account-invite.mts",
     "invite:create": "tsx --env-file-if-exists=.env.local scripts/invite-create.mts",
     "venue:set": "tsx --env-file-if-exists=.env.local scripts/venue-set.mts",
     "member:list": "tsx --env-file-if-exists=.env.local scripts/member-list.mts",
@@ -38,18 +39,24 @@
     "wp:live": "tsx scripts/wp-live-check.mts",
     "social:comments-live": "tsx --env-file-if-exists=.env.local scripts/social-comments-live-check.mts",
     "test:templates": "tsx scripts/template-build.mts",
+    "slugs:check": "tsx --env-file-if-exists=.env.local scripts/slugs-check.mts",
     "site:delete": "tsx --env-file-if-exists=.env.local scripts/site-delete.mts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "0.133.0",
     "@imgly/background-removal-node": "^1.4.5",
+    "@phosphor-icons/react": "2.1.10",
+    "@supabase/ssr": "0.12.7",
     "@supabase/supabase-js": "2.117.3",
     "grammy": "1.46.0",
+    "motion": "14.2.0",
     "next": "16.4.0",
     "openai": "7.32.0",
     "qrcode.react": "4.2.0",
     "react": "19.3.0",
     "react-dom": "19.3.0",
+    "simple-icons": "16.35.0",
+    "stripe": "23.0.0",
     "zod": "4.6.5"
   },
   "devDependencies": {

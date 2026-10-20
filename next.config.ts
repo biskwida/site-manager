@@ -37,6 +37,8 @@ const nextConfig: NextConfig = {
   // Keep the model out of every other function, and keep only what the picture service needs: Linux x64 binaries and
   // the "small" model (the "medium" model's chunks are listed by hash in the package's resources.json).
   outputFileTracingExcludes: {
+    // The landing's demo videos (21 MB) are static files served from public/, never read by a function.
+    "/**": ["./public/landing/**/*"],
     "/api/**": ["./node_modules/onnxruntime-node/bin/napi-v3/darwin/**/*", "./node_modules/onnxruntime-node/bin/napi-v3/win32/**/*", "./node_modules/onnxruntime-node/bin/napi-v3/linux/arm64/**/*"],
     // The package is also traced from its import: drop the "medium" model's chunks, which the picture service never loads.
     "/api/visual": [`./node_modules/@imgly/background-removal-node/dist/{${MEDIUM_MODEL_CHUNKS.join(",")}}`],

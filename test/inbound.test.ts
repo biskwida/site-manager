@@ -137,7 +137,7 @@ describe("handleInbound", () => {
   });
   it("links an own-site venue's own site without a /menu path, plus the dashboard for the owner", async () => {
     const { d, messenger, store, venue } = await setup();
-    await store.updateVenue(venue.id, { site_url: "https://coffique.vercel.app" });
+    await store.updateVenue(venue.id, { site_mode: "own", site_url: "https://coffique.vercel.app" });
     const key = await store.getAdminToken(venue.id);
     await handleInbound(d, { chatRef: "tg:1001", kind: "text", text: "/menu" });
     expect(texts(messenger).at(-1)).toBe(`Сайтът: https://coffique.vercel.app\nQR код и табло: https://site.example/admin/agala?key=${key}`);
@@ -146,6 +146,58 @@ describe("handleInbound", () => {
     await store.upsertMember({ venue_id: venue.id, chat_ref: "fb:901", role: "staff", lang: "bg" });
     await handleInbound(d, { chatRef: "fb:901", kind: "text", text: "меню" });
     expect(texts(messenger).at(-1)).toBe("Сайтът: https://coffique.vercel.app");
+  });
+  it("sends the dashboard link instead of the key link once the venue has an owner account (/menu and welcome-back)", async () => {
+    const { d, messenger, store, venue } = await setup();
+    const key = await store.getAdminToken(venue.id);
+    await handleInbound(d, { chatRef: "tg:1001", kind: "text", text: "/menu" });
+    expect(texts(messenger).at(-1)).toContain(`https://site.example/admin/agala?key=${key}`);
+    await store.linkVenueUser(venue.id, crypto.randomUUID(), "owner");
+    await handleInbound(d, { chatRef: "tg:1001", kind: "text", text: "/menu" });
+    expect(texts(messenger).at(-1)).toContain("QR код и табло: https://site.example/dashboard/agala");
+    expect(texts(messenger).at(-1)).not.toContain(key);
+    await store.upsertMember({ venue_id: venue.id, chat_ref: "fb:810", role: "owner", lang: "bg" });
+    await handleInbound(d, { chatRef: "fb:810", kind: "text", text: "" });
+    expect(texts(messenger).at(-1)).toBe("Вече сте свързани с Кафене „Ъгъла“. Табло: https://site.example/dashboard/agala (влизате с имейла си)");
+    expect(texts(messenger).at(-1)).not.toContain("ключ");
+  });
+  it("the account link never says 'keep this link, it is your key' (welcome in BG and EN); the key link keeps saying it", async () => {
+    const { d, messenger, store, venue } = await setup();
+    const redeem = async (chatRef: string, lang: "bg" | "en") => {
+      const code = await store.createInvite(venue.id, "owner", "2026-10-30T00:00:00.000Z");
+      await handleInbound(d, { chatRef, kind: "text", text: `/start ${code}`, langHint: lang });
+      return texts(messenger).filter((t) => t.includes("Табло") || t.includes("Dashboard")).at(-1) ?? "";
+    };
+    expect(await redeem("tg:2001", "bg")).toContain("пазете линка");
+    await store.linkVenueUser(venue.id, crypto.randomUUID(), "owner");
+    const bg = await redeem("tg:2002", "bg");
+    expect(bg).toContain("Табло: https://site.example/dashboard/agala (влизате с имейла си)");
+    expect(bg).not.toContain("ключ");
+    const en = await redeem("tg:2003", "en");
+    expect(en).toContain("Dashboard: https://site.example/dashboard/agala (log in with your email)");
+    expect(en).not.toContain("key");
+  });
+  it("a staff member on /menu never gets a dashboard or key link, with or without an owner account", async () => {
+    const { d, messenger, store, venue } = await setup();
+    for (const linked of [false, true]) {
+      if (linked) await store.linkVenueUser(venue.id, crypto.randomUUID(), "owner");
+      await handleInbound(d, { chatRef: "tg:1002", kind: "text", text: "/menu" });
+      const last = texts(messenger).at(-1) ?? "";
+      expect(last).toContain("https://site.example/agala");
+      expect(last).not.toMatch(/dashboard|admin|key=/);
+    }
+  });
+  it("falls back to the key link when hasOwnerAccount fails, in /menu and welcome-back", async () => {
+    const { d, messenger, store, venue } = await setup();
+    const key = await store.getAdminToken(venue.id);
+    store.hasOwnerAccount = async () => {
+      throw new Error("venue_users unavailable");
+    };
+    await handleInbound(d, { chatRef: "tg:1001", kind: "text", text: "/menu" });
+    expect(texts(messenger).at(-1)).toContain(`https://site.example/admin/agala?key=${key}`);
+    await store.upsertMember({ venue_id: venue.id, chat_ref: "fb:811", role: "owner", lang: "bg" });
+    await handleInbound(d, { chatRef: "fb:811", kind: "text", text: "" });
+    expect(texts(messenger).at(-1)).toContain(`https://site.example/admin/agala?key=${key}`);
   });
   it("still starts the run when touchMember fails", async () => {
     const { d, runs } = await setup();
@@ -243,7 +295,7 @@ describe("handleInbound: own-site venues", () => {
   it("welcomes the owner with the venue's own site, says it is connected and managed, and never announces publishing", async () => {
     const joined: string[] = [];
     const { d, messenger, store, venue } = await setup({ onOwnerJoined: (id) => joined.push(id) });
-    await store.updateVenue(venue.id, { site_url: "https://coffique.vercel.app" });
+    await store.updateVenue(venue.id, { site_mode: "own", site_url: "https://coffique.vercel.app" });
     const bg = await store.createInvite(venue.id, "owner", "2026-10-10T00:00:00.000Z");
     await handleInbound(d, { chatRef: "fb:950", kind: "text", text: bg });
     const [welcomeBg, ownBg, ...restBg] = texts(messenger);
@@ -266,7 +318,7 @@ describe("handleInbound: own-site venues", () => {
 
   it("gives staff the venue's own site too", async () => {
     const { d, messenger, store, venue } = await setup();
-    await store.updateVenue(venue.id, { site_url: "https://coffique.vercel.app" });
+    await store.updateVenue(venue.id, { site_mode: "own", site_url: "https://coffique.vercel.app" });
     const code = await store.createInvite(venue.id, "staff", "2026-10-10T00:00:00.000Z");
     await handleInbound(d, { chatRef: "fb:952", kind: "text", text: code });
     expect(texts(messenger).at(-1)).toMatch(/Сайт: https:\/\/coffique\.vercel\.app$/);
@@ -279,7 +331,7 @@ describe("handleInbound: WordPress /connect and venue switching on Meta channels
     const { d, messenger, store, venue } = await setup({
       connect: async (venueId, siteUrl, code) => {
         calls.push([venueId, siteUrl, code]);
-        return { ok: true, site: { name: "Smoke Café" } as never, destination: { config: { site_url: "https://cafe.example" } } as never };
+        return { ok: true, site: { name: "Smoke Café" } as never, destination: { config: { site_mode: "own", site_url: "https://cafe.example" } } as never };
       },
     });
     await store.upsertMember({ venue_id: venue.id, chat_ref: "wa:359888123456", role: "owner", lang: "bg" });

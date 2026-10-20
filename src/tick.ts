@@ -15,6 +15,8 @@ import { COMMENT_POST_WINDOW_MS, pollVenueComments, purgeOldComments } from "./s
 import { COMMENT_PROPOSAL_TTL_MS, commentsOfSet, proposalTargets, proposalTtlHours, proposeForComments } from "./social/comments-propose";
 import type { DraftFn } from "./social/comments-draft";
 import { runCommentDigests } from "./social/comments-digest";
+import { planIncludes } from "./billing/entitlements";
+import { pauseExpiredTrials, sendTrialReminders, type TrialBilling } from "./billing/reminders";
 
 export interface TickDeps {
   store: Store;
@@ -28,6 +30,8 @@ export interface TickDeps {
   deployer?: Deployer | null;
   /** Comment reply drafting (src/social/comments-draft.ts); null/undefined = comments are polled but never proposed. */
   comments?: { draft: DraftFn } | null;
+  /** Billing (BILLING_ENABLED on): the free trial's end and its reminders. null/undefined = billing is off, the tick does none of it. */
+  billing?: TrialBilling | null;
 }
 export interface TickReport {
   applied: string[];
@@ -49,6 +53,10 @@ export interface TickReport {
   comments_proposed?: number;
   /** Venue ids that got their daily comment digest this tick (global tick only). */
   digests?: string[];
+  /** Venue ids whose free trial ran out and were paused this tick (billing on only). */
+  trials_paused?: string[];
+  /** Trial reminders sent this tick (billing on only). */
+  trial_reminders?: number;
 }
 
 const HOUR = 3_600_000;
@@ -134,6 +142,18 @@ export async function runTick(d: TickDeps): Promise<TickReport> {
     }
   }
 
+  // 3b. The free trial's end (billing on only): pause trials that ran out, then send the two reminders (once each). Pausing stops NEW owner
+  //     proposals only; the due scheduled sets above and the auto reverts of step 3 have already run, and nothing goes offline.
+  if (d.billing?.config.billingEnabled) {
+    try {
+      const b = { store: d.store, messenger: d.messenger, billing: d.billing, venueId: d.venueId };
+      report.trials_paused = await pauseExpiredTrials(b, d.now);
+      report.trial_reminders = await sendTrialReminders(b, d.now);
+    } catch (e) {
+      console.error("[tick] trial end failed:", e instanceof Error ? e.message : e);
+    }
+  }
+
   // 4. Reminders for sets due within 24 h.
   const until = new Date(d.now.getTime() + REMIND_WINDOW_MS).toISOString();
   for (const cs of await d.store.listUpcoming(now, until, d.venueId)) {
@@ -179,6 +199,9 @@ export async function runTick(d: TickDeps): Promise<TickReport> {
     //    "off" venues only show them on the dashboard). The per-venue tick runs before an owner's agent turn inside the webhook
     //    budget: it makes no Graph read and no model call, and only re-sends that venue's held comments (deferred, drafts
     //    stored), so the owner who just wrote gets them at once. Keep 30 days: the purge runs on the global tick only.
+    // With billing on, comments are read and drafted only for venues whose plan includes them (a free trial with no plan has every feature).
+    // Paused venues are not gated here: the owner decides what to do with replies, and nothing is posted before their tap.
+    const commentsAllowed = (venue: Pick<Venue, "plan">) => !d.billing?.config.billingEnabled || planIncludes(venue.plan, "comments");
     report.comments_found = 0;
     report.comments_proposed = 0;
     let venues: Venue[] = [];
@@ -190,6 +213,7 @@ export async function runTick(d: TickDeps): Promise<TickReport> {
     for (const venue of venues) {
       // One venue's failure (Graph, drafting) never stops the others.
       try {
+        if (!commentsAllowed(venue)) continue; // billing on: the plan has no comments, so nothing is read or drafted for it
         if (!d.venueId) {
           const r = await pollVenueComments(d.sync, venue, d.now);
           report.comments_found += r.inserted.length;
@@ -214,7 +238,7 @@ export async function runTick(d: TickDeps): Promise<TickReport> {
     //     per-venue tick before an owner's message leaves it to the cron.
     if (!d.venueId && d.comments && d.messenger) {
       try {
-        const r = await runCommentDigests({ store: d.store, messenger: d.messenger, now: () => d.now, draft: d.comments.draft, log: d.sync.log }, { now: d.now });
+        const r = await runCommentDigests({ store: d.store, messenger: d.messenger, now: () => d.now, draft: d.comments.draft, log: d.sync.log }, { now: d.now, eligible: commentsAllowed });
         report.digests = r.sent;
       } catch (e) {
         console.error("[tick] comment digests failed:", e instanceof Error ? e.name : "error");

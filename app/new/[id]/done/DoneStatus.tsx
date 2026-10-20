@@ -52,6 +52,10 @@ interface Props {
   fetcher?: typeof fetch;
   /** This server can connect Facebook/Instagram for posting: show the pointer to the dashboard's card. */
   social?: boolean;
+  /** `/onboarding/<slug>`, when the signed-in account owns this venue: the "Continue setup" link. */
+  onboardingHref?: string;
+  /** `/login?next=…`, when this draft was started signed in but published with no session: "Log in to save this business to your account". */
+  loginHref?: string;
 }
 
 type Fresh = { code: string; links: AppLink[]; chats: number };
@@ -63,7 +67,7 @@ const isLocalized = (d: unknown): d is { bg: string; en: string } =>
   typeof d === "object" && d !== null && typeof (d as { bg?: unknown }).bg === "string" && typeof (d as { en?: unknown }).en === "string";
 
 /** App hand-off (deep links, raw code, QR), then a status line polled every 5 s until the site is live. */
-export function DoneStatus({ id, slug, code, links, apps, adminKey, baseUrl, initial, fetcher = defaultFetch, social = false }: Props) {
+export function DoneStatus({ id, slug, code, links, apps, adminKey, baseUrl, initial, fetcher = defaultFetch, social = false, onboardingHref, loginHref }: Props) {
   const { lang, t } = useLang();
   const [status, setStatus] = useState(initial);
   // "Connect another app": a fresh single-use owner code from POST /invite; cleared once one more chat links with it.
@@ -221,6 +225,22 @@ export function DoneStatus({ id, slug, code, links, apps, adminKey, baseUrl, ini
       </section>
 
       <ul className="mt-5 grid gap-2">
+        {loginHref && (
+          <li>
+            <a href={loginHref} className={link}>
+              <span className="font-semibold text-ink">{t("done.loginToSave")}</span>
+              <span className="text-sm text-ink-soft">{t("done.loginToSaveHint")}</span>
+            </a>
+          </li>
+        )}
+        {onboardingHref && (
+          <li>
+            <a href={onboardingHref} className={link}>
+              <span className="font-semibold text-ink">{t("done.continueSetup")}</span>
+              <span className="text-sm text-ink-soft">{t("done.continueSetupHint")}</span>
+            </a>
+          </li>
+        )}
         <li>
           <a href={hostedUrl} className={link}>
             <span className="font-semibold text-ink">{t("done.hosted")}</span>

@@ -45,7 +45,7 @@ describe("startDeploy", () => {
 
   it("skips a venue with its own site: no provider project, no deploy record", async () => {
     const { store, venue } = await makeDemo();
-    await store.updateVenue(venue.id, { site_url: "https://coffique.vercel.app" });
+    await store.updateVenue(venue.id, { site_mode: "own", site_url: "https://coffique.vercel.app" });
     const deployer = new FakeDeployer();
     const logs: string[] = [];
     await startDeploy({ store, deployer, feedUrlFor, now: () => T0, log: (s: string) => logs.push(s) }, venue.id);

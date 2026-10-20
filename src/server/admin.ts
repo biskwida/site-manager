@@ -5,12 +5,15 @@ import { invertChanges } from "../domain/changes";
 import { isSoldOut } from "../domain/effective";
 import { baseLang, unkeep, unkeepTexts } from "../domain/format";
 import { renderPreview } from "../domain/preview";
-import { isBoostPlanSet, isBoostPlanUndoSet, TEMPLATE_IDS, type ChangeSet, type DeployInfo, type TemplateId, type Venue, type VenueStatus } from "../domain/types";
+import { isBoostPlanSet, isBoostPlanUndoSet, TEMPLATE_IDS, type BillingStatus, type ChangeSet, type DeployInfo, type Plan, type SiteMode, type TemplateId, type Venue, type VenueStatus } from "../domain/types";
+import { lockedFeatures } from "../billing/entitlements";
+import type { Feature } from "../billing/plans";
+import { canBuyWebsiteLater, hasStoredSubscription, socialWebsiteNote, trialDaysLeft, websiteAllowed } from "../billing/plans";
 import type { Deployer, DeployInput, DomainInstructions } from "../deploy/types";
 import { normalizeDomain } from "../deploy/vercel-domains";
 import type { DestinationStatus, Store, SyncStatus } from "../store/types";
 import { formatDateTime } from "../time";
-import { changeUsage } from "../store/usage";
+import { changeUsage, type ChangeUsage } from "../store/usage";
 import { accentAfterTemplateSwitch } from "../wizard/schema";
 import { connectedApps, type ConnectedApp } from "./connect-apps";
 import { publishedIn, safeLink } from "../destinations/social-common";
@@ -24,8 +27,10 @@ export interface AdminOverview {
   status: VenueStatus;
   /** True when this server has no deployer (no VERCEL_TOKEN): the hosted /<slug> is the site; no deploy record, no custom domain. */
   hosted: boolean;
-  /** True when the venue has its own site (Venue.site_url, built and hosted elsewhere): no deploy, template switch or custom domain. */
+  /** True when the venue has its own site (Venue.site_mode "own", built and hosted elsewhere at Venue.site_url): no deploy, template switch or custom domain. */
   own_site?: boolean;
+  /** The venue's site mode; "none" (social media only) hides the site, template and domain cards like own_site does. */
+  site_mode?: SiteMode;
   /** Always null when `hosted` or `own_site`. */
   deploy: DeployInfo | null;
   /** The venue's own site when `own_site`; else the provider URL when the deploy is ready, otherwise our hosted copy. */
@@ -42,16 +47,60 @@ export interface AdminOverview {
   connected_apps: ConnectedApp[];
   /** "Facebook and Instagram" card. */
   social?: SocialOverview;
-  /** Monthly change limit (src/domain/limits.ts): changes applied this calendar month in the venue's zone; limit null = unlimited. */
-  changes_this_month?: { used: number; limit: number | null };
+  /**
+   * Change limit (src/domain/limits.ts): changes applied this calendar month in the venue's zone; limit null = unlimited. In a free
+   * trial (billing on, no subscription) it counts the whole trial instead and `trial` is true ("Changes in your trial: 6 / 20").
+   */
+  changes_this_month?: { used: number; limit: number | null; trial?: true };
   /** "Comments" card (comment replies, 2026-10-15). */
   comments?: CommentsOverview;
+  /** The plan and trial card (billing, 2026-10-19). Present only when billing is on. */
+  billing?: BillingOverview;
+}
+
+export interface BillingOverview {
+  plan: Plan | null;
+  status: BillingStatus | null;
+  /** Whole days of free trial left while the status is "trialing"; null otherwise. */
+  trial_days_left: number | null;
+  trial_ends_at: string | null;
+  /** A Stripe subscription exists that is not canceled (live, paused or unpaid): it is managed in the Customer Portal, not by a new Checkout. */
+  subscribed: boolean;
+  /** A Stripe customer exists, so the Customer Portal can open. */
+  has_customer: boolean;
+  /** The website add-on is paid and the venue has no Claudia site yet: the dashboard offers "Build your website". */
+  can_build_website: boolean;
+  /** An Admin or Both subscriber with no Claudia site who has not paid the 199 € website yet: the dashboard offers "Add a website". */
+  can_buy_website: boolean;
+  /** A Social media subscriber with no Claudia site: the dashboard says a website comes with Admin or Both. */
+  website_note: boolean;
+  /** The free trial's changes used so far over the whole trial, against TRIAL_CHANGE_LIMIT; null outside a free trial. */
+  trial_changes?: { used: number; limit: number } | null;
+  /** Features the venue's plan does not include (shown as locked cards with the upgrade link); empty when nothing is locked. */
+  locked?: Feature[];
+}
+
+function billingOverview(venue: Venue, now: Date, usage: ChangeUsage): BillingOverview {
+  const planStates: (Venue["billing_status"])[] = ["trialing", "active", "past_due"]; // a paused or canceled venue shows its status, not locked cards
+  return {
+    plan: venue.plan,
+    status: venue.billing_status,
+    trial_days_left: venue.billing_status === "trialing" && venue.trial_ends_at ? trialDaysLeft(venue, now) : null,
+    trial_ends_at: venue.trial_ends_at,
+    subscribed: hasStoredSubscription(venue),
+    has_customer: venue.stripe_customer_id !== null,
+    can_build_website: venue.site_mode !== "claudia" && venue.status === "live" && websiteAllowed(venue),
+    can_buy_website: canBuyWebsiteLater(venue),
+    website_note: socialWebsiteNote(venue),
+    trial_changes: usage.kind === "trial" && usage.limit !== null ? { used: usage.used, limit: usage.limit } : null,
+    locked: planStates.includes(venue.billing_status) ? lockedFeatures(venue, { billingEnabled: true }) : [],
+  };
 }
 
 /** How many proposed sets the generic pending list shows. */
 const PENDING_MAX = 20;
 
-export async function adminOverview(store: Store, venue: Venue, now: Date, baseUrl = "", opts: { hosted?: boolean; social?: { facebook: boolean; instagram: boolean } } = {}): Promise<AdminOverview> {
+export async function adminOverview(store: Store, venue: Venue, now: Date, baseUrl = "", opts: { hosted?: boolean; social?: { facebook: boolean; instagram: boolean }; billing?: boolean } = {}): Promise<AdminOverview> {
   const [pending, scheduled, log, site, members] = await Promise.all([
     // Comment sets are decided in the Comments card or the chat only: fetched wider, then left out of the generic list.
     store.listChangeSets(venue.id, { status: ["proposed"], limit: 200 }),
@@ -61,11 +110,12 @@ export async function adminOverview(store: Store, venue: Venue, now: Date, baseU
     store.listMembers(venue.id),
   ]);
   const nowMs = now.getTime();
+  const usage = await changeUsage(store, venue, now); // one count for "changes this month" / the trial counter and the billing card
   const hosted = opts.hosted ?? false;
-  const ownSite = venue.site_url !== null && venue.site_url !== "";
+  const ownSite = venue.site_mode === "own" && venue.site_url !== null && venue.site_url !== "";
   // In hosted mode a deploy record left from an earlier setup means nothing: no provider is reachable from this server.
-  // An own site is not ours to deploy either, whatever record an earlier template setup left behind.
-  const deploy = hosted || ownSite ? null : venue.deploy;
+  // An own site (or none) is not ours to deploy either, whatever record an earlier template setup left behind.
+  const deploy = hosted || venue.site_mode !== "claudia" ? null : venue.deploy;
   return {
     venue: { id: venue.id, slug: venue.slug, name: venue.name, tz: venue.tz, default_lang: venue.default_lang },
     now: now.toISOString(),
@@ -74,6 +124,7 @@ export async function adminOverview(store: Store, venue: Venue, now: Date, baseU
     status: venue.status,
     hosted,
     own_site: ownSite,
+    site_mode: venue.site_mode,
     deploy,
     site_url: ownSite ? (venue.site_url as string) : deploy?.status === "ready" && deploy.url ? deploy.url : `${baseUrl}/${venue.slug}`,
     custom_domain: deploy?.custom_domain ?? null,
@@ -86,14 +137,14 @@ export async function adminOverview(store: Store, venue: Venue, now: Date, baseU
     wordpress: await wordPressOverview(store, venue.id),
     connected_apps: connectedApps(members),
     social: await socialOverview(store, venue.id, opts.social ?? { facebook: false, instagram: false }),
-    changes_this_month: await changesThisMonth(store, venue, now),
+    changes_this_month: changesThisMonth(usage),
     comments: await commentsOverview(store, venue, now),
+    ...(opts.billing ? { billing: billingOverview(venue, now, usage) } : {}),
   };
 }
 
-async function changesThisMonth(store: Store, venue: Venue, now: Date): Promise<{ used: number; limit: number | null }> {
-  const u = await changeUsage(store, venue, now);
-  return { used: u.used, limit: u.limit };
+function changesThisMonth(u: ChangeUsage): { used: number; limit: number | null; trial?: true } {
+  return { used: u.used, limit: u.limit, ...(u.kind === "trial" ? { trial: true as const } : {}) };
 }
 
 export type AdminActionName = "apply" | "reject" | "cancel" | "undo";
@@ -221,11 +272,12 @@ export interface AdminSiteDeps {
 }
 export type SetTemplateResult =
   | { ok: true; template: TemplateId; deploy: DeployInfo | null }
-  | { ok: false; code: "unknown_template" | "busy" | "failed" | "own_site"; error: string; bg: string; en: string };
+  | { ok: false; code: "unknown_template" | "busy" | "failed" | "own_site" | "no_site"; error: string; bg: string; en: string };
 
 const UNKNOWN_TEMPLATE: SetTemplateResult = { ok: false, code: "unknown_template", error: "Unknown template.", bg: "Непознат шаблон.", en: "Unknown template." };
 const SAVE_FAILED: SetTemplateResult = { ok: false, code: "failed", error: "The template could not be saved.", bg: "Шаблонът не можа да бъде запазен. Опитайте отново.", en: "The template could not be saved. Try again." };
 const OWN_SITE: SetTemplateResult = { ok: false, code: "own_site", error: "This venue has its own site; templates do not apply.", bg: "Сайтът ви е изграден отделно и не използва шаблон.", en: "Your site is built separately and does not use a template." };
+const NO_WEBSITE: SetTemplateResult = { ok: false, code: "no_site", error: "This venue has no website; templates do not apply.", bg: "Нямате уебсайт, затова няма шаблон за смяна.", en: "You have no website, so there is no template to change." };
 const BUSY: SetTemplateResult = { ok: false, code: "busy", error: "The site is publishing right now.", bg: "Сайтът се публикува в момента. Опитайте след минута.", en: "The site is publishing right now. Try again in a minute." };
 
 /**
@@ -234,7 +286,8 @@ const BUSY: SetTemplateResult = { ok: false, code: "busy", error: "The site is p
  * concurrent switches cannot both start one. Never calls startDeploy. Refuses for a venue with its own site.
  */
 export async function setTemplate(d: AdminSiteDeps, venue: Venue, template: unknown): Promise<SetTemplateResult> {
-  if (venue.site_url) return OWN_SITE; // its own site never wears one of our templates
+  if (venue.site_mode === "own") return OWN_SITE; // its own site never wears one of our templates
+  if (venue.site_mode === "none") return NO_WEBSITE;
   if (typeof template !== "string" || !(TEMPLATE_IDS as readonly string[]).includes(template)) return UNKNOWN_TEMPLATE;
   const id = template as TemplateId;
   const deploy = venue.deploy;

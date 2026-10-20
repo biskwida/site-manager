@@ -9,7 +9,7 @@ import type { Decide } from "./useAdminOverview";
 const TONE: Partial<Record<ChangeSetStatus, "good" | "warn">> = { applied: "good", reverted: "warn" };
 
 /** Decided sets, newest first: before → after from the stored preview text; Undo only on applied sets. With a monthly change limit, the header shows this month's count. */
-export function LogList({ sets, tz, decide, usage }: { sets: ChangeSet[]; tz: string; decide: Decide; usage?: { used: number; limit: number | null } }) {
+export function LogList({ sets, tz, decide, usage }: { sets: ChangeSet[]; tz: string; decide: Decide; usage?: { used: number; limit: number | null; trial?: boolean } }) {
   const { lang, t } = useLang();
   const limit = usage?.limit ?? null;
   const reached = usage !== undefined && limit !== null && usage.used >= limit;
@@ -17,8 +17,8 @@ export function LogList({ sets, tz, decide, usage }: { sets: ChangeSet[]; tz: st
     <Section id="log" title={t("admin.log")}>
       {usage && limit !== null && (
         <p className="mb-4 flex flex-wrap items-center gap-2 text-sm text-ink-soft">
-          <Chip tone={reached ? "warn" : "plain"}>{t("admin.changesThisMonth", { used: String(usage.used), limit: String(limit) })}</Chip>
-          {reached && <span>{t("admin.limitReached")}</span>}
+          <Chip tone={reached ? "warn" : "plain"}>{t(usage.trial ? "admin.changesInTrial" : "admin.changesThisMonth", { used: String(usage.used), limit: String(limit) })}</Chip>
+          {reached && <span>{t(usage.trial ? "admin.trialLimitReached" : "admin.limitReached")}</span>}
         </p>
       )}
       {sets.length === 0 ? <Empty /> : (

@@ -38,10 +38,22 @@ export function buildPreviewState(d: WizardDraft, media: Media[], now: Date): Si
     wizard_draft: null,
     instagram_import: null,
     site_url: null,
+    site_mode: "claudia",
+    site_platform: null,
+    created_via: "wizard",
+    plan: null,
+    billing_status: null,
+    trial_started_at: null,
+    trial_ends_at: null,
+    past_due_since: null,
+    stripe_customer_id: null,
+    stripe_subscription_id: null,
+    trial_reminder_sent: null,
+    website_fee_paid: false,
   };
   const categories: Category[] = d.categories.map((c, i) => {
     const n = bothLangs(c.name_bg, c.name_en);
-    return { id: `prev-cat-${c.key}`, venue_id: "preview", name_bg: n.bg, name_en: n.en, position: i, active: true };
+    return { id: `prev-cat-${c.key}`, venue_id: "preview", name_bg: n.bg, name_en: n.en, position: i, active: c.active !== false };
   });
   const items: Item[] = d.categories.flatMap((c) =>
     c.items.map((it, j): Item => {
@@ -61,7 +73,7 @@ export function buildPreviewState(d: WizardDraft, media: Media[], now: Date): Si
         is_special: false,
         special_expires_at: null,
         position: j,
-        active: true,
+        active: it.active !== false,
         created_at: iso,
         updated_at: iso,
       };

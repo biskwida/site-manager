@@ -26,6 +26,32 @@ describe("handleTickRequest", () => {
     expect(hdr.status).toBe(200);
   });
 
+  it("accepts the signed-in owner by ?slug= (POST needs a same-host Origin), scoped to that venue", async () => {
+    const demo = await makeDemo();
+    const other = await demo.store.createVenue({ slug: "other", name: "Other" });
+    const mk = (venue_id: string) => demo.store.createChangeSet({ venue_id, chat_ref: null, summary_bg: "", summary_en: "", preview_bg: "", preview_en: "", source: "text", status: "scheduled", apply_at: "2026-10-09T08:00:00.000Z", changes: [] });
+    const a = await mk(demo.venue.id);
+    await mk(other.id);
+    await demo.store.linkVenueUser(demo.venue.id, "u1", "owner");
+    await demo.store.linkVenueUser(demo.venue.id, "u2", "staff");
+    let who: string | null = "u1";
+    const deps = { config: { tickSecret: "tick" }, store: demo.store, messenger: new FakeMessenger(), sessionUser: async () => (who ? { id: who } : null) };
+    const post = (q: string, headers: Record<string, string> = { origin: "http://x" }) => handleTickRequest(new Request(`http://x/api/tick?${q}`, { method: "POST", headers }), deps, T0);
+    expect((await post("slug=other")).status).toBe(401); // owns another venue
+    expect((await post("slug=agala", {})).status).toBe(403); // cookie POST without Origin
+    expect((await post("slug=agala", { origin: "https://evil.example" })).status).toBe(403);
+    expect((await post("slug=agala&key=wrong")).status).toBe(401); // a bad key is no fallback
+    who = "u2";
+    expect((await post("slug=agala")).status).toBe(401); // staff
+    who = null;
+    expect((await post("slug=agala")).status).toBe(401);
+    who = "u1";
+    const ok = await post("slug=agala");
+    expect(ok.status).toBe(200);
+    expect(await ok.json()).toMatchObject({ applied: [a.id] });
+    expect((await handleTickRequest(new Request("http://x/api/tick?slug=agala"), deps, T0)).status).toBe(200); // GET: nothing sensitive, no Origin needed
+  });
+
   it("polls the venue's deployment on an admin-key tick when a deployer is wired", async () => {
     const demo = await makeDemo();
     const other = await demo.store.createVenue({ slug: "other", name: "Other" });

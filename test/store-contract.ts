@@ -2,7 +2,8 @@
 import { describe, expect, it } from "vitest";
 import { planChanges } from "@/src/domain/changes";
 import type { Change } from "@/src/domain/types";
-import { COMMENT_REDACTED, type NewSocialComment, type Store } from "@/src/store/types";
+import { COMMENT_REDACTED, SlugTakenError, type NewSocialComment, type Store } from "@/src/store/types";
+import { emptyDraft } from "@/src/wizard/schema";
 import { NOW } from "./fixtures";
 
 const LATER = "2026-10-09T10:00:00.000Z";
@@ -14,7 +15,13 @@ const only = (venues: { id: string }[], ...ids: string[]) => venues.map((v) => v
  * Behaviour every Store must have. Call with a factory that yields an empty store, and a probe that says whether a storage
  * object exists at a media row's storage_path in that store (used by the draft-cleanup storage test).
  */
-export function storeContract(name: string, make: () => Promise<Store>, storageHas: (s: Store, path: string) => Promise<boolean>) {
+export function storeContract(
+  name: string,
+  make: () => Promise<Store>,
+  storageHas: (s: Store, path: string) => Promise<boolean>,
+  /** A user id the store accepts for venue_users (a live database needs a real auth.users row); a random uuid by default. */
+  newUserId: () => Promise<string> = async () => crypto.randomUUID(),
+) {
   describe(`${name} store`, () => {
     it("creates a venue with defaults and reads it back by id and slug", async () => {
       const s = await make();
@@ -299,6 +306,51 @@ export function storeContract(name: string, make: () => Promise<Store>, storageH
         expect((await s.getVenueBySlug("t13a"))?.site_url).toBe("https://a.example");
         expect((await s.updateVenue(a.id, { name: "A2" })).site_url).toBe("https://a.example"); // untouched by other patches
         expect((await s.updateVenue(a.id, { site_url: null })).site_url).toBeNull();
+        expect(a.site_mode).toBe("claudia");
+        expect(b.site_mode).toBe("claudia"); // a URL alone changes nothing: the mode is explicit
+        expect((await s.updateVenue(a.id, { site_mode: "none" })).site_mode).toBe("none");
+        expect((await s.getVenueBySlug("t13a"))?.site_mode).toBe("none");
+        expect((await s.updateVenue(a.id, { name: "A3" })).site_mode).toBe("none"); // untouched by other patches
+      } finally {
+        await s.deleteVenue(a.id);
+        await s.deleteVenue(b.id);
+      }
+    });
+
+    it("stores an own-site venue's platform, null by default, and a live venue with an open wizard draft can be claimed for publish", async () => {
+      const s = await make();
+      const a = await s.createVenue({ slug: "t13p", name: "A", site_mode: "own", site_url: "https://own.example", site_platform: "wordpress" });
+      const b = await s.createVenue({ slug: "t13q", name: "B" });
+      try {
+        expect(a.site_platform).toBe("wordpress");
+        expect(b.site_platform).toBeNull();
+        expect((await s.getVenue(a.id)).site_platform).toBe("wordpress");
+        expect((await s.updateVenue(a.id, { site_platform: "wix" })).site_platform).toBe("wix");
+        expect((await s.updateVenue(a.id, { name: "A2" })).site_platform).toBe("wix"); // untouched by other patches
+        expect((await s.updateVenue(a.id, { site_platform: null })).site_platform).toBeNull();
+        // how the venue was made: operator by default; a duplicate slug is a SlugTakenError
+        expect(b.created_via).toBe("operator");
+        const c = await s.createVenue({ slug: "t13r", name: "C", created_via: "start" });
+        try {
+          expect((await s.getVenue(c.id)).created_via).toBe("start");
+          expect((await s.updateVenue(c.id, { name: "C2" })).created_via).toBe("start"); // untouched by other patches
+          await expect(s.createVenue({ slug: "t13r", name: "dup" })).rejects.toBeInstanceOf(SlugTakenError);
+          await expect(s.updateVenue(c.id, { slug: "t13q" })).rejects.toBeInstanceOf(SlugTakenError);
+          // hidden categories and dishes can be inserted hidden, and a sold-out mark can be carried
+          const cat = await s.insertCategory({ venue_id: c.id, name_bg: "К", name_en: "C", position: 0, active: false });
+          const it = await s.insertItem({ venue_id: c.id, category_id: cat.id, name_bg: "Е", name_en: "E", desc_bg: "", desc_en: "", price_eur: 1, allergens: [], position: 0, active: false, sold_out_until: "2030-01-01T00:00:00.000Z" });
+          expect([cat.active, it.active, it.sold_out_until]).toEqual([false, false, "2030-01-01T00:00:00.000Z"]);
+        } finally {
+          await s.deleteVenue(c.id);
+        }
+        // claimPublish: a draft, or a live venue carrying a wizard draft (the website add-on); never a plain live venue
+        expect(await s.claimPublish(b.id, NOW)).toBe(false);
+        await s.updateVenue(b.id, { wizard_draft: emptyDraft("classic") });
+        expect(await s.claimPublish(b.id, NOW)).toBe(true);
+        expect(await s.claimPublish(b.id, NOW)).toBe(false); // held
+        await s.releasePublish(b.id);
+        await s.updateVenue(b.id, { wizard_draft: null });
+        expect(await s.claimPublish(b.id, NOW)).toBe(false); // published: never again
       } finally {
         await s.deleteVenue(a.id);
         await s.deleteVenue(b.id);
@@ -968,6 +1020,189 @@ export function storeContract(name: string, make: () => Promise<Store>, storageH
       expect(await s.getSurroundings(v.id)).toEqual(next);
       await s.deleteVenue(v.id);
       expect(await s.getSurroundings(v.id)).toBeNull();
+    });
+
+    it("links accounts to venues: idempotent link, list only the linked venues, owner check, venue delete cascades", async () => {
+      const s = await make();
+      const a = await s.createVenue({ slug: "t-u1", name: "A" });
+      const b = await s.createVenue({ slug: "t-u2", name: "B" });
+      const c = await s.createVenue({ slug: "t-u3", name: "C" });
+      const [u1, u2] = [await newUserId(), await newUserId()];
+      expect(await s.listVenuesForUser(u1)).toEqual([]);
+      await s.linkVenueUser(a.id, u1, "owner");
+      await s.linkVenueUser(a.id, u1, "owner"); // a second link changes nothing
+      await s.linkVenueUser(b.id, u1, "staff");
+      await s.linkVenueUser(c.id, u2, "owner");
+      expect((await s.listVenuesForUser(u1)).map((v) => v.id)).toEqual([a.id, b.id]);
+      expect((await s.listVenuesForUser(u2)).map((v) => v.id)).toEqual([c.id]);
+      expect(await s.isVenueOwner(a.id, u1)).toBe(true);
+      expect(await s.isVenueOwner(b.id, u1)).toBe(false); // staff
+      expect(await s.isVenueOwner(a.id, u2)).toBe(false); // not linked
+      await s.linkVenueUser(a.id, u1, "staff"); // never downgrades
+      expect(await s.isVenueOwner(a.id, u1)).toBe(true);
+      expect(await s.hasOwnerAccount(a.id)).toBe(true);
+      expect(await s.hasOwnerAccount(b.id)).toBe(false); // only a staff link
+      expect(await s.hasOwnerAccount(crypto.randomUUID())).toBe(false);
+      await s.deleteVenue(a.id);
+      expect(await s.hasOwnerAccount(a.id)).toBe(false);
+      expect((await s.listVenuesForUser(u1)).map((v) => v.id)).toEqual([b.id]);
+    });
+
+    it("claims pending account invites once, by email, ignoring case", async () => {
+      const s = await make();
+      const a = await s.createVenue({ slug: "t-i1", name: "A" });
+      const b = await s.createVenue({ slug: "t-i2", name: "B" });
+      const email = `Owner-${crypto.randomUUID()}@Example.com`;
+      const [u1, u2] = [await newUserId(), await newUserId()];
+      await s.createPendingAccountInvite(a.id, email);
+      await s.createPendingAccountInvite(a.id, email.toLowerCase()); // the same invite again
+      await s.createPendingAccountInvite(b.id, email.toUpperCase());
+      await s.createPendingAccountInvite(b.id, `other-${crypto.randomUUID()}@example.com`);
+      expect(await s.claimAccountInvites(u2, `nobody-${crypto.randomUUID()}@example.com`)).toEqual([]);
+      expect((await s.claimAccountInvites(u1, email.toLowerCase())).sort()).toEqual([a.id, b.id].sort());
+      expect(await s.claimAccountInvites(u1, email)).toEqual([]); // once
+      expect(await s.claimAccountInvites(u2, email)).toEqual([]);
+      expect((await s.listVenuesForUser(u1)).map((v) => v.id).sort()).toEqual([a.id, b.id].sort());
+      expect(await s.isVenueOwner(a.id, u1)).toBe(true);
+      expect(await s.listVenuesForUser(u2)).toEqual([]);
+      // A claim lifts an earlier staff link to owner.
+      const c = await s.createVenue({ slug: "t-i3", name: "C" });
+      await s.linkVenueUser(c.id, u1, "staff");
+      expect(await s.isVenueOwner(c.id, u1)).toBe(false);
+      await s.createPendingAccountInvite(c.id, email);
+      expect(await s.claimAccountInvites(u1, email)).toEqual([c.id]);
+      expect(await s.isVenueOwner(c.id, u1)).toBe(true);
+      // Inviting again after a claim opens a new pending invite.
+      await s.createPendingAccountInvite(a.id, email);
+      expect(await s.claimAccountInvites(u2, email)).toEqual([a.id]);
+      expect((await s.listVenuesForUser(u2)).map((v) => v.id)).toEqual([a.id]);
+    });
+
+    it("billing: venues start with no plan or status; billing fields are written with updateVenue and untouched by other patches", async () => {
+      const s = await make();
+      const v = await s.createVenue({ slug: "t-b1", name: "B" });
+      try {
+        expect(v).toMatchObject({ plan: null, billing_status: null, trial_started_at: null, trial_ends_at: null, past_due_since: null, stripe_customer_id: null, stripe_subscription_id: null, trial_reminder_sent: null, website_fee_paid: false });
+        const cus = `cus_${crypto.randomUUID()}`;
+        const u = await s.updateVenue(v.id, { plan: "admin", billing_status: "past_due", past_due_since: "2026-10-15T09:00:00.000Z", stripe_customer_id: cus, stripe_subscription_id: "sub_1", trial_reminder_sent: "soon", website_fee_paid: true });
+        expect(u).toMatchObject({ plan: "admin", billing_status: "past_due", past_due_since: "2026-10-15T09:00:00.000Z", stripe_customer_id: cus, stripe_subscription_id: "sub_1", trial_reminder_sent: "soon", website_fee_paid: true });
+        expect((await s.updateVenue(v.id, { name: "B2" })).plan).toBe("admin"); // untouched by other patches
+        expect((await s.updateVenue(v.id, { plan: null, past_due_since: null })).past_due_since).toBeNull();
+        expect((await s.findVenueByStripeCustomer(cus))?.id).toBe(v.id);
+        expect(await s.findVenueByStripeCustomer(`cus_${crypto.randomUUID()}`)).toBeNull();
+      } finally {
+        await s.deleteVenue(v.id);
+      }
+    });
+
+    it("billing: startTrialIfNone starts a trial once and never restarts or extends it", async () => {
+      const s = await make();
+      const v = await s.createVenue({ slug: "t-b2", name: "B" });
+      const g = await s.createVenue({ slug: "t-b3", name: "G" });
+      try {
+        const first = { trial_started_at: "2026-10-19T09:00:00.000Z", trial_ends_at: "2026-11-02T09:00:00.000Z" };
+        expect(await s.startTrialIfNone(v.id, first)).toBe(true);
+        expect(await s.getVenue(v.id)).toMatchObject({ ...first, billing_status: "trialing" });
+        expect(await s.startTrialIfNone(v.id, { trial_started_at: "2026-10-25T09:00:00.000Z", trial_ends_at: "2026-11-08T09:00:00.000Z" })).toBe(false);
+        expect(await s.getVenue(v.id)).toMatchObject({ ...first, billing_status: "trialing" });
+        // a venue billing already knows (grandfathered, subscribed) never gets one
+        await s.updateVenue(g.id, { plan: "both", billing_status: "active" });
+        expect(await s.startTrialIfNone(g.id, first)).toBe(false);
+        expect(await s.getVenue(g.id)).toMatchObject({ billing_status: "active", trial_started_at: null });
+        // concurrent starts: exactly one wins
+        const h = await s.createVenue({ slug: "t-b4", name: "H" });
+        try {
+          const wins = await Promise.all([s.startTrialIfNone(h.id, first), s.startTrialIfNone(h.id, first), s.startTrialIfNone(h.id, first)]);
+          expect(wins.filter(Boolean)).toHaveLength(1);
+        } finally {
+          await s.deleteVenue(h.id);
+        }
+        await expect(s.startTrialIfNone(crypto.randomUUID(), first)).rejects.toThrow();
+      } finally {
+        await s.deleteVenue(v.id);
+        await s.deleteVenue(g.id);
+      }
+    });
+
+    it("billing: pauseExpiredTrial pauses a trialing venue only when its trial is over and it has no subscription, once", async () => {
+      const s = await make();
+      const [a, b, c, d] = [await s.createVenue({ slug: "t-b10", name: "A" }), await s.createVenue({ slug: "t-b11", name: "B" }), await s.createVenue({ slug: "t-b12", name: "C" }), await s.createVenue({ slug: "t-b13", name: "D" })];
+      const now = "2026-11-02T09:00:00.000Z";
+      try {
+        await s.updateVenue(a.id, { billing_status: "trialing", trial_started_at: "2026-10-19T09:00:00.000Z", trial_ends_at: "2026-11-02T09:00:00.000Z" });
+        await s.updateVenue(b.id, { billing_status: "trialing", trial_started_at: "2026-10-19T09:00:00.000Z", trial_ends_at: "2026-11-02T09:00:01.000Z" }); // not over yet
+        await s.updateVenue(c.id, { billing_status: "trialing", plan: "both", stripe_subscription_id: "sub_x", trial_started_at: "2026-10-19T09:00:00.000Z", trial_ends_at: "2026-11-01T09:00:00.000Z" }); // Stripe's trial
+        await s.updateVenue(d.id, { billing_status: "active", plan: "both", trial_ends_at: "2026-11-01T09:00:00.000Z" });
+        const wins = await Promise.all([s.pauseExpiredTrial(a.id, now), s.pauseExpiredTrial(a.id, now), s.pauseExpiredTrial(a.id, now)]);
+        expect(wins.filter(Boolean)).toHaveLength(1);
+        expect((await s.getVenue(a.id)).billing_status).toBe("paused");
+        expect(await s.pauseExpiredTrial(a.id, now)).toBe(false);
+        for (const v of [b, c, d]) expect(await s.pauseExpiredTrial(v.id, now)).toBe(false);
+        expect((await s.getVenue(b.id)).billing_status).toBe("trialing");
+        expect((await s.getVenue(c.id)).billing_status).toBe("trialing");
+        expect((await s.getVenue(d.id)).billing_status).toBe("active");
+        await expect(s.pauseExpiredTrial(crypto.randomUUID(), now)).rejects.toThrow();
+      } finally {
+        for (const v of [a, b, c, d]) await s.deleteVenue(v.id);
+      }
+    });
+
+    it("billing: claimTrialReminder marks each reminder once; 'ended' may follow 'soon' but never repeats", async () => {
+      const s = await make();
+      const v = await s.createVenue({ slug: "t-b14", name: "R" });
+      try {
+        const soon = await Promise.all([s.claimTrialReminder(v.id, "soon"), s.claimTrialReminder(v.id, "soon"), s.claimTrialReminder(v.id, "soon")]);
+        expect(soon.filter(Boolean)).toHaveLength(1);
+        expect((await s.getVenue(v.id)).trial_reminder_sent).toBe("soon");
+        expect(await s.claimTrialReminder(v.id, "soon")).toBe(false);
+        const ended = await Promise.all([s.claimTrialReminder(v.id, "ended"), s.claimTrialReminder(v.id, "ended")]);
+        expect(ended.filter(Boolean)).toHaveLength(1);
+        expect((await s.getVenue(v.id)).trial_reminder_sent).toBe("ended");
+        expect(await s.claimTrialReminder(v.id, "ended")).toBe(false);
+        expect(await s.claimTrialReminder(v.id, "soon")).toBe(false);
+        const fresh = await s.createVenue({ slug: "t-b15", name: "R2" }); // straight to 'ended' from no marker
+        try {
+          expect(await s.claimTrialReminder(fresh.id, "ended")).toBe(true);
+        } finally {
+          await s.deleteVenue(fresh.id);
+        }
+        await expect(s.claimTrialReminder(crypto.randomUUID(), "soon")).rejects.toThrow();
+      } finally {
+        await s.deleteVenue(v.id);
+      }
+    });
+
+    it("billing: claimStripeCustomer stores a customer only while there is none and returns what is stored", async () => {
+      const s = await make();
+      const v = await s.createVenue({ slug: "t-b6", name: "B6" });
+      try {
+        const [a, b] = [`cus_${crypto.randomUUID()}`, `cus_${crypto.randomUUID()}`];
+        const [r1, r2] = await Promise.all([s.claimStripeCustomer(v.id, a), s.claimStripeCustomer(v.id, b)]);
+        expect(r1.stripe_customer_id).toBe(r2.stripe_customer_id); // both see the one that won
+        expect([a, b]).toContain(r1.stripe_customer_id);
+        expect((await s.getVenue(v.id)).stripe_customer_id).toBe(r1.stripe_customer_id);
+        expect((await s.claimStripeCustomer(v.id, `cus_${crypto.randomUUID()}`)).stripe_customer_id).toBe(r1.stripe_customer_id); // later claims change nothing
+        await expect(s.claimStripeCustomer(crypto.randomUUID(), a)).rejects.toThrow();
+      } finally {
+        await s.deleteVenue(v.id);
+      }
+    });
+
+    it("billing: a Stripe event id is recorded once, after applying; findVenueById is null for an unknown venue", async () => {
+      const s = await make();
+      const id = `evt_${crypto.randomUUID()}`;
+      expect(await s.hasBillingEvent(id)).toBe(false);
+      expect(await s.recordBillingEvent(id, "invoice.paid", NOW)).toBe(true);
+      expect(await s.hasBillingEvent(id)).toBe(true);
+      expect(await s.recordBillingEvent(id, "invoice.paid", LATER)).toBe(false); // the loser of a race
+      const v = await s.createVenue({ slug: "t-b5", name: "B5" });
+      try {
+        expect((await s.findVenueById(v.id))?.slug).toBe("t-b5");
+        expect(await s.findVenueById(crypto.randomUUID())).toBeNull();
+        expect(await s.findVenueById("not-a-uuid")).toBeNull();
+      } finally {
+        await s.deleteVenue(v.id);
+      }
     });
   });
 }

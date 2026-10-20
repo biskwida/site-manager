@@ -10,7 +10,7 @@ import { DEFAULT_HOURS } from "../store/types";
 
 /** 2–39 chars: lowercase letters and digits, single dashes only between them (no leading, trailing or doubled dash). */
 export const SLUG_RE = /^[a-z0-9](?:[a-z0-9]|-(?=[a-z0-9])){1,38}$/;
-export const RESERVED_SLUGS = ["new", "admin", "api", "embed", "draft", "demo", "www", "static", "_next", "privacy", "data-deletion"];
+export const RESERVED_SLUGS = ["new", "admin", "api", "embed", "draft", "demo", "www", "static", "_next", "privacy", "data-deletion", "start", "login", "dashboard", "onboarding", "auth", "app", "billing", "pricing"];
 /** Placeholder slug of an unpublished draft: `draft-<8 hex>`. Never accepted as the final address. */
 export const DRAFT_SLUG_PREFIX = "draft-";
 const HEX = /^#[0-9a-fA-F]{6}$/;
@@ -63,12 +63,16 @@ export interface WizardItem {
   price_eur: number;
   allergens: number[];
   image_media_id: string | null;
+  /** Only a website add-on's prefill sets it: false = the dish is hidden on the live venue and stays hidden. Absent = shown. */
+  active?: boolean;
 }
 export interface WizardCategory {
   key: string;
   name_bg: string;
   name_en: string;
   items: WizardItem[];
+  /** Like WizardItem.active, for a hidden category. */
+  active?: boolean;
 }
 export interface WizardDraft {
   template: TemplateId;
@@ -93,6 +97,11 @@ export interface WizardDraft {
   categories: WizardCategory[];
   /** Last step the owner reached. */
   step: WizardStep;
+  /**
+   * Website add-on only (startDraftForVenue): how many images the venue already had when the draft began, so the draft's own upload
+   * limit (MAX_DRAFT_MEDIA) counts only what is uploaded afterwards. Set by the server; the PUT patch cannot write it.
+   */
+  media_base?: number;
 }
 
 const HHMM = /^([01]\d|2[0-3]):[0-5]\d$/;
@@ -125,8 +134,9 @@ export const WizardItemSchema = z.object({
   price_eur: Price,
   allergens: Allergens,
   image_media_id: z.string().max(64).nullable(),
+  active: z.boolean().optional(),
 });
-export const WizardCategorySchema = z.object({ key: Key, name_bg: Short(80), name_en: Short(80), items: z.array(WizardItemSchema).max(200) });
+export const WizardCategorySchema = z.object({ key: Key, name_bg: Short(80), name_en: Short(80), items: z.array(WizardItemSchema).max(200), active: z.boolean().optional() });
 
 export const WizardDraftSchema = z.object({
   template: z.enum(TEMPLATE_IDS),
@@ -150,9 +160,10 @@ export const WizardDraftSchema = z.object({
   gallery_media_ids: z.array(z.string().max(64)).max(40),
   categories: z.array(WizardCategorySchema).max(40),
   step: z.enum(WIZARD_STEPS),
+  media_base: z.number().int().min(0).max(100000).optional(),
 }) satisfies z.ZodType<WizardDraft>;
 /** PUT body: any subset of the draft; unknown keys are dropped. */
-export const WizardPatchSchema = WizardDraftSchema.partial();
+export const WizardPatchSchema = WizardDraftSchema.omit({ media_base: true }).partial();
 
 export function emptyDraft(template: TemplateId): WizardDraft {
   return {

@@ -2,12 +2,16 @@
 import { LangToggle, useLang } from "@/src/i18n";
 import type { AdminOverview } from "@/src/server/admin";
 import { formatDateTime } from "@/src/time";
+import { AccountBanner } from "./AccountBanner";
+import { SessionExpired } from "./SessionExpired";
 import { AppsCard } from "./AppsCard";
+import { BillingCard } from "./BillingCard";
 import { CommentsCard } from "./CommentsCard";
 import { Empty, Section } from "./bits";
 import { PendingList, ScheduledList } from "./Decisions";
 import { DomainCard } from "./DomainCard";
 import { InvalidKey } from "./InvalidKey";
+import { LockedCard } from "./LockedCard";
 import { LogList } from "./LogList";
 import { QrCard } from "./QrCard";
 import { SiteCard } from "./SiteCard";
@@ -15,11 +19,16 @@ import { useAdminOverview } from "./useAdminOverview";
 import { WordPressCard } from "./WordPressCard";
 import { SocialCard } from "./SocialCard";
 
-/** The owner's dashboard: the site (status, template switch), the optional custom domain, decisions, schedule, sold-out items, change log with undo, connected apps, QR and links. Client-polled every 3 s. */
-export function AdminPanel({ slug, adminKey, initial }: { slug: string; adminKey: string; initial: AdminOverview }) {
+/**
+ * The owner's dashboard, on a legacy admin key (`adminKey`, sent as ?key=) or on the signed-in account (no `adminKey`: the session cookie
+ * goes with every same-origin request). `showAccountBanner` adds the "log in with your email" note on the key page. `billingJustPaid` is the
+ * ?billing=success return from Stripe Checkout.
+ * The dashboard: the site (status, template switch), the optional custom domain, decisions, schedule, sold-out items, change log with undo, connected apps, QR and links. Client-polled every 3 s. */
+export function AdminPanel({ slug, adminKey, initial, showAccountBanner = false, billingJustPaid = false }: { slug: string; adminKey?: string; initial: AdminOverview; showAccountBanner?: boolean; billingJustPaid?: boolean }) {
   const { lang, t } = useLang();
   const { overview: o, unauthorized, decide, post, refresh } = useAdminOverview(initial, slug, adminKey);
-  if (unauthorized) return <InvalidKey />;
+  // A key that stopped working: the invalid-link text. An account whose session ended: a way back in.
+  if (unauthorized) return adminKey ? <InvalidKey /> : <SessionExpired slug={slug} />;
   const tz = o.venue.tz;
   return (
     <div className="flex flex-1 flex-col">
@@ -33,6 +42,9 @@ export function AdminPanel({ slug, adminKey, initial }: { slug: string; adminKey
         </div>
       </header>
       <main className="mx-auto w-full max-w-3xl flex-1 px-4 pb-16 sm:px-6">
+        {showAccountBanner && <AccountBanner />}
+        {/* Plan and payment: the account dashboard only (a legacy key page is unchanged), and only while billing is on. */}
+        {!adminKey && o.billing && <BillingCard billing={o.billing} slug={slug} tz={tz} justPaid={billingJustPaid} />}
         <SiteCard overview={o} post={post} adminKey={adminKey} refresh={refresh} />
         <PendingList sets={o.pending} slug={slug} adminKey={adminKey} tz={tz} decide={decide} />
         <ScheduledList sets={o.scheduled} tz={tz} decide={decide} />
@@ -51,10 +63,11 @@ export function AdminPanel({ slug, adminKey, initial }: { slug: string; adminKey
         <LogList sets={o.log} tz={tz} decide={decide} usage={o.changes_this_month} />
         <AppsCard apps={o.connected_apps ?? []} post={post} />
         <WordPressCard overview={o.wordpress ?? null} slug={slug} adminKey={adminKey} baseUrl={o.public_url.replace(new RegExp(`/${slug}$`), "")} tz={tz} />
-        <SocialCard overview={o.social ?? null} slug={slug} adminKey={adminKey} tz={tz} />
-        <CommentsCard overview={o.comments ?? null} post={post} tz={tz} />
-        {/* Hosted mode (no deployer on this server) or an own site: there is no provider project of ours to attach a domain to. */}
-        {!o.hosted && !o.own_site && <DomainCard overview={o} post={post} />}
+        {/* A feature outside the plan is shown, not hidden: a locked card with the upgrade link (billing on only). */}
+        {o.billing?.locked?.includes("social") ? <LockedCard id="social" title="admin.social.title" plan={o.billing.plan} slug={slug} /> : <SocialCard overview={o.social ?? null} slug={slug} adminKey={adminKey} tz={tz} />}
+        {o.billing?.locked?.includes("comments") ? <LockedCard id="comments" title="admin.comments.title" plan={o.billing.plan} slug={slug} /> : <CommentsCard overview={o.comments ?? null} post={post} tz={tz} />}
+        {/* Hosted mode (no deployer on this server), an own site or no website: there is no provider project of ours to attach a domain to. */}
+        {!o.hosted && !o.own_site && o.site_mode !== "none" && <DomainCard overview={o} post={post} />}
         <QrCard siteUrl={o.site_url} />
       </main>
     </div>

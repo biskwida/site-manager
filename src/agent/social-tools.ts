@@ -79,6 +79,7 @@ export function socialTools(d: ToolDeps, k: ToolKit) {
           if ((caption.match(/#[\p{L}\p{N}_]+/gu) ?? []).length > IG_HASHTAGS_MAX) throw new Error("Instagram allows at most 30 hashtags in a caption; remove some.");
           if ((caption.match(/(^|[^\w@])@[A-Za-z0-9._]{1,30}/g) ?? []).length > IG_MENTIONS_MAX) throw new Error("Instagram allows at most 20 @-mentions in a caption; remove some.");
         }
+        await k.ensureEntitled("social");
         await k.ensureWithinLimit();
         await k.ensureNoPending();
         const s = await k.site();

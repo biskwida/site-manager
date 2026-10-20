@@ -5,12 +5,13 @@ import { wpErrorText } from "@/src/destinations/wp-errors";
 import type { WordPressOverview } from "@/src/server/admin";
 import { formatDateTime } from "@/src/time";
 import { Chip, Section } from "./bits";
+import { adminApiUrl } from "./useAdminOverview";
 
 const TONE = { done: "good", pending: "warn", failed: "warn" } as const;
 const SYNC_LABEL = { done: "admin.wp.sync.done", pending: "admin.wp.sync.pending", failed: "admin.wp.sync.failed" } as const;
 
 /** Connect-your-WordPress card: status, the three steps (download, two settings, /connect line), the last pushes, Disconnect. */
-export function WordPressCard({ overview, slug, adminKey, baseUrl, tz }: { overview: WordPressOverview | null; slug: string; adminKey: string; baseUrl: string; tz: string }) {
+export function WordPressCard({ overview, slug, adminKey, baseUrl, tz }: { overview: WordPressOverview | null; slug: string; adminKey?: string; baseUrl: string; tz: string }) {
   const { lang, t } = useLang();
   const [busy, setBusy] = useState(false);
   const [failed, setFailed] = useState(false);
@@ -30,7 +31,7 @@ export function WordPressCard({ overview, slug, adminKey, baseUrl, tz }: { overv
     setBusy(true);
     setFailed(false);
     try {
-      const res = await fetch(`/api/admin/${encodeURIComponent(slug)}/wordpress?key=${encodeURIComponent(adminKey)}`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ action: "disconnect" }) });
+      const res = await fetch(adminApiUrl(slug, adminKey, "/wordpress"), { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ action: "disconnect" }) });
       setFailed(!res.ok);
     } catch {
       setFailed(true);

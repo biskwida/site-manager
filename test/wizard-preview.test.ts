@@ -41,4 +41,18 @@ describe("buildPreviewState", () => {
     expect(buildPreviewState(d, [], new Date()).venue.name).toBe("Your venue");
     expect(bg.venue.slug).toBe("preview");
   });
+
+  it("shows hidden dishes and categories as hidden (a website add-on keeps them hidden)", () => {
+    const d = emptyDraft("classic");
+    d.categories = [
+      { key: "a", name_bg: "А", name_en: "A", items: [
+        { key: "x", name_bg: "Х", name_en: "X", desc_bg: "", desc_en: "", price_eur: 1, allergens: [], image_media_id: null },
+        { key: "y", name_bg: "Й", name_en: "Y", desc_bg: "", desc_en: "", price_eur: 1, allergens: [], image_media_id: null, active: false },
+      ] },
+      { key: "b", name_bg: "Б", name_en: "B", active: false, items: [{ key: "z", name_bg: "З", name_en: "Z", desc_bg: "", desc_en: "", price_eur: 1, allergens: [], image_media_id: null }] },
+    ];
+    const s = buildPreviewState(d, [], new Date("2026-10-09T09:00:00.000Z"));
+    expect(s.categories.map((c) => [c.id, c.active])).toEqual([["prev-cat-a", true], ["prev-cat-b", false]]);
+    expect(s.items.map((i) => [i.id, i.active])).toEqual([["prev-item-x", true], ["prev-item-y", false], ["prev-item-z", true]]);
+  });
 });

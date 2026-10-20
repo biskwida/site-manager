@@ -58,7 +58,8 @@ export function LegalLinks({ className = "" }: { className?: string }) {
 }
 
 const DATA_ITEMS = ["privacy.data.1", "privacy.data.2", "privacy.data.3", "privacy.data.4", "privacy.data.5", "privacy.data.6", "privacy.data.7"] as const;
-const THIRD_PARTIES = ["privacy.third.meta", "privacy.third.telegram", "privacy.third.anthropic", "privacy.third.stt", "privacy.third.vercel", "privacy.third.supabase"] as const;
+const THIRD_PARTIES = ["privacy.third.meta", "privacy.third.telegram", "privacy.third.anthropic", "privacy.third.stt", "privacy.third.vercel", "privacy.third.supabase", "privacy.third.stripe", "privacy.third.resend"] as const;
+const ACCOUNT_ITEMS = ["privacy.accounts.1", "privacy.accounts.2", "privacy.accounts.3", "privacy.accounts.4"] as const;
 
 export function PrivacyPolicy({ contactEmail }: { contactEmail: string | null }) {
   const { t } = useLang();
@@ -77,6 +78,10 @@ export function PrivacyPolicy({ contactEmail }: { contactEmail: string | null })
       <Section title={t("privacy.where.title")}><p>{t("privacy.where.body")}</p></Section>
       <Section title={t("privacy.third.title")}>
         <ul className="list-disc space-y-2 pl-5">{THIRD_PARTIES.map((k) => <li key={k}>{t(k)}</li>)}</ul>
+      </Section>
+      {/* OWNER REVIEW REQUIRED before BILLING_ENABLED goes on: this section (privacy.accounts.* in src/i18n/dicts.ts) is a factual draft. */}
+      <Section title={t("privacy.accounts.title")}>
+        <ul className="list-disc space-y-2 pl-5">{ACCOUNT_ITEMS.map((k) => <li key={k}>{t(k)}</li>)}</ul>
       </Section>
       <Section title={t("privacy.retention.title")}><p>{t("privacy.retention.body")}</p></Section>
       <Section title={t("privacy.rights.title")}>

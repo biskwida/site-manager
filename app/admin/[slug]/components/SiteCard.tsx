@@ -30,9 +30,10 @@ export function SiteCard({ overview: o, post, adminKey = "", refresh }: { overvi
   const retry = d?.status === "error" && unchanged;
 
   useEffect(() => {
-    if (!publishing || !adminKey) return;
-    return startTickNudge({ adminKey, onNudged: () => void refresh?.() });
-  }, [publishing, adminKey, refresh]);
+    if (!publishing) return;
+    // A key page nudges with its key; the account dashboard (no key) with the venue slug and the session cookie.
+    return startTickNudge({ adminKey: adminKey || undefined, slug: o.venue.slug, onNudged: () => void refresh?.() });
+  }, [publishing, adminKey, o.venue.slug, refresh]);
 
   async function change(e: FormEvent) {
     e.preventDefault();
@@ -45,6 +46,9 @@ export function SiteCard({ overview: o, post, adminKey = "", refresh }: { overvi
     setBusy(false);
   }
   const msgText = msg ? ("key" in msg ? t(msg.key) : msg[lang]) : null;
+
+  // No website at all (social media only): there is nothing to show, deploy or switch here.
+  if (o.site_mode === "none") return null;
 
   const statusTone = d?.status === "ready" ? "good" : d?.status === "error" ? "warn" : "plain";
   // Own site (built and hosted elsewhere, reads our feed): just the link and who runs it; no deploy rows, no template switch.

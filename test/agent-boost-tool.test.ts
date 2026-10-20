@@ -613,6 +613,14 @@ describe("propose_boost: goal and placement checks", () => {
     expect(liveOk.status).toBe("proposed");
   });
 
+  it("website_visits is refused for a site_mode none venue, even when it is live or has a stale site_url", async () => {
+    const s = await setup();
+    await s.plain.updateVenue(s.venue.id, { site_mode: "none", site_url: "https://stale.example" });
+    const r = await call(s.tools, "propose_boost", { media_id: s.photo.id, goal: "website_visits" });
+    expect(r.error).toBe("This business has no website yet; offer reach or profile visits.");
+    expect(await boostSets(s)).toEqual([]);
+  });
+
   it("placements facebook needs a connected Facebook Page", async () => {
     const s = await setup();
     const r = await call(s.tools, "propose_boost", { media_id: s.photo.id, placements: "facebook" });

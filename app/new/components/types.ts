@@ -36,4 +36,6 @@ export interface StepProps {
   onIgConsumed?: () => void;
   /** Sends pending autosave edits now (before leaving for Instagram, before an import patches the draft on the server). */
   flush?: () => Promise<boolean>;
+  /** A website add-on on an existing business: its address is fixed, so the address field is read-only. */
+  slugLocked?: boolean;
 }

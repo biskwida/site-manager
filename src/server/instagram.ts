@@ -11,7 +11,7 @@ import type { Config } from "../config";
 import type { InstagramCandidate, InstagramImport, Media, Venue } from "../domain/types";
 import { emptyDraft, WIZARD_MAX_IMAGE_BYTES, type WizardDraft } from "../wizard/schema";
 import { COOKIE_NAME, cookieFromHeader, venueFromDraftCookie } from "./draft-cookie";
-import { ALREADY_PUBLISHED, MAX_DRAFT_MEDIA, sniffImageType, TOO_LARGE, TOO_MANY_MEDIA, UNSUPPORTED, updateDraft, WizardError, wizardErrorResponse, type WizardDeps } from "./wizard";
+import { ALREADY_PUBLISHED, draftUploads, isOpenDraft, MAX_DRAFT_MEDIA, sniffImageType, TOO_LARGE, TOO_MANY_MEDIA, UNSUPPORTED, updateDraft, WizardError, wizardErrorResponse, type WizardDeps } from "./wizard";
 
 export const IG_AUTHORIZE_URL = "https://www.instagram.com/oauth/authorize";
 export const IG_TOKEN_URL = "https://api.instagram.com/oauth/access_token";
@@ -250,7 +250,7 @@ export async function readInstagramMedia(f: typeof fetch, token: string): Promis
 
 function readyDraft(d: InstagramDeps, venue: Venue): void {
   if (!instagramConfigured(d.config)) throw UNAVAILABLE();
-  if (venue.status !== "draft") throw ALREADY_PUBLISHED(venue.slug);
+  if (!isOpenDraft(venue)) throw ALREADY_PUBLISHED(venue.slug);
 }
 
 /** GET /api/new/[id]/instagram/start[?from=look] → 302 to Instagram's consent screen with a signed state and a nonce cookie. */
@@ -288,7 +288,7 @@ export async function handleInstagramCallback(req: Request, d: InstagramDeps): P
   const cookies = req.headers.get("cookie");
   const venue = await venueFromDraftCookie(d.store, cookieFromHeader(cookies, COOKIE_NAME)).catch(() => null);
   if (!venue) return go("/new");
-  if (venue.status !== "draft") return go(`/new/${venue.id}`);
+  if (!isOpenDraft(venue)) return go(`/new/${venue.id}`);
   const params = new URL(req.url).searchParams;
   const state = verifyState(params.get("state"), igStateKey(d.config.instagramAppSecret!), d.now());
   const back = (step: IgReturnStep, q: string) => go(`/new/${venue.id}?step=${step}&${q}`);
@@ -309,9 +309,9 @@ export async function handleInstagramCallback(req: Request, d: InstagramDeps): P
     const list: InstagramImport = { fetched_at: d.now().toISOString(), ...read };
     // Reading Instagram takes seconds; the draft may have been published meanwhile. Write only to a draft, and if a publish
     // slipped in between this read and the write, take the list off again: a live venue never keeps one.
-    if ((await d.store.getVenue(venue.id)).status !== "draft") return go(`/new/${venue.id}`);
+    if (!isOpenDraft(await d.store.getVenue(venue.id))) return go(`/new/${venue.id}`);
     await d.store.updateVenue(venue.id, { instagram_import: list });
-    if ((await d.store.getVenue(venue.id)).status !== "draft") {
+    if (!isOpenDraft(await d.store.getVenue(venue.id))) {
       await d.store.updateVenue(venue.id, { instagram_import: null });
       return go(`/new/${venue.id}`);
     }
@@ -470,7 +470,7 @@ export async function handleInstagramImport(req: Request, d: InstagramDeps, venu
     if (picks.some((p) => typeof p.target === "object" && !itemRefs.has(p.target.item)))
       throw new WizardError("invalid", 400, "Това ястие вече не е в менюто.", "That dish is no longer on the menu.");
     const ids = [...new Set(picks.map((p) => p.id))];
-    if ((await d.store.getSite(venue.id)).media.length + ids.length > MAX_DRAFT_MEDIA) throw TOO_MANY_MEDIA();
+    if (draftUploads(venue, (await d.store.getSite(venue.id)).media.length) + ids.length > MAX_DRAFT_MEDIA) throw TOO_MANY_MEDIA();
     if (!(await d.store.bumpRateLimit(igRateLimitKey(venue.id), HOUR_MS, IG_IMPORTS_PER_HOUR, d.now().toISOString())))
       throw new WizardError("rate_limited", 429, "Твърде много внасяния от Instagram. Опитайте след час.", "Too many Instagram imports. Try again in an hour.");
 
