@@ -138,6 +138,8 @@ export interface Venue extends VenueBilling {
   comment_limit: number | null;
   /** ISO of the last digest sent (or skipped for lack of comments); one per local day. */
   last_comment_digest_at: string | null;
+  /** Restyled pictures are labelled as AI-made: a note in the caption and Instagram's is_ai_generated. Server-only; null in the DB = off. */
+  ai_label: boolean;
   tz: string;
   default_lang: Lang;
   theme: Theme;
@@ -414,6 +416,8 @@ export interface SocialPostRow {
   ig_feed_ratio?: "4:5" | "1.91:1";
   /** Stories (Instagram and Facebook): a 1080×1920 JPEG copy (our storage, https) with the whole photo on the café's colour. Absent when the photo is already 9:16, when none could be made, and on older rows: the story then publishes `image_url`. */
   story_image_url?: string;
+  /** True only for a restyled picture (storage path under `/restyle/`) of a venue with `ai_label` on: Instagram then gets `is_ai_generated: true`, and the caption already carries the "made with AI" suffix. Absent otherwise. */
+  ai_generated?: boolean;
 }
 /** Entities that live outside our database (the owner's WordPress site, Facebook, Instagram): applied as no-ops, written by destination pushes. */
 export function isExternalEntity(e: string): e is WpEntity | SocialEntity {

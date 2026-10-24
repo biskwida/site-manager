@@ -20,7 +20,7 @@ revoke insert, update, delete, truncate on public.venues, public.site_texts, pub
 grant select on public.site_texts, public.categories, public.items, public.holidays, public.announcements, public.media to anon, authenticated;
 -- R27: venues are readable column by column. The list is exactly PublicVenue (src/server/site.ts, the public feed's venue), so
 -- deploy, wizard_draft, draft_token_hash, publishing_at, instagram_import, site_url, site_mode, site_platform, created_via, change_limit, comment_mode, comment_digest_hour, comment_limit
--- last_comment_digest_at and the billing columns (plan, billing_status, trial_started_at, trial_ends_at, past_due_since, stripe_customer_id,
+-- last_comment_digest_at, ai_label and the billing columns (plan, billing_status, trial_started_at, trial_ends_at, past_due_since, stripe_customer_id,
 -- stripe_subscription_id, trial_reminder_sent, website_fee_paid) are never readable with the anon key, not even on a live row. Revoking the table privilege also
 -- drops every column grant, so a re-run (db:apply) starts clean each time.
 -- test/policies-grants.test.ts keeps this list equal to PublicVenue.

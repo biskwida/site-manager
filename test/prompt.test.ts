@@ -2,7 +2,7 @@
 import { describe, expect, it } from "vitest";
 import { SYSTEM_PROMPT, userMessage, type UserMessageContext } from "@/src/agent/prompt";
 import { SocialPostSchema } from "@/src/agent/social-tools";
-import { MakeVisualSchema } from "@/src/agent/visual-tools";
+import { MakeVisualSchema, RestylePhotoSchema } from "@/src/agent/visual-tools";
 
 const turn = (lang: UserMessageContext["lang"]): string =>
   userMessage({ venueName: "V", slug: "v", nowText: "now", lang, role: "owner", memory: "", correctionFor: null, text: "x", source: "text" });
@@ -148,5 +148,42 @@ describe("propose_boost: the variant words", () => {
       expect(text).toContain("reset");
       expect(text).toContain("only the changed fields");
     }
+  });
+});
+
+describe("SYSTEM_PROMPT: the restyle rule", () => {
+  const rule = SYSTEM_PROMPT.split("\n").find((l) => /^\d+\. Restyled photos: /.test(l)) ?? "";
+  it("names the tool, the triggers in both languages and keeps make_visual as the default", () => {
+    expect(rule).not.toBe("");
+    expect(SYSTEM_PROMPT).toMatch(/restyle_photo/);
+    expect(SYSTEM_PROMPT).toMatch(/разкраси/);
+    expect(SYSTEM_PROMPT).toMatch(/make it aesthetic/i);
+    expect(rule).toMatch(/only on request|only when the owner asks/i);
+    expect(rule).toMatch(/make_visual/);
+  });
+  it("tells how a mood word and the three follow-ups are handled", () => {
+    for (const w of ["по-тъмна", "darker", "brighter", "more minimal"]) expect(rule).toContain(w);
+    expect(rule).toContain("social_post");
+    expect(rule).toContain("set_item_image");
+    expect(rule).toMatch(/never make_menu_photo on a restyled picture/);
+    expect(rule).toMatch(/both/);
+    expect(rule).toMatch(/fallback/);
+  });
+  it("does not ask again when the owner already said where the picture goes", () => {
+    expect(rule).toContain("already said");
+    expect(rule).toContain("do that now in this turn");
+    expect(rule).toContain("разкраси я и я пусни в инстаграм");
+    expect(rule).toMatch(/otherwise ask in one short message/);
+  });
+  it("the existing photo rules are untouched and the numbering stays continuous", () => {
+    expect(SYSTEM_PROMPT).toMatch(/^13\. Pictures for Instagram: /m);
+    expect(SYSTEM_PROMPT).toMatch(/^16\. Website and menu photos: /m);
+    expect(SYSTEM_PROMPT).toMatch(/^17\. Ads: /m);
+    expect(SYSTEM_PROMPT).not.toMatch(/AI assistant/);
+    const numbers = [...SYSTEM_PROMPT.matchAll(/^(\d+)\. /gm)].map((m) => Number(m[1]));
+    expect(numbers).toEqual(Array.from({ length: numbers.length }, (_, i) => i + 1));
+  });
+  it("the schema description tells the mood words", () => {
+    expect(RestylePhotoSchema.shape.mood.description ?? "").toMatch(/darker/);
   });
 });

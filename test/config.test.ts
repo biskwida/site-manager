@@ -56,6 +56,26 @@ describe("loadConfig", () => {
     expect(() => loadConfig({ ...full, META_PAGE_TOKEN: "pt" })).toThrow(/META_APP_SECRET and META_VERIFY_TOKEN/);
     expect(() => loadConfig({ ...full, META_APP_SECRET: "s", META_VERIFY_TOKEN: "v", WHATSAPP_TOKEN: "wt" })).toThrow(/WHATSAPP_PHONE_NUMBER_ID/);
   });
+  it("reads GEMINI_API_KEY as optional (null when absent)", () => {
+    expect(loadConfig(full).geminiApiKey).toBeNull();
+    expect(loadConfig({ ...full, GEMINI_API_KEY: "  gk_1  " }).geminiApiKey).toBe("gk_1");
+  });
+  it("reads RESTYLE_MODEL with the default gemini-nano-banana-2.1", () => {
+    expect(loadConfig(full).restyleModel).toBe("gemini-nano-banana-2.1");
+    expect(loadConfig({ ...full, RESTYLE_MODEL: " gemini-test " }).restyleModel).toBe("gemini-test");
+  });
+  it("reads RESTYLE_MONTHLY_LIMIT (default 30) and RESTYLE_TRIAL_LIMIT (default 5) as whole numbers from 0 to 10000", () => {
+    expect(loadConfig(full)).toMatchObject({ restyleMonthlyLimit: 30, restyleTrialLimit: 5 });
+    expect(loadConfig({ ...full, RESTYLE_MONTHLY_LIMIT: "0" }).restyleMonthlyLimit).toBe(0);
+    expect(loadConfig({ ...full, RESTYLE_TRIAL_LIMIT: "10000" }).restyleTrialLimit).toBe(10000);
+    expect(() => loadConfig({ ...full, RESTYLE_MONTHLY_LIMIT: "abc" })).toThrow(/RESTYLE_MONTHLY_LIMIT/);
+    expect(() => loadConfig({ ...full, RESTYLE_MONTHLY_LIMIT: "1.5" })).toThrow(/RESTYLE_MONTHLY_LIMIT/);
+    expect(() => loadConfig({ ...full, RESTYLE_MONTHLY_LIMIT: "-1" })).toThrow(/RESTYLE_MONTHLY_LIMIT/);
+    expect(() => loadConfig({ ...full, RESTYLE_MONTHLY_LIMIT: "10001" })).toThrow(/RESTYLE_MONTHLY_LIMIT/);
+    expect(() => loadConfig({ ...full, RESTYLE_TRIAL_LIMIT: "abc" })).toThrow(/RESTYLE_TRIAL_LIMIT/);
+    expect(() => loadConfig({ ...full, RESTYLE_TRIAL_LIMIT: "-1" })).toThrow(/RESTYLE_TRIAL_LIMIT/);
+    expect(() => loadConfig({ ...full, RESTYLE_TRIAL_LIMIT: "10001" })).toThrow(/RESTYLE_TRIAL_LIMIT/);
+  });
   it("reads DESTINATION_SECRET_KEY as optional", () => {
     expect(loadConfig(full).destinationSecretKey).toBeNull();
     expect(loadConfig({ ...full, DESTINATION_SECRET_KEY: "ab".repeat(32) }).destinationSecretKey).toBe("ab".repeat(32));

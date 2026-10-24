@@ -188,7 +188,7 @@ export async function makeServerDeps(o: DepsOptions): Promise<ServerDeps> {
   const fetchUrl: MediaFetch = (url) => downloadUrl(url);
 
   // The picture service runs as its own function (/api/visual) on this same deployment, reached with the tick secret.
-  const visual = config.tickSecret ? httpVisualClient({ baseUrl: config.publicBaseUrl, secret: config.tickSecret, fetch: o.fetch }) : null;
+  const visual = config.tickSecret ? httpVisualClient({ baseUrl: config.publicBaseUrl, secret: config.tickSecret, fetch: o.fetch, restyle: config.geminiApiKey !== null }) : null;
 
   async function handleRun(r: RunRequest): Promise<void> {
     try {

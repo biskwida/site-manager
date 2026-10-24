@@ -143,7 +143,8 @@ export const instagramAdapter: DestinationAdapter = {
           if (!container) {
             // The file the owner saw in the proposal (publishedUrl, shared with the preview): the feed post its padded copy, the story Claudia's 9:16 copy.
             const imageUrl = publishedUrl(row, target);
-            const body = target === "instagram_post" ? { image_url: imageUrl, ...(row.caption ? { caption: row.caption } : {}) } : { image_url: imageUrl, media_type: "STORIES" };
+            const ai = row.ai_generated ? { is_ai_generated: true } : {}; // the venue's AI label is on and this is a restyled picture
+            const body = target === "instagram_post" ? { image_url: imageUrl, ...(row.caption ? { caption: row.caption } : {}), ...ai } : { image_url: imageUrl, media_type: "STORIES", ...ai };
             container = String((await ig.post<{ id: string }>(`/${igId}/media`, body)).id);
             entries.set(key, { target, media_id: c.entity_id, state: "attempted", id: null, permalink: null, container, attempted_at: ctx.now.toISOString() });
             await ctx.checkpoint?.(current());
