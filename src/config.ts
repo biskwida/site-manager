@@ -100,6 +100,14 @@ export interface Config {
   stripeWebhookSecret: string | null;
   /** Stripe price ids: the three monthly plans and the one-time website setup (199 €). */
   stripePrices: { admin: string | null; social: string | null; both: string | null; websiteSetup: string | null };
+  /** GEMINI_API_KEY: key for the AI restyle photo feature (Gemini image model); null when unset. */
+  geminiApiKey: string | null;
+  /** RESTYLE_MODEL (default "gemini-nano-banana-2.1"): the Gemini image model used to restyle a photo. */
+  restyleModel: string;
+  /** RESTYLE_MONTHLY_LIMIT (default 30, 0 to 10000): restyled photos per venue per month; 0 = every photo is refused. */
+  restyleMonthlyLimit: number;
+  /** RESTYLE_TRIAL_LIMIT (default 5, 0 to 10000): restyled photos per venue during the free trial. */
+  restyleTrialLimit: number;
 }
 
 type Env = Record<string, string | undefined>;
@@ -155,6 +163,10 @@ export function loadConfig(env: Env = process.env, opts: { lenient?: boolean } =
   if (!Number.isInteger(trialDays) || trialDays < 0 || trialDays > 365) throw new Error("TRIAL_DAYS must be a whole number of days from 0 to 365");
   const trialChangeLimit = Number(optional("TRIAL_CHANGE_LIMIT") ?? 20);
   if (!Number.isInteger(trialChangeLimit) || trialChangeLimit < 0) throw new Error("TRIAL_CHANGE_LIMIT must be a whole number >= 0");
+  const restyleMonthlyLimit = Number(optional("RESTYLE_MONTHLY_LIMIT") ?? 30);
+  if (!Number.isInteger(restyleMonthlyLimit) || restyleMonthlyLimit < 0 || restyleMonthlyLimit > 10000) throw new Error("RESTYLE_MONTHLY_LIMIT must be a whole number from 0 to 10000");
+  const restyleTrialLimit = Number(optional("RESTYLE_TRIAL_LIMIT") ?? 5);
+  if (!Number.isInteger(restyleTrialLimit) || restyleTrialLimit < 0 || restyleTrialLimit > 10000) throw new Error("RESTYLE_TRIAL_LIMIT must be a whole number from 0 to 10000");
   // Without a scheme the admin link is a bare domain that the translation layer would not recognise as a link (src/bot/translate.ts).
   const publicBaseUrl = need("PUBLIC_BASE_URL");
   if (publicBaseUrl && !opts.lenient && !/^https?:\/\//i.test(publicBaseUrl)) throw new Error("PUBLIC_BASE_URL must start with http:// or https://");
@@ -205,5 +217,9 @@ export function loadConfig(env: Env = process.env, opts: { lenient?: boolean } =
     stripeSecretKey: optional("STRIPE_SECRET_KEY"),
     stripeWebhookSecret: optional("STRIPE_WEBHOOK_SECRET"),
     stripePrices: { admin: optional("STRIPE_PRICE_ADMIN"), social: optional("STRIPE_PRICE_SOCIAL"), both: optional("STRIPE_PRICE_BOTH"), websiteSetup: optional("STRIPE_PRICE_WEBSITE_SETUP") },
+    geminiApiKey: optional("GEMINI_API_KEY"),
+    restyleModel: optional("RESTYLE_MODEL") ?? "gemini-nano-banana-2.1",
+    restyleMonthlyLimit,
+    restyleTrialLimit,
   };
 }
