@@ -9,6 +9,7 @@ import { FORMAT } from "../domain/social-preview";
 import type { Lang } from "../domain/types";
 import { deltaE76, rgbToLab } from "../visual/lab";
 import { BACKDROPS } from "../visual/palette";
+import { MOODS, type Mood, type RestyleRefusal } from "../visual/restyle";
 import type { MenuPhotoResult } from "../visual/service";
 import type { Format } from "../visual/template";
 import type { ToolDeps, ToolKit } from "./tools";
@@ -44,7 +45,24 @@ export const MakeMenuPhotoSchema = z.object({
   style: z.enum(["match", "white"]).optional().describe('"match" when the owner says "like the rest", "като другите" or "same as the menu": the backdrop and object size most of the menu photos share. "white" for "white" or "бял фон", and when the owner says nothing about the backdrop (omitted = "white").'),
 });
 
+export const RestylePhotoSchema = z.object({
+  media_id: z.string().describe("The media_id of the owner's own photo (never of an earlier restyled picture: a redo starts from the same photo again)."),
+  mood: z.enum(MOODS as readonly [Mood, ...Mood[]]).optional().describe('"default" (omitted): a light oak table by a window. "darker" for "по-тъмна" / "darker", "brighter" for "по-светла" / "brighter", "minimal" for "по-минималистична" / "more minimal".'),
+  item_id: z.string().optional().describe("The menu item when it is clear from the photo or the owner's words; its name keeps the restyled picture true to the product. Id from get_menu."),
+});
+
 const NO_OBJECT = "Could not separate the object from this photo; ask the owner for a photo of the item alone on a plain surface, taken straight on.";
+
+/** What the owner is told when restyle_photo is refused; the numbers are the service's. Plain no-photo wording, not make_visual's cut-out line. */
+const RESTYLE_REFUSALS: Record<RestyleRefusal, (limit: number | undefined, lang: Lang) => string> = {
+  monthly_limit: (limit, lang) => (lang === "bg" ? `Това бяха ${limit}-те разкрасявания за този месец; от 1-во число отново.` : `That's the ${limit} restyles for this month; from the 1st again.`),
+  trial_limit: (limit, lang) => (lang === "bg" ? `Пробният период включва ${limit} разкрасени снимки; планът има 30 на месец.` : `The trial includes ${limit} restyled photos; the plan has 30 a month.`),
+  too_many_generations: (_, lang) => (lang === "bg" ? "Три варианта са максимумът за една снимка; изпрати я пак като нова, ако искаш още." : "Three versions is the most for one photo; send it again as a new photo if you want more."),
+  source_is_restyle: (_, lang) => (lang === "bg" ? "Изпрати оригиналната снимка; разкрасяването винаги тръгва от нея." : "Send the original photo; restyling always starts from it."),
+  no_photo: (_, lang) => (lang === "bg" ? "Не намирам тази снимка; изпрати я пак." : "I can't find that photo; send it again."),
+};
+
+const REDO_WORDS = 'Name the redo words once, as a hint: "darker", "brighter", "more minimal" (in Bulgarian „по-тъмна", „по-светла", „по-минималистична").';
 
 /** Plain colour words and their swatches: rule 11's hexes for white, cream, beige and light grey, the picture backdrops' for the rest. */
 const COLOUR_WORDS: [string, string][] = [
@@ -120,8 +138,7 @@ export function visualTools(d: ToolDeps, k: ToolKit) {
       }),
   });
   const menuPhoto = visual.menuPhoto?.bind(visual);
-  if (!menuPhoto) return [make];
-  const makeMenu = betaZodTool({
+  const makeMenu = !menuPhoto ? null : betaZodTool({
     name: "make_menu_photo",
     description: "Clean an owner's photo for the website or menu: the item cut out of its background, centred on a plain backdrop (white, or the one the other menu photos share), no text. Sends the photo to the chat. Changes nothing on the site: propose set_item_image with the media_id it returns. Use it, never make_visual, for any photo that goes on the website.",
     inputSchema: MakeMenuPhotoSchema,
@@ -138,5 +155,41 @@ export function visualTools(d: ToolDeps, k: ToolKit) {
         return { media_id: r.media_id, ...(note ? { note } : {}), next: `Propose set_item_image for item ${input.item_id} with this media_id now (propose_changes). Say nothing else about the picture.${note ? " Tell the owner the note in one short line in the Owner language." : ""}` };
       }),
   });
-  return [make, makeMenu];
+  const restyle = visual.restyle?.bind(visual);
+  const restylePhoto = !restyle ? null : betaZodTool({
+    name: "restyle_photo",
+    description: "Restyle the owner's photo of a product into a more aesthetic photograph of the same product (new surface and light, the product itself unchanged). Only when the owner asks to make a photo look good; the plain \"make a post\" flow stays make_visual. Sends the restyled photo to the chat. Publishes and changes nothing: propose social_post or set_item_image with the media_id it returns. Never use make_menu_photo on a restyled picture.",
+    inputSchema: RestylePhotoSchema,
+    run: (input) =>
+      k.attempt(async () => {
+        if (d.member.role !== "owner") throw new Error("Restyling photos is the owner's decision; tell the owner to send this.");
+        await k.ensureEntitled("social");
+        let item: { id: string; name: string } | null = null;
+        if (input.item_id !== undefined) {
+          const found = (await k.site()).items.find((i) => i.id === input.item_id);
+          if (!found) throw new Error("item_id not found; use an id from get_menu.");
+          item = { id: found.id, name: k.lang === "bg" ? found.name_bg : found.name_en };
+        }
+        const mood = input.mood ?? "default";
+        const r = await restyle({ venueId: d.venueId, mediaId: input.media_id, mood, item: item?.name ?? null });
+        if ("error" in r) throw new Error(RESTYLE_REFUSALS[r.error](r.limit, k.lang));
+        if ("fallback" in r) {
+          return {
+            fallback: r.fallback,
+            reason: r.reason,
+            next: `The photo could not be restyled; nothing was sent to the chat.${r.reason === "refused" ? " Photos with people or faces cannot be restyled; say so in one short sentence." : ""} Go by what the owner wanted: for a post, offer make_visual on the same media_id in this same message; for the website, call make_menu_photo on the same media_id now; when the owner only said restyle, say in one short sentence that it couldn't be restyled and ask which of the two they want (a post picture or a website photo).`,
+          };
+        }
+        if ((await d.messenger.sendPhoto(d.chatRef, r.url, k.lang === "bg" ? "Разкрасена" : "Restyled")) !== null) d.sentPhotos.add(r.url);
+        d.notes?.push(`restyle from photo ${input.media_id}: ${r.media_id} (${r.mood}, generation ${r.generation})`);
+        const which = item ? `put it on the website as the photo of ${item.name}` : "put it on the website (name which item the photo is for, your likely match from get_menu)";
+        return {
+          media_id: r.media_id,
+          generation: r.generation,
+          mood: r.mood,
+          next: `The restyled photo is in the chat. In one short message in the Owner language ask: post it, ${which}, or both?${r.generation === 1 ? ` ${REDO_WORDS}` : ""} Do nothing else yet. Post it → social_post with this media_id; website → propose_changes set_item_image with this media_id (never make_menu_photo on a restyled picture); both → both in one turn.`,
+        };
+      }),
+  });
+  return [make, ...(makeMenu ? [makeMenu] : []), ...(restylePhoto ? [restylePhoto] : [])];
 }
