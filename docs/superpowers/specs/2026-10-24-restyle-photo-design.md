@@ -91,3 +91,7 @@ This is the picture the demo video and the Crossroads deck show ("Same cup. A pi
 - The store query for "media under a path prefix in a date range" (add to `Store` with a Supabase implementation and the in-memory test store).
 - Wording of the prompt rule and the owner-facing lines in both languages, matching the tone of the existing rules.
 - Whether the website photo should be the 4:5 restyled file as is or passed through `make_menu_photo`'s centring: use the restyled file as is (it is a photograph, not a cut-out); the owner can still ask for the white-background version.
+
+## Built
+
+PR biskwida/site-manager#24 (branch build/restyle, 24 Oct 2026): plan `docs/superpowers/plans/2026-10-24-restyle-photo.md`. The owner applies the migration, runs the smoke test and merges.
