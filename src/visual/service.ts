@@ -47,7 +47,7 @@ async function sharpAverage(bytes: Uint8Array) {
   return { r: channels[0]?.mean ?? 128, g: channels[1]?.mean ?? 128, b: channels[2]?.mean ?? 128 };
 }
 
-function sniffType(bytes: Uint8Array): string {
+export function sniffType(bytes: Uint8Array): string {
   if (bytes[0] === 0x89 && bytes[1] === 0x50) return "image/png";
   if (bytes[0] === 0x52 && bytes[1] === 0x49) return "image/webp";
   return "image/jpeg";
