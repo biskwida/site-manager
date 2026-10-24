@@ -1,5 +1,5 @@
 // test/visual-route.test.ts
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { handleVisualRequest } from "@/src/server/visual";
 import { httpVisualClient } from "@/src/visual/client";
 import type { RestyleDeps } from "@/src/visual/restyle";
@@ -104,6 +104,24 @@ describe("/api/visual kind restyle", () => {
     const ok = await handler(post({ kind: "restyle", venueId: venue.id, mediaId: photo.id, mood: "darker", item: "Latte" }));
     expect(ok.status).toBe(200);
     expect(await ok.json()).toMatchObject({ generation: 1, mood: "darker", url: expect.stringMatching(/\.jpg$/) });
+  });
+  it("accepts a restyle with item null and with no item at all", async () => {
+    const { handler, venue, photo } = await restyleSetup();
+    const withNull = await handler(post({ kind: "restyle", venueId: venue.id, mediaId: photo.id, item: null }));
+    expect(withNull.status).toBe(200);
+    expect(await withNull.json()).toMatchObject({ generation: 1 });
+    const without = await handler(post({ kind: "restyle", venueId: venue.id, mediaId: photo.id }));
+    expect(without.status).toBe(200);
+    expect(await without.json()).toMatchObject({ generation: 2 });
+  });
+  it("hands the route's deadline to the service: no time left means a timeout fallback", async () => {
+    const s = await restyleSetup();
+    const generate = vi.fn(s.restyle.generate);
+    const handler = (deadline: number) => (req: Request) => handleVisualRequest(req, { secret: "S3CRET", visual: s.visual, restyle: { ...s.restyle, generate }, deadline });
+    const body = { kind: "restyle", venueId: s.venue.id, mediaId: s.photo.id };
+    expect(await (await handler(Date.now() + 2_000)(post(body))).json()).toEqual({ fallback: "card", reason: "timeout" });
+    expect(generate).not.toHaveBeenCalled();
+    expect(await (await handler(Date.now() + 50_000)(post(body))).json()).toMatchObject({ generation: 1 });
   });
   it("answers refusals and fallbacks as 200 with the result", async () => {
     const s = await restyleSetup();

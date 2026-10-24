@@ -172,6 +172,19 @@ describe("social_post", () => {
       expect(after.ai_generated).toBe(true);
     });
 
+    it("a caption that already ends with the label (either language) is left as it is", async () => {
+      const t = await setup();
+      await t.store.updateVenue(t.venue.id, { ai_label: true });
+      const m = await restyled(t);
+      for (const caption of ["Нова чаша · създадено с AI", "New cup · made with AI  "]) {
+        const r = await call(t.tools, "social_post", input(m.id, { caption }));
+        const after = await row(t.store, r);
+        expect(after.caption).toBe(caption.trim());
+        expect(after.ai_generated).toBe(true);
+        await t.store.updateChangeSet(r.change_set_id as string, { status: "cancelled" });
+      }
+    });
+
     it("the label follows the conversation language: English and any other non-Bulgarian language get ' · made with AI'", async () => {
       const t = await setup();
       await t.store.updateVenue(t.venue.id, { ai_label: true });

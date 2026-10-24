@@ -4,7 +4,9 @@
 // Pure orchestration: the image model call is injected as `generate` (the Gemini call lives elsewhere), so this runs in tests
 // without the model. When the model gives nothing back it answers { fallback: "card" } and saves nothing, so the owner is
 // never shown a card as if it were the restyled photo.
-import { inFreeTrial } from "../billing/entitlements";
+// Known gap: HEIC photos are not detected by sniffType (src/visual/service.ts), so they reach Gemini labelled image/jpeg and come
+// back as a fallback "error".
+import { freeTrialOver, inFreeTrial } from "../billing/entitlements";
 import { monthWindow } from "../domain/limits";
 import type { Store } from "../store/types";
 import { sniffType } from "./service";
@@ -14,8 +16,10 @@ export const MOODS: readonly Mood[] = ["default", "darker", "brighter", "minimal
 
 /** One source photo may be restyled this many times (the first + two redos). */
 export const RESTYLE_MAX_GENERATIONS = 3;
-/** The model call gets this long; the /api/visual route's whole budget is 60 s. */
-export const RESTYLE_TIMEOUT_MS = 40_000;
+/** The model call gets this long at most (less when the request's deadline is nearer); the /api/visual route's whole budget is 60 s. */
+export const RESTYLE_TIMEOUT_MS = 30_000;
+/** Below this much time left before the deadline the model is not called at all. */
+const MIN_REMAINING_MS = 5_000;
 
 /** What changes between moods: the surface the product stands on, and the light on it. */
 const SCENES: Record<Mood, { change: string; light: string }> = {
@@ -61,6 +65,8 @@ export interface RestyleRequest {
   mood?: Mood;
   /** The item's name when known. */
   item?: string | null;
+  /** Epoch ms by which the whole request must be answered (the route sets it); unset = only RESTYLE_TIMEOUT_MS applies. */
+  deadline?: number;
 }
 
 export type RestyleRefusal = "source_is_restyle" | "too_many_generations" | "monthly_limit" | "trial_limit" | "no_photo";
@@ -82,12 +88,14 @@ export async function restylePhoto(d: RestyleDeps, req: RestyleRequest): Promise
   if (made.length >= RESTYLE_MAX_GENERATIONS) return { error: "too_many_generations" };
 
   // The caps count source photos, not generations: a redo of a photo already in the counted set is never a new photo.
+  // Like every other limit, the trial cap exists only with billing on and while the free trial is running.
   const venue = await d.store.getVenue(req.venueId);
-  if (inFreeTrial(venue)) {
+  const now = (d.now ?? (() => new Date()))();
+  if (d.store.billingConfig?.billingEnabled === true && inFreeTrial(venue) && !freeTrialOver(venue, now)) {
     const used = new Set((await d.store.listMediaByPathPrefix(req.venueId, "restyle/")).map((m) => sourceOf(req.venueId, m.storage_path)));
     if (!used.has(media.id) && used.size >= d.limits.trial) return { error: "trial_limit", used: used.size, limit: d.limits.trial };
   }
-  const window = monthWindow((d.now ?? (() => new Date()))(), venue.tz);
+  const window = monthWindow(now, venue.tz);
   const usedThisMonth = new Set((await d.store.listMediaByPathPrefix(req.venueId, "restyle/", window)).map((m) => sourceOf(req.venueId, m.storage_path)));
   if (!usedThisMonth.has(media.id) && usedThisMonth.size >= d.limits.monthly) return { error: "monthly_limit", used: usedThisMonth.size, limit: d.limits.monthly };
 
@@ -95,9 +103,11 @@ export async function restylePhoto(d: RestyleDeps, req: RestyleRequest): Promise
   if (!original) return { error: "no_photo" };
 
   const mood = req.mood ?? "default";
+  const remaining = req.deadline === undefined ? RESTYLE_TIMEOUT_MS : Math.max(0, req.deadline - Date.now());
+  if (remaining < MIN_REMAINING_MS) return { fallback: "card", reason: "timeout" };
   let outcome: GenerateOutcome;
   try {
-    outcome = await d.generate({ image: original, mimeType: sniffType(original), prompt: restylePrompt(mood, req.item ?? null), signal: AbortSignal.timeout(RESTYLE_TIMEOUT_MS) });
+    outcome = await d.generate({ image: original, mimeType: sniffType(original), prompt: restylePrompt(mood, req.item ?? null), signal: AbortSignal.timeout(Math.min(RESTYLE_TIMEOUT_MS, remaining)) });
   } catch (e) {
     const name = (e as { name?: string } | null)?.name;
     if (name === "TimeoutError" || name === "AbortError") return { fallback: "card", reason: "timeout" };
@@ -108,7 +118,14 @@ export async function restylePhoto(d: RestyleDeps, req: RestyleRequest): Promise
   if ("refused" in outcome) return { fallback: "card", reason: "refused" };
   if ("none" in outcome) return { fallback: "card", reason: "no_image" };
 
-  const generation = made.length + 1;
-  const saved = await d.store.saveMedia(req.venueId, outcome.image, "image/jpeg", { name: `restyle/${media.id}/${generation}.jpg` });
-  return { media_id: saved.id, url: saved.public_url, generation, mood };
+  // Storage does not overwrite: a racing request (or an upload whose row never landed) already holds this number, so try the next.
+  for (let generation = made.length + 1, retries = 0; ; generation++, retries++) {
+    try {
+      const saved = await d.store.saveMedia(req.venueId, outcome.image, "image/jpeg", { name: `restyle/${media.id}/${generation}.jpg` });
+      return { media_id: saved.id, url: saved.public_url, generation, mood };
+    } catch (e) {
+      if (!/already exists|duplicate|409/i.test(e instanceof Error ? e.message : String(e))) throw e;
+      if (retries >= RESTYLE_MAX_GENERATIONS) return { fallback: "card", reason: "error" };
+    }
+  }
 }

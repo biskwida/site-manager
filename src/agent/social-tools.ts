@@ -77,7 +77,9 @@ export function socialTools(d: ToolDeps, k: ToolKit) {
         if (!/^https:\/\//.test(m.public_url)) throw new Error("This photo has no public https address, so Facebook and Instagram cannot fetch it (offline storage). Tell the owner posting works on the hosted site.");
         // The owner's "label my AI pictures" choice (off unless set): a restyled picture gets the suffix in the owner's language, in code, never by the agent.
         const labelled = (await d.store.getVenue(d.venueId)).ai_label === true && m.storage_path.includes("/restyle/");
-        const caption = input.caption.trim() + (labelled ? AI_LABEL[k.lang] : "");
+        const typed = input.caption.trim();
+        // A caption the agent already ended with the label (either language) is left as it is, so the label is never doubled.
+        const caption = typed + (labelled && !Object.values(AI_LABEL).some((l) => typed.endsWith(l)) ? AI_LABEL[k.lang] : "");
         if (targets.some((t) => t.startsWith("instagram_")) && !isJpeg(m)) throw new Error("Instagram accepts only JPEG photos and this one is not a JPEG. Ask the owner to send it as a regular photo (not as a file), or post it to Facebook only.");
         if (targets.includes("instagram_post")) {
           if (Array.from(caption).length > IG_CAPTION_MAX) throw new Error(`The caption is longer than Instagram's 2,200 characters; shorten it.`);

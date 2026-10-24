@@ -169,6 +169,12 @@ describe("SYSTEM_PROMPT: the restyle rule", () => {
     expect(rule).toMatch(/both/);
     expect(rule).toMatch(/fallback/);
   });
+  it("does not ask again when the owner already said where the picture goes", () => {
+    expect(rule).toContain("already said");
+    expect(rule).toContain("do that now in this turn");
+    expect(rule).toContain("разкраси я и я пусни в инстаграм");
+    expect(rule).toMatch(/otherwise ask in one short message/);
+  });
   it("the existing photo rules are untouched and the numbering stays continuous", () => {
     expect(SYSTEM_PROMPT).toMatch(/^13\. Pictures for Instagram: /m);
     expect(SYSTEM_PROMPT).toMatch(/^16\. Website and menu photos: /m);

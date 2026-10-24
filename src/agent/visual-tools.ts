@@ -53,6 +53,11 @@ export const RestylePhotoSchema = z.object({
 
 const NO_OBJECT = "Could not separate the object from this photo; ask the owner for a photo of the item alone on a plain surface, taken straight on.";
 
+/** The item name sent to the service: the route accepts at most 60 characters, menu names have no cap. */
+const RESTYLE_ITEM_MAX = 60;
+/** A restyle that ran out of time (the service's own timeout, or the client giving up on the call). */
+const TIMEOUT_ERROR = /timeout|aborted|timed out/i;
+
 /** What the owner is told when restyle_photo is refused; the numbers are the service's. Plain no-photo wording, not make_visual's cut-out line. */
 const RESTYLE_REFUSALS: Record<RestyleRefusal, (limit: number | undefined, lang: Lang) => string> = {
   monthly_limit: (limit, lang) => (lang === "bg" ? `Това бяха ${limit}-те разкрасявания за този месец; от 1-во число отново.` : `That's the ${limit} restyles for this month; from the 1st again.`),
@@ -61,6 +66,11 @@ const RESTYLE_REFUSALS: Record<RestyleRefusal, (limit: number | undefined, lang:
   source_is_restyle: (_, lang) => (lang === "bg" ? "Изпрати оригиналната снимка; разкрасяването винаги тръгва от нея." : "Send the original photo; restyling always starts from it."),
   no_photo: (_, lang) => (lang === "bg" ? "Не намирам тази снимка; изпрати я пак." : "I can't find that photo; send it again."),
 };
+
+/** What the agent does when the photo could not be restyled; `reason` refused adds the most common cause. */
+function restyleFallbackNext(reason: string): string {
+  return `The photo could not be restyled; nothing was sent to the chat.${reason === "refused" ? " The most common cause is people or faces in the photo; say so in one short sentence." : ""} Go by what the owner wanted: for a post, offer make_visual on the same media_id in this same message; for the website, call make_menu_photo on the same media_id now; when the owner only said restyle, say in one short sentence that it couldn't be restyled and ask which of the two they want (a post picture or a website photo).`;
+}
 
 const REDO_WORDS = 'Name the redo words once, as a hint: "darker", "brighter", "more minimal" (in Bulgarian „по-тъмна", „по-светла", „по-минималистична").';
 
@@ -171,24 +181,28 @@ export function visualTools(d: ToolDeps, k: ToolKit) {
           item = { id: found.id, name: k.lang === "bg" ? found.name_bg : found.name_en };
         }
         const mood = input.mood ?? "default";
-        const r = await restyle({ venueId: d.venueId, mediaId: input.media_id, mood, item: item?.name ?? null });
-        if ("error" in r) throw new Error(RESTYLE_REFUSALS[r.error](r.limit, k.lang));
-        if ("fallback" in r) {
-          return {
-            fallback: r.fallback,
-            reason: r.reason,
-            next: `The photo could not be restyled; nothing was sent to the chat.${r.reason === "refused" ? " Photos with people or faces cannot be restyled; say so in one short sentence." : ""} Go by what the owner wanted: for a post, offer make_visual on the same media_id in this same message; for the website, call make_menu_photo on the same media_id now; when the owner only said restyle, say in one short sentence that it couldn't be restyled and ask which of the two they want (a post picture or a website photo).`,
-          };
+        // No item key at all without a name (the route would otherwise be sent null); a long menu name is cut to what the route takes.
+        let r: Awaited<ReturnType<typeof restyle>>;
+        try {
+          r = await restyle({ venueId: d.venueId, mediaId: input.media_id, mood, ...(item?.name ? { item: item.name.slice(0, RESTYLE_ITEM_MAX) } : {}) });
+        } catch (e) {
+          // The call to the picture service ran out of time: the same fallback as the service's own timeout, so the agent gets the by-intent instruction.
+          if (TIMEOUT_ERROR.test(`${(e as { name?: string } | null)?.name ?? ""} ${(e as { message?: string } | null)?.message ?? ""}`)) return { fallback: "card", reason: "timeout", next: restyleFallbackNext("timeout") };
+          throw e;
         }
+        if ("error" in r) throw new Error(`Nothing was made. Do not retry, split or rephrase this request and do not offer a workaround; reply to the owner with exactly this line: "${RESTYLE_REFUSALS[r.error](r.limit, k.lang)}"`);
+        if ("fallback" in r) return { fallback: r.fallback, reason: r.reason, next: restyleFallbackNext(r.reason) };
         if ((await d.messenger.sendPhoto(d.chatRef, r.url, k.lang === "bg" ? "Разкрасена" : "Restyled")) !== null) d.sentPhotos.add(r.url);
         d.notes?.push(`restyle from photo ${input.media_id}: ${r.media_id} (${r.mood}, generation ${r.generation})`);
         const which = item ? `put it on the website as the photo of ${item.name}` : "put it on the website (name which item the photo is for, your likely match from get_menu)";
-        return {
-          media_id: r.media_id,
-          generation: r.generation,
-          mood: r.mood,
-          next: `The restyled photo is in the chat. In one short message in the Owner language ask: post it, ${which}, or both?${r.generation === 1 ? ` ${REDO_WORDS}` : ""} Do nothing else yet. Post it → social_post with this media_id; website → propose_changes set_item_image with this media_id (never make_menu_photo on a restyled picture); both → both in one turn.`,
-        };
+        const redo = r.generation === 1 ? ` ${REDO_WORDS}` : "";
+        const social = d.social;
+        const canPost = !!social && (social.instagram || social.facebook);
+        const said = `If the owner already said where it goes (post / website / both — e.g. „разкраси я и я пусни в инстаграм", "make it aesthetic for the website"), do that now in this turn (${canPost ? "social_post / " : ""}propose_changes set_item_image${canPost ? " / both" : ""}); otherwise`;
+        const next = canPost
+          ? `The restyled photo is in the chat. ${said} ask in one short message in the Owner language: post it, ${which}, or both?${redo} Then wait for the answer. Post it → social_post with this media_id; website → propose_changes set_item_image with this media_id (never make_menu_photo on a restyled picture); both → both in one turn.`
+          : `The restyled photo is in the chat. Instagram and Facebook are not connected, so do not offer to post it; if the owner wants it posted, tell them in one short sentence that posting needs the "Facebook and Instagram" card on the dashboard. ${said} ask in one short message in the Owner language whether to ${which}.${redo} Then wait for the answer. Website → propose_changes set_item_image with this media_id (never make_menu_photo on a restyled picture).`;
+        return { media_id: r.media_id, generation: r.generation, mood: r.mood, next };
       }),
   });
   return [make, ...(makeMenu ? [makeMenu] : []), ...(restylePhoto ? [restylePhoto] : [])];
