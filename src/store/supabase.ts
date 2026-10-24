@@ -556,7 +556,8 @@ export class SupabaseStore implements Store {
     const escaped = `${venueId}/${prefix}`.replace(/[\\%_]/g, (c) => `\\${c}`); // like wildcards and the escape character itself
     let q = this.db.from("media").select("*").eq("venue_id", venueId).like("storage_path", `${escaped}%`);
     if (range) q = q.gte("created_at", range.from).lt("created_at", range.to);
-    return (await mustRows(q.order("created_at", { ascending: true }), "listMediaByPathPrefix")).map(toMedia);
+    // `must`, not `mustRows`: no rows is the normal answer (a venue that has not restyled a photo yet), never an error.
+    return (await must(q.order("created_at", { ascending: true }), "listMediaByPathPrefix")).map(toMedia);
   }
   async getMedia(id: string) {
     const { data, error } = await this.db.from("media").select("*").eq("id", id).maybeSingle();
