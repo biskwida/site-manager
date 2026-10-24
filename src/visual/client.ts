@@ -1,13 +1,20 @@
 // src/visual/client.ts
 // How the agent asks for a picture: over HTTP to /api/visual, so the cut-out model stays in that one function.
+import type { RestyleRequest, RestyleResult } from "./restyle";
 import type { MenuPhotoRequest, MenuPhotoResult, VisualRequest, VisualResult } from "./service";
 
-/** Asking for a picture; `menuPhoto` asks for the plain website photo (optional so a plain function still is a client). */
-export type VisualClient = ((req: VisualRequest) => Promise<VisualResult>) & { menuPhoto?: (req: MenuPhotoRequest) => Promise<MenuPhotoResult> };
+/**
+ * Asking for a picture; `menuPhoto` asks for the plain website photo, `restyle` for an AI-restyled photo (present only when the
+ * deployment has the image model key). Both optional so a plain function still is a client.
+ */
+export type VisualClient = ((req: VisualRequest) => Promise<VisualResult>) & {
+  menuPhoto?: (req: MenuPhotoRequest) => Promise<MenuPhotoResult>;
+  restyle?: (req: RestyleRequest) => Promise<RestyleResult>;
+};
 
 export const VISUAL_PATH = "/api/visual";
 
-export function httpVisualClient(o: { baseUrl: string; secret: string; fetch?: typeof fetch; timeoutMs?: number }): VisualClient {
+export function httpVisualClient(o: { baseUrl: string; secret: string; fetch?: typeof fetch; timeoutMs?: number; restyle?: boolean }): VisualClient {
   const f = o.fetch ?? fetch;
   const post = async <T>(payload: unknown): Promise<T> => {
     const res = await f(`${o.baseUrl}${VISUAL_PATH}`, {
@@ -21,5 +28,8 @@ export function httpVisualClient(o: { baseUrl: string; secret: string; fetch?: t
     return body as T;
   };
   const client = (req: VisualRequest) => post<VisualResult>(req);
-  return Object.assign(client, { menuPhoto: (req: MenuPhotoRequest) => post<MenuPhotoResult>({ kind: "menu", ...req }) });
+  return Object.assign(client, {
+    menuPhoto: (req: MenuPhotoRequest) => post<MenuPhotoResult>({ kind: "menu", ...req }),
+    ...(o.restyle ? { restyle: (req: RestyleRequest) => post<RestyleResult>({ kind: "restyle", ...req }) } : {}),
+  });
 }

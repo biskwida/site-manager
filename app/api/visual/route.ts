@@ -3,6 +3,7 @@
 import { getServerDeps } from "@/src/server/deps";
 import { handleVisualRequest } from "@/src/server/visual";
 import { cutout } from "@/src/visual/cutout";
+import { geminiGenerate } from "@/src/visual/gemini";
 import { renderJpeg } from "@/src/visual/render";
 
 export const dynamic = "force-dynamic";
@@ -19,5 +20,14 @@ export async function POST(req: Request) {
       return null;
     }
   };
-  return handleVisualRequest(req, { secret: deps.config.tickSecret, visual: { store: deps.store, read, cutout, render: renderJpeg } });
+  const { config } = deps;
+  const restyle = config.geminiApiKey
+    ? {
+        store: deps.store,
+        read,
+        generate: geminiGenerate({ apiKey: config.geminiApiKey, model: config.restyleModel, fetch: deps.fetch }),
+        limits: { monthly: config.restyleMonthlyLimit, trial: config.restyleTrialLimit },
+      }
+    : undefined;
+  return handleVisualRequest(req, { secret: config.tickSecret, visual: { store: deps.store, read, cutout, render: renderJpeg }, restyle });
 }
