@@ -138,6 +138,8 @@ export interface Venue extends VenueBilling {
   comment_limit: number | null;
   /** ISO of the last digest sent (or skipped for lack of comments); one per local day. */
   last_comment_digest_at: string | null;
+  /** Restyled pictures are labelled as AI-made: a note in the caption and Instagram's is_ai_generated. Server-only; null in the DB = off. */
+  ai_label: boolean;
   tz: string;
   default_lang: Lang;
   theme: Theme;

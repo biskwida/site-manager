@@ -46,6 +46,8 @@ export interface NewVenue {
   comment_mode?: CommentMode;
   comment_digest_hour?: number;
   comment_limit?: number | null;
+  /** Label restyled pictures as AI-made; default false. */
+  ai_label?: boolean;
   tz?: string;
   default_lang?: Lang;
   theme?: Venue["theme"];
@@ -107,7 +109,7 @@ export type ChangeSetPatch = Partial<Pick<ChangeSet, "status" | "apply_at" | "re
 export type VenuePatch = Partial<Pick<Venue,
   "slug" | "name" | "tagline_bg" | "tagline_en" | "about_bg" | "about_en" | "address" | "phone" | "maps_url" | "instagram" |
   "hours" | "tz" | "default_lang" | "theme" | "template" | "business_type" | "status" | "wizard_draft" | "instagram_import" | "site_url" | "site_mode" | "site_platform" | "created_via" |
-  "comment_mode" | "comment_digest_hour" | "comment_limit" | "last_comment_digest_at" |
+  "comment_mode" | "comment_digest_hour" | "comment_limit" | "last_comment_digest_at" | "ai_label" |
   "plan" | "billing_status" | "trial_started_at" | "trial_ends_at" | "past_due_since" | "stripe_customer_id" | "stripe_subscription_id" | "trial_reminder_sent" | "website_fee_paid">>;
 
 export interface InviteSummary {
@@ -223,6 +225,11 @@ export interface Store {
   saveMedia(venueId: string, bytes: Uint8Array, contentType: string, opts?: { name?: string }): Promise<Media>;
   getMedia(id: string): Promise<Media | null>;
   findMediaByPath(storagePath: string): Promise<Media | null>;
+  /**
+   * The venue's media stored under `<venue>/<prefix>` (e.g. "restyle/" or "restyle/<src>/"), oldest first. `range` keeps only rows whose
+   * created_at is in [from, to) (ISO instants).
+   */
+  listMediaByPathPrefix(venueId: string, prefix: string, range?: { from: string; to: string }): Promise<Media[]>;
 
   // conversations
   getConversation(venueId: string, chatRef: string): Promise<Conversation | null>;
