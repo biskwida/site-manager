@@ -45,6 +45,9 @@ export async function socialConnections(store: Store, venueId: string): Promise<
   return { facebook: kinds.has("facebook"), instagram: kinds.has("instagram") };
 }
 
+/** The caption suffix for a restyled picture when the venue turned the AI label on. */
+const AI_LABEL = { bg: " · създадено с AI", en: " · made with AI" } as const;
+
 /** A JPEG by its stored file name or URL (Telegram photos are JPEG; Instagram accepts nothing else). */
 function isJpeg(m: { storage_path: string; public_url: string }): boolean {
   return /\.jpe?g$/i.test(m.storage_path) || /\.jpe?g(\?|$)/i.test(m.public_url);
@@ -72,7 +75,9 @@ export function socialTools(d: ToolDeps, k: ToolKit) {
         const m = await d.store.getMedia(input.media_id);
         if (!m || m.venue_id !== d.venueId) throw new Error(`media_id "${input.media_id}" not found for this venue; use the id of a photo you received.`);
         if (!/^https:\/\//.test(m.public_url)) throw new Error("This photo has no public https address, so Facebook and Instagram cannot fetch it (offline storage). Tell the owner posting works on the hosted site.");
-        const caption = input.caption.trim();
+        // The owner's "label my AI pictures" choice (off unless set): a restyled picture gets the suffix in the owner's language, in code, never by the agent.
+        const labelled = (await d.store.getVenue(d.venueId)).ai_label === true && m.storage_path.includes("/restyle/");
+        const caption = input.caption.trim() + (labelled ? AI_LABEL[k.lang] : "");
         if (targets.some((t) => t.startsWith("instagram_")) && !isJpeg(m)) throw new Error("Instagram accepts only JPEG photos and this one is not a JPEG. Ask the owner to send it as a regular photo (not as a file), or post it to Facebook only.");
         if (targets.includes("instagram_post")) {
           if (Array.from(caption).length > IG_CAPTION_MAX) throw new Error(`The caption is longer than Instagram's 2,200 characters; shorten it.`);
@@ -83,7 +88,7 @@ export function socialTools(d: ToolDeps, k: ToolKit) {
         await k.ensureWithinLimit();
         await k.ensureNoPending();
         const s = await k.site();
-        const row: SocialPostRow = { media_id: m.id, image_url: m.public_url, caption, targets };
+        const row: SocialPostRow = { media_id: m.id, image_url: m.public_url, caption, targets, ...(labelled ? { ai_generated: true } : {}) };
         const stories = targets.some((t) => t.endsWith("_story"));
         if (targets.includes("instagram_post") || stories) {
           // Read once: the Instagram feed shape and the story picture both come from these bytes.
