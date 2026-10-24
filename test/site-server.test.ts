@@ -91,10 +91,12 @@ describe("publicSiteState", () => {
     expect("change_limit" in pub.venue).toBe(false);
     expect("comment_mode" in pub.venue).toBe(false);
     expect("comment_limit" in pub.venue).toBe(false);
+    expect("ai_label" in pub.venue).toBe(false);
     expect(JSON.stringify(pub)).not.toContain("prj_secret");
     expect(JSON.stringify(pub)).not.toContain("cdninstagram");
-    const { deploy: _d, wizard_draft: _w, instagram_import: _i, site_url: _s, site_mode: _sm, site_platform: _sp, created_via: _cv, change_limit: _l, comment_mode: _cm, comment_digest_hour: _ch, comment_limit: _cl, last_comment_digest_at: _cd, plan: _bp, billing_status: _bs, trial_started_at: _bts, trial_ends_at: _bte, past_due_since: _bpd, stripe_customer_id: _bc, stripe_subscription_id: _bsub, trial_reminder_sent: _btr, website_fee_paid: _bw, ...rest } = state.venue;
+    const { deploy: _d, wizard_draft: _w, instagram_import: _i, site_url: _s, site_mode: _sm, site_platform: _sp, created_via: _cv, change_limit: _l, comment_mode: _cm, comment_digest_hour: _ch, comment_limit: _cl, last_comment_digest_at: _cd, ai_label: _al, plan: _bp, billing_status: _bs, trial_started_at: _bts, trial_ends_at: _bte, past_due_since: _bpd, stripe_customer_id: _bc, stripe_subscription_id: _bsub, trial_reminder_sent: _btr, website_fee_paid: _bw, ...rest } = state.venue;
     void _d;
+    void _al;
     void _w;
     void _i;
     void _s;

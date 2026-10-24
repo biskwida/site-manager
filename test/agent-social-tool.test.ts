@@ -35,8 +35,8 @@ async function setup(over: Partial<AgentDeps> = {}, connect: { facebook?: boolea
     const m = await getMedia(id);
     return m && https(m);
   };
-  demo.store.saveMedia = async (venueId: string, bytes: Uint8Array, type: string) => {
-    const m = https(await saveMedia(venueId, bytes, type));
+  demo.store.saveMedia = async (venueId: string, bytes: Uint8Array, type: string, opts?: { name?: string }) => {
+    const m = https(await saveMedia(venueId, bytes, type, opts));
     files.set(m.public_url, bytes);
     return m;
   };
@@ -155,6 +155,74 @@ describe("social_post", () => {
     const r = await call(tools, "social_post", input(photo.id, { caption: tags, targets: ["facebook_post", "instagram_story"] }));
     expect(r.status).toBe("proposed");
     await store.updateChangeSet(r.change_set_id as string, { status: "cancelled" });
+  });
+
+  describe("the AI label (off by default)", () => {
+    const row = async (store: { getChangeSet(id: string): Promise<{ changes: { after: unknown }[] }> }, r: Record<string, unknown>) => (await store.getChangeSet(r.change_set_id as string)).changes[0].after as SocialPostRow;
+    const restyled = (t: Awaited<ReturnType<typeof setup>>) => t.store.saveMedia(t.venue.id, JPEG, "image/jpeg", { name: "restyle/src/1.jpg" });
+
+    it("label on + restyled picture: the caption ends with the label in the owner's language and the row says ai_generated", async () => {
+      const t = await setup();
+      await t.store.updateVenue(t.venue.id, { ai_label: true });
+      const m = await restyled(t);
+      const r = await call(t.tools, "social_post", input(m.id, { caption: "Нова чаша  " }));
+      expect(r.status).toBe("proposed");
+      const after = await row(t.store, r);
+      expect(after.caption).toBe("Нова чаша · създадено с AI");
+      expect(after.ai_generated).toBe(true);
+    });
+
+    it("a caption that already ends with the label (either language) is left as it is", async () => {
+      const t = await setup();
+      await t.store.updateVenue(t.venue.id, { ai_label: true });
+      const m = await restyled(t);
+      for (const caption of ["Нова чаша · създадено с AI", "New cup · made with AI  "]) {
+        const r = await call(t.tools, "social_post", input(m.id, { caption }));
+        const after = await row(t.store, r);
+        expect(after.caption).toBe(caption.trim());
+        expect(after.ai_generated).toBe(true);
+        await t.store.updateChangeSet(r.change_set_id as string, { status: "cancelled" });
+      }
+    });
+
+    it("the label follows the conversation language: English and any other non-Bulgarian language get ' · made with AI'", async () => {
+      const t = await setup();
+      await t.store.updateVenue(t.venue.id, { ai_label: true });
+      const m = await restyled(t);
+      for (const lang of ["en", "de"]) {
+        const tools = makeTools({ ...t.deps, member: { ...t.deps.member, lang } });
+        const r = await call(tools, "social_post", input(m.id, { caption: "New cup" }));
+        expect((await row(t.store, r)).caption).toBe("New cup · made with AI");
+        await t.store.updateChangeSet(r.change_set_id as string, { status: "cancelled" });
+      }
+    });
+
+    it("label on + an ordinary photo, or label off + a restyled picture: the row is exactly what it was (no ai_generated key)", async () => {
+      const t = await setup();
+      const m = await restyled(t);
+      const off = await call(t.tools, "social_post", input(m.id));
+      const offRow = await row(t.store, off);
+      expect(offRow.caption).toBe("Днешното предложение: тиквена супа 🎃 #кафе");
+      expect(offRow).not.toHaveProperty("ai_generated");
+      await t.store.updateChangeSet(off.change_set_id as string, { status: "cancelled" });
+      await t.store.updateVenue(t.venue.id, { ai_label: true });
+      const plain = await call(t.tools, "social_post", input(t.photo.id));
+      const plainRow = await row(t.store, plain);
+      expect(plainRow.caption).toBe("Днешното предложение: тиквена супа 🎃 #кафе");
+      expect(plainRow).not.toHaveProperty("ai_generated");
+    });
+
+    it("Instagram's 2,200 limit counts the label: 2,195 characters pass without it and are refused with it", async () => {
+      const t = await setup();
+      const m = await restyled(t);
+      const caption = "а".repeat(2195);
+      const ok = await call(t.tools, "social_post", input(m.id, { caption }));
+      expect(ok.status).toBe("proposed");
+      await t.store.updateChangeSet(ok.change_set_id as string, { status: "cancelled" });
+      await t.store.updateVenue(t.venue.id, { ai_label: true });
+      expect((await call(t.tools, "social_post", input(m.id, { caption }))).error).toMatch(/2,200/);
+      expect((await call(t.tools, "social_post", input(t.photo.id, { caption }))).status).toBe("proposed"); // an ordinary photo takes no label
+    });
   });
 
   it("refuses while a proposal from an earlier message is pending, but allows several from the same message", async () => {

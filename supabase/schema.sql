@@ -101,6 +101,8 @@ alter table public.venues add column if not exists comment_limit integer default
 alter table public.venues drop constraint if exists venues_comment_limit_check;
 alter table public.venues add constraint venues_comment_limit_check check (comment_limit is null or comment_limit >= 0);
 alter table public.venues add column if not exists last_comment_digest_at timestamptz;
+-- AI label (2026-10-24): label restyled pictures as AI-made (caption note + Instagram's is_ai_generated). Owner-only, never granted to anon; null = off.
+alter table public.venues add column if not exists ai_label boolean;
 alter table public.venues drop constraint if exists venues_template_check;
 alter table public.venues add constraint venues_template_check check (template in ('classic', 'nocturne', 'lumen', 'furna', 'mehana', 'kvartal'));
 alter table public.venues drop constraint if exists venues_business_type_check;

@@ -34,6 +34,7 @@ export function venue(over: Partial<Venue> = {}): Venue {
     comment_digest_hour: 9,
     comment_limit: 300,
     last_comment_digest_at: null,
+    ai_label: false,
     tz: TZ,
     default_lang: "bg",
     theme: { accent: "#2f6b4f" },

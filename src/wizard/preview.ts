@@ -27,6 +27,7 @@ export function buildPreviewState(d: WizardDraft, media: Media[], now: Date): Si
     comment_digest_hour: 9,
     comment_limit: 300,
     last_comment_digest_at: null,
+    ai_label: false,
     tz: "Europe/Sofia",
     default_lang: d.default_lang,
     theme: { accent: d.theme.accent },

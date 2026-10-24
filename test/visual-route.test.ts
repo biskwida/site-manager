@@ -1,7 +1,8 @@
 // test/visual-route.test.ts
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { handleVisualRequest } from "@/src/server/visual";
 import { httpVisualClient } from "@/src/visual/client";
+import type { RestyleDeps } from "@/src/visual/restyle";
 import type { VisualDeps } from "@/src/visual/service";
 import { makeDemo } from "./helpers";
 
@@ -87,5 +88,70 @@ describe("/api/visual kind menu", () => {
     expect("error" in r).toBe(false);
     expect(r).toMatchObject({ style: "white", reason: "no_photos" });
     await expect(client.menuPhoto!({ venueId: venue.id, mediaId: "nope" })).rejects.toThrow(/not found for this venue/);
+  });
+});
+
+describe("/api/visual kind restyle", () => {
+  const JPEG = new Uint8Array([0xff, 0xd8, 7, 7, 7]);
+  async function restyleSetup() {
+    const s = await setup();
+    const restyle: RestyleDeps = { store: s.store, read: s.visual.read, generate: async () => ({ image: JPEG }), limits: { monthly: 30, trial: 5 } };
+    return { ...s, restyle, handler: (req: Request) => handleVisualRequest(req, { secret: "S3CRET", visual: s.visual, restyle }) };
+  }
+  it("restyles with the secret and answers the service's result as 200", async () => {
+    const { handler, venue, photo } = await restyleSetup();
+    expect((await handler(post({ kind: "restyle", venueId: venue.id, mediaId: photo.id }, "Bearer nope"))).status).toBe(401);
+    const ok = await handler(post({ kind: "restyle", venueId: venue.id, mediaId: photo.id, mood: "darker", item: "Latte" }));
+    expect(ok.status).toBe(200);
+    expect(await ok.json()).toMatchObject({ generation: 1, mood: "darker", url: expect.stringMatching(/\.jpg$/) });
+  });
+  it("accepts a restyle with item null and with no item at all", async () => {
+    const { handler, venue, photo } = await restyleSetup();
+    const withNull = await handler(post({ kind: "restyle", venueId: venue.id, mediaId: photo.id, item: null }));
+    expect(withNull.status).toBe(200);
+    expect(await withNull.json()).toMatchObject({ generation: 1 });
+    const without = await handler(post({ kind: "restyle", venueId: venue.id, mediaId: photo.id }));
+    expect(without.status).toBe(200);
+    expect(await without.json()).toMatchObject({ generation: 2 });
+  });
+  it("hands the route's deadline to the service: no time left means a timeout fallback", async () => {
+    const s = await restyleSetup();
+    const generate = vi.fn(s.restyle.generate);
+    const handler = (deadline: number) => (req: Request) => handleVisualRequest(req, { secret: "S3CRET", visual: s.visual, restyle: { ...s.restyle, generate }, deadline });
+    const body = { kind: "restyle", venueId: s.venue.id, mediaId: s.photo.id };
+    expect(await (await handler(Date.now() + 2_000)(post(body))).json()).toEqual({ fallback: "card", reason: "timeout" });
+    expect(generate).not.toHaveBeenCalled();
+    expect(await (await handler(Date.now() + 50_000)(post(body))).json()).toMatchObject({ generation: 1 });
+  });
+  it("answers refusals and fallbacks as 200 with the result", async () => {
+    const s = await restyleSetup();
+    const handler = (generate: RestyleDeps["generate"]) => (req: Request) => handleVisualRequest(req, { secret: "S3CRET", visual: s.visual, restyle: { ...s.restyle, generate } });
+    const body = { kind: "restyle", venueId: s.venue.id, mediaId: s.photo.id };
+    const refused = await handler(async () => ({ refused: true }))(post(body));
+    expect(refused.status).toBe(200);
+    expect(await refused.json()).toEqual({ fallback: "card", reason: "refused" });
+    const missing = await s.handler(post({ ...body, mediaId: "nope" }));
+    expect(missing.status).toBe(200);
+    expect(await missing.json()).toEqual({ error: "no_photo" });
+  });
+  it("answers 404 when restyle is not configured, and 400 for a bad body", async () => {
+    const { handler, venue, photo, visual } = await restyleSetup();
+    const without = await handleVisualRequest(post({ kind: "restyle", venueId: venue.id, mediaId: photo.id }), { secret: "S3CRET", visual });
+    expect(without.status).toBe(404);
+    expect(await without.json()).toEqual({ error: "restyle is not configured" });
+    for (const bad of [{ mood: "neon" }, { item: "x".repeat(61) }, { mediaId: undefined }, { venueId: "" }]) {
+      expect((await handler(post({ kind: "restyle", venueId: venue.id, mediaId: photo.id, ...bad }))).status).toBe(400);
+    }
+  });
+  it("is reached by the HTTP client's restyle, which exists only when switched on", async () => {
+    const { handler, venue, photo } = await restyleSetup();
+    const f = (async (url: RequestInfo | URL, init?: RequestInit) => {
+      expect(JSON.parse(String(init?.body)).kind).toBe("restyle");
+      return handler(new Request(String(url), init));
+    }) as typeof fetch;
+    const client = httpVisualClient({ baseUrl: "https://app.example", secret: "S3CRET", fetch: f, restyle: true });
+    expect(await client.restyle!({ venueId: venue.id, mediaId: photo.id, mood: "minimal" })).toMatchObject({ generation: 1, mood: "minimal" });
+    expect(httpVisualClient({ baseUrl: "https://app.example", secret: "S3CRET", fetch: f }).restyle).toBeUndefined();
+    expect(httpVisualClient({ baseUrl: "https://app.example", secret: "S3CRET", fetch: f, restyle: false }).restyle).toBeUndefined();
   });
 });

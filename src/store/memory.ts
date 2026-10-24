@@ -74,6 +74,7 @@ export class InMemoryStore implements Store {
       comment_digest_hour: v.comment_digest_hour ?? 9,
       comment_limit: v.comment_limit === undefined ? COMMENT_LIMIT_DEFAULT : v.comment_limit,
       last_comment_digest_at: null,
+      ai_label: v.ai_label ?? false,
       tz: v.tz ?? "Europe/Sofia",
       default_lang: v.default_lang ?? "bg",
       theme: clone(v.theme ?? { accent: "#2f6b4f" }),
@@ -442,6 +443,13 @@ export class InMemoryStore implements Store {
       if (m) return clone(m);
     }
     return null;
+  }
+  async listMediaByPathPrefix(venueId: string, prefix: string, range?: { from: string; to: string }) {
+    const start = `${venueId}/${prefix}`;
+    return this.site(venueId)
+      .media.filter((m) => m.storage_path.startsWith(start) && (!range || (m.created_at >= range.from && m.created_at < range.to)))
+      .sort((a, b) => a.created_at.localeCompare(b.created_at))
+      .map(clone);
   }
   async getMedia(id: string) {
     for (const s of this.sites.values()) {

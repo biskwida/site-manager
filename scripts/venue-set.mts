@@ -10,16 +10,17 @@ import { makeServerDeps } from "../src/server/deps";
 import { changeUsage } from "../src/store/usage";
 import { parseArgs } from "./invite-lines.mts";
 
-const USAGE = `Usage: npm run venue:set -- --slug my-cafe [--change-limit 60|none] [--plan admin|social|both|none] [--billing-status trialing|active|past_due|paused|canceled|none] [--trial-ends 2026-11-02|none]
+const USAGE = `Usage: npm run venue:set -- --slug my-cafe [--change-limit 60|none] [--plan admin|social|both|none] [--billing-status trialing|active|past_due|paused|canceled|none] [--trial-ends 2026-11-02|none] [--ai-label on|off]
   --change-limit    applied change sets per calendar month in the venue's time zone (undo and automatic sets do not count); none = no override (unlimited; with billing on, a free trial or a Stripe subscription follows the trial's or plan's limit)
   --plan            the venue's billing plan; none = no plan chosen
   --billing-status  the venue's billing status; none = billing does not touch the venue
   --trial-ends      when the free trial ends: an ISO date (00:00 UTC) or date and time; none = no trial end
-  At least one of the four is needed.`;
+  --ai-label        on = restyled pictures are labelled as AI-made (caption note + Instagram's AI label); off = not labelled
+  At least one of the five is needed.`;
 
 const args = parseArgs(process.argv);
 const slug = args.get("slug")?.trim();
-const FLAGS = ["change-limit", "plan", "billing-status", "trial-ends"] as const;
+const FLAGS = ["change-limit", "plan", "billing-status", "trial-ends", "ai-label"] as const;
 if (!slug || !FLAGS.some((f) => args.has(f))) {
   console.error(USAGE);
   process.exit(1);
@@ -50,6 +51,11 @@ if (args.has("trial-ends")) {
   if (v instanceof Error) bad(v);
   else patch.trial_ends_at = v;
 }
+if (args.has("ai-label")) {
+  const v = args.get("ai-label")?.trim().toLowerCase();
+  if (v !== "on" && v !== "off") bad(new Error('--ai-label takes "on" or "off"'));
+  else patch.ai_label = v === "on";
+}
 
 // The memory store logs the demo venue's admin link (with its key) on start: drop any log line that carries a key.
 const deps = await makeServerDeps({ defer: (fn) => void fn(), log: (line) => void (line.includes("key=") || console.log(line)) });
@@ -73,3 +79,4 @@ const dash = (v: string | null) => v ?? "-";
 if ("plan" in patch) console.log(`plan:           ${dash(before.plan)} -> ${dash(updated.plan)}`);
 if ("billing_status" in patch) console.log(`billing status: ${dash(before.billing_status)} -> ${dash(updated.billing_status)}`);
 if ("trial_ends_at" in patch) console.log(`trial ends:     ${dash(before.trial_ends_at)} -> ${dash(updated.trial_ends_at)}`);
+if ("ai_label" in patch) console.log(`ai label:       ${before.ai_label ? "on" : "off"} -> ${updated.ai_label ? "on" : "off"}`);

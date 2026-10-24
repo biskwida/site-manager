@@ -60,6 +60,27 @@ describe("relevant()", () => {
   });
 });
 
+describe("Instagram is_ai_generated", () => {
+  const igBodies = (meta: { calls: { path: string; body: Record<string, unknown> | null }[] }) => meta.calls.filter((c) => c.path.endsWith("/media")).map((c) => c.body!);
+  it("is sent as true in both container shapes (post and story) when the row says ai_generated", async () => {
+    const { store, set, meta } = await connected();
+    const cs = await set([post(["instagram_post", "instagram_story"], "Нова чаша · създадено с AI", { ai_generated: true })]);
+    expect(await store.applyChangeSet(cs.id, T0.toISOString())).toBe("applied");
+    expect(igBodies(meta)).toEqual([
+      { image_url: IMAGE, caption: "Нова чаша · създадено с AI", is_ai_generated: true },
+      { image_url: IMAGE, media_type: "STORIES", is_ai_generated: true },
+    ]);
+  });
+  it("is absent from both container shapes when the row has no ai_generated", async () => {
+    const { store, set, meta } = await connected();
+    const cs = await set([post(["instagram_post", "instagram_story"])]);
+    expect(await store.applyChangeSet(cs.id, T0.toISOString())).toBe("applied");
+    const bodies = igBodies(meta);
+    expect(bodies).toHaveLength(2);
+    for (const b of bodies) expect(b).not.toHaveProperty("is_ai_generated");
+  });
+});
+
 describe("publishing", () => {
   it("publishes all four targets once, stores ids and permalinks, and reports each network with links", async () => {
     const { store, set, meta, page, ig } = await connected();

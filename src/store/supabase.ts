@@ -42,6 +42,8 @@ export function toVenue(r: Row): Venue {
     comment_digest_hour: r.comment_digest_hour === null || r.comment_digest_hour === undefined ? 9 : num(r.comment_digest_hour),
     comment_limit: r.comment_limit === undefined ? COMMENT_LIMIT_DEFAULT : r.comment_limit === null ? null : num(r.comment_limit),
     last_comment_digest_at: isoOrNull(r.last_comment_digest_at),
+    // Missing before the migration is applied (null in the DB): off.
+    ai_label: r.ai_label === true,
     tz: str(r.tz) || "Europe/Sofia",
     default_lang: (r.default_lang as Lang) ?? "bg",
     theme: (r.theme as Venue["theme"]) ?? { accent: "#2f6b4f" },
@@ -549,6 +551,12 @@ export class SupabaseStore implements Store {
     const { data, error } = await this.db.from("media").select("*").eq("storage_path", storagePath).maybeSingle();
     if (error) throw new Error(`findMediaByPath: ${error.message}`);
     return data ? toMedia(data) : null;
+  }
+  async listMediaByPathPrefix(venueId: string, prefix: string, range?: { from: string; to: string }) {
+    const escaped = `${venueId}/${prefix}`.replace(/[\\%_]/g, (c) => `\\${c}`); // like wildcards and the escape character itself
+    let q = this.db.from("media").select("*").eq("venue_id", venueId).like("storage_path", `${escaped}%`);
+    if (range) q = q.gte("created_at", range.from).lt("created_at", range.to);
+    return (await mustRows(q.order("created_at", { ascending: true }), "listMediaByPathPrefix")).map(toMedia);
   }
   async getMedia(id: string) {
     const { data, error } = await this.db.from("media").select("*").eq("id", id).maybeSingle();
