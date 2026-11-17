@@ -149,6 +149,21 @@ describe("pollVenueReviews", () => {
     expect(updates).toEqual([]); // unchanged in both respects: nothing written again
   });
 
+  it("a reply seen on Google while the row's set is being applied leaves the row to the push", async () => {
+    const g = await connectedGoogle();
+    const rv = g.fake.addReview(g.loc.v4, { text: "good", created: at(-HOUR) });
+    await pollVenueReviews(g.d, g.venue, T0);
+    const row = (await g.store.findComment(g.venue.id, rv.name))!;
+    const cs = await g.d.store.createChangeSet({ venue_id: g.venue.id, chat_ref: "tg:1001", summary_bg: "s", summary_en: "s", preview_bg: "p", preview_en: "p", source: "comment", status: "proposed", changes: [] });
+    await g.store.updateComment(row.id, { status: "proposed", change_set_id: cs.id, draft_text: "Thanks from Claudia", draft_kind: "praise" });
+    expect(await g.d.store.applyChangeSet(cs.id, at(5 * MIN).toISOString())).toBe("applied"); // ✅ tapped; the push is in flight
+    await replyByHand(g, rv.name, "Thanks from Claudia", at(5 * MIN)); // Google already shows Claudia's reply
+    const before = await g.store.getComment(row.id);
+    await pollVenueReviews(g.d, g.venue, at(16 * MIN));
+    expect(await g.store.getComment(row.id)).toEqual(before);
+    expect((await g.store.getChangeSet(cs.id)).status).toBe("applied");
+  });
+
   it("a hand reply on a review waiting on a proposal withdraws the set; its buttons then post nothing", async () => {
     const g = await connectedGoogle();
     const rv = g.fake.addReview(g.loc.v4, { text: "good", created: at(-HOUR) });

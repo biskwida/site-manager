@@ -680,10 +680,13 @@ export class InMemoryStore implements Store {
   async redactComments(before: string) {
     let n = 0;
     for (const c of this.comments.values()) {
-      if (c.created_at >= before || (c.text === "" && c.author_name === "" && c.author_id === "")) continue;
+      // A Google row also holds the reply text read from Google in draft_text: Google data is kept 30 days at most.
+      const google = c.network === "google";
+      if (c.created_at >= before || (c.text === "" && c.author_name === "" && c.author_id === "" && (!google || c.draft_text === null))) continue;
       c.text = "";
       c.author_name = "";
       c.author_id = "";
+      if (google) c.draft_text = null;
       n++;
     }
     return n;

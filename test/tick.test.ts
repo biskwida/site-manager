@@ -289,9 +289,11 @@ describe("runTick: Google reviews and notices", () => {
   it("the purge blanks a Google row after 30 days and deletes it after 60", async () => {
     const g = await connectedGoogle();
     const row = (comment_id: string, days: number) => ({ network: "google" as const, post_ref: g.loc.v4, comment_id, parent_id: null, author_id: "", author_name: "Maria", text: "review text", created_at: at(-days * DAY).toISOString(), seen_at: GT0.toISOString(), status: "replied" as const, post_caption: "", rating: 5, review_updated_at: at(-days * DAY).toISOString() });
-    await g.store.upsertComments(g.venue.id, [row("g31", 31), row("g61", 61)]);
+    const rows = await g.store.upsertComments(g.venue.id, [row("g29", 29), row("g31", 31), row("g61", 61)]);
+    for (const r of rows) await g.store.updateComment(r.id, { draft_text: "Reply read from Google" });
     await tick(g, new FakeMessenger(), GT0);
-    expect(await g.store.findComment(g.venue.id, "g31")).toMatchObject({ text: "", author_name: "" });
+    expect(await g.store.findComment(g.venue.id, "g29")).toMatchObject({ text: "review text", author_name: "Maria", draft_text: "Reply read from Google" });
+    expect(await g.store.findComment(g.venue.id, "g31")).toMatchObject({ text: "", author_name: "", draft_text: null });
     expect(await g.store.findComment(g.venue.id, "g61")).toBeNull();
   });
 

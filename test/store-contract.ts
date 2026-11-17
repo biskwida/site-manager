@@ -952,10 +952,13 @@ export function storeContract(
       await s.updateComment(g.id, { text: "edited", author_name: "Иван П.", rating: 2, review_updated_at: T, created_at: T, status: "new" });
       expect(await s.getComment(g.id)).toMatchObject({ text: "edited", author_name: "Иван П.", rating: 2, review_updated_at: T, created_at: T });
       expect((await s.findComment(v.id, id))?.id).toBe(g.id);
-      await s.updateComment(g.id, { status: "replied", reply_id: "x", replied_at: "2026-10-21T09:00:00.000Z" });
+      await s.updateComment(g.id, { status: "replied", reply_id: "x", replied_at: "2026-10-21T09:00:00.000Z", draft_text: "Reply read from Google" });
+      await s.updateComment(m.id, { draft_text: "Claudia's draft" });
       expect(await s.countCommentActions(v.id, "2026-10-20T00:00:00.000Z", "2026-10-31T00:00:00.000Z")).toBe(1);
       expect(await s.redactComments("2026-10-25T00:00:00.000Z")).toBe(2);
-      expect(await s.getComment(g.id)).toMatchObject({ text: "", author_name: "", rating: 2, status: "replied" });
+      expect(await s.getComment(g.id)).toMatchObject({ text: "", author_name: "", draft_text: null, rating: 2, status: "replied" });
+      expect(await s.getComment(m.id)).toMatchObject({ text: "", author_name: "", draft_text: "Claudia's draft" }); // Meta rows keep their draft
+      expect(await s.redactComments("2026-10-25T00:00:00.000Z")).toBe(0);
     });
 
     it("redacts the customer text of comment sets created before a time, once, and leaves other sets alone", async () => {

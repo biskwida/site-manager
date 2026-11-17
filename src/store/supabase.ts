@@ -820,8 +820,12 @@ export class SupabaseStore implements Store {
     return (data ?? []).length;
   }
   async redactComments(before: string) {
+    // Google rows first: they also hold the reply text read from Google in draft_text (Google data is kept 30 days at most), so a
+    // Google row with a draft left is blanked whole here and not matched again below.
+    const google = await this.db.from("social_comments").update({ text: "", author_name: "", author_id: "", draft_text: null }).eq("network", "google").lt("created_at", before).not("draft_text", "is", null).select("id");
+    if (google.error) throw new Error(`redactComments: ${google.error.message}`);
+    let n = (google.data ?? []).length;
     // Plain filters instead of an or(): rows with text left, then rows with only an author name or id left (none after the first).
-    let n = 0;
     for (const column of ["text", "author_name", "author_id"] as const) {
       const { data, error } = await this.db.from("social_comments").update({ text: "", author_name: "", author_id: "" }).lt("created_at", before).neq(column, "").select("id");
       if (error) throw new Error(`redactComments: ${error.message}`);

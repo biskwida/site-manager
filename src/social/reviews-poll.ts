@@ -137,7 +137,8 @@ export async function pollVenueReviews(d: SyncDeps, venue: Venue, now: Date, o: 
       if (answered(r)) {
         // Answered on Google (by hand, or Claudia's own reply seen back): nothing is posted; a waiting draft is withdrawn.
         // replied_at is left as it is: a hand reply never counts toward comment_limit.
-        if (waiting) await withdrawReviewSet(withdrawDeps, waiting, REVIEW_WITHDRAW_LINES.answered);
+        // A set that is no longer proposed is being applied: Claudia's own reply is in flight, and its push sets the row.
+        if (waiting && !(await withdrawReviewSet(withdrawDeps, waiting, REVIEW_WITHDRAW_LINES.answered))) continue;
         await d.store.updateComment(known.id, { ...fields, status: "replied", reply_id: r.name, draft_text: replyText, change_set_id: null, deferred: false, hold_attempts: 0, held_at: null });
         continue;
       }

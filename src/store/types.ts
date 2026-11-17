@@ -458,7 +458,7 @@ export interface Store {
   purgeComments(before: string): Promise<number>;
   /**
    * The 30-day rule for the rows themselves: blanks text, author_name and author_id (the commenter's Meta id) of every venue's rows with created_at < before that
-   * still hold any (the row, its status and replied_at stay for the monthly comment count). Returns how many it blanked.
+   * still hold any (Google rows also lose draft_text, which can hold a reply read from Google) (the row, its status and replied_at stay for the monthly comment count). Returns how many it blanked.
    */
   redactComments(before: string): Promise<number>;
   /**
