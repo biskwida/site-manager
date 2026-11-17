@@ -1,20 +1,28 @@
 // src/destinations/comment-push.ts
-// The reply / moderation / undo loop both social adapters run over their social_reply and social_moderate rows. Idempotent
+// The reply / moderation / undo loop the social adapters run over their social_reply and social_moderate rows. Idempotent
 // through the accumulated result (`acc`, pre-filled from earlier attempts): a comment already replied to, moderated or gone
 // is skipped. A reply is checkpointed as attempted right before its call; a retry of an attempted reply first looks for our
 // reply under the comment (Meta may have taken it and answered without an id, or the answer was lost) and never posts twice.
 // A comment Meta no longer has is recorded in `gone` and the loop goes on (a batch must not lose its other rows); every other
 // error stops the push and is classified by the caller (socialFailure). Comment and reply texts are never logged.
-import type { ModerateAction } from "../domain/types";
+// Google reviews (the Google adapter) take their own branch: a reply is a PUT on the review, which replaces any earlier reply,
+// so a retry simply PUTs again; an undo DELETEs it; there is no moderation.
+import type { CommentNetwork, ModerateAction } from "../domain/types";
 import { deleteReply, findOwnReply, moderateFacebook, moderateInstagram, replyFacebook, replyInstagram } from "../social/comments-graph";
-import { MetaApiError, type GraphClient } from "./meta-graph";
-import { commentNetworkOf, commentResultIn, type CommentResult, type SocialNetwork } from "./social-common";
+import { deleteReviewReply, GoogleApiError, GoogleClient, putReviewReply } from "./google-api";
+import { GraphClient, MetaApiError } from "./meta-graph";
+import { commentNetworkOf, commentResultIn, type CommentResult } from "./social-common";
 import type { PushContext } from "./types";
 
 const UNDO_ACTION: Record<ModerateAction, ModerateAction | null> = { hide: "unhide", unhide: "hide", delete: null };
 const isGone = (e: unknown) => e instanceof MetaApiError && e.notFound;
 
-export async function pushCommentChanges(ctx: PushContext, network: SocialNetwork, client: GraphClient, acc: CommentResult, save: () => Promise<void>): Promise<void> {
+export async function pushCommentChanges(ctx: PushContext, network: CommentNetwork, client: GraphClient | GoogleClient, acc: CommentResult, save: () => Promise<void>): Promise<void> {
+  if (network === "google") {
+    if (!(client instanceof GoogleClient)) throw new TypeError("A Google review reply needs a Google client.");
+    return pushReviewReplies(ctx, client, acc, save);
+  }
+  if (!(client instanceof GraphClient)) throw new TypeError("A Meta comment needs a Graph client.");
   const ownId = String(ctx.destination.config[network === "instagram" ? "ig_user_id" : "page_id"] ?? "");
   const done = {
     replied: new Set(acc.replied.map((x) => x.comment_id)),
@@ -99,6 +107,49 @@ export async function pushCommentChanges(ctx: PushContext, network: SocialNetwor
       } else {
         markGone(id);
       }
+    }
+    await save();
+  }
+}
+
+/**
+ * Google review replies: the review name (entity_id) must belong to the connected location, otherwise it is recorded as gone
+ * without a call. 404 (the review is gone) is recorded as gone and the loop goes on; any other error is thrown to the adapter.
+ * The reply id is the review name (Google keeps one reply per review). social_moderate rows do not exist for Google: skipped.
+ */
+async function pushReviewReplies(ctx: PushContext, client: GoogleClient, acc: CommentResult, save: () => Promise<void>): Promise<void> {
+  const locationV4 = typeof ctx.destination.config.location_v4 === "string" ? ctx.destination.config.location_v4 : "";
+  const done = {
+    replied: new Set(acc.replied.map((x) => x.comment_id)),
+    deletedReplies: new Set(acc.deleted_replies.map((x) => x.comment_id)),
+    gone: new Set(acc.gone),
+  };
+  const markGone = (id: string) => {
+    acc.gone.push(id);
+    done.gone.add(id);
+  };
+  for (const c of ctx.changes) {
+    if (c.entity !== "social_reply" || commentNetworkOf(c) !== "google") continue;
+    const id = c.entity_id;
+    if (done.gone.has(id) || (c.after ? done.replied.has(id) : done.deletedReplies.has(id))) continue;
+    if (!locationV4 || !id.startsWith(`${locationV4}/reviews/`)) {
+      markGone(id);
+      await save();
+      continue;
+    }
+    try {
+      if (c.after) {
+        await putReviewReply(client, id, typeof c.after.reply_text === "string" ? c.after.reply_text : "");
+        acc.replied.push({ comment_id: id, reply_id: id });
+        done.replied.add(id);
+      } else {
+        await deleteReviewReply(client, id);
+        acc.deleted_replies.push({ comment_id: id, reply_id: id });
+        done.deletedReplies.add(id);
+      }
+    } catch (e) {
+      if (!(e instanceof GoogleApiError && e.notFound)) throw e;
+      markGone(id);
     }
     await save();
   }

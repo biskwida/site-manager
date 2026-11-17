@@ -47,8 +47,8 @@ export function socialSyncLine(kind: SocialNetwork, status: SyncStatus, result: 
   return bg ? `${name}: публикувано ✅${tail}` : `${name}: published ✅${tail}`;
 }
 
-/** What a done comment push did, in the owner's language (counts when more than one). */
-function commentParts(cr: ReturnType<typeof commentResultIn>, bg: boolean): string[] {
+/** What a done comment push did, in the owner's language (counts when more than one). Also used for Google review replies. */
+export function commentParts(cr: ReturnType<typeof commentResultIn>, bg: boolean): string[] {
   const parts: string[] = [];
   const n = (k: number, one: string, many: string) => (k === 1 ? one : many.replace("{n}", String(k)));
   if (cr.replied.length) parts.push(bg ? n(cr.replied.length, "отговорът е публикуван ✅", "{n} отговора са публикувани ✅") : n(cr.replied.length, "reply published ✅", "{n} replies published ✅"));

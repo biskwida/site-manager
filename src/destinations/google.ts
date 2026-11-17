@@ -1,11 +1,14 @@
 // Server-only: the Google Business Profile destination. Pushes the venue's opening hours and holidays (regularHours /
 // specialHours) after an approved change set: dry run first (validateOnly), then the write, then a read-back. Removes only
-// the special dates Claudia wrote herself; a period set by hand in Google stays.
+// the special dates Claudia wrote herself; a period set by hand in Google stays. Also posts an approved review reply (PUT on
+// the review) and deletes it on undo, through pushCommentChanges. A set holds hours rows or a review reply, never both kinds.
 import type { Change } from "../domain/types";
 import { localDate } from "../time";
 import { getLocation, GoogleApiError, googleAccessToken, GoogleClient, patchLocation, type GoogleLocation } from "./google-api";
 import { hasNoHours, longestClosedRun, mergeSpecial, toRegularPeriods, toSpecialPeriods } from "./google-hours";
+import { pushCommentChanges } from "./comment-push";
 import { googleSyncLine } from "./google-lines";
+import { commentNetworkOf, commentResultIn } from "./social-common";
 import type { SyncDeps } from "./sync";
 import type { DestinationAdapter, PushContext, PushResult } from "./types";
 import { formatSyncError } from "./wp-errors";
@@ -38,8 +41,8 @@ const lines = (status: "done" | "pending" | "failed", result: Record<string, unk
   en: googleSyncLine(status, result, stored, "en"),
 });
 
-function failure(code: string, message: string, retry: boolean): PushResult {
-  return { ok: false, retry, error: message, code, line: lines(retry ? "pending" : "failed", null, formatSyncError(code, message)) };
+function failure(code: string, message: string, retry: boolean, partial?: Record<string, unknown>): PushResult {
+  return { ok: false, retry, error: message, code, line: lines(retry ? "pending" : "failed", null, formatSyncError(code, message)), ...(partial ? { partial } : {}) };
 }
 
 async function pushHours(ctx: PushContext, hoursRows: Change[]): Promise<PushResult> {
@@ -83,12 +86,31 @@ async function pushHours(ctx: PushContext, hoursRows: Change[]): Promise<PushRes
   }
 }
 
+const isReviewReply = (c: Change) => commentNetworkOf(c) === "google";
+
+/** Posts (or, on undo, deletes) the approved review replies; earlier attempts' results are skipped. No location call. */
+async function pushReplies(ctx: PushContext): Promise<PushResult> {
+  const acc = commentResultIn(ctx.prior ?? []);
+  const current = () => ({ ...acc }) as unknown as Record<string, unknown>;
+  if (!ctx.secrets.refresh_token || !ctx.google) return failure("sm_social_not_connected", "Google is not connected.", false, current());
+  try {
+    const client = await googleClientFor({ fetch: ctx.fetch, google: ctx.google }, ctx.secrets);
+    await pushCommentChanges(ctx, "google", client, acc, async () => ctx.checkpoint?.(current()));
+    const result = current();
+    return { ok: true, result, line: lines("done", result, null) };
+  } catch (e) {
+    if (e instanceof GoogleApiError) return failure(e.code, e.message, e.retryable, current());
+    throw e;
+  }
+}
+
 export const googleAdapter: DestinationAdapter = {
   kind: "google",
-  relevant: (changes) => changes.filter(isHoursChange),
+  relevant: (changes) => changes.filter((c) => isHoursChange(c) || isReviewReply(c)).sort((a, b) => a.position - b.position),
   async push(ctx) {
     const hoursRows = ctx.changes.filter(isHoursChange);
-    if (hoursRows.length === 0) return { ok: true, result: {}, line: lines("done", {}, null) };
-    return pushHours(ctx, hoursRows);
+    if (hoursRows.length) return pushHours(ctx, hoursRows);
+    if (ctx.changes.some(isReviewReply)) return pushReplies(ctx);
+    return { ok: true, result: {}, line: lines("done", {}, null) };
   },
 };
