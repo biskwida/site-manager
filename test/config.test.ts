@@ -86,4 +86,9 @@ describe("loadConfig", () => {
     expect(loadConfig({ ...full, INSTAGRAM_APP_ID: " 123 ", INSTAGRAM_APP_SECRET: "sec" })).toMatchObject({ instagramAppId: "123", instagramAppSecret: "sec" });
     expect(loadConfig({ ...full, INSTAGRAM_APP_ID: "123" })).toMatchObject({ instagramAppId: "123", instagramAppSecret: null });
   });
+
+  it("reads the optional Google client id and secret", () => {
+    expect(loadConfig(full)).toMatchObject({ googleClientId: null, googleClientSecret: null });
+    expect(loadConfig({ ...full, GOOGLE_CLIENT_ID: " cid ", GOOGLE_CLIENT_SECRET: "gsec" })).toMatchObject({ googleClientId: "cid", googleClientSecret: "gsec" });
+  });
 });
