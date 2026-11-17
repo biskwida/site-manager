@@ -1,3 +1,5 @@
+Plan: docs/superpowers/plans/2026-11-13-google-business-profile.md
+
 # Google Business Profile: hours, holidays and review replies from the chat
 
 Date: 31 October 2026. Owner decisions from the chat of 31 Oct 2026 (Tanya); everything marked *my call* is the author's and can be overturned.
