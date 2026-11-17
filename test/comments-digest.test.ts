@@ -137,6 +137,22 @@ describe("runCommentDigests", () => {
     expect(await cancelled()).toHaveLength(6);
     expect((await v.store.listComments(v.venueId)).map((c) => c.hold_attempts)).toEqual([6, 6]);
   });
+  it("the batch holds Meta comments only; Google reviews still waiting get one line per owner after the digest", async () => {
+    const v = await digestVenue();
+    await v.store.upsertMember({ venue_id: v.venueId, chat_ref: "tg:2002", role: "owner", lang: "en" });
+    const meta = await v.addNew(Z("2026-10-15T06:00:00.000Z"));
+    const review = (id: string, status: "new" | "proposed") => ({ network: "google" as const, post_ref: "accounts/1/locations/2", comment_id: `accounts/1/locations/2/reviews/${id}`, parent_id: null, author_id: "", author_name: "Maria", text: "Nice", created_at: "2026-10-15T05:00:00.000Z", seen_at: "2026-10-15T05:00:00.000Z", status, post_caption: "", rating: 5, review_updated_at: "2026-10-15T05:00:00.000Z" });
+    await v.store.upsertComments(v.venueId, [review("g1", "proposed"), review("g2", "proposed")]);
+    const now = Z("2026-10-15T07:00:00.000Z");
+    expect((await runCommentDigests(v.deps(now), { now })).sent).toEqual([v.venueId]);
+    const sets = (await v.store.listChangeSets(v.venueId, { status: ["proposed"] })).filter((s) => s.source === "comment");
+    expect(sets.flatMap((s) => s.changes.map((c) => c.entity_id))).toEqual([meta.comment_id]);
+    const lines = v.messenger.sent.filter((m) => !m.setId);
+    expect(lines.map((m) => [m.chatRef, m.text])).toEqual([
+      ["tg:1001", "⭐ Отзиви в Google, които чакат отговор: 2"],
+      ["tg:2002", "⭐ Google reviews waiting for your answer: 2"],
+    ]);
+  });
   it("tick step 10 runs the digests on the global tick when comment deps are wired, never on a per-venue tick", async () => {
     const v = await digestVenue();
     await v.addNew(Z("2026-10-15T06:00:00.000Z"));

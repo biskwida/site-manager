@@ -233,6 +233,44 @@ describe("draftReply", () => {
   });
 });
 
+describe("Google review drafts", () => {
+  async function reviewCtx(text: string, rating: number | null, previous_reply: string | null = null, author = "Maria K.") {
+    const { store, venue } = await makeDemo();
+    return draftContextOf(await store.getSite(venue.id), { author_name: author, text, post_caption: "" }, { rating, previous_reply });
+  }
+  it("the review prompt: stars, the negative-review rules, the facts; never the social media wording", async () => {
+    const c = await reviewCtx("Cold coffee, rude staff.", 1);
+    expect(c.review).toEqual({ rating: 1, previous_reply: null });
+    expect(c.postCaption).toBe("");
+    const p = draftSystemPrompt(c, "en");
+    for (const s of ["Google reviews", "1 of 5 stars", "apologise", "never argue", "compensation", "Кафене „Ъгъла“", "+359 2 000 0000", "never leave it empty", '"kind"']) expect(p).toContain(s);
+    expect(p).not.toContain("social media posts");
+    expect(p).not.toContain("AI assistant");
+    expect(p).not.toContain("The business replied earlier");
+    expect(draftSystemPrompt(await reviewCtx("", null), "bg")).toContain("no star rating");
+  });
+  it("an edited review: the prompt holds the earlier reply", async () => {
+    const p = draftSystemPrompt(await reviewCtx("Changed my mind.", 3, "Thank you for visiting!"), "en");
+    expect(p).toContain("The business replied earlier: \"Thank you for visiting!\"");
+    expect(p).not.toContain("AI assistant");
+  });
+  it("a spam or abuse verdict with an empty reply becomes the neutral line, kind other: a review cannot be hidden", async () => {
+    const r = await draftReply(fakeClient(text('{"reply":"","kind":"spam"}')).client, { model: "m" }, await reviewCtx("Visit my site", 1));
+    expect(r.kind).toBe("other");
+    expect(r.reply.length).toBeGreaterThan(0);
+    const abuse = await draftReply(fakeClient(text('{"reply":"","kind":"abuse"}')).client, { model: "m" }, await reviewCtx("You idiots", 1));
+    expect(abuse).toMatchObject({ kind: "other" });
+    expect(abuse.reply).not.toBe("");
+  });
+  it("a star-only review (no text) is drafted in the venue's language", async () => {
+    const { client, calls } = fakeClient(text('{"reply":"Благодарим за оценката!","kind":"praise"}'));
+    const r = await draftReply(client, { model: "m" }, await reviewCtx("", 5));
+    expect(r).toEqual({ reply: "Благодарим за оценката!", kind: "praise", fallback: false });
+    expect(String(calls[0].system)).toContain("Answer in Bulgarian");
+    expect(String(calls[0].system)).toContain("5 of 5 stars");
+  });
+});
+
 describe("draftReply: the commenter's language", () => {
   it("a German comment gets a German draft: the classifier names it, the model is told to answer in German", async () => {
     const { client, calls } = modelFor("de", '{"reply": "Ja, wir haben jeden Tag Hafermilch.", "kind": "question"}');

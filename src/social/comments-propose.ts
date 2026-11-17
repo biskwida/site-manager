@@ -6,19 +6,21 @@
 // nobody (the bot blocked) a comment waits until an owner writes. A set holds at most COMMENT_SET_MAX_ROWS comments and stays
 // under Telegram's message size (splitCommentItems); a larger batch becomes several sets. A comment set never counts toward the monthly
 // change limit; the venue's comment_limit caps replies and moderations instead (here and at apply time, src/store/usage.ts).
+// Google reviews (network "google") come through here too, with their own text and rules: one set per review, never a batch,
+// never a moderation (a review cannot be hidden), the stars in the text.
 // Never logs comment text or drafts: log lines carry ids and counts only.
 import { CHANNEL_NAMES } from "../bot/members";
 import { copy } from "../bot/copy";
 import type { Messenger } from "../bot/messenger";
 import { channelOf, isMetaChannel, maskRef } from "../channels/ref";
 import { PROACTIVE_WINDOW_MS } from "../channels/router";
-import { excerpt } from "../domain/comment-preview";
+import { excerpt, reviewStars } from "../domain/comment-preview";
 import { baseLang, keep, quote, tr } from "../domain/format";
 import { renderPreview } from "../domain/preview";
 import { NETWORK_NAMES, type Change, type ChangeSet, type ChangeSource, type Lang, type Member, type ModerateAction, type SocialModerateRow, type SocialReplyRow, type Venue } from "../domain/types";
 import type { CommentStatus, SocialComment, Store } from "../store/types";
 import { commentUsage, type CommentUsage } from "../store/usage";
-import { draftContextOf, type DraftFn, type DraftKind } from "./comments-draft";
+import { draftContextOf, fallbackReply, type DraftFn, type DraftKind } from "./comments-draft";
 
 const HOUR = 3_600_000;
 /** At most this many comments in one set; a larger batch (the digest, held comments) is split into further sets. */
@@ -70,16 +72,19 @@ export interface CommentSetResult {
 export type CommentLimitState = CommentUsage;
 
 const log = (d: Pick<ProposeDeps, "log">, s: string) => (d.log ?? ((x: string) => console.log(x)))(s);
+const isReview = (c: Pick<SocialComment, "network">) => c.network === "google";
 
 export function commentChanges(items: CommentSetItem[]): Change[] {
   return items.map((it, position): Change => {
     const c = it.comment;
+    if (it.moderate && isReview(c)) throw new Error("A Google review cannot be hidden or deleted.");
     if (it.moderate) {
       const row: SocialModerateRow = { network: c.network, comment_id: c.comment_id, author_name: c.author_name, comment_text: c.text, action: it.moderate };
       return { position, op: "social_moderate", entity: "social_moderate", entity_id: c.comment_id, before: null, after: row as unknown as Change["after"] };
     }
     // permalink is stored as null when Meta gave none (the row keeps a fixed shape for the adapter and the dashboard).
     const row: Omit<SocialReplyRow, "permalink"> & { permalink: string | null } = { network: c.network, comment_id: c.comment_id, post_ref: c.post_ref, author_name: c.author_name, comment_text: c.text, reply_text: it.reply_text ?? "", permalink: c.post_permalink };
+    if (isReview(c) && typeof c.rating === "number") row.rating = c.rating;
     return { position, op: "social_reply", entity: "social_reply", entity_id: c.comment_id, before: null, after: row as unknown as Change["after"] };
   });
 }
@@ -100,11 +105,22 @@ function bgCount(n: number, one: string, many: string): string {
   return n === 1 ? `1 ${one}` : `${n} ${many}`;
 }
 
-/** The message with the buttons: one comment with its draft, one moderation, or a numbered batch. */
+/** The message with the buttons for one Google review: the reviewer, the stars, the review and the drafted reply. */
+export function reviewProposalText(it: CommentSetItem, lang: Lang): string {
+  const bg = lang === "bg";
+  const c = it.comment;
+  const stars = reviewStars(c.rating ?? null);
+  const head = `⭐ ${bg ? "Нов отзив в Google от" : "New Google review from"} ${author(c, lang)}${stars ? ` ${stars}` : ""}`;
+  const said = c.text.trim() ? quote(keep(clip(c.text, SINGLE_COMMENT_MAX)), lang) : tr(lang, "(само оценка, без текст)", "(rating only, no text)");
+  return `${head}\n${said}\n\n${bg ? "Предложен отговор" : "Suggested reply"}:\n${quote(keep(it.reply_text ?? ""), lang)}\n\n${bg ? "Да отговоря ли?" : "Reply?"}`;
+}
+
+/** The message with the buttons: one comment with its draft, one moderation, one Google review, or a numbered batch. */
 export function commentProposalText(items: CommentSetItem[], lang: Lang, o: { batch?: boolean } = {}): string {
   const bg = lang === "bg";
   if (!o.batch && items.length === 1) {
     const it = items[0];
+    if (isReview(it.comment)) return reviewProposalText(it, lang);
     const c = it.comment;
     const where = bg
       ? `под поста ${quote(captionOf(c, lang), lang)} (${networkName(c)}) от ${author(c, lang)}: ${quote(keep(clip(c.text, SINGLE_COMMENT_MAX)), lang)}`
@@ -124,7 +140,10 @@ export function commentProposalText(items: CommentSetItem[], lang: Lang, o: { ba
     : `💬 ${items.length} new ${items.length === 1 ? "comment" : "comments"} under ${posts} ${posts === 1 ? "post" : "posts"}`;
   const lines = items.flatMap((it, i) => {
     const c = it.comment;
-    const first = `${i + 1}. ${author(c, lang)} (${networkName(c)}) ${bg ? "под" : "under"} ${quote(captionOf(c, lang), lang)}: ${quote(keep(excerpt(c.text, BATCH_COMMENT_MAX)), lang)}`;
+    const stars = reviewStars(c.rating ?? null);
+    const first = isReview(c)
+      ? `${i + 1}. ${stars ? `${stars} ` : ""}${author(c, lang)} (${networkName(c)}): ${c.text.trim() ? quote(keep(excerpt(c.text, BATCH_COMMENT_MAX)), lang) : tr(lang, "(само оценка, без текст)", "(rating only, no text)")}`
+      : `${i + 1}. ${author(c, lang)} (${networkName(c)}) ${bg ? "под" : "under"} ${quote(captionOf(c, lang), lang)}: ${quote(keep(excerpt(c.text, BATCH_COMMENT_MAX)), lang)}`;
     const second = it.moderate
       ? `   → ${it.moderate === "delete" ? tr(lang, "изтриване (спам или обиден)", "deletion (spam or abuse)") : tr(lang, "скриване (спам или обиден)", "hiding (spam or abuse)")}`
       : `   → ${quote(keep(it.reply_text ?? ""), lang)}`;
@@ -142,6 +161,7 @@ export function commentSetSummary(items: CommentSetItem[]): { summary_bg: string
     const nameEn = keep(it.comment.author_name) || "a customer";
     if (it.moderate === "delete") return { summary_bg: `Изтриване на коментар от ${name}`, summary_en: `Delete a comment by ${nameEn}` };
     if (it.moderate) return { summary_bg: `Скриване на коментар от ${name}`, summary_en: `Hide a comment by ${nameEn}` };
+    if (isReview(it.comment)) return { summary_bg: `Отговор на отзив в Google от ${name}`, summary_en: `Reply to ${nameEn}'s Google review` };
     return { summary_bg: `Отговор на коментар от ${name}`, summary_en: `Reply to ${nameEn}'s comment` };
   }
   return { summary_bg: `Отговори на ${bgCount(items.length, "коментар", "коментара")}`, summary_en: `Replies to ${items.length} comments` };
@@ -276,6 +296,8 @@ export async function createCommentSet(d: CommentSetDeps, venue: Venue, items: C
  * held one as its own set). Comments that gave up after HOLD_MAX_ATTEMPTS failed sends are skipped until an owner writes.
  * Spam or abuse becomes a hide proposal (by the draft's kind, never by an empty reply). When the comment limit is reached a
  * batch tells the reachable owners once; `each` only logs.
+ * A Google review always gets a set of its own (held or not, in either mode), is drafted with its stars and, after an edit,
+ * the earlier reply (draft_text while draft_kind is null), and is never moderated: whatever the kind, it gets a reply.
  */
 export async function proposeForComments(d: ProposeDeps, venue: Venue, comments: SocialComment[], o: { mode: "each" | "batch" }): Promise<{ sets: ChangeSet[]; deferred: number; limited: boolean }> {
   const candidates = comments.filter((c) => c.status === "new" && c.parent_id === null);
@@ -306,23 +328,32 @@ export async function proposeForComments(d: ProposeDeps, venue: Venue, comments:
   const site = await d.store.getSite(venue.id);
   const items: CommentSetItem[] = [];
   for (const c of fresh) {
+    const review = isReview(c);
     let kind = (c.draft_kind ?? null) as DraftKind | null;
     let reply = c.draft_text;
     if (kind === null) {
-      const r = await d.draft(draftContextOf(site, { author_name: c.author_name, text: c.text, post_caption: c.post_caption }));
+      const r = await d.draft(review
+        ? draftContextOf(site, { author_name: c.author_name, text: c.text, post_caption: "" }, { rating: c.rating ?? null, previous_reply: c.draft_text })
+        : draftContextOf(site, { author_name: c.author_name, text: c.text, post_caption: c.post_caption }));
       kind = r.kind;
-      reply = r.reply;
-      await d.store.updateComment(c.id, { draft_text: kind === "spam" || kind === "abuse" ? null : reply, draft_kind: kind });
+      reply = review && !r.reply.trim() ? fallbackReply(venue, venue.default_lang) : r.reply;
+      await d.store.updateComment(c.id, { draft_text: !review && (kind === "spam" || kind === "abuse") ? null : reply, draft_kind: kind });
+    }
+    if (review) {
+      items.push({ comment: c, reply_text: reply?.trim() ? reply : fallbackReply(venue, venue.default_lang), moderate: null, kind });
+      continue;
     }
     const moderate = kind === "spam" || kind === "abuse";
     items.push({ comment: c, reply_text: moderate ? null : reply ?? "", moderate: moderate ? "hide" : null, kind });
   }
   const groups: { items: CommentSetItem[]; batch: boolean }[] = [];
   const extra = previewLength(site, venue.tz);
-  if (o.mode === "batch") for (const g of splitCommentItems(items, { batch: true, extra })) groups.push({ items: g, batch: true });
+  const metaItems = items.filter((x) => !isReview(x.comment));
+  for (const it of items.filter((x) => isReview(x.comment))) groups.push({ items: [it], batch: false });
+  if (o.mode === "batch") for (const g of splitCommentItems(metaItems, { batch: true, extra })) groups.push({ items: g, batch: true });
   else {
-    for (const it of items.filter((x) => !x.comment.deferred)) groups.push({ items: [it], batch: false });
-    const held = items.filter((x) => x.comment.deferred);
+    for (const it of metaItems.filter((x) => !x.comment.deferred)) groups.push({ items: [it], batch: false });
+    const held = metaItems.filter((x) => x.comment.deferred);
     for (const g of splitCommentItems(held, { batch: false, extra })) groups.push({ items: g, batch: g.length > 1 });
   }
   const sets: ChangeSet[] = [];

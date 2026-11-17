@@ -220,6 +220,64 @@ describe("runTick: Google reviews and notices", () => {
     }
   });
 
+  const reviewDraft = { draft: async () => ({ reply: "Thank you!", kind: "praise" as const, fallback: false }) };
+  const puts = (g: Awaited<ReturnType<typeof connectedGoogle>>) => g.fake.calls.filter((c) => c.method === "PUT").length;
+
+  it("proposes a new review at once in modes each and digest (a new Instagram comment waits for the digest), nothing in off, never posts", async () => {
+    for (const mode of ["each", "digest", "off"] as const) {
+      const g = await connectedGoogle();
+      await g.store.updateVenue(g.venue.id, { comment_mode: mode, comment_digest_hour: 23 }); // 23:00 local: no digest in this test
+      const rv = g.fake.addReview(g.loc.v4, { text: "Lovely", stars: 5, name: "Maria K.", created: at(-MIN) });
+      await g.store.upsertComments(g.venue.id, [{ network: "instagram", post_ref: "media-1", comment_id: "ig-1", parent_id: null, author_id: "u1", author_name: "Ivan", text: "Super!", created_at: at(-2 * MIN).toISOString(), seen_at: GT0.toISOString(), status: "new", post_caption: "Post" }]);
+      const m = new FakeMessenger();
+      const r = await tick(g, m, GT0, { comments: reviewDraft });
+      const sets = m.sent.filter((x) => x.setId);
+      if (mode === "off") {
+        expect([mode, r.comments_proposed, sets.length]).toEqual([mode, 0, 0]);
+      } else {
+        const expected = mode === "each" ? 2 : 1;
+        expect([mode, r.comments_proposed, sets.length]).toEqual([mode, expected, expected]);
+        expect((await g.store.findComment(g.venue.id, rv.name))?.status).toBe("proposed");
+        expect((await g.store.findComment(g.venue.id, "ig-1"))?.status).toBe(mode === "each" ? "proposed" : "new");
+        expect(sets.some((x) => x.text.startsWith("⭐ Нов отзив в Google от Maria K. ★★★★★"))).toBe(true);
+      }
+      expect(puts(g)).toBe(0); // nothing is posted without ✅
+    }
+  });
+
+  it("proposes at most 10 reviews per tick, newest first; the rest go out on the next tick", async () => {
+    const g = await connectedGoogle();
+    const reviews = [];
+    for (let i = 12; i >= 1; i--) reviews.push(g.fake.addReview(g.loc.v4, { text: `Review ${i}`, created: at(-i * MIN) }));
+    const m = new FakeMessenger();
+    const first = await tick(g, m, GT0, { comments: reviewDraft });
+    expect(first.reviews_found).toBe(12);
+    expect(first.comments_proposed).toBe(10);
+    const status = async (name: string) => (await g.store.findComment(g.venue.id, name))?.status;
+    for (const rv of reviews.slice(0, 2)) expect(await status(rv.name)).toBe("new"); // the two oldest wait
+    for (const rv of reviews.slice(2)) expect(await status(rv.name)).toBe("proposed");
+    const second = await tick(g, m, at(MIN), { comments: reviewDraft });
+    expect(second.comments_proposed).toBe(2);
+    for (const rv of reviews) expect(await status(rv.name)).toBe("proposed");
+    expect(m.sent.filter((x) => x.setId)).toHaveLength(12);
+    expect(puts(g)).toBe(0);
+  });
+
+  it("the per-venue tick re-sends a held review with its stored draft (digest mode too) and never drafts a new one", async () => {
+    const g = await connectedGoogle();
+    await g.store.updateVenue(g.venue.id, { comment_mode: "digest", comment_digest_hour: 23 });
+    const row = (id: string) => ({ network: "google" as const, post_ref: g.loc.v4, comment_id: `${g.loc.v4}/reviews/${id}`, parent_id: null, author_id: "", author_name: "Maria", text: "Nice", created_at: at(-MIN).toISOString(), seen_at: GT0.toISOString(), status: "new" as const, post_caption: "", rating: 4, review_updated_at: at(-MIN).toISOString() });
+    const [held, fresh] = await g.store.upsertComments(g.venue.id, [row("held"), row("fresh")]);
+    await g.store.updateComment(held.id, { deferred: true, draft_text: "Thanks!", draft_kind: "praise" });
+    let drafted = 0;
+    const m = new FakeMessenger();
+    const r = await tick(g, m, GT0, { venueId: g.venue.id, comments: { draft: async () => (drafted++, { reply: "x", kind: "praise" as const, fallback: false }) } });
+    expect(r.comments_proposed).toBe(1);
+    expect(drafted).toBe(0);
+    expect((await g.store.getComment(held.id))?.status).toBe("proposed");
+    expect((await g.store.getComment(fresh.id))?.status).toBe("new");
+  });
+
   it("with billing on, a plan without comments reads no reviews", async () => {
     const g = await connectedGoogle();
     await g.store.updateVenue(g.venue.id, { plan: "admin", billing_status: "active" });

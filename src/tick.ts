@@ -12,7 +12,7 @@ import { limitReachedLine, usageLine } from "./bot/limit";
 import { channelOf, isMetaChannel } from "./channels/ref";
 import { formatDateTime } from "./time";
 import { COMMENT_POST_WINDOW_MS, pollVenueComments, purgeOldComments } from "./social/comments-poll";
-import { COMMENT_PROPOSAL_TTL_MS, commentsOfSet, proposalTargets, proposalTtlHours, proposeForComments } from "./social/comments-propose";
+import { COMMENT_PROPOSAL_TTL_MS, COMMENT_SET_MAX_ROWS, commentsOfSet, proposalTargets, proposalTtlHours, proposeForComments } from "./social/comments-propose";
 import type { DraftFn } from "./social/comments-draft";
 import { runCommentDigests } from "./social/comments-digest";
 import { planIncludes } from "./billing/entitlements";
@@ -53,7 +53,7 @@ export interface TickReport {
   limited?: string[];
   /** New customer comments stored this tick (comment replies, 2026-10-15); absent without sync deps. */
   comments_found?: number;
-  /** Comment sets proposed this tick (mode "each"); absent without sync deps. */
+  /** Comment sets proposed this tick (comments in mode "each", Google reviews in "each" and "digest"); absent without sync deps. */
   comments_proposed?: number;
   /** New Google reviews stored this tick (global tick only); absent without sync deps. */
   reviews_found?: number;
@@ -208,6 +208,8 @@ export async function runTick(d: TickDeps): Promise<TickReport> {
     //    "off" venues only show them on the dashboard). The per-venue tick runs before an owner's agent turn inside the webhook
     //    budget: it makes no Graph read and no model call, and only re-sends that venue's held comments (deferred, drafts
     //    stored), so the owner who just wrote gets them at once. Keep 30 days: the purge runs on the global tick only.
+    //    Google reviews are proposed one at a time in modes "each" and "digest" alike (never in a digest batch, never posted
+    //    without ✅), at most COMMENT_SET_MAX_ROWS per tick, newest first; the rest wait for the next tick.
     // With billing on, comments are read and drafted only for venues whose plan includes them (a free trial with no plan has every feature).
     // Paused venues are not gated here: the owner decides what to do with replies, and nothing is posted before their tap.
     const commentsAllowed = (venue: Pick<Venue, "plan">) => !d.billing?.config.billingEnabled || planIncludes(venue.plan, "comments");
@@ -234,9 +236,12 @@ export async function runTick(d: TickDeps): Promise<TickReport> {
           const rr = await pollVenueReviews(d.sync, venue, d.now, { messenger: d.messenger });
           report.reviews_found += rr.inserted.length;
         }
-        if (!d.comments || !d.messenger || venue.comment_mode !== "each") continue;
+        if (!d.comments || !d.messenger || venue.comment_mode === "off") continue;
         const since = new Date(d.now.getTime() - COMMENT_POST_WINDOW_MS).toISOString();
-        const fresh = (await d.store.listComments(venue.id, { status: ["new"], since })).filter((c) => c.parent_id === null && (!d.venueId || (c.deferred && c.draft_kind !== null)));
+        // Newest first (listComments): the reviews past the per-tick cap are the oldest.
+        const sendable = (await d.store.listComments(venue.id, { status: ["new"], since })).filter((c) => c.parent_id === null && (!d.venueId || (c.deferred && c.draft_kind !== null)));
+        const reviews = sendable.filter((c) => c.network === "google").slice(0, COMMENT_SET_MAX_ROWS);
+        const fresh = [...(venue.comment_mode === "each" ? sendable.filter((c) => c.network !== "google") : []), ...reviews];
         if (fresh.length === 0) continue;
         const draft = d.venueId ? noDraftOnScopedTick : d.comments.draft;
         // Read the status again right before proposing: the owner's agent turn (list_comments, then reply_to_comments) may have

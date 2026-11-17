@@ -1,7 +1,7 @@
 // test/comment-preview.test.ts — social_reply / social_moderate rows in the change engine and their preview lines.
 import { describe, expect, it } from "vitest";
 import { applyChange, invertChanges, planChange, validateChange } from "@/src/domain/changes";
-import { commentPreviewLines, excerpt } from "@/src/domain/comment-preview";
+import { commentPreviewLines, excerpt, reviewStars } from "@/src/domain/comment-preview";
 import { countsTowardLimit } from "@/src/domain/limits";
 import { renderPreview } from "@/src/domain/preview";
 import { COMMENT_MODES, isExternalEntity, isSocialEntity, OP_NAMES, SOCIAL_ENTITIES, type Change } from "@/src/domain/types";
@@ -88,6 +88,14 @@ describe("commentPreviewLines", () => {
     const [undel] = invertChanges([del]);
     expect(commentPreviewLines(undel, "bg")).toEqual(["• Коментарът от ⟦Spam Bot⟧ е изтрит и не може да бъде върнат (Facebook)"]);
     expect(commentPreviewLines(undel, "en")).toEqual(["• ⟦Spam Bot⟧'s comment was deleted and cannot be restored (Facebook)"]);
+  });
+  it("shows a Google review reply as a review with its stars", () => {
+    const review: Change = { ...reply, entity_id: "accounts/1/locations/2/reviews/r1", after: { network: "google", comment_id: "accounts/1/locations/2/reviews/r1", post_ref: "accounts/1/locations/2", author_name: "Maria K.", comment_text: "Lovely coffee", reply_text: "Thank you!", rating: 5 } };
+    expect(renderPreview(state(), [review], "en", TZ)).toContain("Google review ★★★★★");
+    expect(commentPreviewLines(review, "en")).toEqual(["• Reply to ⟦Maria K.⟧'s Google review ★★★★★: “⟦Lovely coffee⟧” → “⟦Thank you!⟧”"]);
+    expect(commentPreviewLines(review, "bg")).toEqual(["• Отговор на отзива в Google от ⟦Maria K.⟧ ★★★★★: „⟦Lovely coffee⟧“ → „⟦Thank you!⟧“"]);
+    expect(reviewStars(2)).toBe("★★☆☆☆");
+    expect(reviewStars(null)).toBe("");
   });
   it("cuts long comments to one line of 60 characters", () => {
     expect(excerpt("a".repeat(80))).toBe(`${"a".repeat(59)}…`);
