@@ -777,13 +777,24 @@ export class SupabaseStore implements Store {
   async upsertComments(venueId: string, rows: NewSocialComment[]) {
     if (rows.length === 0 || badVenue(venueId)) return [];
     // ON CONFLICT (comment_id) DO NOTHING; RETURNING gives only the rows that were inserted.
-    const { data, error } = await this.db
-      .from("social_comments")
-      .upsert(rows.map((r) => ({ venue_id: venueId, ...r, post_permalink: r.post_permalink ?? null, rating: r.rating ?? null, review_updated_at: r.review_updated_at ?? null })), { onConflict: "comment_id", ignoreDuplicates: true })
-      .select("*");
-    if (error) throw new Error(`upsertComments: ${error.message}`);
+    // rating and review_updated_at go on Google rows only: Facebook and Instagram rows keep the key set they had before the
+    // Google migration, so they insert even where it is not applied yet. A bulk upsert needs one key set per request.
+    const google = rows.filter((r) => r.network === "google").map((r) => ({ venue_id: venueId, ...r, post_permalink: r.post_permalink ?? null, rating: r.rating ?? null, review_updated_at: r.review_updated_at ?? null }));
+    const meta = rows.filter((r) => r.network !== "google").map((r) => {
+      const row: Record<string, unknown> = { venue_id: venueId, ...r, post_permalink: r.post_permalink ?? null };
+      delete row.rating;
+      delete row.review_updated_at;
+      return row;
+    });
+    const inserted: Record<string, unknown>[] = [];
+    for (const batch of [meta, google]) {
+      if (batch.length === 0) continue;
+      const { data, error } = await this.db.from("social_comments").upsert(batch, { onConflict: "comment_id", ignoreDuplicates: true }).select("*");
+      if (error) throw new Error(`upsertComments: ${error.message}`);
+      inserted.push(...(data ?? []));
+    }
     const order = (c: SocialComment) => rows.findIndex((r) => r.comment_id === c.comment_id);
-    return (data ?? []).map(toComment).sort((a, b) => order(a) - order(b));
+    return inserted.map(toComment).sort((a, b) => order(a) - order(b));
   }
   async listComments(venueId: string, opts: ListCommentsOpts = {}) {
     if (badVenue(venueId) || (opts.changeSetId !== undefined && !UUID.test(opts.changeSetId))) return [];

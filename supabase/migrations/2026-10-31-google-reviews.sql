@@ -1,4 +1,4 @@
--- Google reviews (docs/superpowers/plans/2026-10-31-google-business-profile.md, Task 6): a Google review rides the comment pipeline
+-- Google reviews (docs/superpowers/plans/2026-11-13-google-business-profile.md, Task 6): a Google review rides the comment pipeline
 -- as a third network. social_comments.network accepts 'google'; rating (1-5, reviews only) and review_updated_at (when the reviewer
 -- last edited it) are new. Safe to re-run. schema-integrations.sql carries the same statements.
 --   npm run db:apply -- supabase/migrations/2026-10-31-google-reviews.sql

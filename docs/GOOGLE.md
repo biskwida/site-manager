@@ -15,16 +15,22 @@ A venue connects its Google Business Profile ("Google listing") to Claudia from 
 | `GOOGLE_CLIENT_SECRET` | its secret |
 | `DESTINATION_SECRET_KEY` | encrypts each venue's Google refresh token in the database (also used by WordPress and social connections) |
 
-## Tanya's tasks
+## Tanya's tasks, in this order
 
-- [ ] In Google Cloud, OAuth client `claudia-web`, add both redirect URIs:
-  - `https://site-manager-lovat.vercel.app/api/social/google/callback`
-  - `https://getclaudia.app/api/social/google/callback`
-- [ ] On project `claudia-512010`, enable "My Business Business Information API", "My Business Account Management API" and "Google My Business API", and confirm the quota is 300 queries per minute.
-- [ ] Apply the migration: `npm run db:apply -- supabase/migrations/2026-10-31-google-reviews.sql`
-- [ ] Set `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET` (and `DESTINATION_SECRET_KEY`) in production.
-- [ ] Approve the privacy paragraph below for getclaudia.app/privacy (the page itself is not changed by this work).
-- [ ] After the first connect, tell the Coffique owner.
+1. [ ] **Before the merge and the deploy**, apply the migration. Without it the deployed code cannot store Google reviews.
+   - First check the name of the network constraint (the migration assumes it is named `social_comments_network_check`; if the name differs, tell the developer before applying):
+     ```sql
+     select conname, pg_get_constraintdef(oid) from pg_constraint where conrelid = 'public.social_comments'::regclass and contype = 'c';
+     ```
+   - Then apply: `npm run db:apply -- supabase/migrations/2026-10-31-google-reviews.sql`
+2. [ ] In Google Cloud, OAuth client `claudia-web`, add both redirect URIs:
+   - `https://site-manager-lovat.vercel.app/api/social/google/callback`
+   - `https://getclaudia.app/api/social/google/callback`
+3. [ ] On project `claudia-512010`, enable "My Business Business Information API", "My Business Account Management API" and "Google My Business API", and confirm the quota is 300 queries per minute.
+4. [ ] Set `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET` (and `DESTINATION_SECRET_KEY`) in production.
+5. [ ] Approve the privacy paragraph below for getclaudia.app/privacy (the page itself is not changed by this work).
+6. [ ] Merge and deploy.
+7. [ ] After the first connect, tell the Coffique owner.
 
 ## Draft privacy paragraph (for Tanya to approve)
 
