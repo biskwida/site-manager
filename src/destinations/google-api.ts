@@ -159,6 +159,25 @@ export interface GoogleLocation {
   specialHours?: { specialHourPeriods?: GoogleSpecialPeriod[] };
   metadata?: { hasGoogleUpdated?: boolean; hasPendingEdits?: boolean; hasVoiceOfMerchant?: boolean };
 }
+/** Destination config of kind "google" (not secret). Secrets: `{ refresh_token }`, encrypted. */
+export interface GoogleConfig {
+  account_name: string;
+  location_name: string;
+  location_v4: string;
+  title: string;
+  address: string;
+  connected_at: string;
+  /** Display name of the Google account that connected (the accounts list's accountName). */
+  google_account_name: string;
+  last_review_poll_at?: string;
+  last_hours_push_at?: string;
+  hours_pushed?: boolean;
+  hours_conflict?: boolean;
+  google_hours?: GooglePeriod[];
+  special_dates_pushed?: string[];
+  revoked_notified_at?: string;
+}
+
 export interface GoogleReview {
   name: string; // "accounts/1/locations/2/reviews/abc"
   reviewer?: { displayName?: string; isAnonymous?: boolean };

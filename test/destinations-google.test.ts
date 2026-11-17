@@ -1,17 +1,12 @@
-import { randomUUID } from "node:crypto";
 import { describe, expect, it } from "vitest";
 import { googleAdapter } from "@/src/destinations/google";
 import type { GooglePeriod, GoogleSpecialPeriod } from "@/src/destinations/google-api";
-import { encryptSecrets, parseSecretKey } from "@/src/destinations/secrets";
-import { withDestinationSync } from "@/src/destinations/store-hook";
-import { BACKOFF_MS, enqueueForChangeSet, MAX_ATTEMPTS, runPendingSyncs, syncLines, type SyncDeps } from "@/src/destinations/sync";
-import { invertChanges, planChanges } from "@/src/domain/changes";
+import { BACKOFF_MS, enqueueForChangeSet, MAX_ATTEMPTS, runPendingSyncs, syncLines } from "@/src/destinations/sync";
+import { invertChanges } from "@/src/domain/changes";
 import type { Change, ChangeOp, WeekHours } from "@/src/domain/types";
-import { FakeGoogle } from "./fake-google";
-import { makeDemo } from "./helpers";
+import type { FakeGoogle } from "./fake-google";
+import { connectedGoogle, T0 } from "./google-helpers";
 
-const KEY = parseSecretKey("ab".repeat(32));
-const T0 = new Date("2026-11-13T09:00:00.000Z");
 const WEEKDAYS_8_19: WeekHours = {
   mon: { open: "08:00", close: "19:00" }, tue: { open: "08:00", close: "19:00" }, wed: { open: "08:00", close: "19:00" },
   thu: { open: "08:00", close: "19:00" }, fri: { open: "08:00", close: "19:00" }, sat: null, sun: null,
@@ -20,40 +15,6 @@ const CLOSED_WEEK: WeekHours = { mon: null, tue: null, wed: null, thu: null, fri
 const holiday = (date: string): ChangeOp => ({ op: "add_holiday", date, note_bg: "Почивка", note_en: "Day off" });
 const dateKey = (p: GoogleSpecialPeriod) => `${p.startDate.year}-${String(p.startDate.month).padStart(2, "0")}-${String(p.startDate.day).padStart(2, "0")}`;
 const DONE_EN = "Google listing: updated ✅";
-
-async function connectedGoogle(opts: { now?: Date; destination?: boolean; config?: Record<string, unknown>; regularHours?: GooglePeriod[]; specialHours?: GoogleSpecialPeriod[]; hasGoogleUpdated?: boolean; before?: ChangeOp[] } = {}) {
-  const demo = await makeDemo();
-  const fake = new FakeGoogle();
-  const account = fake.addAccount("Кафе Агала");
-  const loc = fake.addLocation(account.name, { regularHours: opts.regularHours, specialHours: opts.specialHours, hasGoogleUpdated: opts.hasGoogleUpdated });
-  let now = opts.now ?? T0;
-  const logs: string[] = [];
-  const d: SyncDeps = { store: demo.store, secretKey: KEY, fetch: fake.fetch, log: (s: string) => logs.push(s), google: { clientId: fake.clientId, clientSecret: fake.clientSecret } };
-  const store = withDestinationSync(demo.store, d, () => now);
-  const applyOps = async (ops: ChangeOp[]) => {
-    const changes = planChanges(await store.getSite(demo.venue.id), ops, { newId: randomUUID, now: now.toISOString() });
-    return applyChanges(changes);
-  };
-  const applyChanges = async (changes: Change[], extra: { undoes_id?: string; source?: "text" | "undo" } = {}) => {
-    const cs = await store.createChangeSet({ venue_id: demo.venue.id, chat_ref: "tg:1001", summary_bg: "Промяна", summary_en: "Change", preview_bg: "p", preview_en: "p", source: extra.source ?? "text", status: "proposed", changes, undoes_id: extra.undoes_id ?? null });
-    expect(await store.applyChangeSet(cs.id, now.toISOString())).toBe("applied");
-    return store.getChangeSet(cs.id);
-  };
-  if (opts.before) await applyOps(opts.before);
-  if (opts.destination !== false) {
-    await demo.store.upsertDestination({
-      venue_id: demo.venue.id,
-      kind: "google",
-      config: { account_name: account.name, location_name: loc.name, location_v4: loc.v4, title: "Test Cafe", address: "1 Main St", connected_at: T0.toISOString(), google_account_name: "Owner", ...opts.config },
-      secrets: encryptSecrets({ refresh_token: account.refresh_token }, KEY),
-    });
-  }
-  fake.calls.length = 0;
-  const dest = async () => (await demo.store.listDestinations(demo.venue.id)).find((x) => x.kind === "google")!;
-  const rows = async (csId: string) => (await store.listSyncs({ changeSetId: csId })).filter((r) => r.payload.kind === "google");
-  const setNow = (t: Date) => void (now = t);
-  return { ...demo, store, fake, account, loc, d, logs, applyOps, applyChanges, dest, rows, setNow };
-}
 
 const patches = (fake: FakeGoogle) => fake.calls.filter((c) => c.method === "PATCH");
 

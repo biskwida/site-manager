@@ -13,7 +13,7 @@
 import { randomBytes } from "node:crypto";
 import type { Config } from "../config";
 import type { Venue } from "../domain/types";
-import { exchangeGoogleCode, getLocation, GOOGLE_AUTH_URL, GOOGLE_SCOPE, GoogleApiError, googleAccessToken, GoogleClient, listLocations, type GoogleLocation, type GooglePeriod } from "../destinations/google-api";
+import { exchangeGoogleCode, getLocation, GOOGLE_AUTH_URL, GOOGLE_SCOPE, GoogleApiError, googleAccessToken, GoogleClient, listLocations, type GoogleConfig, type GoogleLocation } from "../destinations/google-api";
 import { decryptSecrets, encryptSecrets } from "../destinations/secrets";
 import type { Destination } from "../store/types";
 import { parseLegacyHosts } from "./host";
@@ -26,25 +26,6 @@ export const GOOGLE_CALLBACK_PATH = "/api/social/google/callback";
 export const GOOGLE_SELECT_PATH = "/api/social/google/select";
 /** What Claudia reads of the location right after connecting (Task 5 compares the hours). */
 const CONNECTED_READ_MASK = "regularHours,metadata";
-
-/** Destination config of kind "google" (not secret). Secrets: `{ refresh_token }`, encrypted. */
-export interface GoogleConfig {
-  account_name: string;
-  location_name: string;
-  location_v4: string;
-  title: string;
-  address: string;
-  connected_at: string;
-  /** Display name of the Google account that connected (the accounts list's accountName). */
-  google_account_name: string;
-  last_review_poll_at?: string;
-  last_hours_push_at?: string;
-  hours_pushed?: boolean;
-  hours_conflict?: boolean;
-  google_hours?: GooglePeriod[];
-  special_dates_pushed?: string[];
-  revoked_notified_at?: string;
-}
 
 export interface GoogleConnectDeps extends SocialConnectDeps {
   /** Called after a location is stored (Task 5 wires the chat message); failures are caught and logged by class only. */
