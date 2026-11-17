@@ -30,6 +30,13 @@ export function isHoursChange(c: Change): boolean {
   return c.entity === "venue" && row !== null && Object.prototype.hasOwnProperty.call(row, "hours");
 }
 
+/** Rows that change the week (set_hours, or a venue row carrying hours, their undo included): only these send regularHours after the first push. */
+export function isWeekChange(c: Change): boolean {
+  if (c.op === "set_hours") return true;
+  const row = c.after ?? c.before;
+  return c.entity === "venue" && row !== null && Object.prototype.hasOwnProperty.call(row, "hours");
+}
+
 /** A client bound to a fresh access token (never stored). Throws sm_social_not_connected without credentials or a refresh token. */
 export async function googleClientFor(d: Pick<SyncDeps, "fetch" | "google">, secrets: Record<string, string>): Promise<GoogleClient> {
   if (!d.google || !secrets.refresh_token) throw new GoogleApiError(0, "sm_social_not_connected", "Google is not connected.", { retry: false });
@@ -60,18 +67,20 @@ async function pushHours(ctx: PushContext, hoursRows: Change[]): Promise<PushRes
     const mine = toSpecialPeriods(site.holidays, today);
     const pushedBefore = Array.isArray(config.special_dates_pushed) ? config.special_dates_pushed.filter((x): x is string => typeof x === "string") : [];
     const merged = mergeSpecial(mine, current.specialHours?.specialHourPeriods ?? [], pushedBefore, today);
-    // While Google's week differs from the website's and the owner has not chosen, only a new week from the owner replaces it.
-    // The first push decides that itself (the after-connect read may have failed): a non-empty Google week that differs from
-    // the website's, or that the website cannot express, is not overwritten.
-    const weekChange = hoursRows.some((c) => c.op === "set_hours");
+    // The week (regularHours) goes out only with a week change or on the first push: a holiday alone never reverts a week
+    // someone changed directly in Google. While Google's week differs from the website's and the owner has not chosen, only a
+    // new week from the owner replaces it. The first push decides that itself (the after-connect read may have failed): a
+    // non-empty Google week that differs from the website's, or that the website cannot express, is not overwritten.
+    const weekChange = hoursRows.some(isWeekChange);
+    const firstPush = config.hours_pushed !== true;
     let conflictWeek: GooglePeriod[] | null = null;
-    if (!weekChange && config.hours_conflict !== true && config.hours_pushed !== true) {
+    if (!weekChange && firstPush && config.hours_conflict !== true) {
       const googlePeriods = current.regularHours?.periods ?? [];
       const googleWeek = googlePeriods.length ? fromRegularHours(googlePeriods) : null;
       if (googlePeriods.length && (!googleWeek || !sameWeek(googleWeek, site.venue.hours))) conflictWeek = googlePeriods;
     }
     const conflict = !weekChange && (config.hours_conflict === true || conflictWeek !== null);
-    const regular = !conflict;
+    const regular = weekChange || (firstPush && !conflict);
     const mask = regular ? "regularHours,specialHours" : "specialHours";
     const body: Pick<GoogleLocation, "regularHours" | "specialHours"> = { specialHours: { specialHourPeriods: merged.periods } };
     if (regular) body.regularHours = { periods: toRegularPeriods(site.venue.hours) };

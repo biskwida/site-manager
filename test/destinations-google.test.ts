@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { googleAdapter } from "@/src/destinations/google";
 import { toRegularPeriods } from "@/src/destinations/google-hours";
 import { commentNetworkOf, relevantFor } from "@/src/destinations/social-common";
-import type { GooglePeriod, GoogleSpecialPeriod } from "@/src/destinations/google-api";
+import { GoogleClient, googleAccessToken, patchLocation, type GooglePeriod, type GoogleSpecialPeriod } from "@/src/destinations/google-api";
 import { BACKOFF_MS, enqueueForChangeSet, MAX_ATTEMPTS, runPendingSyncs, syncLines } from "@/src/destinations/sync";
 import { invertChanges } from "@/src/domain/changes";
 import type { Change, ChangeOp, WeekHours } from "@/src/domain/types";
@@ -78,7 +78,9 @@ describe("hours push", () => {
     await g.applyOps([holiday("2026-12-24"), holiday("2026-12-25"), holiday("2026-12-26")]);
     expect(g.fake.location(g.loc.name).specialHours?.specialHourPeriods?.map(dateKey)).toEqual(["2026-12-24", "2026-12-25", "2026-12-26"]);
     const h25 = (await g.store.getSite(g.venue.id)).holidays.find((h) => h.date === "2026-12-25")!;
+    g.fake.calls.length = 0;
     await g.applyOps([{ op: "remove_holiday", holiday_id: h25.id }]);
+    expect(patches(g.fake).map((c) => c.query.updateMask)).toEqual(["specialHours", "specialHours"]); // after the first push: holidays only
     expect(g.fake.location(g.loc.name).specialHours?.specialHourPeriods?.map(dateKey)).toEqual(["2026-12-24", "2026-12-26"]);
     expect((await g.dest()).config.special_dates_pushed).toEqual(["2026-12-24", "2026-12-26"]);
   });
@@ -174,6 +176,33 @@ describe("hours push", () => {
     await g.applyOps([holiday("2026-12-24")]);
     expect(patches(g.fake).map((c) => c.query.updateMask)).toEqual(["regularHours,specialHours", "regularHours,specialHours"]);
     expect((await g.dest()).config).toMatchObject({ hours_pushed: true, hours_conflict: false });
+  });
+
+  it("I4: hours changed by hand in Google after the first push + closed today: Google's week untouched, special period added", async () => {
+    const g = await connectedGoogle();
+    await g.applyOps([{ op: "set_hours", hours: WEEKDAYS_8_19 }]);
+    expect((await g.dest()).config.hours_pushed).toBe(true);
+    // Someone edits the week directly in Google.
+    const byHand: GooglePeriod[] = [{ openDay: "TUESDAY", openTime: { hours: 10 }, closeDay: "TUESDAY", closeTime: { hours: 14 } }];
+    const c = new GoogleClient(await googleAccessToken(g.fake.fetch, g.d.google!, g.account.refresh_token), g.fake.fetch);
+    await patchLocation(c, g.loc.name, "regularHours", { regularHours: { periods: byHand } });
+    g.fake.calls.length = 0;
+    const cs = await g.applyOps([holiday("2026-11-13")]);
+    expect(patches(g.fake).map((x) => x.query.updateMask)).toEqual(["specialHours", "specialHours"]);
+    expect(g.fake.location(g.loc.name).regularHours?.periods).toEqual(byHand);
+    expect(g.fake.location(g.loc.name).specialHours?.specialHourPeriods?.map(dateKey)).toEqual(["2026-11-13"]);
+    // Not a conflict line: Claudia did not compare, she only left the week alone.
+    expect(await syncLines(g.store, cs.id, "en")).toEqual([DONE_EN]);
+    expect((await g.rows(cs.id))[0].result).toMatchObject({ hours: { regular: false, conflict: false, special: 1 } });
+    expect((await g.dest()).config).toMatchObject({ hours_pushed: true, hours_conflict: false });
+  });
+
+  it("I4: the undo of a set_hours is a week change and sends the week again", async () => {
+    const g = await connectedGoogle();
+    const cs = await g.applyOps([{ op: "set_hours", hours: WEEKDAYS_8_19 }]);
+    g.fake.calls.length = 0;
+    await g.applyChanges(invertChanges(cs.changes), { source: "undo", undoes_id: cs.id });
+    expect(patches(g.fake).map((x) => x.query.updateMask)).toEqual(["regularHours,specialHours", "regularHours,specialHours"]);
   });
 
   it("Google reviewing the edit: done after one attempt, with the reviewing line", async () => {
