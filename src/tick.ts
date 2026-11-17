@@ -12,11 +12,13 @@ import { limitReachedLine, usageLine } from "./bot/limit";
 import { channelOf, isMetaChannel } from "./channels/ref";
 import { formatDateTime } from "./time";
 import { COMMENT_POST_WINDOW_MS, pollVenueComments, purgeOldComments } from "./social/comments-poll";
-import { COMMENT_PROPOSAL_TTL_MS, commentsOfSet, proposalTargets, proposalTtlHours, proposeForComments } from "./social/comments-propose";
+import { cancelCommentSet, COMMENT_PROPOSAL_TTL_MS, commentsOfSet, proposalTargets, proposalTtlHours, proposeForComments } from "./social/comments-propose";
 import type { DraftFn } from "./social/comments-draft";
 import { runCommentDigests } from "./social/comments-digest";
 import { planIncludes } from "./billing/entitlements";
 import { pauseExpiredTrials, sendTrialReminders, type TrialBilling } from "./billing/reminders";
+import { pollVenueReviews } from "./social/reviews-poll";
+import { notifyGoogleBroken, notifyGoogleHoursFailed } from "./social/google-notices";
 
 export interface TickDeps {
   store: Store;
@@ -32,6 +34,8 @@ export interface TickDeps {
   comments?: { draft: DraftFn } | null;
   /** Billing (BILLING_ENABLED on): the free trial's end and its reminders. null/undefined = billing is off, the tick does none of it. */
   billing?: TrialBilling | null;
+  /** The app's public base URL (PUBLIC_BASE_URL), for the dashboard link of the Google notices; absent = those notices are not sent. */
+  baseUrl?: string;
 }
 export interface TickReport {
   applied: string[];
@@ -51,6 +55,8 @@ export interface TickReport {
   comments_found?: number;
   /** Comment sets proposed this tick (mode "each"); absent without sync deps. */
   comments_proposed?: number;
+  /** New Google reviews stored this tick (global tick only); absent without sync deps. */
+  reviews_found?: number;
   /** Venue ids that got their daily comment digest this tick (global tick only). */
   digests?: string[];
   /** Venue ids whose free trial ran out and were paused this tick (billing on only). */
@@ -185,6 +191,9 @@ export async function runTick(d: TickDeps): Promise<TickReport> {
     try {
       const r = await runPendingSyncs(d.sync, { venueId: d.venueId, now: d.now });
       report.pushed = r.done;
+      // A Google hours push that failed for good: the owner edits the profile by hand. A broken connection is told once by
+      // the notice of step 9 instead.
+      if (d.messenger && r.failed.length > 0) await notifyGoogleFailures({ store: d.store, messenger: d.messenger, now: d.now, baseUrl: d.baseUrl ?? "", log: d.sync.log }, r.failed);
     } catch (e) {
       console.error("[tick] destination syncs failed:", e instanceof Error ? e.message : e);
     }
@@ -204,6 +213,7 @@ export async function runTick(d: TickDeps): Promise<TickReport> {
     const commentsAllowed = (venue: Pick<Venue, "plan">) => !d.billing?.config.billingEnabled || planIncludes(venue.plan, "comments");
     report.comments_found = 0;
     report.comments_proposed = 0;
+    report.reviews_found = 0;
     let venues: Venue[] = [];
     try {
       venues = d.venueId ? [await d.store.getVenue(d.venueId)] : await d.store.listVenues({ status: "live" });
@@ -217,6 +227,13 @@ export async function runTick(d: TickDeps): Promise<TickReport> {
         if (!d.venueId) {
           const r = await pollVenueComments(d.sync, venue, d.now);
           report.comments_found += r.inserted.length;
+        }
+        // Google reviews (spec ruling 2: not read at all in mode "off"). An edit by the reviewer withdraws the proposal that
+        // waited on the old text; the review is proposed again from its new text.
+        if (!d.venueId && venue.comment_mode !== "off") {
+          const rr = await pollVenueReviews(d.sync, venue, d.now);
+          report.reviews_found += rr.inserted.length;
+          for (const e of rr.edited) if (e.had_set) await withdrawEditedReview(d, e.had_set);
         }
         if (!d.comments || !d.messenger || venue.comment_mode !== "each") continue;
         const since = new Date(d.now.getTime() - COMMENT_POST_WINDOW_MS).toISOString();
@@ -232,6 +249,15 @@ export async function runTick(d: TickDeps): Promise<TickReport> {
         report.comments_proposed += p.sets.length;
       } catch (e) {
         console.error(`[tick] comments for venue ${venue.id} failed:`, e instanceof Error ? e.name : "error");
+      } finally {
+        // Not gated by the plan or the comment mode: a broken Google connection also stops the hours.
+        if (d.messenger && d.baseUrl) {
+          try {
+            await notifyGoogleBroken({ store: d.store, messenger: d.messenger, now: d.now, baseUrl: d.baseUrl, log: d.sync.log }, venue);
+          } catch (e) {
+            console.error(`[tick] google notice for venue ${venue.id} failed:`, e instanceof Error ? e.name : "error");
+          }
+        }
       }
     }
     // 10. Daily comment digests (venues in "digest" mode) at their local hour, once per local day. Global tick only: the
@@ -253,6 +279,34 @@ export async function runTick(d: TickDeps): Promise<TickReport> {
     }
   }
   return report;
+}
+
+const REVIEW_EDITED = { bg: "✏️ Отзивът беше променен; идва ново предложение.", en: "✏️ The review was edited; a new proposal follows." };
+
+/** Cancels the proposal that waited on a review's old text (only while it is still proposed) and frees its comments. */
+async function withdrawEditedReview(d: TickDeps, setId: string): Promise<void> {
+  const cs = await d.store.getChangeSet(setId);
+  if (cs.status !== "proposed") return;
+  if (d.messenger) {
+    await cancelCommentSet({ store: d.store, messenger: d.messenger, now: () => d.now }, cs, REVIEW_EDITED);
+    return;
+  }
+  if ((await d.store.cancelChangeSet(cs.id, d.now.toISOString())) !== "cancelled") return;
+  for (const c of await commentsOfSet(d.store, cs)) await d.store.updateComment(c.id, { status: "new", change_set_id: null, deferred: false });
+}
+
+/** Step 7: each Google row that failed for good, unless its destination is now `error` (the broken-connection notice covers it). */
+async function notifyGoogleFailures(n: Parameters<typeof notifyGoogleHoursFailed>[0], failed: string[]): Promise<void> {
+  for (const id of failed) {
+    try {
+      const sync = await n.store.getSync(id);
+      if (sync.payload.kind !== "google") continue;
+      if ((await n.store.getDestination(sync.venue_id, "google"))?.status === "error") continue;
+      await notifyGoogleHoursFailed(n, sync);
+    } catch (e) {
+      console.error(`[tick] google failure notice for sync ${id} failed:`, e instanceof Error ? e.name : "error");
+    }
+  }
 }
 
 /** The per-venue tick only re-sends held comments, whose drafts are stored: it never calls the model. */

@@ -13,6 +13,7 @@ import { formatSyncError } from "../destinations/wp-errors";
 import type { CommentNetwork, MetaNetwork, Venue } from "../domain/types";
 import type { DestinationPatch, DestinationWithSecrets, NewSocialComment, SocialComment, Store } from "../store/types";
 import { fetchFacebookComments, fetchInstagramComments, listFacebookPosts, listInstagramMedia, type AccountPost, type IncomingComment } from "./comments-graph";
+import { pollVenueReviews } from "./reviews-poll";
 
 export const COMMENT_POLL_EVERY_MS = 15 * 60_000;
 /** An owner's question about comments reads Meta right then, but not again within this long after the last read of the venue. */
@@ -174,7 +175,7 @@ export async function purgeOldComments(store: Pick<Store, "purgeComments" | "red
   return store.purgeComments(new Date(now.getTime() - COMMENT_ROW_RETENTION_MS).toISOString());
 }
 
-/** What list_comments needs to read Meta right then (AgentDeps.liveComments). */
+/** What list_comments needs to read Meta and Google right then (AgentDeps.liveComments). */
 export interface LiveComments {
   /** One on-demand poll of the venue; aborting `signal` stops its Graph calls. Never throws. An error without a network is not one network's. */
   poll(venueId: string, signal: AbortSignal): Promise<{ polled: CommentNetwork[]; errors: { network: CommentNetwork | null; code: string }[] }>;
@@ -185,14 +186,19 @@ export interface LiveComments {
   lastCheckedAt(venueId: string): Promise<{ at: string | null; never: CommentNetwork[] }>;
 }
 
-/** The on-demand poll over the same deps as the tick: every Graph call also stops when the caller's signal aborts. */
+/** The on-demand poll over the same deps as the tick (Meta comments, then Google reviews): every call also stops when the caller's signal aborts. */
 export function makeLiveComments(d: SyncDeps, now: () => Date): LiveComments {
   return {
     async poll(venueId, signal) {
       const base = d.fetch ?? fetch;
       const f: typeof fetch = (input, init) => base(input, { ...init, signal: init?.signal ? AbortSignal.any([init.signal, signal]) : signal });
       try {
-        return await pollVenueComments({ ...d, fetch: f }, await d.store.getVenue(venueId), now(), { onDemand: true });
+        const venue = await d.store.getVenue(venueId);
+        const meta = await pollVenueComments({ ...d, fetch: f }, venue, now(), { onDemand: true });
+        const google = await pollVenueReviews({ ...d, fetch: f }, venue, now(), { onDemand: true });
+        const polled: CommentNetwork[] = [...meta.polled, ...(google.polled ? (["google"] as const) : [])];
+        const errors: { network: CommentNetwork | null; code: string }[] = [...meta.errors, ...(google.error ? [{ network: "google" as const, code: google.error }] : [])];
+        return { polled, errors };
       } catch (e) {
         log(d, `[comments] on-demand poll for venue ${venueId} failed: ${codeOf(e)}`);
         return { polled: [], errors: [{ network: null, code: codeOf(e) }] };
@@ -201,10 +207,10 @@ export function makeLiveComments(d: SyncDeps, now: () => Date): LiveComments {
     async lastCheckedAt(venueId) {
       const times: number[] = [];
       const never: CommentNetwork[] = [];
-      for (const network of NETWORKS) {
+      for (const network of [...NETWORKS, "google" as const]) {
         const dest = await d.store.getDestination(venueId, network);
         if (!dest || dest.status !== "connected") continue; // an `error` destination's stamp is the failed attempt
-        const t = Date.parse(String(dest.config.last_comment_poll_at ?? ""));
+        const t = Date.parse(String((network === "google" ? dest.config.last_review_poll_at : dest.config.last_comment_poll_at) ?? ""));
         if (Number.isFinite(t)) times.push(t);
         else never.push(network);
       }

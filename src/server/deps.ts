@@ -193,7 +193,7 @@ export async function makeServerDeps(o: DepsOptions): Promise<ServerDeps> {
 
   async function handleRun(r: RunRequest): Promise<void> {
     try {
-      await runTick({ store: store2, messenger, now: new Date(), venueId: r.venueId, deployer, sync, comments, billing });
+      await runTick({ store: store2, messenger, now: new Date(), venueId: r.venueId, deployer, sync, comments, billing, baseUrl: config.publicBaseUrl });
     } catch (e) {
       console.error("[tick] per-webhook tick failed:", e instanceof Error ? e.message : e);
     }

@@ -8,7 +8,9 @@ import { startDeploy } from "@/src/deploy/run";
 import { planChanges } from "@/src/domain/changes";
 import type { InMemoryStore } from "@/src/store/memory";
 import { cleanupDrafts, DRAFT_TTL_MS, runTick } from "@/src/tick";
+import { MAX_ATTEMPTS, runPendingSyncs } from "@/src/destinations/sync";
 import { FakeWordPress } from "./fake-wordpress";
+import { connectedGoogle, T0 as GT0 } from "./google-helpers";
 import { FakeMessenger, makeDemo } from "./helpers";
 
 const T0 = new Date("2026-10-09T09:00:00.000Z");
@@ -192,5 +194,119 @@ describe("runTick", () => {
     };
     expect(await cleanupDrafts({ store, now: T0 })).toEqual([]);
     expect(reads).toBe(0);
+  });
+});
+
+describe("runTick: Google reviews and notices", () => {
+  const MIN = 60_000;
+  const DAY = 24 * 3_600_000;
+  const BASE = "https://sm.example";
+  const at = (ms: number) => new Date(GT0.getTime() + ms);
+  const reviewLists = (g: Awaited<ReturnType<typeof connectedGoogle>>) => g.fake.calls.filter((c) => c.path.endsWith("/reviews")).length;
+  const tick = (g: Awaited<ReturnType<typeof connectedGoogle>>, m: FakeMessenger, now: Date, extra: Partial<Parameters<typeof runTick>[0]> = {}) =>
+    runTick({ store: g.store, messenger: m, now, sync: g.d, baseUrl: BASE, ...extra });
+
+  it("the global tick polls reviews in modes each and digest, never in off nor on a per-venue tick", async () => {
+    for (const mode of ["each", "digest", "off"] as const) {
+      const g = await connectedGoogle();
+      await g.store.updateVenue(g.venue.id, { comment_mode: mode });
+      g.fake.addReview(g.loc.v4, { created: at(-MIN) });
+      const m = new FakeMessenger();
+      expect((await tick(g, m, GT0, { venueId: g.venue.id })).reviews_found).toBe(0);
+      expect(reviewLists(g)).toBe(0);
+      const r = await tick(g, m, GT0);
+      expect([mode, r.reviews_found, reviewLists(g)]).toEqual(mode === "off" ? [mode, 0, 0] : [mode, 1, 1]);
+    }
+  });
+
+  it("with billing on, a plan without comments reads no reviews", async () => {
+    const g = await connectedGoogle();
+    await g.store.updateVenue(g.venue.id, { plan: "admin", billing_status: "active" });
+    g.fake.addReview(g.loc.v4, { created: at(-MIN) });
+    const billing = { config: { billingEnabled: true, trialChangeLimit: 20, trialRequiresCard: false, publicBaseUrl: BASE }, ownerEmails: async () => [], sendEmail: async () => ({ ok: true as const, id: "e" }) };
+    const r = await tick(g, new FakeMessenger(), GT0, { billing: billing as unknown as Parameters<typeof runTick>[0]["billing"] });
+    expect(r.reviews_found).toBe(0);
+    expect(reviewLists(g)).toBe(0);
+  });
+
+  it("an edited review waiting on a proposal cancels that set and concludes the owner's message", async () => {
+    const g = await connectedGoogle();
+    await g.store.upsertMember({ venue_id: g.venue.id, chat_ref: "tg:1001", role: "owner", lang: "en" });
+    const rv = g.fake.addReview(g.loc.v4, { text: "good", created: at(-MIN) });
+    const m = new FakeMessenger();
+    await tick(g, m, GT0);
+    const row = (await g.store.findComment(g.venue.id, rv.name))!;
+    const cs = await g.store.createChangeSet({ venue_id: g.venue.id, chat_ref: "tg:1001", summary_bg: "s", summary_en: "s", preview_bg: "p", preview_en: "p", source: "comment", status: "proposed", changes: [] });
+    await g.store.updateChangeSet(cs.id, { message_ref: "55", proposal_refs: { "tg:1001": "55" } });
+    await g.store.updateComment(row.id, { status: "proposed", change_set_id: cs.id, draft_text: "Thanks!", draft_kind: "praise" });
+    g.fake.editReview(rv.name, { text: "changed", updated: at(5 * MIN) });
+    await tick(g, m, at(16 * MIN));
+    expect((await g.store.getChangeSet(cs.id)).status).toBe("cancelled");
+    expect(m.concluded.map((c) => [c.chatRef, c.messageRef, c.short])).toEqual([["tg:1001", "55", "✏️ The review was edited; a new proposal follows."]]);
+    expect(await g.store.getComment(row.id)).toMatchObject({ status: "new", change_set_id: null, text: "changed" });
+  });
+
+  it("without a messenger an edited review's waiting set is still cancelled and its review freed", async () => {
+    const g = await connectedGoogle();
+    const rv = g.fake.addReview(g.loc.v4, { text: "good", created: at(-MIN) });
+    await runTick({ store: g.store, messenger: null, now: GT0, sync: g.d });
+    const row = (await g.store.findComment(g.venue.id, rv.name))!;
+    const cs = await g.store.createChangeSet({ venue_id: g.venue.id, chat_ref: "tg:1001", summary_bg: "s", summary_en: "s", preview_bg: "p", preview_en: "p", source: "comment", status: "proposed", changes: [] });
+    await g.store.updateComment(row.id, { status: "proposed", change_set_id: cs.id });
+    g.fake.editReview(rv.name, { text: "changed", updated: at(5 * MIN) });
+    await runTick({ store: g.store, messenger: null, now: at(16 * MIN), sync: g.d });
+    expect((await g.store.getChangeSet(cs.id)).status).toBe("cancelled");
+    expect(await g.store.getComment(row.id)).toMatchObject({ status: "new", change_set_id: null });
+  });
+
+  it("the purge blanks a Google row after 30 days and deletes it after 60", async () => {
+    const g = await connectedGoogle();
+    const row = (comment_id: string, days: number) => ({ network: "google" as const, post_ref: g.loc.v4, comment_id, parent_id: null, author_id: "", author_name: "Maria", text: "review text", created_at: at(-days * DAY).toISOString(), seen_at: GT0.toISOString(), status: "replied" as const, post_caption: "", rating: 5, review_updated_at: at(-days * DAY).toISOString() });
+    await g.store.upsertComments(g.venue.id, [row("g31", 31), row("g61", 61)]);
+    await tick(g, new FakeMessenger(), GT0);
+    expect(await g.store.findComment(g.venue.id, "g31")).toMatchObject({ text: "", author_name: "" });
+    expect(await g.store.findComment(g.venue.id, "g61")).toBeNull();
+  });
+
+  it("a Google hours push that fails for good tells the set's chat to edit the profile by hand", async () => {
+    const g = await connectedGoogle();
+    await g.store.upsertMember({ venue_id: g.venue.id, chat_ref: "tg:1001", role: "owner", lang: "en" });
+    for (let i = 0; i < MAX_ATTEMPTS; i++) g.fake.failNext({ status: 503, match: (c) => c.method === "GET" && c.host === "mybusinessbusinessinformation.googleapis.com" });
+    const cs = await g.applyOps([{ op: "add_holiday", date: "2026-12-24", note_bg: "Почивка", note_en: "Day off" }]);
+    for (let i = 1; i < MAX_ATTEMPTS - 1; i++) await runPendingSyncs(g.d, { venueId: g.venue.id, now: new Date((await g.rows(cs.id))[0].next_at) });
+    const m = new FakeMessenger();
+    const due = new Date((await g.rows(cs.id))[0].next_at);
+    g.setNow(due);
+    await tick(g, m, due);
+    expect((await g.rows(cs.id))[0]).toMatchObject({ status: "failed", attempts: MAX_ATTEMPTS });
+    const sent = m.sent.filter((s) => s.text.includes("Open your profile to change it by hand"));
+    expect(sent).toHaveLength(1);
+    expect(sent[0]).toMatchObject({ chatRef: "tg:1001", text: "Change\nGoogle listing: not updated. Open your profile to change it by hand: https://business.google.com/", proactive: true });
+  });
+
+  it("a broken Google connection is told once to the reachable owners, never while none is reachable", async () => {
+    const g = await connectedGoogle();
+    const dest = await g.dest();
+    await g.store.updateDestination(dest.id, { status: "error", last_error: "sm_google_revoked: Google no longer accepts the connection." });
+    await g.store.upsertMember({ venue_id: g.venue.id, chat_ref: "tg:1001", role: "staff", lang: "en" });
+    const m = new FakeMessenger();
+    await tick(g, m, GT0);
+    expect(m.sent.filter((s) => s.text.includes("Google disconnected itself"))).toHaveLength(0);
+    expect((await g.dest()).config.revoked_notified_at).toBeUndefined();
+    await g.store.upsertMember({ venue_id: g.venue.id, chat_ref: "tg:1001", role: "owner", lang: "en" });
+    for (let i = 1; i <= 3; i++) await tick(g, m, at(i * 20 * MIN));
+    const sent = m.sent.filter((s) => s.text.includes("Google disconnected itself"));
+    expect(sent).toHaveLength(1);
+    expect(sent[0]).toMatchObject({ chatRef: "tg:1001", text: `Google disconnected itself (the permission was removed). Connect Google again from the dashboard: ${BASE}/dashboard/${g.venue.slug}#google`, proactive: true });
+    expect((await g.dest()).config.revoked_notified_at).toBe(at(20 * MIN).toISOString());
+  });
+
+  it("the per-venue tick also sends the broken-connection notice (in Bulgarian for a Bulgarian owner)", async () => {
+    const g = await connectedGoogle();
+    const dest = await g.dest();
+    await g.store.updateDestination(dest.id, { status: "error", last_error: "sm_google_permission: The Google account no longer manages this listing." });
+    const m = new FakeMessenger();
+    await tick(g, m, GT0, { venueId: g.venue.id });
+    expect(m.sent.map((s) => s.text)).toEqual([`Връзката с Google прекъсна (разрешението е премахнато). Свържете Google отново от таблото: ${BASE}/dashboard/${g.venue.slug}#google`]);
   });
 });
