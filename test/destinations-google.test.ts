@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { googleAdapter } from "@/src/destinations/google";
+import { toRegularPeriods } from "@/src/destinations/google-hours";
 import { commentNetworkOf, relevantFor } from "@/src/destinations/social-common";
 import type { GooglePeriod, GoogleSpecialPeriod } from "@/src/destinations/google-api";
 import { BACKOFF_MS, enqueueForChangeSet, MAX_ATTEMPTS, runPendingSyncs, syncLines } from "@/src/destinations/sync";
@@ -139,6 +140,40 @@ describe("hours push", () => {
     expect(cfg.hours_conflict).toBe(false);
     expect(cfg).not.toHaveProperty("google_hours");
     expect(g.fake.location(g.loc.name).regularHours?.periods).toHaveLength(5);
+  });
+
+  it("I3: the first push meets Google hours that differ and no conflict was recorded: specialHours only, conflict saved", async () => {
+    // The after-connect read failed, so nothing recorded the conflict: the push itself must not overwrite Google's week.
+    const googleWeek: GooglePeriod[] = [{ openDay: "MONDAY", openTime: { hours: 9 }, closeDay: "MONDAY", closeTime: { hours: 17 } }];
+    const g = await connectedGoogle({ regularHours: googleWeek });
+    const cs = await g.applyOps([holiday("2026-12-24")]);
+    expect(patches(g.fake).map((c) => c.query.updateMask)).toEqual(["specialHours", "specialHours"]);
+    expect(g.fake.location(g.loc.name).regularHours?.periods).toEqual(googleWeek);
+    expect(g.fake.location(g.loc.name).specialHours?.specialHourPeriods?.map(dateKey)).toEqual(["2026-12-24"]);
+    const cfg = (await g.dest()).config;
+    expect(cfg).toMatchObject({ hours_conflict: true, google_hours: googleWeek, special_dates_pushed: ["2026-12-24"] });
+    expect(cfg.hours_pushed).not.toBe(true);
+    expect(await syncLines(g.store, cs.id, "en")).toEqual([`${DONE_EN} (the regular hours on Google stay as they are; they differ from the website)`]);
+  });
+
+  it("I3: Google hours the website cannot express (two periods on Monday) count as different", async () => {
+    const googleWeek: GooglePeriod[] = [
+      { openDay: "MONDAY", openTime: { hours: 9 }, closeDay: "MONDAY", closeTime: { hours: 12 } },
+      { openDay: "MONDAY", openTime: { hours: 13 }, closeDay: "MONDAY", closeTime: { hours: 18 } },
+    ];
+    const g = await connectedGoogle({ regularHours: googleWeek });
+    await g.applyOps([holiday("2026-12-24")]);
+    expect(patches(g.fake).map((c) => c.query.updateMask)).toEqual(["specialHours", "specialHours"]);
+    expect((await g.dest()).config).toMatchObject({ hours_conflict: true, google_hours: googleWeek });
+  });
+
+  it("I3: the first push meets Google hours equal to the website's: the week is sent and recorded as pushed", async () => {
+    const g0 = await connectedGoogle({ destination: false });
+    const site = await g0.store.getSite(g0.venue.id);
+    const g = await connectedGoogle({ regularHours: toRegularPeriods(site.venue.hours) });
+    await g.applyOps([holiday("2026-12-24")]);
+    expect(patches(g.fake).map((c) => c.query.updateMask)).toEqual(["regularHours,specialHours", "regularHours,specialHours"]);
+    expect((await g.dest()).config).toMatchObject({ hours_pushed: true, hours_conflict: false });
   });
 
   it("Google reviewing the edit: done after one attempt, with the reviewing line", async () => {

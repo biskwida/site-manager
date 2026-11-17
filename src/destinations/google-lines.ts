@@ -22,13 +22,13 @@ export function googleSyncLine(status: SyncStatus, result: Record<string, unknow
   }
   const replies = commentResultIn([result]);
   if (hasCommentResult(replies)) return `${NETWORK_NAMES.google}: ${commentParts(replies, bg).join("; ")}`;
-  const hours = (result?.hours ?? null) as { regular?: unknown; reviewing?: unknown; long_closure?: unknown } | null;
+  const hours = (result?.hours ?? null) as { conflict?: unknown; reviewing?: unknown; long_closure?: unknown } | null;
   let line = hours?.reviewing === true ? (bg ? `${name}: изпратено, Google го преглежда` : `${name}: sent, Google is reviewing`) : bg ? `${name}: обновен ✅` : `${name}: updated ✅`;
   if (hours?.long_closure === true) {
     line += bg
       ? " (7+ дни затворено: Google ще го покаже като „временно затворено\" само ако го зададете в профила си)"
       : " (7+ days closed: Google may show this as temporarily closed only if you set it in your profile)";
   }
-  if (hours && hours.regular === false) line += bg ? " (работното време в Google остава както е; различава се от сайта)" : " (the regular hours on Google stay as they are; they differ from the website)";
+  if (hours?.conflict === true) line += bg ? " (работното време в Google остава както е; различава се от сайта)" : " (the regular hours on Google stay as they are; they differ from the website)";
   return line;
 }

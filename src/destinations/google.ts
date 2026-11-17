@@ -4,8 +4,8 @@
 // the review) and deletes it on undo, through pushCommentChanges. A set holds hours rows or a review reply, never both kinds.
 import type { Change } from "../domain/types";
 import { localDate } from "../time";
-import { getLocation, GoogleApiError, googleAccessToken, GoogleClient, patchLocation, type GoogleLocation } from "./google-api";
-import { hasNoHours, longestClosedRun, mergeSpecial, toRegularPeriods, toSpecialPeriods } from "./google-hours";
+import { getLocation, GoogleApiError, googleAccessToken, GoogleClient, patchLocation, type GoogleLocation, type GooglePeriod } from "./google-api";
+import { fromRegularHours, hasNoHours, longestClosedRun, mergeSpecial, sameWeek, toRegularPeriods, toSpecialPeriods } from "./google-hours";
 import { pushCommentChanges } from "./comment-push";
 import { googleSyncLine } from "./google-lines";
 import { commentNetworkOf, commentResultIn } from "./social-common";
@@ -18,7 +18,8 @@ const READ_MASK = "regularHours,specialHours,metadata";
 const LONG_CLOSURE_DAYS = 7;
 
 export interface GoogleHoursResult {
-  hours: { regular: boolean; special: number; kept: number; reviewing: boolean; long_closure: boolean };
+  /** regular: the week was sent; conflict: it was held back because Google's own week differs from the website's. */
+  hours: { regular: boolean; conflict: boolean; special: number; kept: number; reviewing: boolean; long_closure: boolean };
 }
 
 /** Rows that change what Google shows as opening hours: the week, a holiday, or their undo rows. */
@@ -60,7 +61,17 @@ async function pushHours(ctx: PushContext, hoursRows: Change[]): Promise<PushRes
     const pushedBefore = Array.isArray(config.special_dates_pushed) ? config.special_dates_pushed.filter((x): x is string => typeof x === "string") : [];
     const merged = mergeSpecial(mine, current.specialHours?.specialHourPeriods ?? [], pushedBefore, today);
     // While Google's week differs from the website's and the owner has not chosen, only a new week from the owner replaces it.
-    const regular = !(config.hours_conflict === true && !hoursRows.some((c) => c.op === "set_hours"));
+    // The first push decides that itself (the after-connect read may have failed): a non-empty Google week that differs from
+    // the website's, or that the website cannot express, is not overwritten.
+    const weekChange = hoursRows.some((c) => c.op === "set_hours");
+    let conflictWeek: GooglePeriod[] | null = null;
+    if (!weekChange && config.hours_conflict !== true && config.hours_pushed !== true) {
+      const googlePeriods = current.regularHours?.periods ?? [];
+      const googleWeek = googlePeriods.length ? fromRegularHours(googlePeriods) : null;
+      if (googlePeriods.length && (!googleWeek || !sameWeek(googleWeek, site.venue.hours))) conflictWeek = googlePeriods;
+    }
+    const conflict = !weekChange && (config.hours_conflict === true || conflictWeek !== null);
+    const regular = !conflict;
     const mask = regular ? "regularHours,specialHours" : "specialHours";
     const body: Pick<GoogleLocation, "regularHours" | "specialHours"> = { specialHours: { specialHourPeriods: merged.periods } };
     if (regular) body.regularHours = { periods: toRegularPeriods(site.venue.hours) };
@@ -73,10 +84,13 @@ async function pushHours(ctx: PushContext, hoursRows: Change[]): Promise<PushRes
       nextConfig.hours_pushed = true;
       nextConfig.hours_conflict = false;
       delete nextConfig.google_hours;
+    } else if (conflictWeek) {
+      nextConfig.hours_conflict = true;
+      nextConfig.google_hours = conflictWeek;
     }
     await ctx.saveConnection?.(nextConfig, ctx.secrets);
     const result: GoogleHoursResult = {
-      hours: { regular, special: mine.length, kept: merged.periods.length - mine.length, reviewing, long_closure: longestClosedRun(mine) >= LONG_CLOSURE_DAYS },
+      hours: { regular, conflict, special: mine.length, kept: merged.periods.length - mine.length, reviewing, long_closure: longestClosedRun(mine) >= LONG_CLOSURE_DAYS },
     };
     const stored = result as unknown as Record<string, unknown>;
     return { ok: true, result: stored, line: lines("done", stored, null) };
