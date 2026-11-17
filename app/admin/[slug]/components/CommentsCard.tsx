@@ -4,6 +4,7 @@ import { useState } from "react";
 import { useLang } from "@/src/i18n";
 import type { MessageKey } from "@/src/i18n/dicts";
 import type { CommentsOverview, CommentView } from "@/src/server/admin-comments";
+import { reviewStars } from "@/src/domain/comment-preview";
 import { NETWORK_NAMES, type CommentMode } from "@/src/domain/types";
 import { formatDateTime } from "@/src/time";
 import { Chip, Section } from "./bits";
@@ -12,7 +13,21 @@ import type { Post } from "./useAdminOverview";
 const MODES: CommentMode[] = ["each", "digest", "off"];
 const TONE: Record<CommentView["status"], "plain" | "good" | "warn"> = { new: "warn", proposed: "warn", replied: "good", ignored: "plain", expired: "plain", hidden: "plain", deleted: "plain", own: "plain", nested: "plain" };
 
-/** Customers' comments under the bot's posts: pending ones with an editable draft (Reply / Ignore), the last answered, the notification mode. */
+/** A Google review's author, its stars ("5 of 5" for screen readers) and the "Google review" chip. */
+function ReviewHead({ c }: { c: CommentView }) {
+  const { t } = useLang();
+  const stars = reviewStars(c.rating);
+  const full = [...stars].filter((ch) => ch === "★").length;
+  return (
+    <span className="flex min-w-0 flex-wrap items-center gap-2">
+      <span className="[overflow-wrap:anywhere] font-semibold">{c.author_name || "—"}</span>
+      {stars && <span role="img" aria-label={t("admin.comments.stars", { n: String(full) })} className="text-amber">{stars}</span>}
+      <Chip>{t("admin.comments.googleBadge")}</Chip>
+    </span>
+  );
+}
+
+/** Customers' comments under the bot's posts and Google reviews (stars and a "Google review" chip): pending ones with an editable draft (Reply / Ignore), the last answered, the notification mode. */
 export function CommentsCard({ overview, post, tz }: { overview: CommentsOverview | null; post: Post; tz: string }) {
   const { lang, t } = useLang();
   const [busy, setBusy] = useState<string | null>(null);
@@ -36,7 +51,11 @@ export function CommentsCard({ overview, post, tz }: { overview: CommentsOvervie
   const row = (c: CommentView, pending: boolean) => (
     <li key={c.id} className="py-4 first:pt-0 last:pb-0">
       <div className="flex flex-wrap items-baseline justify-between gap-2">
-        <span className="min-w-0 [overflow-wrap:anywhere] font-semibold">{c.author_name || "—"} · {NETWORK_NAMES[c.network]}</span>
+        {c.network === "google" ? (
+          <ReviewHead c={c} />
+        ) : (
+          <span className="min-w-0 [overflow-wrap:anywhere] font-semibold">{c.author_name || "—"} · {NETWORK_NAMES[c.network]}</span>
+        )}
         <span className="flex items-center gap-2 text-sm text-ink-soft">
           <span suppressHydrationWarning>{formatDateTime(c.created_at, lang, tz)}</span>
           <Chip tone={TONE[c.status]}>{t(statusKey(c.status))}</Chip>

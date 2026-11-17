@@ -9,13 +9,14 @@ import { LangProvider } from "@/src/i18n";
 import { authorizeAdminAccess } from "@/src/server/admin-auth";
 import { connectLinks } from "@/src/server/connect-apps";
 import { getServerDeps } from "@/src/server/deps";
+import { googleAvailability } from "@/src/server/google-connect";
 import { onboardingStatus } from "@/src/server/onboarding";
 import { firstParam, readPageLang } from "@/src/server/request-lang";
 import { getSessionUser } from "@/src/server/session";
 import { socialAvailability } from "@/src/server/social-connect";
 import { doneInviteCode } from "@/src/server/wizard";
 
-const SOCIAL_RESULTS = ["facebook_connected", "facebook_no_pages", "facebook_error", "instagram_connected", "instagram_personal", "instagram_error"];
+const SOCIAL_RESULTS = ["facebook_connected", "facebook_no_pages", "facebook_error", "instagram_connected", "instagram_personal", "instagram_error", "google_connected", "google_no_locations", "google_error"];
 
 export const dynamic = "force-dynamic";
 export const metadata: Metadata = { title: "Claudia", robots: { index: false, follow: false }, referrer: "no-referrer" };
@@ -49,6 +50,7 @@ export default async function Page(props: PageProps<"/onboarding/[slug]">) {
           code={code}
           links={code ? connectLinks(deps.config, code) : []}
           social={socialAvailability(deps.config, deps.destinationSecretKey)}
+          google={googleAvailability(deps.config, deps.destinationSecretKey)}
           menuUrl={`${base.replace(/^https?:\/\//, "")}/${venue.slug}/menu`}
           menuHref={`${base}/${venue.slug}/menu`}
           socialResult={SOCIAL_RESULTS.includes(firstParam(sp.social_result) ?? "") ? (firstParam(sp.social_result) ?? null) : null}

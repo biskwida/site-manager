@@ -87,8 +87,8 @@ describe("locked cards", () => {
 describe("the checklist's plan card", () => {
   const props = (plan: Parameters<typeof Checklist>[0]["initial"]["plan"], lang: "bg" | "en") => ({
     lang, slug: "coffique", name: "Coffique", siteUrl: null, mode: "none" as const, platform: null,
-    initial: { chat: true, instagram: false, facebook: false, website: "n/a" as const, plan },
-    code: null, links: [], social: { facebook: false, instagram: false }, menuUrl: "getclaudia.app/coffique/menu", menuHref: "https://getclaudia.app/coffique/menu", pluginHref: "/wp/site-manager.zip", appUrl: "https://getclaudia.app",
+    initial: { chat: true, instagram: false, facebook: false, google: false, website: "n/a" as const, plan },
+    code: null, links: [], social: { facebook: false, instagram: false }, google: false, menuUrl: "getclaudia.app/coffique/menu", menuHref: "https://getclaudia.app/coffique/menu", pluginHref: "/wp/site-manager.zip", appUrl: "https://getclaudia.app",
   });
   it("says '0 of 20 changes' / '0 от 20 промени'", () => {
     const plan = { status: "trial" as const, trial_days_left: 14, plan: null, trial_changes: { used: 0, limit: 20 } };

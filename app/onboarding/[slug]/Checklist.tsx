@@ -1,7 +1,7 @@
 "use client";
 // app/onboarding/[slug]/Checklist.tsx — the onboarding checklist, the same for all three paths: business details, chat, Instagram and
-// Facebook, the website (path B only), Google Business (coming soon) and the plan card. It can be left and resumed: the ticks come from
-// the server (GET /api/onboarding/[slug], polled every 5 s until the chat is connected).
+// Facebook, the website (path B only), Google Business ("coming soon" on a server without the Google keys) and the plan card. It can be
+// left and resumed: the ticks come from the server (GET /api/onboarding/[slug], polled every 5 s until the chat is connected).
 import Link from "next/link";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { ConnectApps, parseOwnerCode, type AppLink } from "@/app/components/ConnectApps";
@@ -27,13 +27,15 @@ export interface ChecklistProps {
   links: AppLink[];
   /** Which Meta connects this server can start (their app ids and the secret key are set). */
   social: { facebook: boolean; instagram: boolean };
+  /** This server can start the Google connect (its client id and secret and the secret key are set). */
+  google: boolean;
   /** getclaudia.app/<slug>/menu without the scheme, and with it. */
   menuUrl: string;
   menuHref: string;
   pluginHref: string;
   /** The address the WordPress plugin asks for ("Claudia address"). */
   appUrl: string;
-  /** `social_result` from the Instagram/Facebook callback, when it returned here. */
+  /** `social_result` from the Instagram/Facebook/Google callback, when it returned here. */
   socialResult?: string | null;
   fetcher?: typeof fetch;
 }
@@ -149,8 +151,10 @@ export function Checklist(p: ChecklistProps) {
   // ?return=onboarding: the connect comes back to this page instead of the dashboard.
   const igHref = `/api/admin/${encodeURIComponent(slug)}/social/instagram/start?return=onboarding`;
   const fbHref = `/api/admin/${encodeURIComponent(slug)}/social/facebook/start?return=onboarding`;
+  const googleHref = `/api/admin/${encodeURIComponent(slug)}/social/google/start?return=onboarding`;
   const platformName = p.platform && ["wordpress", "wix", "squarespace", "shopify"].includes(p.platform) ? t[`form.platform.${p.platform}` as OnboardingKey] : null;
-  const socialProblem = p.socialResult === "instagram_personal" ? t["list.social.result.personal"] : p.socialResult === "facebook_no_pages" ? t["list.social.result.noPages"] : p.socialResult?.endsWith("_error") ? t["list.social.result.error"] : null;
+  const socialProblem = p.socialResult === "instagram_personal" ? t["list.social.result.personal"] : p.socialResult === "facebook_no_pages" ? t["list.social.result.noPages"] : p.socialResult?.startsWith("google_") ? null : p.socialResult?.endsWith("_error") ? t["list.social.result.error"] : null;
+  const googleProblem = p.socialResult === "google_no_locations" ? t["list.google.result.noLocations"] : p.socialResult === "google_error" ? t["list.google.result.error"] : null;
 
   // The plan card: with billing off (or a venue it never touched) the old placeholder; otherwise the trial days left or the plan, and the way to choose one.
   const plan = status.plan;
@@ -245,8 +249,14 @@ export function Checklist(p: ChecklistProps) {
             </li>
           ) : null}
 
-          <Step n={n++} done={false} title={t["list.step.google"]} pill={t["list.google.soon"]} lang={lang}>
+          <Step n={n++} done={status.google} title={t["list.step.google"]} pill={status.google || p.google ? undefined : t["list.google.soon"]} lang={lang}>
             <p>{t["list.google.text"]}</p>
+            {status.google ? (
+              <div className="mt-3"><span role="status" className={pillCls}>{t["list.google.done"]}</span></div>
+            ) : p.google ? (
+              <div className="mt-3"><a href={googleHref} className={btnSmall}>{t["list.google.connect"]}</a></div>
+            ) : null}
+            {googleProblem ? <p role="alert" className="mt-3 text-sm text-[var(--cl-error)]">{googleProblem}</p> : null}
           </Step>
         </ol>
       </div>

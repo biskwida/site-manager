@@ -22,7 +22,7 @@ vi.mock("@/src/server/request-lang", () => ({
   readPageLang: async (q: string | string[] | undefined) => langOf(q),
 }));
 let store: InMemoryStore;
-const config = { publicBaseUrl: "https://getclaudia.app", telegramBotUsername: "claudia_bot", messengerPageHandle: null, instagramUsername: null, whatsappNumber: null, channelsEnabled: false, metaPageToken: null, whatsappToken: null, metaAppId: "1", metaAppSecret: "s", instagramAppId: "2", instagramAppSecret: "s", metaLoginConfigId: null };
+const config = { publicBaseUrl: "https://getclaudia.app", telegramBotUsername: "claudia_bot", messengerPageHandle: null, instagramUsername: null, whatsappNumber: null, channelsEnabled: false, metaPageToken: null, whatsappToken: null, metaAppId: "1", metaAppSecret: "s", instagramAppId: "2", instagramAppSecret: "s", metaLoginConfigId: null, googleClientId: null as string | null, googleClientSecret: null as string | null };
 let secretKey: Buffer | null = Buffer.alloc(32, 1);
 vi.mock("@/src/server/deps", () => ({ getServerDeps: async () => ({ store, config, deployer: null, destinationSecretKey: secretKey }) }));
 
@@ -33,7 +33,7 @@ import SocialPage from "@/app/start/social/page";
 import OnboardingPage from "@/app/onboarding/[slug]/page";
 import { postStartVenue, StartVenueForm } from "@/app/start/StartVenueForm";
 import { startPath } from "@/src/auth/start-links";
-import { createOwnVenue } from "@/src/server/onboarding";
+import { createOwnVenue, onboardingStatus } from "@/src/server/onboarding";
 import { InMemoryStore } from "@/src/store/memory";
 
 async function outcome(run: () => Promise<unknown>): Promise<{ redirectTo?: string; notFound?: boolean; html?: string }> {
@@ -54,6 +54,8 @@ beforeEach(() => {
   sessionUser.mockResolvedValue(null);
   supabaseOn = true;
   secretKey = Buffer.alloc(32, 1);
+  config.googleClientId = null;
+  config.googleClientSecret = null;
 });
 
 describe("startPath", () => {
@@ -265,6 +267,66 @@ describe("/onboarding/[slug]", () => {
     const { html } = (await outcome(() => OnboardingPage(slugSp(slug)))) as { html: string };
     expect(html).not.toContain("/social/instagram/start");
     expect(html).toContain("Свържете Instagram · Скоро");
+  });
+});
+
+describe("/onboarding/[slug] Google step", () => {
+  async function venue() {
+    return createOwnVenue({ store }, owner, { path: "none", name: "Ъгъла", address: "A", city: "C", lang: "bg" });
+  }
+  const withGoogle = () => {
+    config.googleClientId = "gid";
+    config.googleClientSecret = "gsecret";
+  };
+  it("onboardingStatus says whether Google is connected", async () => {
+    const { slug } = await venue();
+    const v = (await store.getVenueBySlug(slug))!;
+    expect((await onboardingStatus(store, v)).google).toBe(false);
+    const d = await store.upsertDestination({ venue_id: v.id, kind: "google", config: { title: "Ъгъла" }, secrets: "x" });
+    expect((await onboardingStatus(store, v)).google).toBe(true);
+    await store.updateDestination(d.id, { status: "error" });
+    expect((await onboardingStatus(store, v)).google).toBe(false);
+  });
+  it("links to the Google connect when this server can start it, with the new text and no Coming soon", async () => {
+    withGoogle();
+    const { slug } = await venue();
+    sessionUser.mockResolvedValue(owner);
+    const { html } = (await outcome(() => OnboardingPage(slugSp(slug)))) as { html: string };
+    expect(html).toContain(`href="/api/admin/${slug}/social/google/start?return=onboarding"`);
+    expect(html).toContain("Свържи Google");
+    expect(html).toContain("Работно време, почивни дни и отговори на отзиви в Google Maps.");
+    expect(html).not.toContain(">Скоро<");
+    const en = (await outcome(() => OnboardingPage(slugSp(slug, { lang: "en" })))) as { html: string };
+    expect(en.html).toContain("Connect Google");
+    expect(en.html).toContain("Opening hours, holidays and review replies on Google Maps.");
+  });
+  it("ticks the step once Google is connected", async () => {
+    withGoogle();
+    const { slug } = await venue();
+    const v = (await store.getVenueBySlug(slug))!;
+    await store.upsertDestination({ venue_id: v.id, kind: "google", config: { title: "Ъгъла" }, secrets: "x" });
+    sessionUser.mockResolvedValue(owner);
+    const { html } = (await outcome(() => OnboardingPage(slugSp(slug, { lang: "en" })))) as { html: string };
+    expect(html).toContain("Google connected");
+    expect(html).not.toContain("/social/google/start");
+  });
+  it("keeps Coming soon on a server without the Google keys", async () => {
+    const { slug } = await venue();
+    sessionUser.mockResolvedValue(owner);
+    const { html } = (await outcome(() => OnboardingPage(slugSp(slug, { lang: "en" })))) as { html: string };
+    expect(html).toContain("Coming soon");
+    expect(html).not.toContain("/social/google/start");
+  });
+  it("says what went wrong when the Google connect returns here", async () => {
+    withGoogle();
+    const { slug } = await venue();
+    sessionUser.mockResolvedValue(owner);
+    const none = (await outcome(() => OnboardingPage(slugSp(slug, { social_result: "google_no_locations" })))) as { html: string };
+    expect(none.html).toContain("Вашият Google акаунт не управлява потвърден бизнес профил");
+    const failed = (await outcome(() => OnboardingPage(slugSp(slug, { social_result: "google_error", lang: "en" })))) as { html: string };
+    expect(failed.html).toContain("Google could not be connected. Try again.");
+    const ok = (await outcome(() => OnboardingPage(slugSp(slug, { social_result: "google_connected" })))) as { html: string };
+    expect(ok.html).not.toContain('role="alert"');
   });
 });
 

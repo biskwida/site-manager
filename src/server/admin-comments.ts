@@ -33,6 +33,8 @@ export interface CommentView {
   /** A proposed comment whose set was approved (or scheduled) and whose push is still on its way (a Meta outage, a retry):
    *  the card shows "being posted" instead of Reply / Ignore, and the actions are refused (a second set would reply twice). */
   posting: boolean;
+  /** A Google review's star rating (1–5); null for Facebook and Instagram comments. */
+  rating: number | null;
 }
 export interface CommentsOverview {
   mode: CommentMode;
@@ -52,7 +54,7 @@ function view(c: SocialComment, posting = false): CommentView {
   return {
     id: c.id, network: c.network, author_name: c.author_name, text: c.text, post_caption: c.post_caption, post_permalink: c.post_permalink,
     created_at: c.created_at, status: c.status, draft_text: c.draft_text, draft_kind: c.draft_kind, change_set_id: c.change_set_id,
-    reply_text: c.status === "replied" ? c.draft_text : null, replied_at: c.replied_at, posting,
+    reply_text: c.status === "replied" ? c.draft_text : null, replied_at: c.replied_at, posting, rating: c.rating ?? null,
   };
 }
 
@@ -127,6 +129,7 @@ async function isPosting(store: Store, c: SocialComment): Promise<boolean> {
 export type AdminCommentErrorCode = "not_found" | "answered" | "state" | "limit" | "decided" | "invalid" | "failed";
 type Result = { ok: boolean; status?: string; change_set_id?: string; error?: string; code?: AdminCommentErrorCode };
 const DECIDED_MEANWHILE: Result = { ok: false, code: "decided", error: "The proposal in the chat was decided meanwhile." };
+const REVIEW_NOT_MODERATED: Result = { ok: false, code: "invalid", error: "A Google review cannot be hidden or deleted; reply to it or leave it." };
 const BEING_POSTED: Result = { ok: false, code: "decided", error: "The approved reply is being posted; it shows as answered once it is out." };
 
 /** Sends each reachable owner its line; one failed send never stops the others or costs the dashboard's answer. */
@@ -200,6 +203,9 @@ export async function adminCommentAction(d: AdminDeps, venue: Venue, a: AdminCom
   const cd: CommentSetDeps = { store: d.store, messenger: d.messenger, now: d.now };
   const c = await d.store.getComment(a.comment_id);
   if (!c || c.venue_id !== venue.id) return { ok: false, code: "not_found", error: "Comment not found." };
+  // A review is only replied to or left: any other action (a hide or delete from an untyped caller) is refused before anything changes.
+  const kind: string = a.action;
+  if (c.network === "google" && kind !== "reply_comment" && kind !== "ignore_comment") return REVIEW_NOT_MODERATED;
   const now = d.now();
   const limit = await commentLimitState(d.store, venue, now);
 
