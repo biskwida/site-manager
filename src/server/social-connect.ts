@@ -13,6 +13,8 @@
 // starts with `a: "session"` instead: nothing secret rides in that state, the callback re-checks that the signed-in account still
 // owns the venue, and it returns to /dashboard/<slug> rather than the key URL. Tokens are encrypted, never logged, never
 // in a URL we build for the browser, never rendered.
+// The Google Business Profile connect (src/server/google-connect.ts) reuses the state, nonce cookie, pages and way back exported
+// here, with its own steps ("google", "google_select") signed under a key derived from the Google client secret.
 import { createHmac, randomBytes, timingSafeEqual } from "node:crypto";
 import type { Config } from "../config";
 import type { Venue } from "../domain/types";
@@ -38,11 +40,11 @@ export const SOCIAL_NONCE_COOKIE = "sm_social_nonce";
 const NONCE_COOKIE_PATH = "/api/social";
 export const SOCIAL_STATE_TTL_MS = 10 * 60_000;
 const MAX_STATE = 4096;
-const NO_STORE = { "cache-control": "no-store" };
+export const NO_STORE = { "cache-control": "no-store" };
 
 export interface SocialConnectDeps {
   store: Store;
-  config: Pick<Config, "publicBaseUrl" | "metaAppId" | "metaAppSecret" | "metaLoginConfigId" | "instagramAppId" | "instagramAppSecret">;
+  config: Pick<Config, "publicBaseUrl" | "metaAppId" | "metaAppSecret" | "metaLoginConfigId" | "instagramAppId" | "instagramAppSecret" | "googleClientId" | "googleClientSecret" | "appHost">;
   /** DESTINATION_SECRET_KEY; null = nothing can be stored, both buttons hidden. */
   secretKey: Buffer | null;
   fetch: typeof fetch;
@@ -69,8 +71,8 @@ export function returnTargetOf(url: string): ReturnTarget | undefined {
   return new URL(url).searchParams.get("return") === "onboarding" ? "onboarding" : undefined;
 }
 
-type StateStep = "facebook" | "instagram" | "facebook_select";
-interface SocialState {
+export type StateStep = "facebook" | "instagram" | "facebook_select" | "google" | "google_select";
+export interface SocialState {
   /** Step this state is good for. */
   k: StateStep;
   v: string;
@@ -82,14 +84,15 @@ interface SocialState {
   a?: "session";
   /** Session states only: where the callback returns. Absent = the dashboard; "onboarding" = the /onboarding/<slug> checklist. Inside the signed state, so it cannot be changed. */
   ret?: ReturnTarget;
-  /** facebook_select only: the long-lived user token, encrypted. */
+  /** facebook_select: the long-lived user token, encrypted; google_select: the Google refresh token, encrypted. */
   t?: string;
 }
 
 function appSecretFor(d: SocialConnectDeps, step: StateStep): string | null {
+  if (step === "google" || step === "google_select") return d.config.googleClientSecret;
   return step === "instagram" ? d.config.instagramAppSecret : d.config.metaAppSecret;
 }
-function stateKey(appSecret: string): Buffer {
+export function stateKey(appSecret: string): Buffer {
   return createHmac("sha256", appSecret).update("site-manager:social-oauth-state:v1").digest();
 }
 const b64url = (b: Buffer | string) => Buffer.from(b).toString("base64url");
@@ -127,16 +130,16 @@ function sameSecret(a: string, b: string): boolean {
   const y = Buffer.from(b);
   return x.length === y.length && timingSafeEqual(x, y);
 }
-function nonceCookie(value: string, maxAge: number, secure: boolean): string {
+export function nonceCookie(value: string, maxAge: number, secure: boolean): string {
   return `${SOCIAL_NONCE_COOKIE}=${value}; Path=${NONCE_COOKIE_PATH}; HttpOnly; SameSite=Lax; Max-Age=${maxAge}${secure ? "; Secure" : ""}`;
 }
 
 // ---------------------------------------------------------------------------------------------------------------------
 // Pages for the browser
 
-const esc = (s: string) => s.replace(/[&<>"']/g, (ch) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[ch]!);
+export const esc = (s: string) => s.replace(/[&<>"']/g, (ch) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[ch]!);
 
-function htmlPage(title: string, inner: string, status = 200): Response {
+export function htmlPage(title: string, inner: string, status = 200): Response {
   const page = `<!doctype html><html lang="bg"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><meta name="referrer" content="no-referrer"><meta name="robots" content="noindex"><title>${esc(title)}</title>
 <style>body{font-family:system-ui,-apple-system,"Segoe UI",sans-serif;background:#faf7f2;color:#1f1b16;margin:0;padding:24px 16px}main{max-width:32rem;margin:0 auto}h1{font-size:1.4rem;margin:0 0 4px}p{line-height:1.5;color:#4a443c}.en{color:#6b645a}form{margin:12px 0}button{width:100%;min-height:48px;border-radius:999px;border:1px solid #1f1b1640;background:#fff;font:inherit;font-weight:600;cursor:pointer;padding:0 20px}button:hover{background:#f1ece4}</style></head><body><main>${inner}</main></body></html>`;
   return new Response(page, { status, headers: { ...NO_STORE, "content-type": "text/html; charset=utf-8", "referrer-policy": "no-referrer", "x-frame-options": "DENY" } });
@@ -147,7 +150,7 @@ function htmlPage(title: string, inner: string, status = 200): Response {
  * missing or belongs to another start (another browser), or a declined/failed login (?error=). The admin key is never put in a
  * redirect unless the nonce cookie matches.
  */
-function genericPage(): Response {
+export function genericPage(): Response {
   return htmlPage(
     "Свързването не завърши · Connecting did not finish",
     `<h1>Свързването не завърши</h1><p>Връзката е изтекла, отказана или е отворена в друг браузър. Отворете таблото отново и натиснете „Свържи“.</p><p class="en">Connecting did not finish: the link expired, was declined or was opened in another browser. Open the dashboard again and press Connect.</p>`,
@@ -157,16 +160,22 @@ function genericPage(): Response {
 
 export type SocialResult =
   | "facebook_connected" | "facebook_no_pages" | "facebook_error"
-  | "instagram_connected" | "instagram_personal" | "instagram_error";
+  | "instagram_connected" | "instagram_personal" | "instagram_error"
+  | "google_connected" | "google_no_locations" | "google_error";
 
-/** `adminKey` null = the dashboard was opened on an account: back to /dashboard/<slug>, with no key anywhere. */
-function backToDashboard(d: SocialConnectDeps, slug: string, adminKey: string | null, result: SocialResult, ret?: ReturnTarget): Response {
-  const secure = d.config.publicBaseUrl.startsWith("https://");
+/**
+ * `adminKey` null = the dashboard was opened on an account: back to /dashboard/<slug>, with no key anywhere. `o.base` replaces
+ * PUBLIC_BASE_URL (the Google flow returns to the host it started on); `o.anchor` replaces the `#social` section anchor.
+ */
+export function backToDashboard(d: SocialConnectDeps, slug: string, adminKey: string | null, result: SocialResult, ret?: ReturnTarget, o: { base?: string; anchor?: string } = {}): Response {
+  const base = o.base ?? d.config.publicBaseUrl;
+  const anchor = o.anchor ?? "social";
+  const secure = base.startsWith("https://");
   const location = adminKey === null
     ? ret === "onboarding"
-      ? `${d.config.publicBaseUrl}/onboarding/${encodeURIComponent(slug)}?social_result=${result}`
-      : `${d.config.publicBaseUrl}/dashboard/${encodeURIComponent(slug)}?social_result=${result}#social`
-    : `${d.config.publicBaseUrl}/admin/${encodeURIComponent(slug)}?key=${encodeURIComponent(adminKey)}&social_result=${result}#social`;
+      ? `${base}/onboarding/${encodeURIComponent(slug)}?social_result=${result}`
+      : `${base}/dashboard/${encodeURIComponent(slug)}?social_result=${result}#${anchor}`
+    : `${base}/admin/${encodeURIComponent(slug)}?key=${encodeURIComponent(adminKey)}&social_result=${result}#${anchor}`;
   return new Response(null, { status: 303, headers: { ...NO_STORE, location, "set-cookie": nonceCookie("", 0, secure), "referrer-policy": "no-referrer" } });
 }
 
@@ -200,7 +209,7 @@ export async function handleSocialStart(d: SocialConnectDeps, venue: Venue, auth
 // ---------------------------------------------------------------------------------------------------------------------
 // Callbacks
 
-interface Checked {
+export interface Checked {
   state: SocialState;
   venue: Venue;
   /** The admin key the connect was started with; null when it was started from the account dashboard. */
@@ -213,7 +222,7 @@ interface Checked {
  * Verifies the state (signature, step, expiry), loads the venue and compares the nonce cookie. A key state decrypts the admin key and
  * looks the venue up by it; a session state needs the signed-in account of this request to still own the venue.
  */
-async function checkState(d: SocialConnectDeps, raw: string | null, step: StateStep, cookies: string | null): Promise<Checked | null> {
+export async function checkState(d: SocialConnectDeps, raw: string | null, step: StateStep, cookies: string | null): Promise<Checked | null> {
   const secret = appSecretFor(d, step);
   if (!secret || !d.secretKey) return null;
   const state = verifySocialState(raw, stateKey(secret), step, d.now());
@@ -393,8 +402,8 @@ function firstRow(j: unknown): Record<string, unknown> | null {
   return row && typeof row === "object" ? (row as Record<string, unknown>) : null;
 }
 
-/** Removes the stored connection of one network (the post history in sync rows goes with it). */
-export async function disconnectSocial(store: Store, venueId: string, kind: SocialKind): Promise<boolean> {
+/** Removes the stored connection of one network or of Google (the sync rows go with it). */
+export async function disconnectSocial(store: Store, venueId: string, kind: SocialKind | "google"): Promise<boolean> {
   const row = await store.getDestination(venueId, kind);
   if (!row) return false;
   await store.deleteDestination(row.id);

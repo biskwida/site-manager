@@ -82,7 +82,7 @@ export class FakeGoogle {
     this.codes.set(code, refresh_token);
     return { name, refresh_token, code };
   }
-  addLocation(accountName: string, o: { title?: string; address?: string; verified?: boolean; regularHours?: GooglePeriod[]; specialHours?: GoogleSpecialPeriod[]; hasGoogleUpdated?: boolean } = {}): GoogleLocation & { v4: string } {
+  addLocation(accountName: string, o: { title?: string; address?: string; verified?: boolean; regularHours?: GooglePeriod[]; specialHours?: GoogleSpecialPeriod[]; hasGoogleUpdated?: boolean; serviceArea?: boolean } = {}): GoogleLocation & { v4: string } {
     if (!this.accounts.has(accountName)) throw new Error(`no account ${accountName}`);
     const id = String(++this.seq);
     const name = `locations/${id}`;
@@ -92,6 +92,11 @@ export class FakeGoogle {
       storefrontAddress: { addressLines: o.address === undefined ? ["1 Main St"] : o.address ? [o.address] : [], locality: "Sofia", postalCode: "1000" },
       metadata: { hasVoiceOfMerchant: o.verified ?? true, hasGoogleUpdated: o.hasGoogleUpdated ?? false, hasPendingEdits: false },
     };
+    // A service-area business (no storefront): Google returns serviceArea and no storefrontAddress.
+    if (o.serviceArea) {
+      delete loc.storefrontAddress;
+      loc.serviceArea = { businessType: "CUSTOMER_LOCATION_ONLY", places: { placeInfos: [{ placeName: "Sofia" }] } };
+    }
     if (o.regularHours) loc.regularHours = { periods: o.regularHours };
     if (o.specialHours) loc.specialHours = { specialHourPeriods: o.specialHours };
     const v4 = `${accountName}/${name}`;

@@ -31,7 +31,7 @@ async function setup(over: { now?: () => Date; config?: Partial<SocialConnectDep
   let clock = T0;
   const d: SocialConnectDeps = {
     store: demo.store,
-    config: { publicBaseUrl: BASE, metaLoginConfigId: null, metaAppId: meta.appId, metaAppSecret: meta.appSecret, instagramAppId: meta.igAppId, instagramAppSecret: meta.igAppSecret, ...over.config },
+    config: { publicBaseUrl: BASE, metaLoginConfigId: null, metaAppId: meta.appId, metaAppSecret: meta.appSecret, instagramAppId: meta.igAppId, instagramAppSecret: meta.igAppSecret, googleClientId: null, googleClientSecret: null, appHost: "getclaudia.app", ...over.config },
     secretKey: KEY,
     fetch: meta.fetch,
     now: over.now ?? (() => clock),
