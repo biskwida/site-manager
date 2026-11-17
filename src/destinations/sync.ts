@@ -90,6 +90,13 @@ export async function runSync(d: SyncDeps, listed: DestinationSync, now: Date): 
     const saveConnection = async (config: Record<string, unknown>, fresh: Record<string, string>) => {
       await d.store.upsertDestination({ venue_id: dest.venue_id, kind: dest.kind, config, secrets: encryptSecrets(fresh, key), status: dest.status });
     };
+    const patchConfig = async (set: Record<string, unknown>, remove: readonly string[] = []) => {
+      const current = await d.store.getDestination(dest.venue_id, dest.kind);
+      if (!current || current.id !== dest.id || current.status === "disconnected") return; // disconnected during the push
+      const config: Record<string, unknown> = { ...current.config, ...set };
+      for (const k of remove) delete config[k];
+      await d.store.updateDestination(current.id, { config });
+    };
     // Written to the row at once (before a call whose answer might be lost), so a retry knows what may already be out.
     const checkpoint = async (partial: Record<string, unknown>) => {
       await d.store.updateSync(sync.id, { result: partial, updated_at: now.toISOString() });
@@ -97,7 +104,7 @@ export async function runSync(d: SyncDeps, listed: DestinationSync, now: Date): 
     try {
       const cs = await d.store.getChangeSet(sync.change_set_id);
       const prior = await resultsOf(sync.change_set_id);
-      return await adapter.push({ venue, destination: dest, secrets, changeSet: cs, changes: adapter.relevant(cs.changes), fetch: d.fetch, now, prior, resultsOf, saveConnection, sleep: d.sleep, checkpoint, loadSite: () => d.store.getSite(venue.id), google: d.google });
+      return await adapter.push({ venue, destination: dest, secrets, changeSet: cs, changes: adapter.relevant(cs.changes), fetch: d.fetch, now, prior, resultsOf, saveConnection, patchConfig, sleep: d.sleep, checkpoint, loadSite: () => d.store.getSite(venue.id), google: d.google });
     } catch (e) {
       return connectionError(e, true);
     }

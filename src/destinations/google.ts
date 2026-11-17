@@ -88,16 +88,16 @@ async function pushHours(ctx: PushContext, hoursRows: Change[]): Promise<PushRes
     await patchLocation(client, locationName, mask, body);
     const after = await getLocation(client, locationName, READ_MASK);
     const reviewing = after.metadata?.hasGoogleUpdated === true || after.metadata?.hasPendingEdits === true;
-    const nextConfig: Record<string, unknown> = { ...config, last_hours_push_at: ctx.now.toISOString(), special_dates_pushed: merged.pushed };
+    // Only the keys this push owns, onto the destination as it is now (a disconnect or a poll stamp meanwhile is kept).
+    const set: Record<string, unknown> = { last_hours_push_at: ctx.now.toISOString(), special_dates_pushed: merged.pushed };
+    const remove: string[] = [];
     if (regular) {
-      nextConfig.hours_pushed = true;
-      nextConfig.hours_conflict = false;
-      delete nextConfig.google_hours;
+      Object.assign(set, { hours_pushed: true, hours_conflict: false });
+      remove.push("google_hours");
     } else if (conflictWeek) {
-      nextConfig.hours_conflict = true;
-      nextConfig.google_hours = conflictWeek;
+      Object.assign(set, { hours_conflict: true, google_hours: conflictWeek });
     }
-    await ctx.saveConnection?.(nextConfig, ctx.secrets);
+    await ctx.patchConfig?.(set, remove);
     const result: GoogleHoursResult = {
       hours: { regular, conflict, special: mine.length, kept: merged.periods.length - mine.length, reviewing, long_closure: longestClosedRun(mine) >= LONG_CLOSURE_DAYS },
     };

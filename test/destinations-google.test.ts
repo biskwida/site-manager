@@ -205,6 +205,51 @@ describe("hours push", () => {
     expect(patches(g.fake).map((x) => x.query.updateMask)).toEqual(["regularHours,specialHours", "regularHours,specialHours"]);
   });
 
+  it("I6: a disconnect between the PATCH and the config save leaves no destination row (no token brought back)", async () => {
+    const g = await connectedGoogle();
+    const id = (await g.dest()).id;
+    const base = g.fake.fetch;
+    g.d.fetch = (async (input, init) => {
+      const res = await base(input, init);
+      if (init?.method === "PATCH" && !String(input).includes("validateOnly")) await g.store.deleteDestination(id);
+      return res;
+    }) as typeof fetch;
+    await g.applyOps([{ op: "set_hours", hours: WEEKDAYS_8_19 }]);
+    expect(await g.store.getDestination(g.venue.id, "google")).toBeNull();
+    expect((await g.store.listDestinations(g.venue.id)).filter((x) => x.kind === "google")).toEqual([]);
+  });
+
+  it("I6: a review poll stamp written during the push is kept; only the push's own keys change", async () => {
+    const g = await connectedGoogle();
+    const id = (await g.dest()).id;
+    const base = g.fake.fetch;
+    g.d.fetch = (async (input, init) => {
+      const res = await base(input, init);
+      if (init?.method === "PATCH" && !String(input).includes("validateOnly")) {
+        const fresh = (await g.store.getDestination(g.venue.id, "google"))!;
+        await g.store.updateDestination(id, { config: { ...fresh.config, last_review_poll_at: "2026-11-13T09:00:30.000Z" } });
+      }
+      return res;
+    }) as typeof fetch;
+    await g.applyOps([{ op: "set_hours", hours: WEEKDAYS_8_19 }]);
+    expect((await g.dest()).config).toMatchObject({ last_review_poll_at: "2026-11-13T09:00:30.000Z", hours_pushed: true, last_hours_push_at: T0.toISOString() });
+  });
+
+  it("I6: a destination set to disconnected during the push is not written", async () => {
+    const g = await connectedGoogle();
+    const id = (await g.dest()).id;
+    const base = g.fake.fetch;
+    g.d.fetch = (async (input, init) => {
+      const res = await base(input, init);
+      if (init?.method === "PATCH" && !String(input).includes("validateOnly")) await g.store.updateDestination(id, { status: "disconnected" });
+      return res;
+    }) as typeof fetch;
+    await g.applyOps([{ op: "set_hours", hours: WEEKDAYS_8_19 }]);
+    const dest = (await g.store.getDestination(g.venue.id, "google"))!;
+    expect(dest.status).toBe("disconnected");
+    expect(dest.config.hours_pushed).toBeUndefined();
+  });
+
   it("Google reviewing the edit: done after one attempt, with the reviewing line", async () => {
     const g = await connectedGoogle({ hasGoogleUpdated: true });
     const cs = await g.applyOps([holiday("2026-12-24")]);

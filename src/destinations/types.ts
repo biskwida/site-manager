@@ -19,6 +19,11 @@ export interface PushContext {
   resultsOf?: (changeSetId: string) => Promise<Record<string, unknown>[]>;
   /** Replaces the destination's config and secrets (encrypted by the caller), e.g. after a token refresh. Keeps its status. */
   saveConnection?: (config: Record<string, unknown>, secrets: Record<string, string>) => Promise<void>;
+  /**
+   * Re-reads the destination and writes `set` (and removes `remove`) onto its current config, keeping every other key and the
+   * secrets as they are now. Does nothing when the destination is gone or disconnected meanwhile. Used by Google.
+   */
+  patchConfig?: (set: Record<string, unknown>, remove?: readonly string[]) => Promise<void>;
   /** Waits between polls (Instagram containers); tests pass a fake. */
   sleep?: (ms: number) => Promise<void>;
   /** Stores a partial result on the sync row right away (before a call whose answer might be lost). */
