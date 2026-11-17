@@ -1,6 +1,7 @@
 // src/agent/comment-tools.ts
-// Agent tools for customer comments under the venue's Facebook/Instagram posts: how the owner is notified (set_comment_mode),
-// what is waiting (list_comments) and replying or moderating (reply_to_comments). Registered only when a network is connected;
+// Agent tools for customer comments under the venue's Facebook/Instagram posts and the venue's Google reviews: how the owner is
+// notified (set_comment_mode), what is waiting (list_comments) and replying or moderating (reply_to_comments). Registered only
+// when Facebook, Instagram or Google is connected; a Google review is only ever replied to, one review per set;
 // owner only. list_comments first reads Instagram and Facebook right then (AgentDeps.liveComments, src/social/comments-poll.ts), so a
 // comment from five minutes ago is not missed; the read is capped and any failure falls back to the saved comments. set_comment_mode is an ordinary proposal through the agent's propose path (source of the turn, ✅/✏️/❌ buttons);
 // a set made only of set_comment_mode rows never counts toward the monthly change limit (countsTowardLimit, src/domain/limits.ts).
@@ -9,7 +10,7 @@
 import { betaZodTool } from "@anthropic-ai/sdk/helpers/beta/zod";
 import { z } from "zod";
 import { copy } from "../bot/copy";
-import { commentModeLabel } from "../domain/comment-preview";
+import { commentModeLabel, reviewStars } from "../domain/comment-preview";
 import { COMMENT_MODES, NETWORK_NAMES, type ChangeSet, type CommentMode, type CommentNetwork } from "../domain/types";
 import { REPLY_MAX } from "../social/comments-draft";
 import { COMMENT_ON_DEMAND_TIMEOUT_MS } from "../social/comments-poll";
@@ -49,6 +50,7 @@ const ANSWERABLE: readonly CommentStatus[] = ["new", "proposed", "expired", "ign
 /** Why this comment cannot get `action` (null = it can). */
 function refusal(c: SocialComment, action: string | null | undefined): string | null {
   const id = c.id;
+  if (c.network === "google" && action) return "A Google review cannot be hidden or deleted; reply to it or leave it.";
   if (c.status === "own") return `Comment ${id} is the venue's own comment; it needs no reply.`;
   if (c.status === "nested") return `Comment ${id} is a reply to a reply; replies to replies are not supported yet.`;
   if (c.status === "replied") return `Comment ${id} is already answered; undo the reply first if the owner wants a different one.`;
@@ -60,7 +62,7 @@ function refusal(c: SocialComment, action: string | null | undefined): string | 
 
 export function commentTools(d: AgentDeps, k: ToolKit) {
   const social = d.social;
-  if (!social || (!social.facebook && !social.instagram)) return [];
+  if (!social || (!social.facebook && !social.instagram && !social.google)) return [];
 
   const setMode = betaZodTool({
     name: "set_comment_mode",
@@ -79,7 +81,7 @@ export function commentTools(d: AgentDeps, k: ToolKit) {
 
   /** Staff get the same refusal social_post gives. */
   const requireOwner = () => {
-    if (d.member.role !== "owner") throw new Error("Comments on Facebook and Instagram are only the owner's decision; tell the owner to send this.");
+    if (d.member.role !== "owner") throw new Error("Comments on Facebook and Instagram and Google reviews are only the owner's decision; tell the owner to send this.");
   };
 
   /** The live read before listing. Never throws; the answer is what list_comments tells the agent about it. */
@@ -118,7 +120,7 @@ export function commentTools(d: AgentDeps, k: ToolKit) {
 
   const list = betaZodTool({
     name: "list_comments",
-    description: "Customer comments under the venue's Facebook/Instagram posts: id, network, author, text, the post's caption, status, the detected kind (question, praise, complaint, spam, abuse, other) and the drafted reply. Default: unanswered comments of the last 14 days, newest first. Reads Instagram and Facebook right then before answering (skipped when they were read less than a minute ago); if that fails it says so in live_check_failed and answers from the saved comments. Call it before replying when the owner names a comment by author or content. Owner only.",
+    description: "Customer comments under the venue's Facebook/Instagram posts and Google reviews: id, network, author, text, the post's caption, status, the detected kind (question, praise, complaint, spam, abuse, other) and the drafted reply; a Google review also has its rating (1–5 stars) and a label to name it by. Default: unanswered comments of the last 14 days, newest first. Reads Instagram and Facebook right then before answering (skipped when they were read less than a minute ago); if that fails it says so in live_check_failed and answers from the saved comments. Call it before replying when the owner names a comment by author or content. Owner only.",
     inputSchema: ListCommentsSchema,
     run: (input) =>
       k.attempt(async () => {
@@ -127,11 +129,16 @@ export function commentTools(d: AgentDeps, k: ToolKit) {
         const since = new Date(d.now().getTime() - input.days * 24 * 3_600_000).toISOString();
         const rows = (await d.store.listComments(d.venueId, { status: [input.status ?? "new"], since, limit: 100 })).filter((c) => c.parent_id === null);
         const unanswered = input.status === undefined || input.status === "new";
+        const reviews = rows.filter((c) => c.network === "google").length;
+        const waiting = unanswered && reviews > 0 ? `${reviews} Google review${reviews === 1 ? "" : "s"} waiting (each is its own proposal; a review can only be replied to). ` : "";
         return {
           ...(live.failed ? { live_check_failed: live.note, last_checked_at: live.last_checked_at } : {}),
           count: rows.length,
-          comments: rows.map((c) => ({ id: c.id, network: c.network, author: c.author_name, text: c.text, post_caption: c.post_caption, created_at: c.created_at, status: c.status, kind: c.draft_kind, draft: c.draft_text })),
-          note: unanswered ? "Reply with reply_to_comments (one call for several comments). Nothing is posted before the owner's ✅." : undefined,
+          comments: rows.map((c) => ({
+            id: c.id, network: c.network, author: c.author_name, text: c.text, post_caption: c.post_caption, created_at: c.created_at, status: c.status, kind: c.draft_kind, draft: c.draft_text,
+            ...(c.network === "google" ? { rating: c.rating, label: `${reviewStars(c.rating)} Google review from ${c.author_name || "a customer"}`.trim() } : {}),
+          })),
+          note: unanswered ? `${waiting}Reply with reply_to_comments (one call for several comments). Nothing is posted before the owner's ✅.` : undefined,
           next: unanswered && rows.length > 0 ? "If the owner asked to check, see or answer the comments, propose replies for these now: one reply_to_comments call for the whole list, without asking first (nothing is posted before the owner's ✅). If they only asked how many are waiting, answer with the count." : undefined,
         };
       }),
@@ -139,7 +146,7 @@ export function commentTools(d: AgentDeps, k: ToolKit) {
 
   const reply = betaZodTool({
     name: "reply_to_comments",
-    description: "Propose replies to customer comments (or hiding/deleting spam): one change set with one row per comment (several sets when they do not fit one message, at most 10 comments each), sent to every owner with ✅ Apply / ✏️ Change / ❌ Cancel. Replaces a pending comment proposal that covers any of the same comments. Never blocked by a pending menu proposal. Nothing is posted before ✅. Owner only.",
+    description: "Propose replies to customer comments and Google reviews (or hiding/deleting spam comments; a Google review can only be replied to): one change set with one row per comment (several sets when they do not fit one message, at most 10 comments each; every Google review is a set of its own), sent to every owner with ✅ Apply / ✏️ Change / ❌ Cancel. Replaces a pending comment proposal that covers any of the same comments. Never blocked by a pending menu proposal. Nothing is posted before ✅. Owner only.",
     inputSchema: ReplyToCommentsSchema,
     run: (input) =>
       k.attempt(async () => {
@@ -183,15 +190,21 @@ export function commentTools(d: AgentDeps, k: ToolKit) {
           it.comment = c;
         }
         // One proposal per group that fits a message (at most 10 comments, under Telegram's size; splitCommentItems, like the
-        // digest): usually one; a long batch becomes several, each to every owner.
+        // digest): usually one; a long batch becomes several, each to every owner. A Google review never shares a set (a withdrawn
+        // review cancels its whole set): each is a set of its own, with the review's own message.
         const site = await d.store.getSite(d.venueId);
-        const groups = splitCommentItems(items, { batch: true, extra: previewLength(site, venue.tz) });
+        const comments = items.filter((it) => it.comment.network !== "google");
+        const reviews = items.filter((it) => it.comment.network === "google");
+        const groups = [
+          ...splitCommentItems(comments, { batch: true, extra: previewLength(site, venue.tz) }).map((g) => ({ g, batch: comments.length > 1 })),
+          ...reviews.map((it) => ({ g: [it], batch: false })),
+        ];
         const summary = { ...(input.summary_bg ? { summary_bg: input.summary_bg } : {}), ...(input.summary_en ? { summary_en: input.summary_en } : {}) };
         const made: ChangeSet[] = [];
         let rows = 0;
         let stopped: "limited" | "held" | null = null;
-        for (const g of groups) {
-          const r = await createCommentSet({ store: d.store, messenger: d.messenger, now: d.now }, venue, g, { chatRef: d.chatRef, batch: items.length > 1 });
+        for (const { g, batch } of groups) {
+          const r = await createCommentSet({ store: d.store, messenger: d.messenger, now: d.now }, venue, g, { chatRef: d.chatRef, batch });
           if (r.limited) {
             stopped = "limited";
             break;
@@ -214,7 +227,7 @@ export function commentTools(d: AgentDeps, k: ToolKit) {
           rows,
           preview: made.map((x) => k.mine(x)).join("\n\n"),
           ...(rest > 0 ? { not_proposed: rest, why: stopped === "limited" ? "The comment limit was reached; the rest stay unanswered (dashboard)." : "No owner could be messaged for the rest; they are kept and proposed again later." } : {}),
-          next: made.length > 1 ? `Sent as ${made.length} proposals (one message holds at most 10 comments). The owner decides each with its buttons. Reply with at most one short sentence, or nothing.` : "The owner decides with the buttons. Reply with at most one short sentence, or nothing.",
+          next: made.length > 1 ? `Sent as ${made.length} proposals (one message holds at most 10 comments${reviews.length ? "; every Google review is its own proposal" : ""}). The owner decides each with its buttons. Reply with at most one short sentence, or nothing.` : "The owner decides with the buttons. Reply with at most one short sentence, or nothing.",
         };
       }),
   });

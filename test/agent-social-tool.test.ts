@@ -57,10 +57,10 @@ const input = (media_id: string, extra: Record<string, unknown> = {}) => ({ summ
 describe("social_post availability", () => {
   it("is registered only when Facebook or Instagram is connected", async () => {
     const none = await setup({}, {});
-    expect(none.deps.social).toEqual({ facebook: false, instagram: false });
+    expect(none.deps.social).toEqual({ facebook: false, instagram: false, google: false });
     expect(none.tools.map((t) => t.name)).not.toContain("social_post");
     const fb = await setup({}, { facebook: true });
-    expect(fb.deps.social).toEqual({ facebook: true, instagram: false });
+    expect(fb.deps.social).toEqual({ facebook: true, instagram: false, google: false });
     expect(fb.tools.map((t) => t.name)).toContain("social_post");
   });
   it("the prompt tells the agent when and how to use it", () => {

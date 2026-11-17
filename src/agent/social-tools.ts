@@ -39,10 +39,13 @@ export const SocialPostSchema = z.object({
   targets: z.array(z.enum(SOCIAL_TARGETS as [SocialTarget, ...SocialTarget[]])).min(1).max(4).describe('Where to publish: facebook_post, facebook_story, instagram_post, instagram_story. "само стори", "като стори", "story only" or a story asked for without a post → only *_story; "само пост", "в профила", "във фийда", "post only" → only *_post; "и стори, и пост", "both" → both. A named network ("в инстаграм", "във фейсбук") → only that network. When the owner names neither story nor post: the feed post, on every connected network unless one is named. "прати стори само в инстаграм" → ["instagram_story"].'),
 });
 
-/** Which networks the venue has connected for posting (an errored connection still counts: its next push tells the owner). */
-export async function socialConnections(store: Store, venueId: string): Promise<{ facebook: boolean; instagram: boolean }> {
+/**
+ * Which networks the venue has connected (an errored connection still counts: its next push tells the owner). Facebook and
+ * Instagram are for posting and comments; Google only for reviews (the comment tools), never for social_post.
+ */
+export async function socialConnections(store: Store, venueId: string): Promise<{ facebook: boolean; instagram: boolean; google: boolean }> {
   const kinds = new Set((await store.listDestinations(venueId)).filter((d) => d.status !== "disconnected").map((d) => d.kind));
-  return { facebook: kinds.has("facebook"), instagram: kinds.has("instagram") };
+  return { facebook: kinds.has("facebook"), instagram: kinds.has("instagram"), google: kinds.has("google") };
 }
 
 /** The caption suffix for a restyled picture when the venue turned the AI label on. */

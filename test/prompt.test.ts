@@ -34,7 +34,7 @@ describe("SYSTEM_PROMPT: the language rule", () => {
   it("is one more numbered rule, and the numbering stays continuous", () => {
     const numbers = [...SYSTEM_PROMPT.matchAll(/^(\d+)\. /gm)].map((m) => Number(m[1]));
     expect(numbers).toEqual(Array.from({ length: numbers.length }, (_, i) => i + 1));
-    expect(SYSTEM_PROMPT).toMatch(/^15\. Language: /m);
+    expect(SYSTEM_PROMPT).toMatch(/^16\. Language: /m);
   });
 
   it("rule 4 tells the agent to write both site languages when the owner writes in neither", () => {
@@ -91,7 +91,7 @@ describe("SYSTEM_PROMPT: website photos", () => {
     expect(SYSTEM_PROMPT).toMatch(/never make_visual for a website/i);
     expect(SYSTEM_PROMPT).toMatch(/make_visual is only for Instagram\/Facebook posts and stories/);
     expect(SYSTEM_PROMPT).toContain("If the result has a note, tell it to the owner in one short line in the Owner language.");
-    expect(SYSTEM_PROMPT).toContain("make_visual's card never goes on the website: that is make_menu_photo (rule 16).");
+    expect(SYSTEM_PROMPT).toContain("make_visual's card never goes on the website: that is make_menu_photo (rule 17).");
     expect(SYSTEM_PROMPT).toContain("never put make_visual's card on the site");
   });
 
@@ -117,7 +117,7 @@ describe("SYSTEM_PROMPT: website photos", () => {
 describe("SYSTEM_PROMPT: ads go to propose_boost", () => {
   it("is a numbered rule: boost requests call propose_boost, never social_post, and ✏️ re-runs it with the owner's numbers", () => {
     const rule = SYSTEM_PROMPT.split("\n").find((l) => /^\d+\. Ads: /.test(l)) ?? "";
-    expect(rule).toMatch(/^17\. Ads: /);
+    expect(rule).toMatch(/^18\. Ads: /);
     for (const words of ["\"пусни поста с реклама\"", "\"рекламирай\"", "\"boost\"", "\"ad\""]) expect(rule).toContain(words);
     expect(rule).toContain("call propose_boost, never social_post for an ad");
     expect(rule).toContain("call propose_boost again with the owner's numbers");
@@ -135,13 +135,13 @@ describe("SYSTEM_PROMPT: ads go to propose_boost", () => {
 describe("propose_boost: the variant words", () => {
   const MORNING = "сутрин / закуска / до 11 / morning / breakfast";
   const WEEKEND = "уикенд / събота / неделя / бранч / концерт / weekend / brunch / event / live music";
-  it("rule 17 and the tool description list the same morning and weekend words", async () => {
+  it("rule 18 and the tool description list the same morning and weekend words", async () => {
     const { makeTools } = await import("@/src/agent/tools");
     const { FakeMessenger, makeDemo } = await import("./helpers");
     const demo = await makeDemo();
     const member = (await demo.store.findMember("tg:1001"))!;
     const tool = makeTools({ store: demo.store, venueId: demo.venue.id, chatRef: "tg:1001", member, messenger: new FakeMessenger(), now: () => new Date(), baseUrl: "https://x" }).find((t) => t.name === "propose_boost")!;
-    const rule = SYSTEM_PROMPT.split("\n").find((l) => /^17\. Ads: /.test(l)) ?? "";
+    const rule = SYSTEM_PROMPT.split("\n").find((l) => /^18\. Ads: /.test(l)) ?? "";
     for (const text of [rule, (tool as { description?: string }).description ?? ""]) {
       expect(text).toContain(`"morning" ${text === rule ? "only " : ""}when the owner says ${MORNING}`);
       expect(text).toContain(`"weekend" ${text === rule ? "only " : ""}when the owner says ${WEEKEND}`);
@@ -177,13 +177,30 @@ describe("SYSTEM_PROMPT: the restyle rule", () => {
   });
   it("the existing photo rules are untouched and the numbering stays continuous", () => {
     expect(SYSTEM_PROMPT).toMatch(/^13\. Pictures for Instagram: /m);
-    expect(SYSTEM_PROMPT).toMatch(/^16\. Website and menu photos: /m);
-    expect(SYSTEM_PROMPT).toMatch(/^17\. Ads: /m);
+    expect(SYSTEM_PROMPT).toMatch(/^17\. Website and menu photos: /m);
+    expect(SYSTEM_PROMPT).toMatch(/^18\. Ads: /m);
     expect(SYSTEM_PROMPT).not.toMatch(/AI assistant/);
     const numbers = [...SYSTEM_PROMPT.matchAll(/^(\d+)\. /gm)].map((m) => Number(m[1]));
     expect(numbers).toEqual(Array.from({ length: numbers.length }, (_, i) => i + 1));
   });
   it("the schema description tells the mood words", () => {
     expect(RestylePhotoSchema.shape.mood.description ?? "").toMatch(/darker/);
+  });
+});
+
+describe("SYSTEM_PROMPT: the Google listing rule", () => {
+  const rule = SYSTEM_PROMPT.split("\n").find((l) => /^\d+\. Google listing: /.test(l)) ?? "";
+  it("comes right after the comments rule, with the edit-profile link and the hours conflict phrases", () => {
+    expect(rule).toMatch(/^15\. Google listing: /);
+    expect(SYSTEM_PROMPT.indexOf("14. Comments")).toBeLessThan(SYSTEM_PROMPT.indexOf("15. Google listing"));
+    expect(SYSTEM_PROMPT).toContain("https://business.google.com/");
+    expect(SYSTEM_PROMPT).toContain("hours_conflict");
+    expect(rule).toContain(`"use Google's" / "вземи тези от Google" means propose set_hours with the hours in google_hours`);
+    expect(rule).toContain("a review can never be hidden or deleted");
+    expect(rule).toContain(`"Closed today" is add_holiday for today`);
+    expect(SYSTEM_PROMPT).not.toContain("AI assistant");
+  });
+  it("the comments rule names Google reviews among what list_comments returns", () => {
+    expect(SYSTEM_PROMPT).toContain("and Google reviews");
   });
 });
