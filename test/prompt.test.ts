@@ -204,3 +204,10 @@ describe("SYSTEM_PROMPT: the Google listing rule", () => {
     expect(SYSTEM_PROMPT).toContain("and Google reviews");
   });
 });
+
+describe("rule 15: Google listing", () => {
+  const rule = SYSTEM_PROMPT.split("\n").find((l) => /^\d+\. Google listing: /.test(l)) ?? "";
+  it("M6: 'keep the website's' with no pending proposal proposes set_hours with the website's current hours", () => {
+    expect(rule).toContain("if no proposal is pending (it expires after 2 hours), propose set_hours with the website's current hours");
+  });
+});

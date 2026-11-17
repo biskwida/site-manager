@@ -9,7 +9,8 @@
 //   --reply <review name> --text "..."  one reply (PUT) to one review of this venue's listing
 import { pathToFileURL } from "node:url";
 import { getLocation, GoogleApiError, googleAccessToken, GoogleClient, listReviews, patchLocation, putReviewReply, type GoogleConfig, type GoogleCreds, type GoogleLocation, type GooglePeriod } from "../src/destinations/google-api";
-import { formatGooglePeriods, formatWeek, fromRegularHours, hasNoHours, mergeSpecial, sameWeek, toRegularPeriods, toSpecialPeriods } from "../src/destinations/google-hours";
+import { planHoursPush } from "../src/destinations/google";
+import { formatGooglePeriods, formatWeek, fromRegularHours, hasNoHours, sameWeek } from "../src/destinations/google-hours";
 import { decryptSecrets } from "../src/destinations/secrets";
 import type { Store } from "../src/store/types";
 import { localDate } from "../src/time";
@@ -46,6 +47,11 @@ export async function runGoogleLiveCheck(d: GoogleLiveDeps, o: GoogleLiveOptions
   const config = dest.config as unknown as GoogleConfig;
   const locationName = config.location_name;
   const locationV4 = config.location_v4;
+  // Checked before anything is read or written: a bad --reply never lets a --push go out first.
+  if (o.reply && (!o.reply.review.startsWith(`${locationV4}/reviews/`) || !o.reply.text.trim())) {
+    out("error: --reply needs a review name of this venue's listing and a non-empty --text");
+    return 1;
+  }
   if (o.push || o.reply) out("WARNING: --push / --reply write to the live Google listing. Run them only with Tanya's explicit go (spec section 7).");
   try {
     let refresh: string;
@@ -77,14 +83,12 @@ export async function runGoogleLiveCheck(d: GoogleLiveDeps, o: GoogleLiveOptions
       out("error sm_google_no_hours: the venue has no opening hours");
       return 1;
     }
-    // The body the adapter would send (src/destinations/google.ts pushHours), including its conflict rule: while the owner has
-    // not chosen between Google's week and the website's, only specialHours go out.
-    const merged = mergeSpecial(toSpecialPeriods(site.holidays, today), loc.specialHours?.specialHourPeriods ?? [], Array.isArray(config.special_dates_pushed) ? config.special_dates_pushed : [], today);
-    const regular = config.hours_conflict !== true;
-    const mask = regular ? "regularHours,specialHours" : "specialHours";
-    const body: Pick<GoogleLocation, "regularHours" | "specialHours"> = { specialHours: { specialHourPeriods: merged.periods } };
-    if (regular) body.regularHours = { periods: toRegularPeriods(site.venue.hours) };
-    if (!regular) out("Note: hours_conflict is set, so only specialHours are sent.");
+    // The body the adapter would send for a holiday change (planHoursPush, src/destinations/google.ts), with its rules: the week
+    // goes out on the first push only, and never while Google's week differs from the website's and the owner has not chosen.
+    const plan = planHoursPush(dest.config, site, loc, false, d.now);
+    const { mask, body } = plan;
+    if (plan.conflict) out("Note: Google's week differs from the website's and the owner has not chosen, so only specialHours are sent.");
+    else if (!plan.regular) out("Note: the week was pushed before, so only specialHours are sent.");
     try {
       await patchLocation(client, locationName, mask, body, { validateOnly: true });
       out("validateOnly: OK");
@@ -100,16 +104,26 @@ export async function runGoogleLiveCheck(d: GoogleLiveDeps, o: GoogleLiveOptions
 
     if (o.push) {
       await patchLocation(client, locationName, mask, body);
-      const after = await getLocation(client, locationName, READ_MASK);
-      const reviewing = after.metadata?.hasGoogleUpdated === true || after.metadata?.hasPendingEdits === true;
+      // Saved the way the adapter saves it (only its own keys, onto the row as it is now), so the dates written here are
+      // tracked as Claudia's (special_dates_pushed) and the next push knows the week went out (hours_pushed).
+      const fresh = await d.store.getDestination(venue.id, "google");
+      if (fresh && fresh.id === dest.id && fresh.status !== "disconnected") {
+        const next: Record<string, unknown> = { ...fresh.config, ...plan.set };
+        for (const k of plan.remove) delete next[k];
+        await d.store.updateDestination(fresh.id, { config: next });
+      }
       out("push: done");
+      let reviewing = false;
+      try {
+        const after = await getLocation(client, locationName, READ_MASK);
+        reviewing = after.metadata?.hasGoogleUpdated === true || after.metadata?.hasPendingEdits === true;
+      } catch (e) {
+        if (!(e instanceof GoogleApiError)) throw e;
+        out(`read-back: failed (${e.code})`);
+      }
       out(`reviewing: ${reviewing ? "yes" : "no"}`);
     }
     if (o.reply) {
-      if (!o.reply.review.startsWith(`${locationV4}/reviews/`) || !o.reply.text.trim()) {
-        out("error: --reply needs a review name of this venue's listing and a non-empty --text");
-        return 1;
-      }
       await putReviewReply(client, o.reply.review, o.reply.text);
       out("reply: posted");
     }

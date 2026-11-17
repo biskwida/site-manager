@@ -58,6 +58,21 @@ describe("google live check", () => {
     expect(s.fake.location(s.loc.name).regularHours?.periods?.length).toBeGreaterThan(0);
   });
 
+  it("M10: a bad --reply is refused before anything is written, even with --push", async () => {
+    const s = await setup();
+    expect(await s.run({ push: true, reply: { review: "accounts/1/locations/2/reviews/zzz", text: "no" } })).toBe(1);
+    expect(s.fake.calls.filter((c) => c.method !== "GET" && c.host !== "oauth2.googleapis.com")).toEqual([]);
+    s.fake.calls.length = 0;
+    expect(await s.run({ push: true, reply: { review: `${s.loc.v4}/reviews/x`, text: "  " } })).toBe(1);
+    expect(s.fake.calls.filter((c) => c.method === "PATCH" || c.method === "PUT")).toEqual([]);
+  });
+
+  it("M10: a real --push saves the config like the adapter, so its dates are Claudia's", async () => {
+    const s = await setup({ before: [{ op: "add_holiday", date: "2026-12-24", note_bg: "Почивка", note_en: "Day off" }] });
+    expect(await s.run({ push: true })).toBe(0);
+    expect((await s.dest()).config).toMatchObject({ special_dates_pushed: ["2026-12-24"], hours_pushed: true, hours_conflict: false, last_hours_push_at: T0.toISOString() });
+  });
+
   it("--reply: one PUT with the given text, review name must belong to the location", async () => {
     const s = await setup();
     const r = s.fake.addReview(s.loc.v4, { text: "x" });

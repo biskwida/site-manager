@@ -2,7 +2,7 @@
 
 ## What it does
 
-A venue connects its Google Business Profile ("Google listing") to Claudia from the dashboard or the chat.
+A venue connects its Google Business Profile ("Google listing") to Claudia from the dashboard (Google card, "Connect Google"). There is no connect from the chat.
 
 - **Hours and holidays.** After the owner approves a change (new opening hours, a holiday added or removed), Claudia updates the opening hours and special days on the Google listing. Nothing is written without an approved change.
 - **Review replies.** Claudia checks for new reviews every 15 minutes, drafts a reply and shows it to the owner. The reply is posted only after the owner approves it. Never automatically.
@@ -45,12 +45,16 @@ Run by the developer against a real connected venue. Never from CI. The script n
    Check the location, Google's hours against the website's week, `validateOnly: OK`, and the newest reviews.
 2. **One real hours push and read-back**, only with Tanya's explicit go:
    `npm run google:live -- --slug <slug> --push`
-   Prints `reviewing: yes|no` (Google may review the change before it shows).
+   Prints `reviewing: yes|no` (Google may review the change before it shows). The push is recorded on the venue's Google connection the way an approved change is, so the special days it wrote count as Claudia's.
 3. **One review reply**, only with Tanya's explicit go:
    `npm run google:live -- --slug <slug> --reply "<review name from step 1>" --text "<reply>"`
 
 ## Known limits
 
 - No menu, no Google posts, no `moreHours`, no "temporarily closed" status. Closures of 7 days or more are written as ordinary closed days and Claudia notes that Google's "temporarily closed" should be set by hand.
-- A posted review reply cannot be deleted from the chat (undo of a reply set removes it, but there is no command for it).
+- A posted review reply cannot be deleted from the chat by a command. Undo of a reply set does delete the reply on Google.
+- A reviewer's edit made between two polls (15 minutes) can still receive the reply the owner approved for the old text; the edited review is proposed again afterwards.
+- Disconnecting does not revoke the token at Google: Claudia deletes it at once, and the owner can also remove Claudia's access at https://myaccount.google.com/permissions.
+- The review line of the daily digest appears only on days a comment digest goes out.
+- After the first push, a holiday change sends only the special days: the regular week is sent again only when the owner changes the hours, so a week edited directly in Google stays.
 - The connecting account's email is not stored, only its display name.
