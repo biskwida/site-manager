@@ -1,7 +1,9 @@
 // test/reviews-poll.test.ts — the Google review poller: rows, throttle, stop-at-seen, star-only and replied-outside reviews,
 // the 7-day backlog of the first poll (Review Focus 4), edits of a waiting review (Review Focus 3), the 30-day limit, errors.
 import { describe, expect, it } from "vitest";
+import { GoogleClient, googleAccessToken, putReviewReply } from "@/src/destinations/google-api";
 import { COMMENT_RETENTION_MS } from "@/src/social/comments-poll";
+import { commentsOfSet } from "@/src/social/comments-propose";
 import { pollVenueReviews, REVIEW_BACKLOG_MS, starsOf } from "@/src/social/reviews-poll";
 import { connectedGoogle, T0 } from "./google-helpers";
 
@@ -9,6 +11,13 @@ const MIN = 60_000;
 const HOUR = 60 * MIN;
 const DAY = 24 * HOUR;
 const at = (ms: number) => new Date(T0.getTime() + ms);
+/** The owner answers on Google by hand at `when`: the review's own updateTime does not move. */
+async function replyByHand(g: Awaited<ReturnType<typeof connectedGoogle>>, name: string, text: string, when: Date) {
+  g.fake.now = () => when;
+  const c = new GoogleClient(await googleAccessToken(g.fake.fetch, g.d.google!, g.account.refresh_token), g.fake.fetch);
+  await putReviewReply(c, name, text);
+}
+const puts = (g: { fake: { calls: { method: string }[] } }) => g.fake.calls.filter((c) => c.method === "PUT").length;
 const lists = (g: { fake: { calls: { path: string }[] } }) => g.fake.calls.filter((c) => c.path.endsWith("/reviews")).length;
 
 describe("pollVenueReviews", () => {
@@ -101,7 +110,62 @@ describe("pollVenueReviews", () => {
     expect(r.edited).toHaveLength(1);
     expect(r.edited[0].had_set).toBe(cs.id);
     expect(r.edited[0].comment).toMatchObject({ id: row.id, text: "changed", rating: 2, status: "new", draft_kind: null });
-    expect(await g.store.getComment(row.id)).toMatchObject({ text: "changed", rating: 2, status: "new", draft_kind: null, draft_text: null, review_updated_at: at(10 * MIN).toISOString() });
+    expect(await g.store.getComment(row.id)).toMatchObject({ text: "changed", rating: 2, status: "new", draft_kind: null, draft_text: null, change_set_id: null, review_updated_at: at(10 * MIN).toISOString() });
+    // Withdrawn by the poll itself (no messenger here): the stale set can no longer be approved.
+    expect((await g.store.getChangeSet(cs.id)).status).toBe("cancelled");
+  });
+
+  it("an edit of a review Claudia replied to leaves no set and no reply on the row", async () => {
+    const g = await connectedGoogle();
+    const rv = g.fake.addReview(g.loc.v4, { text: "good", created: at(-HOUR) });
+    await pollVenueReviews(g.d, g.venue, T0);
+    const row = (await g.store.findComment(g.venue.id, rv.name))!;
+    const cs = await g.store.createChangeSet({ venue_id: g.venue.id, chat_ref: "tg:1001", summary_bg: "s", summary_en: "s", preview_bg: "p", preview_en: "p", source: "comment", status: "proposed", changes: [] });
+    await g.store.updateComment(row.id, { status: "replied", change_set_id: cs.id, reply_id: rv.name, replied_at: at(MIN).toISOString(), draft_text: "Thank you!", draft_kind: "praise" });
+    await replyByHand(g, rv.name, "Thank you!", at(MIN)); // Claudia's reply as Google shows it
+    g.fake.editReview(rv.name, { text: "worse now", updated: at(10 * MIN) });
+    const r = await pollVenueReviews(g.d, g.venue, at(16 * MIN));
+    expect(r.edited.map((e) => e.had_set)).toEqual([null]);
+    expect(await g.store.getComment(row.id)).toMatchObject({ status: "new", change_set_id: null, reply_id: null, replied_at: null, draft_text: "Thank you!", draft_kind: null });
+    expect(await commentsOfSet(g.store, cs)).toEqual([]);
+  });
+
+  it("a hand reply on Google with the review unchanged makes a new row replied, once", async () => {
+    const g = await connectedGoogle();
+    const older = g.fake.addReview(g.loc.v4, { text: "nice", created: at(-2 * HOUR) });
+    g.fake.addReview(g.loc.v4, { text: "newer", created: at(-HOUR) });
+    await pollVenueReviews(g.d, g.venue, T0);
+    await replyByHand(g, older.name, "Thanks by hand", at(5 * MIN));
+    expect(g.fake.review(older.name).updateTime).toBe(at(-2 * HOUR).toISOString());
+    await pollVenueReviews(g.d, g.venue, at(16 * MIN)); // the newer, unchanged review is listed first: the poll goes on past it
+    const row = (await g.store.findComment(g.venue.id, older.name))!;
+    expect(row).toMatchObject({ status: "replied", reply_id: older.name, draft_text: "Thanks by hand", replied_at: null });
+    expect(await g.store.countCommentActions(g.venue.id, at(-DAY).toISOString(), at(DAY).toISOString())).toBe(0);
+    const updates: string[] = [];
+    const raw = g.d.store; // the store the poller writes to
+    const update = raw.updateComment.bind(raw);
+    raw.updateComment = async (id, patch) => void (updates.push(id), await update(id, patch));
+    await pollVenueReviews(g.d, g.venue, at(32 * MIN));
+    expect(updates).toEqual([]); // unchanged in both respects: nothing written again
+  });
+
+  it("a hand reply on a review waiting on a proposal withdraws the set; its buttons then post nothing", async () => {
+    const g = await connectedGoogle();
+    const rv = g.fake.addReview(g.loc.v4, { text: "good", created: at(-HOUR) });
+    await pollVenueReviews(g.d, g.venue, T0);
+    const row = (await g.store.findComment(g.venue.id, rv.name))!;
+    const reply = { network: "google", comment_id: rv.name, post_ref: g.loc.v4, author_name: "Customer", comment_text: "good", reply_text: "Thanks from Claudia", permalink: null, rating: 5 };
+    const cs = await g.store.createChangeSet({ venue_id: g.venue.id, chat_ref: "tg:1001", summary_bg: "s", summary_en: "s", preview_bg: "p", preview_en: "p", source: "comment", status: "proposed", changes: [{ position: 0, op: "social_reply", entity: "social_reply", entity_id: rv.name, before: null, after: reply }] });
+    await g.store.updateComment(row.id, { status: "proposed", change_set_id: cs.id, draft_text: "Thanks from Claudia", draft_kind: "praise" });
+    await replyByHand(g, rv.name, "Answered by hand", at(5 * MIN));
+    const putsBefore = puts(g);
+    const r = await pollVenueReviews(g.d, g.venue, at(16 * MIN));
+    expect(r.edited).toEqual([]);
+    expect((await g.store.getChangeSet(cs.id)).status).toBe("cancelled");
+    expect(await g.store.getComment(row.id)).toMatchObject({ status: "replied", change_set_id: null, draft_text: "Answered by hand", replied_at: null });
+    expect(await g.store.applyChangeSet(cs.id, at(17 * MIN).toISOString())).not.toBe("applied"); // the owner taps the old ✅
+    expect(puts(g)).toBe(putsBefore);
+    expect(g.fake.review(rv.name).reviewReply?.comment).toBe("Answered by hand");
   });
 
   it("an edited review that had a reply goes back to new and keeps the old reply as draft_text", async () => {

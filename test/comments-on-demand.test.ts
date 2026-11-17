@@ -327,3 +327,21 @@ describe("makeLiveComments with Google", () => {
     expect(await live.poll(g.venue.id, new AbortController().signal)).toEqual({ polled: [], errors: [{ network: "google", code: "http_503" }] });
   });
 });
+
+describe("makeLiveComments: an edited review on demand", () => {
+  it("withdraws the proposal that waited on the old text, so no stale set stays live", async () => {
+    const g = await connectedGoogle();
+    const rv = g.fake.addReview(g.loc.v4, { text: "good", created: new Date(GT0.getTime() - MIN) });
+    const clock = { t: GT0 };
+    const live = makeLiveComments(g.d, () => clock.t);
+    await live.poll(g.venue.id, new AbortController().signal);
+    const row = (await g.store.findComment(g.venue.id, rv.name))!;
+    const cs = await g.store.createChangeSet({ venue_id: g.venue.id, chat_ref: "tg:1001", summary_bg: "s", summary_en: "s", preview_bg: "p", preview_en: "p", source: "comment", status: "proposed", changes: [] });
+    await g.store.updateComment(row.id, { status: "proposed", change_set_id: cs.id, draft_text: "Thanks!", draft_kind: "praise" });
+    g.fake.editReview(rv.name, { text: "changed", updated: new Date(GT0.getTime() + MIN) });
+    clock.t = new Date(GT0.getTime() + 2 * MIN);
+    expect((await live.poll(g.venue.id, new AbortController().signal)).polled).toEqual(["google"]);
+    expect((await g.store.getChangeSet(cs.id)).status).toBe("cancelled");
+    expect(await g.store.getComment(row.id)).toMatchObject({ status: "new", change_set_id: null, text: "changed" });
+  });
+});

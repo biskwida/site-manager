@@ -8,6 +8,7 @@ import { startDeploy } from "@/src/deploy/run";
 import { planChanges } from "@/src/domain/changes";
 import type { InMemoryStore } from "@/src/store/memory";
 import { cleanupDrafts, DRAFT_TTL_MS, runTick } from "@/src/tick";
+import { GoogleClient, googleAccessToken, putReviewReply } from "@/src/destinations/google-api";
 import { MAX_ATTEMPTS, runPendingSyncs } from "@/src/destinations/sync";
 import { FakeWordPress } from "./fake-wordpress";
 import { connectedGoogle, T0 as GT0 } from "./google-helpers";
@@ -244,6 +245,32 @@ describe("runTick: Google reviews and notices", () => {
     expect((await g.store.getChangeSet(cs.id)).status).toBe("cancelled");
     expect(m.concluded.map((c) => [c.chatRef, c.messageRef, c.short])).toEqual([["tg:1001", "55", "✏️ The review was edited; a new proposal follows."]]);
     expect(await g.store.getComment(row.id)).toMatchObject({ status: "new", change_set_id: null, text: "changed" });
+  });
+
+  it("a review answered by hand on Google withdraws the waiting proposal with a line to the owner and is never proposed again", async () => {
+    const g = await connectedGoogle();
+    await g.store.upsertMember({ venue_id: g.venue.id, chat_ref: "tg:1001", role: "owner", lang: "en" });
+    const rv = g.fake.addReview(g.loc.v4, { text: "good", created: at(-MIN) });
+    const m = new FakeMessenger();
+    await tick(g, m, GT0);
+    const row = (await g.store.findComment(g.venue.id, rv.name))!;
+    const cs = await g.store.createChangeSet({ venue_id: g.venue.id, chat_ref: "tg:1001", summary_bg: "s", summary_en: "s", preview_bg: "p", preview_en: "p", source: "comment", status: "proposed", changes: [] });
+    await g.store.updateChangeSet(cs.id, { message_ref: "56", proposal_refs: { "tg:1001": "56" } });
+    await g.store.updateComment(row.id, { status: "proposed", change_set_id: cs.id, draft_text: "Thanks!", draft_kind: "praise" });
+    g.fake.now = () => at(5 * MIN);
+    const c = new GoogleClient(await googleAccessToken(g.fake.fetch, g.d.google!, g.account.refresh_token), g.fake.fetch);
+    await putReviewReply(c, rv.name, "Answered by hand");
+    const putsBefore = g.fake.calls.filter((x) => x.method === "PUT").length;
+    let drafted = 0;
+    const comments = { draft: async () => (drafted++, { reply: "x", kind: "praise" as const, fallback: false }) };
+    await tick(g, m, at(16 * MIN), { comments });
+    expect((await g.store.getChangeSet(cs.id)).status).toBe("cancelled");
+    expect(m.concluded.map((x) => [x.chatRef, x.messageRef, x.short])).toEqual([["tg:1001", "56", "Already answered on Google — I withdrew my draft."]]);
+    expect(await g.store.getComment(row.id)).toMatchObject({ status: "replied", change_set_id: null });
+    await tick(g, m, at(32 * MIN), { comments });
+    expect(drafted).toBe(0);
+    expect(m.sent.filter((x) => x.setId)).toEqual([]);
+    expect(g.fake.calls.filter((x) => x.method === "PUT").length).toBe(putsBefore);
   });
 
   it("without a messenger an edited review's waiting set is still cancelled and its review freed", async () => {

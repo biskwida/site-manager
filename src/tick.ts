@@ -12,7 +12,7 @@ import { limitReachedLine, usageLine } from "./bot/limit";
 import { channelOf, isMetaChannel } from "./channels/ref";
 import { formatDateTime } from "./time";
 import { COMMENT_POST_WINDOW_MS, pollVenueComments, purgeOldComments } from "./social/comments-poll";
-import { cancelCommentSet, COMMENT_PROPOSAL_TTL_MS, commentsOfSet, proposalTargets, proposalTtlHours, proposeForComments } from "./social/comments-propose";
+import { COMMENT_PROPOSAL_TTL_MS, commentsOfSet, proposalTargets, proposalTtlHours, proposeForComments } from "./social/comments-propose";
 import type { DraftFn } from "./social/comments-draft";
 import { runCommentDigests } from "./social/comments-digest";
 import { planIncludes } from "./billing/entitlements";
@@ -228,12 +228,11 @@ export async function runTick(d: TickDeps): Promise<TickReport> {
           const r = await pollVenueComments(d.sync, venue, d.now);
           report.comments_found += r.inserted.length;
         }
-        // Google reviews (spec ruling 2: not read at all in mode "off"). An edit by the reviewer withdraws the proposal that
-        // waited on the old text; the review is proposed again from its new text.
+        // Google reviews (spec ruling 2: not read at all in mode "off"). The poll itself withdraws a proposal that waited on a
+        // review edited or answered on Google since, and tells the owners why; an edited review is proposed again below.
         if (!d.venueId && venue.comment_mode !== "off") {
-          const rr = await pollVenueReviews(d.sync, venue, d.now);
+          const rr = await pollVenueReviews(d.sync, venue, d.now, { messenger: d.messenger });
           report.reviews_found += rr.inserted.length;
-          for (const e of rr.edited) if (e.had_set) await withdrawEditedReview(d, e.had_set);
         }
         if (!d.comments || !d.messenger || venue.comment_mode !== "each") continue;
         const since = new Date(d.now.getTime() - COMMENT_POST_WINDOW_MS).toISOString();
@@ -279,20 +278,6 @@ export async function runTick(d: TickDeps): Promise<TickReport> {
     }
   }
   return report;
-}
-
-const REVIEW_EDITED = { bg: "✏️ Отзивът беше променен; идва ново предложение.", en: "✏️ The review was edited; a new proposal follows." };
-
-/** Cancels the proposal that waited on a review's old text (only while it is still proposed) and frees its comments. */
-async function withdrawEditedReview(d: TickDeps, setId: string): Promise<void> {
-  const cs = await d.store.getChangeSet(setId);
-  if (cs.status !== "proposed") return;
-  if (d.messenger) {
-    await cancelCommentSet({ store: d.store, messenger: d.messenger, now: () => d.now }, cs, REVIEW_EDITED);
-    return;
-  }
-  if ((await d.store.cancelChangeSet(cs.id, d.now.toISOString())) !== "cancelled") return;
-  for (const c of await commentsOfSet(d.store, cs)) await d.store.updateComment(c.id, { status: "new", change_set_id: null, deferred: false });
 }
 
 /** Step 7: each Google row that failed for good, unless its destination is now `error` (the broken-connection notice covers it). */

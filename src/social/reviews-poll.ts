@@ -1,18 +1,20 @@
 // src/social/reviews-poll.ts
 // Server-only. Reads the Google reviews of a venue's connected Business Profile location (the newest 50, newest update first) and
 // stores them as social_comments rows with network "google", next to the Meta comments, so the comment flow proposes the replies.
-// Per venue at most every 15 minutes (last_review_poll_at in the destination config), once a minute on demand. Only reads: a
-// reply goes out through an approved change set alone. A review is kept 30 days from its last update (created_at stores the
+// Per venue at most every 15 minutes (last_review_poll_at in the destination config), once a minute on demand. Only reads Google
+// (a reply goes out through an approved change set alone); it may withdraw a waiting proposal that no longer fits its review. A review is kept 30 days from its last update (created_at stores the
 // review's updateTime, so the purge never blanks a review edited today while its proposal waits).
 // Logs carry venue ids, counts and error codes only: never a review's text, never a reviewer's name, never a token.
+import type { Messenger } from "../bot/messenger";
 import { googleClientFor } from "../destinations/google";
 import { GoogleApiError, listReviews, type GoogleReview } from "../destinations/google-api";
 import { decryptSecrets } from "../destinations/secrets";
 import { CONNECTION_CODES, type SyncDeps } from "../destinations/sync";
 import { formatSyncError } from "../destinations/wp-errors";
 import type { Venue } from "../domain/types";
-import type { DestinationPatch, DestinationWithSecrets, NewSocialComment, SocialComment, SocialCommentPatch } from "../store/types";
+import type { DestinationPatch, DestinationWithSecrets, NewSocialComment, SocialComment, SocialCommentPatch, Store } from "../store/types";
 import { COMMENT_ON_DEMAND_MIN_GAP_MS, COMMENT_POLL_EVERY_MS, COMMENT_RETENTION_MS } from "./comments-poll";
+import { cancelCommentSet, commentsOfSet } from "./comments-propose";
 
 /** The first poll after a connect stores reviews older than this before connected_at as ignored (never proposed). */
 export const REVIEW_BACKLOG_MS = 7 * 24 * 3_600_000;
@@ -54,6 +56,26 @@ function reviewFields(r: GoogleReview) {
   return { text: r.comment ?? "", author_name: r.reviewer?.displayName ?? "", rating: starsOf(r.starRating), review_updated_at: r.updateTime, created_at: r.updateTime };
 }
 
+/** The owner's line when a proposal is withdrawn because the review changed under it. */
+export const REVIEW_WITHDRAW_LINES = {
+  edited: { bg: "✏️ Отзивът беше променен; идва ново предложение.", en: "✏️ The review was edited; a new proposal follows." },
+  answered: { bg: "Вече е отговорено в Google — оттеглих черновата.", en: "Already answered on Google — I withdrew my draft." },
+} as const;
+
+/**
+ * Withdraws a review's proposal that no longer fits the review (still proposed only: a ✅ that won the race keeps it) and puts
+ * the set's rows back to new without a set. With a messenger every owner's proposal message is concluded with `mark`; without
+ * one (the on-demand read) the set is only cancelled, so its buttons do nothing. Returns true when it cancelled.
+ */
+export async function withdrawReviewSet(d: { store: Store; messenger?: Messenger | null; now: Date }, setId: string, mark: { bg: string; en: string }): Promise<boolean> {
+  const cs = await d.store.getChangeSet(setId);
+  if (cs.status !== "proposed") return false;
+  if (d.messenger) return cancelCommentSet({ store: d.store, messenger: d.messenger, now: () => d.now }, cs, mark);
+  if ((await d.store.cancelChangeSet(cs.id, d.now.toISOString())) !== "cancelled") return false;
+  for (const c of await commentsOfSet(d.store, cs)) await d.store.updateComment(c.id, { status: "new", change_set_id: null, deferred: false });
+  return true;
+}
+
 /** A reply at least as new as the review's last update answers the review as it is now. */
 function answered(r: GoogleReview): boolean {
   const reply = Date.parse(r.reviewReply?.updateTime ?? "");
@@ -62,9 +84,12 @@ function answered(r: GoogleReview): boolean {
 
 /**
  * One venue's review poll: at most every 15 min (config.last_review_poll_at), `onDemand` every minute. Never throws.
- * Reviews come newest update first; the poll stops at the first one already stored with the same update time.
+ * Every listed review of the last 30 days is compared with its row: a review edited since (its updateTime) or answered on
+ * Google outside Claudia (a reply as new as the review that the row does not hold yet) is processed even below newer seen
+ * ones, since a reply on Google does not move the review's updateTime. A proposal that waited on such a review is withdrawn
+ * here (withdrawReviewSet), on every path that reads reviews; `o.messenger` (the tick) also tells the owners why.
  */
-export async function pollVenueReviews(d: SyncDeps, venue: Venue, now: Date, o: { onDemand?: boolean } = {}): Promise<ReviewPollReport> {
+export async function pollVenueReviews(d: SyncDeps, venue: Venue, now: Date, o: { onDemand?: boolean; messenger?: Messenger | null } = {}): Promise<ReviewPollReport> {
   const report: ReviewPollReport = { polled: false, inserted: [], edited: [], error: null };
   if (!d.secretKey) return report;
   let dest: DestinationWithSecrets | null;
@@ -87,7 +112,6 @@ export async function pollVenueReviews(d: SyncDeps, venue: Venue, now: Date, o: 
       const updated = Date.parse(r.updateTime);
       if (!Number.isFinite(updated) || updated < oldest) break; // newest first: everything after is older than 30 days, never stored
       const known = await d.store.findComment(venue.id, r.name);
-      if (known && known.review_updated_at === r.updateTime) break; // seen: so is everything older
       const fields = reviewFields(r);
       if (!known) {
         const status = r.reviewReply ? "replied" : firstPoll && Number.isFinite(backlogBefore) && updated < backlogBefore ? "ignored" : "new";
@@ -103,14 +127,26 @@ export async function pollVenueReviews(d: SyncDeps, venue: Venue, now: Date, o: 
         report.inserted.push(inserted);
         continue;
       }
+      const replyText = r.reviewReply?.comment ?? null;
+      const edited = known.review_updated_at !== r.updateTime;
+      // A replied row holds the reply's text in draft_text: the same text is the reply already known (Claudia's or an earlier one).
+      const newReply = answered(r) && (known.status !== "replied" || known.draft_text !== replyText);
+      if (!edited && !newReply) continue; // unchanged in both respects
+      const waiting = known.status === "proposed" ? known.change_set_id : null;
+      const withdrawDeps = { store: d.store, messenger: o.messenger, now };
       if (answered(r)) {
-        await d.store.updateComment(known.id, { ...fields, status: "replied", reply_id: r.name, draft_text: r.reviewReply?.comment ?? null });
+        // Answered on Google (by hand, or Claudia's own reply seen back): nothing is posted; a waiting draft is withdrawn.
+        // replied_at is left as it is: a hand reply never counts toward comment_limit.
+        if (waiting) await withdrawReviewSet(withdrawDeps, waiting, REVIEW_WITHDRAW_LINES.answered);
+        await d.store.updateComment(known.id, { ...fields, status: "replied", reply_id: r.name, draft_text: replyText, change_set_id: null, deferred: false, hold_attempts: 0, held_at: null });
         continue;
       }
-      // Edited by its author: proposed again from the new text. draft_text with draft_kind null carries the previous reply.
-      const patch: SocialCommentPatch = { ...fields, status: "new", draft_kind: null, draft_text: r.reviewReply?.comment ?? null, deferred: false, hold_attempts: 0, held_at: null };
+      // Edited by its author: proposed again from the new text. draft_text with draft_kind null carries the previous reply; the
+      // row leaves its old set and its old reply (the withdraw has used change_set_id first).
+      if (waiting) await withdrawReviewSet(withdrawDeps, waiting, REVIEW_WITHDRAW_LINES.edited);
+      const patch: SocialCommentPatch = { ...fields, status: "new", draft_kind: null, draft_text: replyText, deferred: false, hold_attempts: 0, held_at: null, change_set_id: null, reply_id: null, replied_at: null };
       await d.store.updateComment(known.id, patch);
-      report.edited.push({ comment: { ...known, ...patch }, had_set: known.status === "proposed" ? known.change_set_id : null });
+      report.edited.push({ comment: { ...known, ...patch }, had_set: waiting });
     }
     await markPolled(d, venue.id, now);
     report.polled = true;
