@@ -77,6 +77,15 @@ describe("error mapping", () => {
     });
   }
 
+  it("M8: a 403 whose status is not PERMISSION_DENIED is http_403 (not a connection code), not retried", async () => {
+    const f: typeof fetch = async () => Response.json({ error: { code: 403, message: "The caller does not have access.", status: "FORBIDDEN" } }, { status: 403 });
+    const e = await rejection(new GoogleClient("tok", f).get(`${GOOGLE_INFO}/locations/1`));
+    expect(e.code).toBe("http_403");
+    expect(e.retryable).toBe(false);
+    const bare: typeof fetch = async () => new Response("Forbidden", { status: 403 });
+    expect((await rejection(new GoogleClient("tok", bare).get(`${GOOGLE_INFO}/locations/1`))).code).toBe("http_403");
+  });
+
   it("a fetch that throws -> sm_google_unreachable, retryable", async () => {
     const c = new GoogleClient("tok", async () => { throw new TypeError("boom"); });
     const e = await rejection(c.get("https://mybusiness.googleapis.com/v4/accounts/1/locations/2/reviews"));

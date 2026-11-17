@@ -125,13 +125,16 @@ export async function pollVenueReviews(d: SyncDeps, venue: Venue, now: Date, o: 
       const known = await d.store.findComment(venue.id, r.name);
       const fields = reviewFields(r);
       if (!known) {
-        const status = r.reviewReply ? "replied" : firstPoll && Number.isFinite(backlogBefore) && updated < backlogBefore ? "ignored" : "new";
+        // The same "answered" test as a known row: a reply older than the review's last edit answers an earlier text.
+        const isAnswered = answered(r);
+        const status = isAnswered ? "replied" : firstPoll && Number.isFinite(backlogBefore) && updated < backlogBefore ? "ignored" : "new";
         const row: NewSocialComment = { network: "google", post_ref: locationV4, comment_id: r.name, parent_id: null, author_id: "", ...fields, seen_at: now.toISOString(), status, post_caption: "" };
         const [inserted] = await d.store.upsertComments(venue.id, [row]);
         if (!inserted) continue; // stored meanwhile (the tick and an on-demand read at once)
         if (r.reviewReply) {
-          // Not Claudia's reply: replied_at stays null, so it never counts toward comment_limit.
-          const patch: SocialCommentPatch = { reply_id: r.name, draft_text: r.reviewReply.comment ?? null };
+          // Not Claudia's reply: replied_at stays null, so it never counts toward comment_limit. An outdated reply is kept as
+          // draft_text with draft_kind null (the previous reply the draft sees), like an edited known review.
+          const patch: SocialCommentPatch = isAnswered ? { reply_id: r.name, draft_text: r.reviewReply.comment ?? null } : { draft_text: r.reviewReply.comment ?? null };
           await d.store.updateComment(inserted.id, patch);
           Object.assign(inserted, patch);
         }

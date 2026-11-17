@@ -40,6 +40,7 @@ export interface GoogleCreds {
 
 interface ApiErrorBody {
   message?: unknown;
+  status?: unknown;
   details?: unknown;
 }
 
@@ -47,7 +48,7 @@ function reasons(err: ApiErrorBody): string[] {
   return Array.isArray(err.details) ? err.details.map((d) => (d as { reason?: unknown } | null)?.reason).filter((r): r is string => typeof r === "string") : [];
 }
 
-/** Maps a non-2xx API reply to the error table: 401 revoked, 403 scope/api-disabled/permission, 404, 400, 429, else http_<status>. */
+/** Maps a non-2xx API reply to the error table: 401 revoked, 403 scope/api-disabled/permission (PERMISSION_DENIED only), 404, 400, 429, else http_<status>. */
 function errorFrom(status: number, json: unknown): GoogleApiError {
   const err = ((json as { error?: ApiErrorBody } | null)?.error ?? {}) as ApiErrorBody;
   const why = reasons(err);
@@ -55,7 +56,8 @@ function errorFrom(status: number, json: unknown): GoogleApiError {
   if (status === 403) {
     if (why.includes("ACCESS_TOKEN_SCOPE_INSUFFICIENT")) return new GoogleApiError(status, "sm_google_scope", "The Google connection lacks the Business Profile permission.");
     if (why.includes("SERVICE_DISABLED")) return new GoogleApiError(status, "sm_google_api_disabled", "A Google Business Profile API is not enabled for the project.");
-    return new GoogleApiError(status, "sm_google_permission", "The Google account no longer manages this listing.");
+    if (err.status === "PERMISSION_DENIED") return new GoogleApiError(status, "sm_google_permission", "The Google account no longer manages this listing.");
+    return new GoogleApiError(status, "http_403", "Google answered HTTP 403.");
   }
   if (status === 404) return new GoogleApiError(status, "sm_google_not_found", "Google does not know this item.");
   if (status === 400) return new GoogleApiError(status, "sm_google_invalid", typeof err.message === "string" && err.message ? err.message.slice(0, 200) : "Google rejected the request.");

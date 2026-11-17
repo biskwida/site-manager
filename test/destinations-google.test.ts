@@ -1,6 +1,11 @@
 import { describe, expect, it } from "vitest";
 import { googleAdapter } from "@/src/destinations/google";
 import { toRegularPeriods } from "@/src/destinations/google-hours";
+import { googleSyncLine } from "@/src/destinations/google-lines";
+import { socialErrorText } from "@/src/destinations/social-errors";
+import { formatSyncError } from "@/src/destinations/wp-errors";
+import { DICTS } from "@/src/i18n/dicts";
+import { ONBOARDING } from "@/src/i18n/onboarding";
 import { commentNetworkOf, relevantFor } from "@/src/destinations/social-common";
 import { GoogleClient, googleAccessToken, patchLocation, type GooglePeriod, type GoogleSpecialPeriod } from "@/src/destinations/google-api";
 import { BACKOFF_MS, enqueueForChangeSet, MAX_ATTEMPTS, runPendingSyncs, syncLines } from "@/src/destinations/sync";
@@ -250,6 +255,17 @@ describe("hours push", () => {
     expect(dest.config.hours_pushed).toBeUndefined();
   });
 
+  it("M1: a failed read-back after a good write still finishes the push and saves the config", async () => {
+    const g = await connectedGoogle();
+    let gets = 0;
+    g.fake.failNext({ status: 503, match: (c) => c.method === "GET" && c.host === "mybusinessbusinessinformation.googleapis.com" && ++gets === 2 });
+    const cs = await g.applyOps([{ op: "set_hours", hours: WEEKDAYS_8_19 }]);
+    expect((await g.rows(cs.id))[0]).toMatchObject({ status: "done", attempts: 1, result: { hours: { regular: true, reviewing: false } } });
+    expect(patches(g.fake)).toHaveLength(2);
+    expect((await g.dest()).config).toMatchObject({ hours_pushed: true, last_hours_push_at: T0.toISOString() });
+    expect(await syncLines(g.store, cs.id, "en")).toEqual([DONE_EN]);
+  });
+
   it("Google reviewing the edit: done after one attempt, with the reviewing line", async () => {
     const g = await connectedGoogle({ hasGoogleUpdated: true });
     const cs = await g.applyOps([holiday("2026-12-24")]);
@@ -262,7 +278,7 @@ describe("hours push", () => {
     const g = await connectedGoogle();
     const cs = await g.applyOps(["20", "21", "22", "23", "24", "25", "26", "27"].map((d) => holiday(`2026-12-${d}`)));
     expect(await syncLines(g.store, cs.id, "en")).toEqual([`${DONE_EN} (7+ days closed: Google may show this as temporarily closed only if you set it in your profile)`]);
-    expect(await syncLines(g.store, cs.id, "bg")).toEqual(["Google профил: обновен ✅ (7+ дни затворено: Google ще го покаже като „временно затворено\" само ако го зададете в профила си)"]);
+    expect(await syncLines(g.store, cs.id, "bg")).toEqual(["Google профил: обновен ✅ (7+ дни затворено: Google ще го покаже като „временно затворено“ само ако го зададете в профила си)"]);
   });
 });
 
@@ -276,8 +292,8 @@ describe("errors", () => {
     expect((await g.rows(cs.id))[0]).toMatchObject({ status: "failed", attempts: 1 });
     expect((await g.dest()).status).toBe("connected");
     const [line] = await syncLines(g.store, cs.id, "en");
-    expect(line).toBe("Google listing: Google refused the hours: Invalid special period.");
-    expect((await syncLines(g.store, cs.id, "bg"))[0]).toBe("Google профил: Google отказа работното време: Invalid special period.");
+    expect(line).toBe("Google listing: Google refused the change: Invalid special period.");
+    expect((await syncLines(g.store, cs.id, "bg"))[0]).toBe("Google профил: Google отказа промяната: Invalid special period.");
   });
 
   it("429 retries with backoff and succeeds on the next run", async () => {
@@ -349,6 +365,20 @@ describe("errors", () => {
     await g.applyOps([holiday("2026-12-25")]);
     expect(g.logs.length).toBeGreaterThan(0);
     for (const l of g.logs) expect(l).not.toContain(g.account.refresh_token);
+  });
+});
+
+describe("Google texts", () => {
+  it("M2: a push that fails as not connected says so and points to the dashboard", () => {
+    const stored = formatSyncError("sm_social_not_connected", "Google is not connected.");
+    expect(googleSyncLine("failed", null, stored, "en")).toBe("Google listing: not connected; connect it from the dashboard");
+    expect(googleSyncLine("failed", null, stored, "bg")).toBe("Google профил: не е свързан; свържете от таблото");
+  });
+  it("M11: Bulgarian quotes close with “", () => {
+    expect(socialErrorText(formatSyncError("sm_google_permission", "x"), "bg")).toContain("„Мениджър“");
+    expect(googleSyncLine("done", { hours: { regular: true, reviewing: false, long_closure: true } }, null, "bg")).toContain("„временно затворено“");
+    expect(DICTS.bg["admin.social.result.google_no_locations"]).toContain("„Мениджър“");
+    expect(ONBOARDING.bg["list.google.result.noLocations"]).toContain("„Мениджър“");
   });
 });
 

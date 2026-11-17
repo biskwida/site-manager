@@ -371,6 +371,27 @@ describe("runTick: Google reviews and notices", () => {
     expect(sent[0]).toMatchObject({ chatRef: "tg:1001", text: "Change\nGoogle listing: not updated. Open your profile to change it by hand: https://business.google.com/", proactive: true });
   });
 
+  it("M5: a review reply that fails for good says the reply was not posted, never the hours wording", async () => {
+    const g = await connectedGoogle();
+    await g.store.upsertMember({ venue_id: g.venue.id, chat_ref: "tg:1001", role: "owner", lang: "en" });
+    g.fake.addReview(g.loc.v4, { text: "Lovely", stars: 5, name: "Maria K.", created: at(-MIN) });
+    const m = new FakeMessenger();
+    await tick(g, m, GT0, { comments: reviewDraft });
+    const setId = m.sent.find((x) => x.setId)!.setId!;
+    for (let i = 0; i < MAX_ATTEMPTS; i++) g.fake.failNext({ status: 503, match: (c) => c.method === "PUT" });
+    expect(await g.store.applyChangeSet(setId, GT0.toISOString())).toBe("applied");
+    for (let i = 1; i < MAX_ATTEMPTS - 1; i++) await runPendingSyncs(g.d, { venueId: g.venue.id, now: new Date((await g.rows(setId))[0].next_at) });
+    const due = new Date((await g.rows(setId))[0].next_at);
+    g.setNow(due);
+    const m2 = new FakeMessenger();
+    await tick(g, m2, due);
+    expect((await g.rows(setId))[0]).toMatchObject({ status: "failed", attempts: MAX_ATTEMPTS });
+    expect(m2.sent.filter((s) => s.text.includes("change it by hand"))).toEqual([]);
+    const sent = m2.sent.filter((s) => s.text.includes("Google review reply: not posted"));
+    expect(sent).toHaveLength(1);
+    expect(sent[0].text.endsWith("Google review reply: not posted. Open your profile to answer it by hand: https://business.google.com/")).toBe(true);
+  });
+
   it("a broken Google connection is told once to the reachable owners, never while none is reachable", async () => {
     const g = await connectedGoogle();
     const dest = await g.dest();

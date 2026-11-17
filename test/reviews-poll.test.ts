@@ -212,6 +212,17 @@ describe("pollVenueReviews", () => {
     expect(await g.store.findComment(g.venue.id, rv.name)).toMatchObject({ status: "replied", text: "better", replied_at: null });
   });
 
+  it("M9: a new review whose reply is older than its last edit is treated like a known one: new, the old reply kept as context", async () => {
+    const g = await connectedGoogle();
+    const rv = g.fake.addReview(g.loc.v4, { text: "good", created: at(-2 * HOUR), reply: "Thank you!" });
+    g.fake.editReview(rv.name, { text: "actually bad", updated: at(-HOUR) });
+    const r = await pollVenueReviews(g.d, g.venue, T0);
+    expect(r.inserted).toHaveLength(1);
+    expect(await g.store.findComment(g.venue.id, rv.name)).toMatchObject({ status: "new", text: "actually bad", reply_id: null, draft_text: "Thank you!", draft_kind: null, replied_at: null });
+    const again = await pollVenueReviews(g.d, g.venue, at(16 * MIN));
+    expect(again).toMatchObject({ inserted: [], edited: [] });
+  });
+
   it("never stores a review last updated more than 30 days ago", async () => {
     const g = await connectedGoogle();
     const old = g.fake.addReview(g.loc.v4, { created: new Date(T0.getTime() - COMMENT_RETENTION_MS - HOUR) });

@@ -2,9 +2,9 @@
 // specialHours) after an approved change set: dry run first (validateOnly), then the write, then a read-back. Removes only
 // the special dates Claudia wrote herself; a period set by hand in Google stays. Also posts an approved review reply (PUT on
 // the review) and deletes it on undo, through pushCommentChanges. A set holds hours rows or a review reply, never both kinds.
-import type { Change } from "../domain/types";
+import type { Change, SiteState } from "../domain/types";
 import { localDate } from "../time";
-import { getLocation, GoogleApiError, googleAccessToken, GoogleClient, patchLocation, type GoogleLocation, type GooglePeriod } from "./google-api";
+import { getLocation, GoogleApiError, googleAccessToken, GoogleClient, patchLocation, type GoogleLocation, type GooglePeriod, type GoogleSpecialPeriod } from "./google-api";
 import { fromRegularHours, hasNoHours, longestClosedRun, mergeSpecial, sameWeek, toRegularPeriods, toSpecialPeriods } from "./google-hours";
 import { pushCommentChanges } from "./comment-push";
 import { googleSyncLine } from "./google-lines";
@@ -53,6 +53,55 @@ function failure(code: string, message: string, retry: boolean, partial?: Record
   return { ok: false, retry, error: message, code, line: lines(retry ? "pending" : "failed", null, formatSyncError(code, message)), ...(partial ? { partial } : {}) };
 }
 
+export interface HoursPlan {
+  mask: string;
+  body: Pick<GoogleLocation, "regularHours" | "specialHours">;
+  /** The week is sent. */
+  regular: boolean;
+  /** The week is held back: Google's own week differs from the website's and the owner has not chosen. */
+  conflict: boolean;
+  /** Claudia's own special periods (the venue's holidays from today). */
+  mine: GoogleSpecialPeriod[];
+  kept: number;
+  /** The config keys a successful write sets (`set`) and removes (`remove`); nothing else of the config is touched. */
+  set: Record<string, unknown>;
+  remove: string[];
+}
+
+/**
+ * What an hours push sends, read against Google's current location. The week (regularHours) goes out only with a week change
+ * or on the first push: a holiday alone never reverts a week someone changed directly in Google. While Google's week differs
+ * from the website's and the owner has not chosen, only a new week from the owner replaces it. The first push decides that
+ * itself (the after-connect read may have failed): a non-empty Google week that differs from the website's, or that the
+ * website cannot express, is not overwritten. Shared with scripts/google-live-check.mts.
+ */
+export function planHoursPush(config: Record<string, unknown>, site: Pick<SiteState, "venue" | "holidays">, current: GoogleLocation, weekChange: boolean, now: Date): HoursPlan {
+  const today = localDate(now, site.venue.tz);
+  const mine = toSpecialPeriods(site.holidays, today);
+  const pushedBefore = Array.isArray(config.special_dates_pushed) ? config.special_dates_pushed.filter((x): x is string => typeof x === "string") : [];
+  const merged = mergeSpecial(mine, current.specialHours?.specialHourPeriods ?? [], pushedBefore, today);
+  const firstPush = config.hours_pushed !== true;
+  let conflictWeek: GooglePeriod[] | null = null;
+  if (!weekChange && firstPush && config.hours_conflict !== true) {
+    const googlePeriods = current.regularHours?.periods ?? [];
+    const googleWeek = googlePeriods.length ? fromRegularHours(googlePeriods) : null;
+    if (googlePeriods.length && (!googleWeek || !sameWeek(googleWeek, site.venue.hours))) conflictWeek = googlePeriods;
+  }
+  const conflict = !weekChange && (config.hours_conflict === true || conflictWeek !== null);
+  const regular = weekChange || (firstPush && !conflict);
+  const body: HoursPlan["body"] = { specialHours: { specialHourPeriods: merged.periods } };
+  if (regular) body.regularHours = { periods: toRegularPeriods(site.venue.hours) };
+  const set: Record<string, unknown> = { last_hours_push_at: now.toISOString(), special_dates_pushed: merged.pushed };
+  const remove: string[] = [];
+  if (regular) {
+    Object.assign(set, { hours_pushed: true, hours_conflict: false });
+    remove.push("google_hours");
+  } else if (conflictWeek) {
+    Object.assign(set, { hours_conflict: true, google_hours: conflictWeek });
+  }
+  return { mask: regular ? "regularHours,specialHours" : "specialHours", body, regular, conflict, mine, kept: merged.periods.length - mine.length, set, remove };
+}
+
 async function pushHours(ctx: PushContext, hoursRows: Change[]): Promise<PushResult> {
   const config = ctx.destination.config;
   const locationName = typeof config.location_name === "string" ? config.location_name : "";
@@ -63,43 +112,21 @@ async function pushHours(ctx: PushContext, hoursRows: Change[]): Promise<PushRes
   try {
     const client = await googleClientFor({ fetch: ctx.fetch, google: ctx.google }, ctx.secrets);
     const current = await getLocation(client, locationName, READ_MASK);
-    const today = localDate(ctx.now, site.venue.tz);
-    const mine = toSpecialPeriods(site.holidays, today);
-    const pushedBefore = Array.isArray(config.special_dates_pushed) ? config.special_dates_pushed.filter((x): x is string => typeof x === "string") : [];
-    const merged = mergeSpecial(mine, current.specialHours?.specialHourPeriods ?? [], pushedBefore, today);
-    // The week (regularHours) goes out only with a week change or on the first push: a holiday alone never reverts a week
-    // someone changed directly in Google. While Google's week differs from the website's and the owner has not chosen, only a
-    // new week from the owner replaces it. The first push decides that itself (the after-connect read may have failed): a
-    // non-empty Google week that differs from the website's, or that the website cannot express, is not overwritten.
-    const weekChange = hoursRows.some(isWeekChange);
-    const firstPush = config.hours_pushed !== true;
-    let conflictWeek: GooglePeriod[] | null = null;
-    if (!weekChange && firstPush && config.hours_conflict !== true) {
-      const googlePeriods = current.regularHours?.periods ?? [];
-      const googleWeek = googlePeriods.length ? fromRegularHours(googlePeriods) : null;
-      if (googlePeriods.length && (!googleWeek || !sameWeek(googleWeek, site.venue.hours))) conflictWeek = googlePeriods;
+    const plan = planHoursPush(config, site, current, hoursRows.some(isWeekChange), ctx.now);
+    await patchLocation(client, locationName, plan.mask, plan.body, { validateOnly: true });
+    await patchLocation(client, locationName, plan.mask, plan.body);
+    // The write is done: a failed read-back only loses the "Google is reviewing" hint, never the push.
+    let reviewing = false;
+    try {
+      const after = await getLocation(client, locationName, READ_MASK);
+      reviewing = after.metadata?.hasGoogleUpdated === true || after.metadata?.hasPendingEdits === true;
+    } catch (e) {
+      if (!(e instanceof GoogleApiError)) throw e;
     }
-    const conflict = !weekChange && (config.hours_conflict === true || conflictWeek !== null);
-    const regular = weekChange || (firstPush && !conflict);
-    const mask = regular ? "regularHours,specialHours" : "specialHours";
-    const body: Pick<GoogleLocation, "regularHours" | "specialHours"> = { specialHours: { specialHourPeriods: merged.periods } };
-    if (regular) body.regularHours = { periods: toRegularPeriods(site.venue.hours) };
-    await patchLocation(client, locationName, mask, body, { validateOnly: true });
-    await patchLocation(client, locationName, mask, body);
-    const after = await getLocation(client, locationName, READ_MASK);
-    const reviewing = after.metadata?.hasGoogleUpdated === true || after.metadata?.hasPendingEdits === true;
     // Only the keys this push owns, onto the destination as it is now (a disconnect or a poll stamp meanwhile is kept).
-    const set: Record<string, unknown> = { last_hours_push_at: ctx.now.toISOString(), special_dates_pushed: merged.pushed };
-    const remove: string[] = [];
-    if (regular) {
-      Object.assign(set, { hours_pushed: true, hours_conflict: false });
-      remove.push("google_hours");
-    } else if (conflictWeek) {
-      Object.assign(set, { hours_conflict: true, google_hours: conflictWeek });
-    }
-    await ctx.patchConfig?.(set, remove);
+    await ctx.patchConfig?.(plan.set, plan.remove);
     const result: GoogleHoursResult = {
-      hours: { regular, conflict, special: mine.length, kept: merged.periods.length - mine.length, reviewing, long_closure: longestClosedRun(mine) >= LONG_CLOSURE_DAYS },
+      hours: { regular: plan.regular, conflict: plan.conflict, special: plan.mine.length, kept: plan.kept, reviewing, long_closure: longestClosedRun(plan.mine) >= LONG_CLOSURE_DAYS },
     };
     const stored = result as unknown as Record<string, unknown>;
     return { ok: true, result: stored, line: lines("done", stored, null) };

@@ -15,10 +15,10 @@ const KNOWN: Record<string, { bg: string; en: string }> = {
   sm_social_not_connected: { bg: "не е свързан; свържете от таблото", en: "not connected; connect it from the dashboard" },
   sm_google_revoked: { bg: "връзката вече не е валидна; свържете Google отново от таблото", en: "the connection is no longer valid; connect Google again from the dashboard" },
   sm_google_scope: { bg: "липсва разрешение за управление на профила; свържете Google отново и го разрешете", en: "the permission to manage the profile is missing; connect Google again and allow it" },
-  sm_google_permission: { bg: "този Google акаунт вече не управлява профила; поискайте достъп „Мениджър\" от собственика и свържете отново", en: "this Google account no longer manages the profile; ask the profile owner for Manager access and connect again" },
+  sm_google_permission: { bg: "този Google акаунт вече не управлява профила; поискайте достъп „Мениджър“ от собственика и свържете отново", en: "this Google account no longer manages the profile; ask the profile owner for Manager access and connect again" },
   sm_google_no_hours: { bg: "Google иска работно време, преди да приеме почивни дни. Кажете ми първо работното време", en: "Google needs opening hours before it can take holidays — tell me your hours first" },
   // Followed by Google's own message (see socialErrorText).
-  sm_google_invalid: { bg: "Google отказа работното време:", en: "Google refused the hours:" },
+  sm_google_invalid: { bg: "Google отказа промяната:", en: "Google refused the change:" },
   sm_google_api_disabled: { bg: "Google API още не е включен за Claudia; пишете ни", en: "the Google API is not enabled for Claudia yet; write to us" },
   sm_google_not_found: { bg: "Google вече няма този профил или отзив", en: "Google no longer has this profile or review" },
 };

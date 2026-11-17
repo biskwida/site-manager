@@ -55,7 +55,7 @@ export function toSpecialPeriods(holidays: readonly Pick<Holiday, "date">[], tod
 }
 
 /**
- * What to send as specialHours: `mine` plus every period of `current` that starts today or later, is on a date not in `mine`,
+ * What to send as specialHours: `mine` plus every period of `current` that ends today or later, starts on a date not in `mine`,
  * and whose date is not in `pushedBefore` (so a holiday Claudia wrote and the owner removed disappears, and a period someone
  * set by hand in Google stays). Past periods are dropped. Sorted by start date. Returns the list and the dates Claudia owns now.
  */
@@ -69,7 +69,7 @@ export function mergeSpecial(
   const before = new Set(pushedBefore);
   const kept = current.filter((p) => {
     const k = dateKey(p.startDate);
-    return k >= today && !mineDates.has(k) && !before.has(k);
+    return dateKey(p.endDate ?? p.startDate) >= today && !mineDates.has(k) && !before.has(k);
   });
   const periods = [...mine, ...kept].sort((a, b) => dateKey(a.startDate).localeCompare(dateKey(b.startDate)));
   return { periods, pushed: mine.map((p) => dateKey(p.startDate)).sort() };

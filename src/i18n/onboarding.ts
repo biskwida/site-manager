@@ -112,7 +112,7 @@ const bg = {
   "list.google.text": "Работно време, почивни дни и отговори на отзиви в Google Maps.",
   "list.google.connect": "Свържи Google",
   "list.google.done": "Google е свързан",
-  "list.google.result.noLocations": "Вашият Google акаунт не управлява потвърден бизнес профил; помолете собственика на профила да ви добави като „Мениджър\".",
+  "list.google.result.noLocations": "Вашият Google акаунт не управлява потвърден бизнес профил; помолете собственика на профила да ви добави като „Мениджър“.",
   "list.google.result.error": "Google не можа да бъде свързан. Опитайте пак.",
   "list.plan.pill": "Безплатен пробен период",
   "list.plan.title": "Вашият план",

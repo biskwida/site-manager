@@ -69,6 +69,11 @@ describe("mergeSpecial", () => {
     const r = mergeSpecial([closed(2026, 12, 31)], [hand], [], "2026-11-13");
     expect(r.periods).toEqual([closed(2026, 12, 31)]);
   });
+  it("M7: keeps a hand-set period that started before today but ends today or later; drops one that ended yesterday", () => {
+    const running: GoogleSpecialPeriod = { startDate: { year: 2026, month: 11, day: 12 }, endDate: { year: 2026, month: 11, day: 13 }, openTime: { hours: 22 }, closeTime: { hours: 2 } };
+    const ended: GoogleSpecialPeriod = { startDate: { year: 2026, month: 11, day: 11 }, endDate: { year: 2026, month: 11, day: 12 }, openTime: { hours: 22 }, closeTime: { hours: 2 } };
+    expect(mergeSpecial([], [running, ended], [], "2026-11-13").periods).toEqual([running]);
+  });
   it("drops past hand-set periods", () => {
     const past: GoogleSpecialPeriod = { ...hand, startDate: { year: 2026, month: 11, day: 1 } };
     expect(mergeSpecial([], [past], [], "2026-11-13").periods).toEqual([]);

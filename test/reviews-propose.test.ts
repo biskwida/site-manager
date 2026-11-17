@@ -36,6 +36,17 @@ async function setup(o: { lang?: "bg" | "en"; draft?: (ctx: DraftContext) => Rep
 }
 
 describe("proposeForComments: Google reviews", () => {
+  it("M3: a review drafted as spam gets the neutral line, stored as kind other (never spam or abuse)", async () => {
+    const v = await setup({ draft: () => ({ reply: "", kind: "spam", fallback: false }) });
+    const rv = await v.addReview();
+    const r = await proposeForComments(v.d, await v.freshVenue(), [rv], { mode: "each" });
+    expect(r.sets).toHaveLength(1);
+    const row = (await v.store.getComment(rv.id))!;
+    expect(row.draft_kind).toBe("other");
+    expect(row.draft_text?.trim()).toBeTruthy();
+    expect(r.sets[0].changes[0].after).toMatchObject({ reply_text: row.draft_text });
+  });
+
   it("one new 5-star review: one comment set with one Google reply row, the stars and the draft in the message", async () => {
     const v = await setup();
     const rv = await v.addReview();

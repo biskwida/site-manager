@@ -191,8 +191,8 @@ export async function runTick(d: TickDeps): Promise<TickReport> {
     try {
       const r = await runPendingSyncs(d.sync, { venueId: d.venueId, now: d.now });
       report.pushed = r.done;
-      // A Google hours push that failed for good: the owner edits the profile by hand. A broken connection is told once by
-      // the notice of step 9 instead.
+      // A Google push that failed for good: the owner edits the profile (or answers the review) by hand. A broken connection
+      // is told once by the notice of step 9 instead.
       if (d.messenger && r.failed.length > 0) await notifyGoogleFailures({ store: d.store, messenger: d.messenger, now: d.now, baseUrl: d.baseUrl ?? "", log: d.sync.log }, r.failed);
     } catch (e) {
       console.error("[tick] destination syncs failed:", e instanceof Error ? e.message : e);

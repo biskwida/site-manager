@@ -654,7 +654,7 @@ const bg: Record<MessageKey, string> = {
   "admin.social.result.instagram_personal": "Този акаунт в Instagram е личен. Превключете го към професионален (Business или Creator) и свържете отново.",
   "admin.social.result.instagram_error": "Не успяхме да свържем Instagram. Опитайте отново.",
   "admin.social.result.google_connected": "Google е свързан. Работното време и почивните дни от чата вече отиват и в профила ви.",
-  "admin.social.result.google_no_locations": "Вашият Google акаунт не управлява потвърден бизнес профил; помолете собственика на профила да ви добави като „Мениджър\".",
+  "admin.social.result.google_no_locations": "Вашият Google акаунт не управлява потвърден бизнес профил; помолете собственика на профила да ви добави като „Мениджър“.",
   "admin.social.result.google_error": "Google не можа да бъде свързан. Опитайте пак.",
   "admin.google.title": "Google профил",
   "admin.google.intro": "Работното време и почивните дни, които променяте в чата, отиват и в Google Business профила ви, след вашето потвърждение. Новите отзиви в Google идват в чата с готов отговор.",

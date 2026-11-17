@@ -1,10 +1,12 @@
 // src/social/google-notices.ts
 // Server-only. The two Google messages the tick sends on its own: the one-time "Google disconnected itself" notice to the
 // venue's reachable owners (a CONNECTION code on the destination, or the location gone / not connected as the review poll found;
-// stamped in config.revoked_notified_at, cleared by a reconnect that writes a new config), and the line for an hours push that failed for good (the owner edits the profile by hand).
+// stamped in config.revoked_notified_at, cleared by a reconnect that writes a new config), and the line for a push that failed
+// for good (the owner edits the profile, or answers the review, by hand).
 // Logs carry ids and codes only.
 import type { Messenger } from "../bot/messenger";
 import { GOOGLE_EDIT_URL } from "../destinations/google-api";
+import { commentNetworkOf } from "../destinations/social-common";
 import { CONNECTION_CODES } from "../destinations/sync";
 import { parseSyncError } from "../destinations/wp-errors";
 import { baseLang, tr } from "../domain/format";
@@ -46,6 +48,10 @@ export function googleHoursFailedLine(lang: Lang): string {
   return tr(lang, `Google профил: не е обновен. Отворете профила си и го променете ръчно: ${GOOGLE_EDIT_URL}`, `Google listing: not updated. Open your profile to change it by hand: ${GOOGLE_EDIT_URL}`);
 }
 
+export function googleReplyFailedLine(lang: Lang): string {
+  return tr(lang, `Отговор на отзив в Google: не е публикуван. Отворете профила си, за да отговорите ръчно: ${GOOGLE_EDIT_URL}`, `Google review reply: not posted. Open your profile to answer it by hand: ${GOOGLE_EDIT_URL}`);
+}
+
 /** Once per broken connection: destination google in `error` with a NOTICE code and no config.revoked_notified_at. Returns true when it sent. */
 export async function notifyGoogleBroken(d: NoticeDeps, venue: Venue): Promise<boolean> {
   const dest = await d.store.getDestination(venue.id, "google");
@@ -65,11 +71,15 @@ export async function notifyGoogleBroken(d: NoticeDeps, venue: Venue): Promise<b
   return true;
 }
 
-/** For a Google sync row that just failed for good with a non-connection code: tells the set's chat (or the reachable owners). */
+/**
+ * For a Google sync row that just failed for good with a non-connection code: tells the set's chat (or the reachable owners)
+ * to change the profile by hand, or, for a review-reply set, to answer the review by hand.
+ */
 export async function notifyGoogleHoursFailed(d: NoticeDeps, sync: DestinationSync): Promise<void> {
   const cs = await d.store.getChangeSet(sync.change_set_id);
   const venue = await d.store.getVenue(sync.venue_id);
-  const text = (lang: Lang) => `${lang === "bg" ? cs.summary_bg : cs.summary_en}\n${googleHoursFailedLine(lang)}`;
+  const replies = cs.changes.some((c) => commentNetworkOf(c) === "google");
+  const text = (lang: Lang) => `${lang === "bg" ? cs.summary_bg : cs.summary_en}\n${replies ? googleReplyFailedLine(lang) : googleHoursFailedLine(lang)}`;
   const member = cs.chat_ref !== null ? await d.store.findMember(cs.chat_ref) : null;
   if (cs.chat_ref !== null && member && member.venue_id === venue.id) {
     await d.messenger.send(cs.chat_ref, text(baseLang(member.lang)), { proactive: true });

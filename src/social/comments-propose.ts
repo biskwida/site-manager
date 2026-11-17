@@ -335,8 +335,10 @@ export async function proposeForComments(d: ProposeDeps, venue: Venue, comments:
       const r = await d.draft(review
         ? draftContextOf(site, { author_name: c.author_name, text: c.text, post_caption: "" }, { rating: c.rating ?? null, previous_reply: c.draft_text })
         : draftContextOf(site, { author_name: c.author_name, text: c.text, post_caption: c.post_caption }));
-      kind = r.kind;
-      reply = review && !r.reply.trim() ? fallbackReply(venue, venue.default_lang) : r.reply;
+      // A review cannot be hidden: an empty (spam or abuse) draft gets the neutral line, stored as kind "other".
+      const fellBack = review && !r.reply.trim();
+      kind = fellBack ? "other" : r.kind;
+      reply = fellBack ? fallbackReply(venue, venue.default_lang) : r.reply;
       await d.store.updateComment(c.id, { draft_text: !review && (kind === "spam" || kind === "abuse") ? null : reply, draft_kind: kind });
     }
     if (review) {
