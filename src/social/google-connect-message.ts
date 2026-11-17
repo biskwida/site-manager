@@ -2,8 +2,9 @@
 // What happens right after a Google Business Profile is connected (src/server/google-connect.ts calls it as onConnected):
 // every reachable owner (src/social/comments-propose.ts) hears that Google is connected, in their language. When Google's
 // regular hours differ from the website's, nothing is overwritten: the conflict is recorded in the destination config
-// (hours_conflict + google_hours, which the adapter honours, src/destinations/google.ts) and the owners get a proposal to put
-// the website's week on Google. That set has source "auto": it changes nothing on the website, so it uses no monthly change
+// (hours_conflict + google_hours, which the adapter honours, src/destinations/google.ts) and one owner (the first reachable
+// one whose send succeeds: only the set's chat may decide it, src/bot/approvals.ts) gets a proposal to put the website's week
+// on Google; the other owners get the comparison as plain text and who was asked. That set has source "auto": it changes nothing on the website, so it uses no monthly change
 // (src/domain/limits.ts). ✅ applies it, which pushes the week to Google and clears the conflict. Nothing is written to Google
 // here. Never throws; log lines carry ids, counts and error classes only.
 import { randomUUID } from "node:crypto";
@@ -39,22 +40,32 @@ export function googleConnectedText(lang: Lang, title: string, address: string):
     : `Google connected: ${where}. From now on, hours and holidays you change here go to Google too, after your tick. New Google reviews will come here with a drafted reply.`;
 }
 
+/** "Google says <google>; your website says <website>." (the comparison alone, for the owners without the buttons). */
+export function hoursCompareText(lang: Lang, google: string, website: string): string {
+  return lang === "bg" ? `В Google пише ${google}; на сайта ви пише ${website}.` : `Google says ${google}; your website says ${website}.`;
+}
+
 /** `website` "" means the website has no opening hours yet; `canUseGoogle` is false when Google's week cannot be taken over as is. */
 export function hoursDifferText(lang: Lang, google: string, website: string, canUseGoogle: boolean): string {
   const bg = lang === "bg";
   const useGoogle = quote(bg ? "вземи тези от Google" : "use Google's", lang);
   if (!website) {
-    return bg
-      ? `В Google пише ${google}; на сайта ви пише още няма работно време. Кажете ми работното време или ${useGoogle}.`
-      : `Google says ${google}; your website says no opening hours yet. Tell me your hours, or say ${useGoogle}.`;
+    const compare = hoursCompareText(lang, google, bg ? "още няма работно време" : "no opening hours yet");
+    if (!canUseGoogle) return `${compare} ${bg ? "Кажете ми работното време." : "Tell me your hours."}`;
+    return bg ? `${compare} Кажете ми работното време или ${useGoogle}.` : `${compare} Tell me your hours, or say ${useGoogle}.`;
   }
   const head = bg
-    ? `В Google пише ${google}; на сайта ви пише ${website}. ✅ оставя часовете от сайта и в Google.`
-    : `Google says ${google}; your website says ${website}. ✅ keeps the website's hours on Google.`;
+    ? `${hoursCompareText(lang, google, website)} ✅ оставя часовете от сайта и в Google.`
+    : `${hoursCompareText(lang, google, website)} ✅ keeps the website's hours on Google.`;
   if (!canUseGoogle) return head;
   return bg
     ? `${head} За да вземем часовете от Google за сайта, натиснете ✏️ и кажете ${useGoogle}.`
     : `${head} To use Google's hours on the website instead, tap ✏️ and say ${useGoogle}.`;
+}
+
+/** The last line for the owners who did not get the buttons. Members carry no display name, so the fallback words are used. */
+export function askedOtherOwnerText(lang: Lang): string {
+  return lang === "bg" ? "Попитах другия собственик кое работно време да остане." : "I asked another owner which hours to keep.";
 }
 
 /** Sends the connect message to every reachable owner (in each owner's language) and, when Google's hours differ, records the conflict. Never throws. */
@@ -108,41 +119,56 @@ async function announce(d: AnnounceDeps, log: (s: string) => void, venue: Venue,
     return "unreachable";
   }
   const websiteHasNone = hasNoHours(website);
-  const text = (lang: Lang) => {
-    const google = googleWeek ? formatWeek(googleWeek, lang) : formatGooglePeriods(periods, lang);
-    return `${googleConnectedText(lang, title, address)}\n\n${hoursDifferText(lang, google, websiteHasNone ? "" : formatWeek(website, lang), googleWeek !== null)}`;
-  };
+  const googleText = (lang: Lang) => (googleWeek ? formatWeek(googleWeek, lang) : formatGooglePeriods(periods, lang));
+  const text = (lang: Lang) =>
+    `${googleConnectedText(lang, title, address)}\n\n${hoursDifferText(lang, googleText(lang), websiteHasNone ? "" : formatWeek(website, lang), googleWeek !== null)}`;
   if (websiteHasNone) {
     await sendPlain(text);
     return "conflict_text";
   }
-  return propose(d, log, venue, site, reachable, text);
-}
-
-async function propose(d: AnnounceDeps, log: (s: string) => void, venue: Venue, site: Awaited<ReturnType<Store["getSite"]>>, owners: Member[], text: (lang: Lang) => string): Promise<ConnectOutcome> {
-  const changes = [planChange(site, { op: "set_hours", hours: site.venue.hours }, { newId: randomUUID, now: d.now().toISOString() })];
-  const cs = await d.store.createChangeSet({
-    venue_id: venue.id, chat_ref: owners[0].chat_ref, summary_bg: SUMMARY_BG, summary_en: SUMMARY_EN,
-    preview_bg: renderPreview(site, changes, "bg", venue.tz), preview_en: renderPreview(site, changes, "en", venue.tz),
-    source: "auto", status: "proposed", changes,
-  });
-  const refs: Record<string, string> = {};
-  for (const m of owners) {
+  const decider = await propose(d, log, venue, site, reachable, text);
+  if (!decider) return "unreachable";
+  // The proposal (with the buttons) went to one owner only, who alone can decide it; the others are told who was asked.
+  const others = reachable.filter((m) => m.chat_ref !== decider.chat_ref);
+  for (const m of others) {
     const lang = baseLang(m.lang);
     try {
-      const ref = await d.messenger.sendProposal(m.chat_ref, text(lang), cs.id, lang);
-      if (ref !== null) refs[m.chat_ref] = ref;
+      await d.messenger.send(m.chat_ref, `${googleConnectedText(lang, title, address)}\n\n${hoursCompareText(lang, googleText(lang), formatWeek(website, lang))}\n${askedOtherOwnerText(lang)}`, { proactive: true });
+    } catch (e) {
+      log(`[google] connect message to ${maskRef(m.chat_ref)} failed: ${errorTag(e)}`);
+    }
+  }
+  return "proposal";
+}
+
+/**
+ * Sends the proposal to the first owner whose send succeeds, with a set made for that owner (only cs.chat_ref may decide a
+ * non-comment set, src/bot/approvals.ts). A set whose send failed is cancelled before the next owner is tried, so no set
+ * stays live for a chat that never got its buttons. Returns the owner who got it, or null when every send failed.
+ */
+async function propose(d: AnnounceDeps, log: (s: string) => void, venue: Venue, site: Awaited<ReturnType<Store["getSite"]>>, owners: Member[], text: (lang: Lang) => string): Promise<Member | null> {
+  const changes = [planChange(site, { op: "set_hours", hours: site.venue.hours }, { newId: randomUUID, now: d.now().toISOString() })];
+  for (const m of owners) {
+    const cs = await d.store.createChangeSet({
+      venue_id: venue.id, chat_ref: m.chat_ref, summary_bg: SUMMARY_BG, summary_en: SUMMARY_EN,
+      preview_bg: renderPreview(site, changes, "bg", venue.tz), preview_en: renderPreview(site, changes, "en", venue.tz),
+      source: "auto", status: "proposed", changes,
+    });
+    const lang = baseLang(m.lang);
+    let ref: string | null = null;
+    try {
+      ref = await d.messenger.sendProposal(m.chat_ref, text(lang), cs.id, lang);
     } catch (e) {
       log(`[google] hours proposal to ${maskRef(m.chat_ref)} failed: ${errorTag(e)}`);
     }
+    if (ref === null) {
+      await d.store.cancelChangeSet(cs.id, d.now().toISOString());
+      continue;
+    }
+    await d.store.updateChangeSet(cs.id, { message_ref: ref, proposal_refs: { [m.chat_ref]: ref } });
+    log(`[google] venue ${venue.id}: hours proposal ${cs.id} sent`);
+    return m;
   }
-  if (Object.keys(refs).length === 0) {
-    // A set nobody can tap would only expire; the conflict stays recorded for the dashboard.
-    await d.store.cancelChangeSet(cs.id, d.now().toISOString());
-    log(`[google] venue ${venue.id}: hours proposal ${cs.id} reached no owner and was cancelled`);
-    return "unreachable";
-  }
-  await d.store.updateChangeSet(cs.id, { message_ref: refs[owners[0].chat_ref] ?? null, proposal_refs: refs });
-  log(`[google] venue ${venue.id}: hours proposal ${cs.id} sent to ${Object.keys(refs).length} owner(s)`);
-  return "proposal";
+  log(`[google] venue ${venue.id}: hours proposal reached no owner`);
+  return null;
 }

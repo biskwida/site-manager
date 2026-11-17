@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { handleDecision } from "@/src/bot/approvals";
+import type { Messenger } from "@/src/bot/messenger";
 import type { GoogleDay, GooglePeriod } from "@/src/destinations/google-api";
 import { toRegularPeriods } from "@/src/destinations/google-hours";
 import { monthWindow } from "@/src/domain/limits";
@@ -155,17 +156,66 @@ describe("announceGoogleConnected", () => {
     expect((await s.dest()).config).toMatchObject({ hours_conflict: true, google_hours: GOOGLE_8_19 });
   });
 
-  it("two owners both get the proposal, each in their language", async () => {
+  it("two owners: the first gets the proposal and alone decides it, the second a plain note without buttons", async () => {
     const s = await setup({ regularHours: GOOGLE_8_19 });
     await s.store.upsertMember({ venue_id: s.venue.id, chat_ref: "tg:2002", role: "owner", lang: "en" });
     expect(await s.announce()).toBe("proposal");
-    expect(s.messenger.sent.map((m) => m.chatRef).sort()).toEqual(["tg:1001", "tg:2002"]);
-    expect(s.messenger.sent.find((m) => m.chatRef === "tg:2002")!.text).toMatch(/^Google connected: Test Cafe, 1 Main St\.[^]*\n\nGoogle says Mon–Fri 08:00–19:00, Sat–Sun closed; your website says Mon–Fri 08:00–18:00, Sat 09:00–16:00, Sun closed\./);
+    const toFirst = s.messenger.sent.filter((m) => m.chatRef === "tg:1001");
+    const toSecond = s.messenger.sent.filter((m) => m.chatRef === "tg:2002");
+    expect(toFirst).toHaveLength(1);
+    expect(toFirst[0].setId).toBeDefined();
+    expect(toSecond).toHaveLength(1);
+    expect(toSecond[0].setId).toBeUndefined();
+    expect(toSecond[0]).toMatchObject({
+      proactive: true,
+      text: `${CONNECTED_EN}\n\nGoogle says Mon–Fri 08:00–19:00, Sat–Sun closed; your website says Mon–Fri 08:00–18:00, Sat 09:00–16:00, Sun closed.\nI asked another owner which hours to keep.`,
+    });
+    expect(toSecond[0].text).not.toContain("✅");
     const cs = (await s.proposed())!;
-    expect(Object.keys(cs.proposal_refs ?? {}).sort()).toEqual(["tg:1001", "tg:2002"]);
+    expect(cs).toMatchObject({ chat_ref: "tg:1001", message_ref: toFirst[0].messageRef, proposal_refs: { "tg:1001": toFirst[0].messageRef } });
+    expect(Object.keys(cs.proposal_refs!)).toEqual(["tg:1001"]);
+    const r = await handleDecision({ store: s.store, messenger: s.messenger, now: () => T0 }, "tg:1001", "apply", cs.id);
+    expect(r.toast).toBe("✅ Приложено");
+    expect((await s.dest()).config.hours_conflict).toBe(false);
   });
 
-  it("never throws when the messenger fails", async () => {
+  it("the second owner reads it in Bulgarian when Bulgarian", async () => {
+    const s = await setup({ regularHours: GOOGLE_8_19 });
+    await s.store.upsertMember({ venue_id: s.venue.id, chat_ref: "tg:2002", role: "owner", lang: "bg" });
+    await s.announce();
+    expect(s.messenger.sent.find((m) => m.chatRef === "tg:2002")!.text).toBe(`${CONNECTED_BG}\n\nВ Google пише ${GOOGLE_BG}; на сайта ви пише ${SITE_BG}.\nПопитах другия собственик кое работно време да остане.`);
+  });
+
+  it("the first owner's send fails: the set goes to the second owner, who decides it", async () => {
+    const messenger = new FakeMessenger();
+    const real = messenger.sendProposal.bind(messenger);
+    const failFirst: Messenger["sendProposal"] = async (chatRef, text, setId, lang, labels) => (chatRef === "tg:1001" ? null : real(chatRef, text, setId, lang, labels));
+    // The real messengers answer null for a send that did not go out.
+    messenger.sendProposal = failFirst as FakeMessenger["sendProposal"];
+    const s = await setup({ regularHours: GOOGLE_8_19, messenger });
+    await s.store.upsertMember({ venue_id: s.venue.id, chat_ref: "tg:2002", role: "owner", lang: "en" });
+    expect(await s.announce()).toBe("proposal");
+    expect(await s.store.findProposed(s.venue.id, "tg:1001")).toBeNull();
+    const cs = (await s.store.findProposed(s.venue.id, "tg:2002"))!;
+    expect(cs).toMatchObject({ chat_ref: "tg:2002", status: "proposed" });
+    expect(Object.keys(cs.proposal_refs!)).toEqual(["tg:2002"]);
+    // The first owner gets the plain note instead.
+    expect(s.messenger.sent.filter((m) => m.chatRef === "tg:1001").map((m) => m.setId)).toEqual([undefined]);
+    const r = await handleDecision({ store: s.store, messenger: s.messenger, now: () => T0 }, "tg:2002", "apply", cs.id);
+    expect(r.toast).toBe("✅ Applied");
+    expect((await s.store.getChangeSet(cs.id)).status).toBe("applied");
+    expect(s.fake.location(s.loc.name).regularHours?.periods).toEqual(toRegularPeriods(DEFAULT_HOURS));
+  });
+
+  it("website without hours and Google's week not usable as is: no \"use Google's\" offer", async () => {
+    const split = [period("MONDAY", 8, 12), period("MONDAY", 13, 18)];
+    const s = await setup({ regularHours: split, websiteHours: CLOSED_WEEK });
+    expect(await s.announce()).toBe("conflict_text");
+    expect(s.messenger.sent[0].text).toBe(`${CONNECTED_BG}\n\nВ Google пише пон 08:00–12:00 и 13:00–18:00, вт–нед затворено; на сайта ви пише още няма работно време. Кажете ми работното време.`);
+    expect(hoursDifferText("en", "G", "", false)).toBe("Google says G; your website says no opening hours yet. Tell me your hours.");
+  });
+
+  it("never throws when the messenger fails; every set made is cancelled", async () => {
     const messenger = new FakeMessenger();
     messenger.send = async () => {
       throw new Error("down");
@@ -174,9 +224,14 @@ describe("announceGoogleConnected", () => {
       throw new Error("down");
     };
     const same = await setup({ regularHours: toRegularPeriods(DEFAULT_HOURS), messenger });
-    await expect(same.announce()).resolves.toBeDefined();
+    expect(await same.announce()).toBe("plain");
     const differ = await setup({ regularHours: GOOGLE_8_19, messenger });
-    await expect(differ.announce()).resolves.toBeDefined();
+    await differ.store.upsertMember({ venue_id: differ.venue.id, chat_ref: "tg:2002", role: "owner", lang: "en" });
+    expect(await differ.announce()).toBe("unreachable");
     expect((await differ.dest()).config.hours_conflict).toBe(true);
+    expect(await differ.store.findProposed(differ.venue.id, "tg:1001")).toBeNull();
+    expect(await differ.store.findProposed(differ.venue.id, "tg:2002")).toBeNull();
+    const sets = await differ.store.listChangeSets(differ.venue.id);
+    expect(sets.filter((x) => x.source === "auto").map((x) => x.status)).toEqual(["cancelled", "cancelled"]);
   });
 });
