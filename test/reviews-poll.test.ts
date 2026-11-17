@@ -257,6 +257,53 @@ describe("pollVenueReviews", () => {
     for (const s of ["Secret words", "More secret", "Hidden Name"]) expect(all).not.toContain(s);
   });
 
+  it("C1: Google's 0- or 6-digit fractions over a store that keeps 3 digits: a second poll changes nothing", async () => {
+    const g = await connectedGoogle();
+    // Google sends "…:59Z" and "…:59.746205Z"; Supabase hands timestamps back through toISOString() (3 digits).
+    const plain = g.fake.addReview(g.loc.v4, { text: "plain", created: new Date("2026-11-13T07:00:59.000Z") });
+    const micro = g.fake.addReview(g.loc.v4, { text: "micro", created: new Date("2026-11-13T07:30:59.746Z") });
+    const replied = g.fake.addReview(g.loc.v4, { text: "replied", created: new Date("2026-11-13T08:00:59.000Z"), reply: "Thanks" });
+    const backlog = g.fake.addReview(g.loc.v4, { text: "old", created: at(-10 * DAY) });
+    const google = (t: string) => (t.endsWith(".000Z") ? t.replace(".000Z", "Z") : t.replace(/Z$/, "205Z"));
+    const fetchBase = g.fake.fetch;
+    g.d.fetch = (async (input, init) => {
+      const res = await fetchBase(input, init);
+      if (!String(input).includes("/reviews")) return res;
+      const body = (await res.json()) as { reviews: { createTime: string; updateTime: string; reviewReply?: { updateTime: string } }[] };
+      for (const x of body.reviews) {
+        x.createTime = google(x.createTime);
+        x.updateTime = google(x.updateTime);
+        if (x.reviewReply) x.reviewReply.updateTime = google(x.reviewReply.updateTime);
+      }
+      return Response.json(body);
+    }) as typeof fetch;
+    const base = g.d.store;
+    const norm = <T,>(c: T): T => {
+      if (!c || typeof c !== "object") return c;
+      const x = c as unknown as { review_updated_at: string | null; created_at: string };
+      return { ...c, created_at: new Date(x.created_at).toISOString(), review_updated_at: x.review_updated_at === null ? null : new Date(x.review_updated_at).toISOString() } as T;
+    };
+    g.d.store = new Proxy(base, {
+      get(t, k) {
+        const v = Reflect.get(t, k, t);
+        if (k === "findComment" || k === "getComment") return async (...a: unknown[]) => norm(await (v as (...x: unknown[]) => Promise<unknown>).apply(t, a));
+        if (k === "listComments" || k === "upsertComments") return async (...a: unknown[]) => ((await (v as (...x: unknown[]) => Promise<unknown[]>).apply(t, a)) ?? []).map(norm);
+        return typeof v === "function" ? v.bind(t) : v;
+      },
+    });
+    const r1 = await pollVenueReviews(g.d, g.venue, T0);
+    expect(r1.inserted).toHaveLength(4);
+    const before = await g.store.listComments(g.venue.id);
+    expect(before.find((c) => c.comment_id === micro.name)?.review_updated_at).toBe("2026-11-13T07:30:59.746Z");
+    expect(before.find((c) => c.comment_id === plain.name)?.review_updated_at).toBe("2026-11-13T07:00:59.000Z");
+    expect(before.find((c) => c.comment_id === replied.name)?.status).toBe("replied");
+    expect(before.find((c) => c.comment_id === backlog.name)?.status).toBe("ignored");
+    const r2 = await pollVenueReviews(g.d, g.venue, at(16 * MIN));
+    expect(r2).toMatchObject({ polled: true, error: null, inserted: [], edited: [] });
+    const after = await g.store.listComments(g.venue.id);
+    expect(after).toEqual(before);
+  });
+
   it("starsOf maps Google's star names", () => {
     expect([starsOf("ONE"), starsOf("TWO"), starsOf("THREE"), starsOf("FOUR"), starsOf("FIVE")]).toEqual([1, 2, 3, 4, 5]);
     expect(starsOf("STAR_RATING_UNSPECIFIED")).toBeNull();

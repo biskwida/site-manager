@@ -51,9 +51,16 @@ async function markPolled(d: SyncDeps, venueId: string, now: Date, extra: Omit<D
   await d.store.updateDestination(fresh.id, { ...extra, config: { ...fresh.config, last_review_poll_at: now.toISOString() } });
 }
 
+/** Google sends 0, 3, 6 or 9 fraction digits; the store hands timestamps back with 3 (toISOString). Stored in that form. */
+const isoOf = (t: string) => new Date(t).toISOString();
+
+/** The same instant, whatever the fraction digits of either side. */
+const sameInstant = (a: string | null, b: string) => a !== null && Date.parse(a) === Date.parse(b);
+
 /** The review's own fields, as stored on its row (new or edited). */
 function reviewFields(r: GoogleReview) {
-  return { text: r.comment ?? "", author_name: r.reviewer?.displayName ?? "", rating: starsOf(r.starRating), review_updated_at: r.updateTime, created_at: r.updateTime };
+  const updated = isoOf(r.updateTime);
+  return { text: r.comment ?? "", author_name: r.reviewer?.displayName ?? "", rating: starsOf(r.starRating), review_updated_at: updated, created_at: updated };
 }
 
 /** The owner's line when a proposal is withdrawn because the review changed under it. */
@@ -128,7 +135,7 @@ export async function pollVenueReviews(d: SyncDeps, venue: Venue, now: Date, o: 
         continue;
       }
       const replyText = r.reviewReply?.comment ?? null;
-      const edited = known.review_updated_at !== r.updateTime;
+      const edited = !sameInstant(known.review_updated_at, r.updateTime);
       // A replied row holds the reply's text in draft_text: the same text is the reply already known (Claudia's or an earlier one).
       const newReply = answered(r) && (known.status !== "replied" || known.draft_text !== replyText);
       if (!edited && !newReply) continue; // unchanged in both respects
