@@ -1,10 +1,11 @@
 // src/destinations/social-common.ts
 // Pure helpers shared by the Facebook and Instagram adapters and the owner-facing sync lines.
-import type { Change, ModerateAction, SocialTarget } from "../domain/types";
+import type { Change, CommentNetwork, MetaNetwork, ModerateAction, SocialTarget } from "../domain/types";
 import { SOCIAL_TARGETS } from "../domain/types";
 import type { Store } from "../store/types";
 
-export type SocialNetwork = "facebook" | "instagram";
+/** Posting targets stay the two Meta networks. */
+export type SocialNetwork = MetaNetwork;
 /**
  * One target of a post as the sync row remembers it. "attempted" is written before the call that publishes (its answer may be
  * lost); "published" once Meta confirmed it. Meta's id may be null when a retry only learned that it went out.
@@ -36,10 +37,10 @@ export function networkTargets(c: Change, network: SocialNetwork): SocialTarget[
 }
 
 /** The network of a social_reply / social_moderate row (from `after`, or `before` for an undo row); null for every other row. */
-export function commentNetworkOf(c: Change): SocialNetwork | null {
+export function commentNetworkOf(c: Change): CommentNetwork | null {
   if (c.entity !== "social_reply" && c.entity !== "social_moderate") return null;
   const n = (c.after ?? c.before ?? {}).network;
-  return n === "facebook" || n === "instagram" ? n : null;
+  return n === "facebook" || n === "instagram" || n === "google" ? n : null;
 }
 
 /** social_post rows with at least one target on `network`, and comment rows of `network`, in position order. */

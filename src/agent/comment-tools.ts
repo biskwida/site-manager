@@ -10,7 +10,7 @@ import { betaZodTool } from "@anthropic-ai/sdk/helpers/beta/zod";
 import { z } from "zod";
 import { copy } from "../bot/copy";
 import { commentModeLabel } from "../domain/comment-preview";
-import { COMMENT_MODES, type ChangeSet, type CommentMode, type CommentNetwork } from "../domain/types";
+import { COMMENT_MODES, NETWORK_NAMES, type ChangeSet, type CommentMode, type CommentNetwork } from "../domain/types";
 import { REPLY_MAX } from "../social/comments-draft";
 import { COMMENT_ON_DEMAND_TIMEOUT_MS } from "../social/comments-poll";
 import { cancelCommentSet, commentLimitState, createCommentSet, previewLength, splitCommentItems, type CommentSetItem } from "../social/comments-propose";
@@ -106,7 +106,7 @@ export function commentTools(d: AgentDeps, k: ToolKit) {
       clearTimeout(timer);
     }
   }
-  const networkLabel = (n: CommentNetwork) => (n === "instagram" ? "Instagram" : "Facebook");
+  const networkLabel = (n: CommentNetwork) => NETWORK_NAMES[n];
   async function failure(what: string): Promise<{ note: string; last_checked_at: string | null }> {
     const last = (await d.liveComments?.lastCheckedAt(d.venueId).catch(() => null)) ?? { at: null, never: [] };
     const never = last.never.length ? ` ${last.never.map(networkLabel).join(" and ")} ${last.never.length > 1 ? "have" : "has"} not been checked yet.` : "";

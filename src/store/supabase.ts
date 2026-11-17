@@ -779,7 +779,7 @@ export class SupabaseStore implements Store {
     // ON CONFLICT (comment_id) DO NOTHING; RETURNING gives only the rows that were inserted.
     const { data, error } = await this.db
       .from("social_comments")
-      .upsert(rows.map((r) => ({ venue_id: venueId, ...r, post_permalink: r.post_permalink ?? null })), { onConflict: "comment_id", ignoreDuplicates: true })
+      .upsert(rows.map((r) => ({ venue_id: venueId, ...r, post_permalink: r.post_permalink ?? null, rating: r.rating ?? null, review_updated_at: r.review_updated_at ?? null })), { onConflict: "comment_id", ignoreDuplicates: true })
       .select("*");
     if (error) throw new Error(`upsertComments: ${error.message}`);
     const order = (c: SocialComment) => rows.findIndex((r) => r.comment_id === c.comment_id);
@@ -993,5 +993,7 @@ export function toComment(r: Row): SocialComment {
     deferred: Boolean(r.deferred),
     hold_attempts: num(r.hold_attempts ?? 0),
     held_at: isoOrNull(r.held_at),
+    rating: r.rating == null ? null : num(r.rating),
+    review_updated_at: isoOrNull(r.review_updated_at),
   };
 }

@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { googleAdapter } from "@/src/destinations/google";
+import { commentNetworkOf, relevantFor } from "@/src/destinations/social-common";
 import type { GooglePeriod, GoogleSpecialPeriod } from "@/src/destinations/google-api";
 import { BACKOFF_MS, enqueueForChangeSet, MAX_ATTEMPTS, runPendingSyncs, syncLines } from "@/src/destinations/sync";
 import { invertChanges } from "@/src/domain/changes";
@@ -239,5 +240,15 @@ describe("errors", () => {
     await g.applyOps([holiday("2026-12-25")]);
     expect(g.logs.length).toBeGreaterThan(0);
     for (const l of g.logs) expect(l).not.toContain(g.account.refresh_token);
+  });
+});
+
+describe("google as a comment network", () => {
+  const review: Change = { position: 0, op: "social_reply", entity: "social_reply", entity_id: "accounts/1/locations/2/reviews/r1", before: null, after: { network: "google", comment_id: "accounts/1/locations/2/reviews/r1", post_ref: "accounts/1/locations/2", author_name: "Иван", comment_text: "Супер", reply_text: "Благодарим!", rating: 5 } };
+  it("commentNetworkOf reads google and the Meta adapters' relevantFor skips the row", () => {
+    expect(commentNetworkOf(review)).toBe("google");
+    expect(commentNetworkOf(invertChanges([review])[0])).toBe("google");
+    expect(relevantFor("facebook")([review])).toEqual([]);
+    expect(relevantFor("instagram")([review])).toEqual([]);
   });
 });

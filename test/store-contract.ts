@@ -936,6 +936,28 @@ export function storeContract(
       expect(await s.purgeComments("2026-09-15T00:00:00.000Z")).toBe(0);
     });
 
+    it("stores a Google review as a comment: rating, review_updated_at, edit, find, redact, count", async () => {
+      const s = await make();
+      const v = await s.createVenue({ slug: "tcg", name: "Test" });
+      const t = tag();
+      const id = `accounts/1/locations/2/reviews/${t}-r1`;
+      const T = "2026-10-20T10:00:00.000Z";
+      const [g, m] = await s.upsertComments(v.id, [
+        { network: "google", post_ref: "accounts/1/locations/2", comment_id: id, parent_id: null, author_id: "", author_name: "Иван", text: "Супер", created_at: "2026-10-15T08:00:00.000Z", seen_at: NOW, status: "new", post_caption: "", rating: 5, review_updated_at: "2026-10-15T08:00:00.000Z" },
+        { network: "facebook", post_ref: "p1", comment_id: `${t}-fb1`, parent_id: null, author_id: "u", author_name: "A", text: "t", created_at: "2026-10-15T08:01:00.000Z", seen_at: NOW, status: "new", post_caption: "" },
+      ]);
+      expect(g).toMatchObject({ network: "google", rating: 5, review_updated_at: "2026-10-15T08:00:00.000Z" });
+      expect(m).toMatchObject({ network: "facebook", rating: null, review_updated_at: null });
+      expect(await s.getComment(g.id)).toEqual(g);
+      await s.updateComment(g.id, { text: "edited", author_name: "Иван П.", rating: 2, review_updated_at: T, created_at: T, status: "new" });
+      expect(await s.getComment(g.id)).toMatchObject({ text: "edited", author_name: "Иван П.", rating: 2, review_updated_at: T, created_at: T });
+      expect((await s.findComment(v.id, id))?.id).toBe(g.id);
+      await s.updateComment(g.id, { status: "replied", reply_id: "x", replied_at: "2026-10-21T09:00:00.000Z" });
+      expect(await s.countCommentActions(v.id, "2026-10-20T00:00:00.000Z", "2026-10-31T00:00:00.000Z")).toBe(1);
+      expect(await s.redactComments("2026-10-25T00:00:00.000Z")).toBe(2);
+      expect(await s.getComment(g.id)).toMatchObject({ text: "", author_name: "", rating: 2, status: "replied" });
+    });
+
     it("redacts the customer text of comment sets created before a time, once, and leaves other sets alone", async () => {
       const s = await make();
       const v = await s.createVenue({ slug: "tc8", name: "Test" });

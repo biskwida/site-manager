@@ -10,7 +10,7 @@ import { decryptSecrets } from "../destinations/secrets";
 import { publishedTargets, type PublishedTarget } from "../destinations/social-common";
 import { CONNECTION_CODES, type SyncDeps } from "../destinations/sync";
 import { formatSyncError } from "../destinations/wp-errors";
-import type { CommentNetwork, Venue } from "../domain/types";
+import type { CommentNetwork, MetaNetwork, Venue } from "../domain/types";
 import type { DestinationPatch, DestinationWithSecrets, NewSocialComment, SocialComment, Store } from "../store/types";
 import { fetchFacebookComments, fetchInstagramComments, listFacebookPosts, listInstagramMedia, type AccountPost, type IncomingComment } from "./comments-graph";
 
@@ -25,7 +25,7 @@ export const COMMENT_RETENTION_MS = 30 * 24 * 3_600_000;
 export const COMMENT_ROW_RETENTION_MS = 60 * 24 * 3_600_000;
 /** Facebook `since` on a repeat poll: the last poll minus this margin (the unique comment_id makes the overlap harmless). */
 const SINCE_MARGIN_MS = 3_600_000;
-const NETWORKS: readonly CommentNetwork[] = ["instagram", "facebook"];
+const NETWORKS: readonly MetaNetwork[] = ["instagram", "facebook"];
 /**
  * Errors that a retry cannot fix: the destination is marked `error` (the owner connects again) and polled, so it is neither
  * re-read nor logged every tick. CONNECTION_CODES (token, permission) plus a destination saved without its token or account id.
@@ -33,9 +33,9 @@ const NETWORKS: readonly CommentNetwork[] = ["instagram", "facebook"];
 const STOP_CODES: ReadonlySet<string> = new Set([...CONNECTION_CODES, "sm_social_not_connected"]);
 
 export interface PollReport {
-  polled: CommentNetwork[];
+  polled: MetaNetwork[];
   inserted: SocialComment[];
-  errors: { network: CommentNetwork; code: string }[];
+  errors: { network: MetaNetwork; code: string }[];
 }
 
 const log = (d: SyncDeps, s: string) => (d.log ?? ((x: string) => console.log(x)))(s);
@@ -74,7 +74,7 @@ function toRow(c: IncomingComment, t: CommentTarget, ownId: string, now: Date): 
   return { network: c.network, post_ref: c.post_ref, comment_id: c.comment_id, parent_id: c.parent_id, author_id: c.author_id, author_name: c.author_name, text: c.text, created_at: c.created_at, seen_at: now.toISOString(), status, post_caption: t.caption, post_permalink: t.permalink };
 }
 
-async function readNetwork(d: SyncDeps, dest: DestinationWithSecrets, network: CommentNetwork, published: PublishedTarget[], now: Date): Promise<NewSocialComment[]> {
+async function readNetwork(d: SyncDeps, dest: DestinationWithSecrets, network: MetaNetwork, published: PublishedTarget[], now: Date): Promise<NewSocialComment[]> {
   const secrets = decryptSecrets(dest.secrets, d.secretKey as Buffer);
   const token = (network === "instagram" ? secrets.token : secrets.page_token) ?? "";
   const ownId = String((network === "instagram" ? dest.config.ig_user_id : dest.config.page_id) ?? "");
@@ -113,7 +113,7 @@ async function readNetwork(d: SyncDeps, dest: DestinationWithSecrets, network: C
 }
 
 /** Re-reads the destination and writes the patch onto its current config, so a concurrent writer (token refresh) is never reverted. */
-async function markPolled(d: SyncDeps, venueId: string, network: CommentNetwork, now: Date, extra: Omit<DestinationPatch, "config"> = {}): Promise<void> {
+async function markPolled(d: SyncDeps, venueId: string, network: MetaNetwork, now: Date, extra: Omit<DestinationPatch, "config"> = {}): Promise<void> {
   const fresh = await d.store.getDestination(venueId, network);
   if (!fresh) return; // disconnected meanwhile
   await d.store.updateDestination(fresh.id, { ...extra, config: { ...fresh.config, last_comment_poll_at: now.toISOString() } });
