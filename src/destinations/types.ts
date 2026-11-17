@@ -1,6 +1,7 @@
 // src/destinations/types.ts
-import type { Change, ChangeSet, Venue } from "../domain/types";
+import type { Change, ChangeSet, SiteState, Venue } from "../domain/types";
 import type { Destination, DestinationKind } from "../store/types";
+import type { GoogleCreds } from "./google-api";
 
 export interface PushContext {
   venue: Venue;
@@ -22,6 +23,10 @@ export interface PushContext {
   sleep?: (ms: number) => Promise<void>;
   /** Stores a partial result on the sync row right away (before a call whose answer might be lost). */
   checkpoint?: (partial: Record<string, unknown>) => Promise<void>;
+  /** The venue's site as stored now (after the apply that queued this push). */
+  loadSite?: () => Promise<SiteState>;
+  /** Claudia's Google OAuth client; null when GOOGLE_CLIENT_ID / GOOGLE_CLIENT_SECRET are not set. */
+  google?: GoogleCreds | null;
 }
 export type PushResult =
   | { ok: true; result: Record<string, unknown>; line: { bg: string; en: string } }

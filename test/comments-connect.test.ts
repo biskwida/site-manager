@@ -35,6 +35,6 @@ describe("comment scopes", () => {
 
 describe("connection errors", () => {
   it("one set of reconnect codes, shared by the push and the comment poller", () => {
-    expect([...CONNECTION_CODES].sort()).toEqual(["sm_meta_permission", "sm_meta_token"]);
+    expect([...CONNECTION_CODES].sort()).toEqual(["sm_google_permission", "sm_google_revoked", "sm_google_scope", "sm_meta_permission", "sm_meta_token"]);
   });
 });
