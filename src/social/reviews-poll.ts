@@ -27,8 +27,12 @@ export interface ReviewPollReport {
   error: string | null; // error code
 }
 
-/** Errors a retry cannot fix: the destination is marked `error` (the owner connects again). */
-const STOP_CODES: ReadonlySet<string> = new Set([...CONNECTION_CODES, "sm_social_not_connected"]);
+/**
+ * Errors a retry cannot fix: the destination is marked `error` (the owner connects again; the tick tells them once,
+ * notifyGoogleBroken). A 404 on the reviews list can only mean the location is gone (deleted or moved to another account);
+ * a 404 on a reply PUT stays a "gone review" and is not handled here.
+ */
+const STOP_CODES: ReadonlySet<string> = new Set([...CONNECTION_CODES, "sm_social_not_connected", "sm_google_not_found"]);
 const STARS: Readonly<Record<string, number>> = { ONE: 1, TWO: 2, THREE: 3, FOUR: 4, FIVE: 5 };
 
 const log = (d: SyncDeps, s: string) => (d.log ?? ((x: string) => console.log(x)))(s);

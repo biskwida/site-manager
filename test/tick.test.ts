@@ -388,6 +388,31 @@ describe("runTick: Google reviews and notices", () => {
     expect((await g.dest()).config.revoked_notified_at).toBe(at(20 * MIN).toISOString());
   });
 
+  it("I5: a 404 on the reviews list (location deleted or moved) marks the destination error, tells the owners once, stops polling", async () => {
+    const g = await connectedGoogle();
+    await g.store.upsertMember({ venue_id: g.venue.id, chat_ref: "tg:1001", role: "owner", lang: "en" });
+    g.fake.failNext({ status: 404, match: (c) => c.path.endsWith("/reviews") });
+    const m = new FakeMessenger();
+    await tick(g, m, GT0);
+    expect(await g.dest()).toMatchObject({ status: "error", last_error: expect.stringMatching(/^sm_google_not_found/) });
+    const text = `Your Google profile could not be found (it was deleted or moved to another Google account). Connect Google again from the dashboard: ${BASE}/dashboard/${g.venue.slug}#google`;
+    expect(m.sent.map((s) => s.text)).toEqual([text]);
+    const lists = reviewLists(g);
+    for (let i = 1; i <= 2; i++) await tick(g, m, at(i * 20 * MIN));
+    expect(reviewLists(g)).toBe(lists);
+    expect(m.sent.map((s) => s.text)).toEqual([text]);
+  });
+
+  it("I5: a poll that finds Google not connected (no location) marks the destination error and tells the owners once", async () => {
+    const g = await connectedGoogle({ config: { location_v4: "" } });
+    await g.store.upsertMember({ venue_id: g.venue.id, chat_ref: "tg:1001", role: "owner", lang: "bg" });
+    const m = new FakeMessenger();
+    await tick(g, m, GT0);
+    await tick(g, m, at(20 * MIN));
+    expect(await g.dest()).toMatchObject({ status: "error", last_error: expect.stringMatching(/^sm_social_not_connected/) });
+    expect(m.sent.map((s) => s.text)).toEqual([`Google не е свързан. Свържете го отново от таблото: ${BASE}/dashboard/${g.venue.slug}#google`]);
+  });
+
   it("the per-venue tick also sends the broken-connection notice (in Bulgarian for a Bulgarian owner)", async () => {
     const g = await connectedGoogle();
     const dest = await g.dest();
