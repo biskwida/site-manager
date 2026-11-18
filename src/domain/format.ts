@@ -9,6 +9,9 @@ const ENGLISH_WORDS: ReadonlySet<string> = new Set([
   "my", "our", "we", "you", "please", "can", "could", "would", "will",
   "make", "add", "remove", "change", "put", "show", "price", "today", "tomorrow", "closed", "open", "sold", "out",
   "what", "how", "when", "why",
+  // Words of the photo flow (24 Oct 2026): "restyle this photo", "a nice picture" are three words, under the classifier's minimum, and
+  // held only one listed word. None of these is used when Bulgarian is typed in Latin letters ("snimka", "sait", "oshte").
+  "photo", "picture", "restyle", "website", "both", "yes", "nice", "beautiful", "aesthetic", "darker", "brighter", "more", "again",
 ]);
 
 /** At least two different words of ENGLISH_WORDS, matched whole and in any case. */

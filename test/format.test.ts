@@ -44,8 +44,9 @@ describe("detectLang", () => {
       "my", "our", "we", "you", "please", "can", "could", "would", "will",
       "make", "add", "remove", "change", "put", "show", "price", "today", "tomorrow", "closed", "open", "sold", "out",
       "what", "how", "when", "why",
+      "photo", "picture", "restyle", "website", "both", "yes", "nice", "beautiful", "aesthetic", "darker", "brighter", "more", "again",
     ];
-    expect(listed).toHaveLength(43);
+    expect(listed).toHaveLength(56);
     const missed = listed.filter((word) => detectLang(`${word} ${word === "the" ? "please" : "the"}`) !== "en");
     expect(missed).toEqual([]);
   });
@@ -68,6 +69,16 @@ describe("detectLang", () => {
     expect(detectLang("post it on instagram")).toBe("en"); // it + on
     expect(detectLang("make it a story")).toBe("en"); // make + it
     expect(detectLang("make a story")).toBeNull(); // "a" is not a second word
+  });
+
+  // Seen live 2026-10-24: "restyle this photo" from an owner stored as bg kept Bulgarian (three words: no classifier; one listed word).
+  it("short photo-flow requests count as English", () => {
+    expect(detectLang("restyle this photo")).toBe("en"); // this + photo
+    expect(detectLang("restyle it")).toBe("en"); // restyle + it
+    expect(detectLang("a nice photo")).toBe("en"); // nice + photo
+    expect(detectLang("make it aesthetic")).toBe("en"); // make + it
+    expect(detectLang("darker")).toBeNull(); // one word is never enough
+    expect(detectLang("photo")).toBeNull();
   });
 });
 
