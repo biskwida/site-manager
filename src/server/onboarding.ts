@@ -236,6 +236,8 @@ export interface OnboardingStatus {
   chat: boolean;
   instagram: boolean;
   facebook: boolean;
+  /** A connected Google Business Profile (a `google` destination in status connected). */
+  google: boolean;
   /** n/a: not an own-site venue; connected: the WordPress plugin is connected; todo: an own site that is not connected yet. */
   website: "n/a" | "connected" | "todo";
   plan: PlanSummary;
@@ -244,11 +246,12 @@ export interface OnboardingStatus {
 /** The checklist's facts for one venue. Reads nothing secret and returns no codes or tokens. */
 export async function onboardingStatus(store: Store, venue: Venue, opts: { billing?: boolean; now?: Date } = {}): Promise<OnboardingStatus> {
   const [members, destinations] = await Promise.all([store.listMembers(venue.id), store.listDestinations(venue.id)]);
-  const connected = (kind: "wordpress" | "instagram" | "facebook") => destinations.some((x) => x.kind === kind && x.status === "connected");
+  const connected = (kind: "wordpress" | "instagram" | "facebook" | "google") => destinations.some((x) => x.kind === kind && x.status === "connected");
   return {
     chat: members.some((m) => m.role === "owner"),
     instagram: connected("instagram"),
     facebook: connected("facebook"),
+    google: connected("google"),
     website: venue.site_mode !== "own" ? "n/a" : connected("wordpress") ? "connected" : "todo",
     plan: opts.billing ? await planSummary(store, venue, opts.now ?? new Date()) : { status: "none", trial_days_left: null, plan: null },
   };

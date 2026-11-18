@@ -48,3 +48,41 @@ describe("SupabaseStore.applyChangeSet", () => {
     expect(reset.steps).toContainEqual(["eq", ["id", "cs1"]]);
   });
 });
+
+describe("SupabaseStore.upsertComments", () => {
+  const VENUE = "6f1c2a52-6a0b-4d4e-9d55-2f1c0e5a7b11";
+  const base = { post_ref: "p1", parent_id: null, author_id: "a1", author_name: "A", text: "hi", created_at: "2026-11-13T09:00:00.000Z", seen_at: "2026-11-13T09:00:00.000Z", status: "new" as const, post_caption: "" };
+  const upserted = (calls: Call[]) => calls.filter((c) => has(c, "upsert")).map((c) => arg(c, "upsert") as Record<string, unknown>[]);
+
+  it("sends rating and review_updated_at only on Google rows: Facebook and Instagram rows keep the key set they had before Google", async () => {
+    const { calls, client } = fakeClient((c) => ({ data: (arg(c, "upsert") as Record<string, unknown>[]).map((r, i) => ({ id: `id${i}`, ...r })), error: null }));
+    const store = new SupabaseStore("http://localhost:54321", "test-key");
+    (store as unknown as { db: unknown }).db = client;
+    const out = await store.upsertComments(VENUE, [
+      { ...base, network: "facebook", comment_id: "fb1" },
+      { ...base, network: "google", comment_id: "g1", author_id: "", rating: 4, review_updated_at: "2026-11-13T08:00:00.000Z" },
+      { ...base, network: "instagram", comment_id: "ig1", post_permalink: "https://instagram.com/p/x" },
+    ]);
+    expect(out.map((c) => c.comment_id)).toEqual(["fb1", "g1", "ig1"]);
+    const batches = upserted(calls);
+    const meta = batches.flat().filter((r) => r.network !== "google");
+    const google = batches.flat().filter((r) => r.network === "google");
+    for (const r of meta) expect(Object.keys(r).sort()).toEqual(["venue_id", ...Object.keys(base), "network", "comment_id", "post_permalink"].sort());
+    expect(google).toEqual([expect.objectContaining({ rating: 4, review_updated_at: "2026-11-13T08:00:00.000Z" })]);
+    // One request never mixes the two key sets (PostgREST bulk upsert needs identical keys per row).
+    for (const b of batches) expect(new Set(b.map((r) => Object.keys(r).sort().join())).size).toBe(1);
+  });
+
+  it("a Meta-only batch is one request with no Google columns", async () => {
+    const { calls, client } = fakeClient((c) => ({ data: (arg(c, "upsert") as Record<string, unknown>[]).map((r, i) => ({ id: `id${i}`, ...r })), error: null }));
+    const store = new SupabaseStore("http://localhost:54321", "test-key");
+    (store as unknown as { db: unknown }).db = client;
+    await store.upsertComments(VENUE, [{ ...base, network: "facebook", comment_id: "fb1" }, { ...base, network: "facebook", comment_id: "fb2" }]);
+    const batches = upserted(calls);
+    expect(batches).toHaveLength(1);
+    for (const r of batches[0]) {
+      expect(r).not.toHaveProperty("rating");
+      expect(r).not.toHaveProperty("review_updated_at");
+    }
+  });
+});

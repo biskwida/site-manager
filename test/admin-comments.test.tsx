@@ -5,7 +5,7 @@ import { CommentsCard } from "@/app/admin/[slug]/components/CommentsCard";
 import { LangProvider } from "@/src/i18n";
 import { DICTS } from "@/src/i18n/dicts";
 import { adminAction, adminOverview } from "@/src/server/admin";
-import { adminCommentAction, commentsOverview, parseAdminCommentAction, type CommentsOverview } from "@/src/server/admin-comments";
+import { adminCommentAction, commentsOverview, parseAdminCommentAction, type AdminCommentAction, type CommentsOverview } from "@/src/server/admin-comments";
 import { runPendingSyncs } from "@/src/destinations/sync";
 import { createCommentSet, type ProposeDeps } from "@/src/social/comments-propose";
 import { at, connectedVenue, MIN, T0 } from "./comments-helpers";
@@ -42,6 +42,33 @@ describe("commentsOverview", () => {
     const full = await adminOverview(t.store, await t.store.getVenue(t.venue.id), T0, "https://site.example");
     expect(full.comments?.pending).toHaveLength(2);
     expect(JSON.stringify(full)).not.toContain(t.ig.token);
+  });
+});
+
+describe("Google reviews in the Comments card", () => {
+  async function withReview() {
+    const t = await setup();
+    const [review] = await t.store.upsertComments(t.venue.id, [
+      { network: "google", post_ref: "accounts/1/locations/2", comment_id: "accounts/1/locations/2/reviews/r1", parent_id: null, author_id: "", author_name: "Maria K.", text: "Great coffee", created_at: at(-5 * MIN).toISOString(), seen_at: T0.toISOString(), status: "new", post_caption: "", rating: 5 },
+    ]);
+    return { ...t, review };
+  }
+  it("commentsOverview carries the rating (null for Meta comments)", async () => {
+    const t = await withReview();
+    const o = await commentsOverview(t.store, await t.store.getVenue(t.venue.id), T0);
+    const g = o.pending.find((c) => c.network === "google");
+    expect(g).toMatchObject({ author_name: "Maria K.", rating: 5, status: "new" });
+    expect(o.pending.find((c) => c.author_name === "maria.k")?.rating).toBeNull();
+  });
+  it("a review cannot be hidden or deleted from the dashboard: refused as invalid, nothing created", async () => {
+    const t = await withReview();
+    const before = (await t.store.listChangeSets(t.venue.id, { status: ["proposed", "applied"] })).length;
+    for (const action of ["hide_comment", "delete_comment"]) {
+      const r = await adminCommentAction(t.d, t.venue, { action, comment_id: t.review.id } as unknown as AdminCommentAction);
+      expect(r).toMatchObject({ ok: false, code: "invalid" });
+    }
+    expect(await t.store.getComment(t.review.id)).toMatchObject({ status: "new", change_set_id: null });
+    expect(await t.store.listChangeSets(t.venue.id, { status: ["proposed", "applied"] })).toHaveLength(before);
   });
 });
 
@@ -221,9 +248,9 @@ describe("adminCommentAction", () => {
 describe("CommentsCard", () => {
   const overview: CommentsOverview = {
     mode: "each", digest_hour: 9, limit: { used: 12, limit: 300 }, needs_reconnect: { facebook: true, instagram: false },
-    pending: [{ id: "c1", network: "instagram", author_name: "maria.k", text: "Имате ли безглутенови?", post_caption: "Днешното предложение", post_permalink: "https://www.instagram.com/p/C1/", created_at: T0.toISOString(), status: "new", draft_text: "Да, имаме.", draft_kind: "question", change_set_id: null, reply_text: null, replied_at: null, posting: false },
-      { id: "c2", network: "facebook", author_name: "bot", text: "Buy followers", post_caption: "", post_permalink: null, created_at: T0.toISOString(), status: "proposed", draft_text: null, draft_kind: "spam", change_set_id: "cs-1", reply_text: null, replied_at: null, posting: false }],
-    answered: [{ id: "c3", network: "instagram", author_name: "ivan", text: "Отлично", post_caption: "Стар пост", post_permalink: null, created_at: T0.toISOString(), status: "replied", draft_text: "Благодарим!", draft_kind: "praise", change_set_id: "cs-0", reply_text: "Благодарим!", replied_at: T0.toISOString(), posting: false }],
+    pending: [{ id: "c1", network: "instagram", author_name: "maria.k", text: "Имате ли безглутенови?", post_caption: "Днешното предложение", post_permalink: "https://www.instagram.com/p/C1/", created_at: T0.toISOString(), status: "new", draft_text: "Да, имаме.", draft_kind: "question", change_set_id: null, reply_text: null, replied_at: null, posting: false, rating: null },
+      { id: "c2", network: "facebook", author_name: "bot", text: "Buy followers", post_caption: "", post_permalink: null, created_at: T0.toISOString(), status: "proposed", draft_text: null, draft_kind: "spam", change_set_id: "cs-1", reply_text: null, replied_at: null, posting: false, rating: null }],
+    answered: [{ id: "c3", network: "instagram", author_name: "ivan", text: "Отлично", post_caption: "Стар пост", post_permalink: null, created_at: T0.toISOString(), status: "replied", draft_text: "Благодарим!", draft_kind: "praise", change_set_id: "cs-0", reply_text: "Благодарим!", replied_at: T0.toISOString(), posting: false, rating: null }],
   };
   const post = async () => ({ ok: true, data: null });
   const render = (lang: "bg" | "en", o: CommentsOverview | null) => renderToStaticMarkup(<LangProvider defaultLang={lang}><CommentsCard overview={o} post={post} tz="Europe/Sofia" /></LangProvider>);
@@ -258,6 +285,25 @@ describe("CommentsCard", () => {
       expect(html).not.toContain("<textarea");
     }
     expect(render("bg", overview)).not.toContain(DICTS.bg["admin.comments.posting"]);
+  });
+  it("a Google review shows its stars and a Google review chip, with Reply and Ignore like a comment", () => {
+    const review = { ...overview.pending[0], id: "g1", network: "google" as const, author_name: "Maria K.", text: "Great coffee", post_caption: "", post_permalink: null, draft_kind: "praise", rating: 5 };
+    const en = render("en", { ...overview, pending: [review], answered: [] });
+    expect(en).toContain("★★★★★");
+    expect(en).toContain('aria-label="5 of 5"');
+    expect(en).toContain("Google review");
+    expect(en).toContain(`>${DICTS.en["admin.comments.reply"]}<`);
+    expect(en).toContain(`>${DICTS.en["admin.comments.ignore"]}<`);
+    const bg = render("bg", { ...overview, pending: [{ ...review, rating: 4 }], answered: [] });
+    expect(bg).toContain("★★★★☆");
+    expect(bg).toContain('aria-label="4 от 5"');
+    expect(bg).toContain("Отзив в Google");
+    // a Meta comment has neither
+    const meta = render("en", overview);
+    expect(meta).not.toContain("★");
+    expect(meta).not.toContain(`>${DICTS.en["admin.comments.googleBadge"]}<`);
+    expect(DICTS.en["admin.comments.intro"]).toContain("Google reviews appear here too.");
+    expect(DICTS.bg["admin.comments.intro"]).toContain("Тук са и отзивите в Google.");
   });
   it("renders in English and shows the empty state without a connected network", () => {
     const en = render("en", overview);

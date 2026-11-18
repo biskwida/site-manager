@@ -129,7 +129,8 @@ export async function makeServerDeps(o: DepsOptions): Promise<ServerDeps> {
     : null;
   if (billing) s.billingConfig = billing.config;
   const destinationSecretKey = resolveSecretKey(config.destinationSecretKey, isMemory, log);
-  const sync: SyncDeps | null = destinationSecretKey ? { store: s, secretKey: destinationSecretKey, log } : null;
+  const google = config.googleClientId && config.googleClientSecret ? { clientId: config.googleClientId, clientSecret: config.googleClientSecret } : null;
+  const sync: SyncDeps | null = destinationSecretKey ? { store: s, secretKey: destinationSecretKey, log, google } : null;
   // Every apply (bot button, dashboard, tick, agent) goes through store2 so wp_* rows reach the site right after the apply.
   const store2: Store = sync ? withDestinationSync(s, sync) : s;
   // One classifier names the language of the owner's longer Latin-script words (botDeps) and of a customer's comment (the reply
@@ -192,7 +193,7 @@ export async function makeServerDeps(o: DepsOptions): Promise<ServerDeps> {
 
   async function handleRun(r: RunRequest): Promise<void> {
     try {
-      await runTick({ store: store2, messenger, now: new Date(), venueId: r.venueId, deployer, sync, comments, billing });
+      await runTick({ store: store2, messenger, now: new Date(), venueId: r.venueId, deployer, sync, comments, billing, baseUrl: config.publicBaseUrl });
     } catch (e) {
       console.error("[tick] per-webhook tick failed:", e instanceof Error ? e.message : e);
     }

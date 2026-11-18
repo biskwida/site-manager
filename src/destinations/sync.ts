@@ -3,6 +3,8 @@
 import { isWpEntity, type ChangeSet, type Lang } from "../domain/types";
 import { afterSocialPush } from "../social/comments-status";
 import type { DestinationSync, Store } from "../store/types";
+import type { GoogleCreds } from "./google-api";
+import { googleSyncLine } from "./google-lines";
 import { adapterFor } from "./registry";
 import { decryptSecrets, encryptSecrets } from "./secrets";
 import { socialMissingLines, socialSyncLine } from "./social-lines";
@@ -16,6 +18,8 @@ export interface SyncDeps {
   log?: (s: string) => void;
   /** Waits between Instagram container polls; default a real timer. */
   sleep?: (ms: number) => Promise<void>;
+  /** Claudia's Google OAuth client (GOOGLE_CLIENT_ID / GOOGLE_CLIENT_SECRET); null or absent = Google pushes fail as not connected. */
+  google?: GoogleCreds | null;
 }
 export const BACKOFF_MS = [60_000, 300_000, 1_500_000, 7_200_000, 36_000_000] as const;
 export const MAX_ATTEMPTS = 5;
@@ -24,8 +28,8 @@ export const MAX_ATTEMPTS = 5;
 export const HOOK_LEASE_MS = 5 * 60_000;
 /** How long one run holds a row while pushing it (claimSync); a run that crashed frees it after this. */
 export const PUSH_LEASE_MS = 5 * 60_000;
-/** Error codes after which a social destination is marked "error" (the connection itself is broken); the comment poller uses the same set. */
-export const CONNECTION_CODES: ReadonlySet<string> = new Set(["sm_meta_token", "sm_meta_permission"]);
+/** Error codes after which a social or Google destination is marked "error" (the connection itself is broken); the comment poller uses the same set. */
+export const CONNECTION_CODES: ReadonlySet<string> = new Set(["sm_meta_token", "sm_meta_permission", "sm_google_revoked", "sm_google_scope", "sm_google_permission"]);
 
 /**
  * One pending row per destination that has something to push for this set. `leaseMs` moves the row's first
@@ -86,6 +90,13 @@ export async function runSync(d: SyncDeps, listed: DestinationSync, now: Date): 
     const saveConnection = async (config: Record<string, unknown>, fresh: Record<string, string>) => {
       await d.store.upsertDestination({ venue_id: dest.venue_id, kind: dest.kind, config, secrets: encryptSecrets(fresh, key), status: dest.status });
     };
+    const patchConfig = async (set: Record<string, unknown>, remove: readonly string[] = []) => {
+      const current = await d.store.getDestination(dest.venue_id, dest.kind);
+      if (!current || current.id !== dest.id || current.status === "disconnected") return; // disconnected during the push
+      const config: Record<string, unknown> = { ...current.config, ...set };
+      for (const k of remove) delete config[k];
+      await d.store.updateDestination(current.id, { config });
+    };
     // Written to the row at once (before a call whose answer might be lost), so a retry knows what may already be out.
     const checkpoint = async (partial: Record<string, unknown>) => {
       await d.store.updateSync(sync.id, { result: partial, updated_at: now.toISOString() });
@@ -93,12 +104,12 @@ export async function runSync(d: SyncDeps, listed: DestinationSync, now: Date): 
     try {
       const cs = await d.store.getChangeSet(sync.change_set_id);
       const prior = await resultsOf(sync.change_set_id);
-      return await adapter.push({ venue, destination: dest, secrets, changeSet: cs, changes: adapter.relevant(cs.changes), fetch: d.fetch, now, prior, resultsOf, saveConnection, sleep: d.sleep, checkpoint });
+      return await adapter.push({ venue, destination: dest, secrets, changeSet: cs, changes: adapter.relevant(cs.changes), fetch: d.fetch, now, prior, resultsOf, saveConnection, patchConfig, sleep: d.sleep, checkpoint, loadSite: () => d.store.getSite(venue.id), google: d.google });
     } catch (e) {
       return connectionError(e, true);
     }
   })();
-  const social = dest.kind === "facebook" || dest.kind === "instagram";
+  const social = dest.kind === "facebook" || dest.kind === "instagram" || dest.kind === "google";
   // Comment sets: the social_comments rows follow what went out (never fails the push; no comment text in the log).
   const commentStatus = (r: Record<string, unknown> | null | undefined) =>
     social && r ? afterSocialPush(d.store, sync, r, now.toISOString()).catch((e) => log(`[comments] status update after push ${sync.id} failed: ${e instanceof Error ? e.message : String(e)}`)) : undefined;
@@ -114,8 +125,8 @@ export async function runSync(d: SyncDeps, listed: DestinationSync, now: Date): 
   const nextAt = new Date(now.getTime() + (BACKOFF_MS[Math.min(attempts, BACKOFF_MS.length) - 1] ?? BACKOFF_MS[BACKOFF_MS.length - 1])).toISOString();
   await d.store.updateSync(sync.id, { status: giveUp ? "failed" : "pending", attempts, next_at: nextAt, last_error: stored, updated_at: now.toISOString(), leased_until: null, ...(result.partial ? { result: result.partial } : {}) });
   await commentStatus(result.partial);
-  // WordPress: any final failure marks the connection. Facebook/Instagram: only a broken token or a missing permission does;
-  // a refused photo or a Meta outage says nothing about the connection.
+  // WordPress: any final failure marks the connection. Facebook/Instagram/Google: only a broken token or a missing permission
+  // does; a refused photo, refused hours or an outage says nothing about the connection.
   if (giveUp && (!social || CONNECTION_CODES.has(result.code ?? ""))) await d.store.updateDestination(dest.id, { status: "error", last_error: stored });
   log(`[destinations] ${dest.kind} push for set ${sync.change_set_id} failed (attempt ${attempts}${giveUp ? ", giving up" : `, next at ${nextAt}`}): ${result.error}`);
   return result;
@@ -211,6 +222,7 @@ export async function syncLines(store: Store, changeSetId: string, lang: Lang): 
   const lines = rows.map((s) => {
     const kind = String(s.payload.kind ?? "destination");
     if (kind === "facebook" || kind === "instagram") return socialSyncLine(kind, s.status, s.result, s.last_error, lang);
+    if (kind === "google") return googleSyncLine(s.status, s.result, s.last_error, lang);
     const name = kind === "wordpress" ? "WordPress" : kind;
     if (s.status === "done") return lang === "bg" ? `${name}: обновено ✅` : `${name}: updated ✅`;
     if (s.status === "pending") return lang === "bg" ? `${name}: не успях да обновя, ще опитам пак` : `${name}: update failed, will retry`;

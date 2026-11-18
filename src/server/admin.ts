@@ -47,6 +47,8 @@ export interface AdminOverview {
   connected_apps: ConnectedApp[];
   /** "Facebook and Instagram" card. */
   social?: SocialOverview;
+  /** "Google listing" card (Google Business Profile, 2026-11-13). */
+  google?: GoogleOverview;
   /**
    * Change limit (src/domain/limits.ts): changes applied this calendar month in the venue's zone; limit null = unlimited. In a free
    * trial (billing on, no subscription) it counts the whole trial instead and `trial` is true ("Changes in your trial: 6 / 20").
@@ -100,7 +102,7 @@ function billingOverview(venue: Venue, now: Date, usage: ChangeUsage): BillingOv
 /** How many proposed sets the generic pending list shows. */
 const PENDING_MAX = 20;
 
-export async function adminOverview(store: Store, venue: Venue, now: Date, baseUrl = "", opts: { hosted?: boolean; social?: { facebook: boolean; instagram: boolean }; billing?: boolean } = {}): Promise<AdminOverview> {
+export async function adminOverview(store: Store, venue: Venue, now: Date, baseUrl = "", opts: { hosted?: boolean; social?: { facebook: boolean; instagram: boolean }; google?: boolean; billing?: boolean } = {}): Promise<AdminOverview> {
   const [pending, scheduled, log, site, members] = await Promise.all([
     // Comment sets are decided in the Comments card or the chat only: fetched wider, then left out of the generic list.
     store.listChangeSets(venue.id, { status: ["proposed"], limit: 200 }),
@@ -137,6 +139,7 @@ export async function adminOverview(store: Store, venue: Venue, now: Date, baseU
     wordpress: await wordPressOverview(store, venue.id),
     connected_apps: connectedApps(members),
     social: await socialOverview(store, venue.id, opts.social ?? { facebook: false, instagram: false }),
+    google: await googleOverview(store, venue.id, opts.google ?? false),
     changes_this_month: changesThisMonth(usage),
     comments: await commentsOverview(store, venue, now),
     ...(opts.billing ? { billing: billingOverview(venue, now, usage) } : {}),
@@ -447,5 +450,45 @@ export async function socialOverview(store: Store, venueId: string, available: {
       summary_bg: unkeep(sets[i]?.summary_bg ?? ""), summary_en: unkeep(sets[i]?.summary_en ?? ""), updated_at: s.updated_at, last_error: s.last_error,
       links: publishedIn([s.result]).map((p) => safeLink(p.permalink)).filter((x): x is string => !!x),
     })),
+  };
+}
+
+// --- Google listing card (Google Business Profile, appended 2026-11-13) ---
+export interface GoogleAccountOverview {
+  status: DestinationStatus;
+  /** The Business Profile's name and one-line address ("" when it has none). */
+  title: string;
+  address: string;
+  connected_at: string | null;
+  /** The last successful hours push to Google; null until the first. */
+  last_hours_push_at: string | null;
+  last_review_poll_at: string | null;
+  last_error: string | null;
+  /** Google's regular hours differ from the website's and the owner has not chosen yet. */
+  hours_conflict: boolean;
+}
+export interface GoogleOverview {
+  /** This server can start the Connect (Google client id + secret + destination key). */
+  available: boolean;
+  account: GoogleAccountOverview | null;
+}
+
+/** Never includes secrets: a handful of display fields of the `google` destination row (no token, no account or location ids). */
+export async function googleOverview(store: Store, venueId: string, available: boolean): Promise<GoogleOverview> {
+  const d = await store.getDestination(venueId, "google");
+  if (!d) return { available, account: null };
+  const str = (k: string): string | null => (typeof d.config[k] === "string" ? (d.config[k] as string) : null);
+  return {
+    available,
+    account: {
+      status: d.status,
+      title: str("title") ?? "",
+      address: str("address") ?? "",
+      connected_at: str("connected_at"),
+      last_hours_push_at: str("last_hours_push_at"),
+      last_review_poll_at: str("last_review_poll_at"),
+      last_error: d.last_error,
+      hours_conflict: d.config.hours_conflict === true,
+    },
   };
 }

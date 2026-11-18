@@ -641,7 +641,7 @@ export class InMemoryStore implements Store {
     for (const r of rows) {
       if (known.has(r.comment_id)) continue;
       known.add(r.comment_id);
-      const row: SocialComment = { id: crypto.randomUUID(), venue_id: venueId, ...clone(r), post_permalink: r.post_permalink ?? null, change_set_id: null, reply_id: null, replied_at: null, draft_text: null, draft_kind: null, deferred: false, hold_attempts: 0, held_at: null };
+      const row: SocialComment = { id: crypto.randomUUID(), venue_id: venueId, ...clone(r), post_permalink: r.post_permalink ?? null, rating: r.rating ?? null, review_updated_at: r.review_updated_at ?? null, change_set_id: null, reply_id: null, replied_at: null, draft_text: null, draft_kind: null, deferred: false, hold_attempts: 0, held_at: null };
       this.comments.set(row.id, row);
       out.push(clone(row));
     }
@@ -680,10 +680,13 @@ export class InMemoryStore implements Store {
   async redactComments(before: string) {
     let n = 0;
     for (const c of this.comments.values()) {
-      if (c.created_at >= before || (c.text === "" && c.author_name === "" && c.author_id === "")) continue;
+      // A Google row also holds the reply text read from Google in draft_text: Google data is kept 30 days at most.
+      const google = c.network === "google";
+      if (c.created_at >= before || (c.text === "" && c.author_name === "" && c.author_id === "" && (!google || c.draft_text === null))) continue;
       c.text = "";
       c.author_name = "";
       c.author_id = "";
+      if (google) c.draft_text = null;
       n++;
     }
     return n;

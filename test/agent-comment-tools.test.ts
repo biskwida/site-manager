@@ -167,6 +167,87 @@ describe("reply_to_comments", () => {
   });
 });
 
+/** A Google review row as the review poll stores it (no Meta author id, no post caption). */
+const reviewRow = (id: string, author_name: string, text: string, rating: number) => ({
+  network: "google" as const, post_ref: "accounts/1/locations/2", comment_id: `accounts/1/locations/2/reviews/${id}`, parent_id: null, author_id: "", author_name, text,
+  created_at: at(-4 * MIN).toISOString(), seen_at: T0.toISOString(), status: "new" as const, post_caption: "", rating,
+});
+
+/** setup() plus a waiting five-star Google review by Maria K. */
+async function withReview() {
+  const t = await setup();
+  const [review] = await t.store.upsertComments(t.venue.id, [reviewRow("r1", "Maria K.", "Чудесно кафе!", 5)]);
+  await t.store.updateComment(review.id, { draft_text: "Благодарим, Мария!", draft_kind: "praise" });
+  return { ...t, review };
+}
+
+describe("Google reviews in the comment tools", () => {
+  it("list_comments labels a review with its stars and counts the waiting reviews in the note", async () => {
+    const t = await withReview();
+    const r = await call(t.tools, "list_comments", {});
+    const rows = r.comments as Record<string, unknown>[];
+    expect(rows.find((c) => c.id === t.review.id)).toMatchObject({ network: "google", rating: 5, label: "★★★★★ Google review from Maria K.", draft: "Благодарим, Мария!" });
+    expect(r.note).toContain("1 Google review waiting");
+    const ig = rows.find((c) => c.id === t.maria.id)!;
+    expect(ig).not.toHaveProperty("label");
+    expect(ig).not.toHaveProperty("rating");
+    expect((t.tools.find((x) => x.name === "list_comments") as { description?: string }).description).toContain("Google reviews");
+  });
+  it("the note counts several reviews, and says nothing about reviews when none wait", async () => {
+    const t = await withReview();
+    await t.store.upsertComments(t.venue.id, [reviewRow("r2", "Ivan", "", 3)]);
+    expect((await call(t.tools, "list_comments", {})).note).toContain("2 Google reviews waiting");
+    const plain = await setup();
+    expect((await call(plain.tools, "list_comments", {})).note).not.toContain("Google");
+  });
+  it("reply_to_comments: one review makes one set with a google row and the review's message", async () => {
+    const t = await withReview();
+    const r = await call(t.tools, "reply_to_comments", { replies: [{ comment_id: t.review.id, reply_text: "Благодарим, Мария!" }] });
+    expect(r).toMatchObject({ status: "proposed", rows: 1 });
+    const cs = await t.store.getChangeSet(String(r.change_set_id));
+    expect(cs.changes).toHaveLength(1);
+    expect(cs.changes[0].after).toMatchObject({ network: "google" });
+    expect(t.messenger.sent.find((m) => m.setId === cs.id)?.text).toContain("Нов отзив в Google от Maria K.");
+  });
+  it("a review never shares a set: a review and two Instagram comments make two sets, the review alone", async () => {
+    const t = await withReview();
+    const r = await call(t.tools, "reply_to_comments", { replies: [
+      { comment_id: t.maria.id, reply_text: "Да, имаме." },
+      { comment_id: t.review.id, reply_text: "Благодарим, Мария!" },
+      { comment_id: t.pesho.id, reply_text: "В 8:00." },
+    ] });
+    expect(r).toMatchObject({ status: "proposed", rows: 3 });
+    const sets = await Promise.all((r.change_set_ids as string[]).map((id) => t.store.getChangeSet(id)));
+    expect(sets).toHaveLength(2);
+    const networks = (s: (typeof sets)[number]) => s.changes.map((c) => (c.after as { network: string }).network);
+    const google = sets.filter((s) => networks(s).includes("google"));
+    expect(google.map(networks)).toEqual([["google"]]);
+    expect(networks(sets.find((s) => s !== google[0])!)).toEqual(["instagram", "instagram"]);
+    expect(t.messenger.sent.find((m) => m.setId === google[0].id)?.text).toContain("Нов отзив в Google от Maria K.");
+  });
+  it("two reviews answered at once make two sets", async () => {
+    const t = await withReview();
+    const [second] = await t.store.upsertComments(t.venue.id, [reviewRow("r2", "Ivan", "Добре", 4)]);
+    const r = await call(t.tools, "reply_to_comments", { replies: [{ comment_id: t.review.id, reply_text: "Благодарим!" }, { comment_id: second.id, reply_text: "Благодарим, Иване!" }] });
+    expect(r).toMatchObject({ status: "proposed", rows: 2 });
+    expect((r.change_set_ids as string[]).length).toBe(2);
+  });
+  it("hide or delete on a review is refused before anything is cancelled or created", async () => {
+    const t = await withReview();
+    const first = await call(t.tools, "reply_to_comments", { replies: [{ comment_id: t.review.id, reply_text: "Благодарим!" }] });
+    const sent = t.messenger.sent.length;
+    for (const action of ["hide", "delete"] as const) {
+      const r = await call(makeTools(t.deps), "reply_to_comments", { replies: [{ comment_id: t.review.id, action }] });
+      expect(r).toEqual({ error: "A Google review cannot be hidden or deleted; reply to it or leave it." });
+    }
+    expect((await t.store.getChangeSet(String(first.change_set_id))).status).toBe("proposed");
+    expect(await t.fresh(t.review)).toMatchObject({ status: "proposed", change_set_id: first.change_set_id });
+    expect(t.messenger.concluded).toEqual([]);
+    expect(t.messenger.sent.length).toBe(sent);
+    expect((await t.store.listChangeSets(t.venue.id, { status: ["proposed"] })).map((s) => s.id)).toEqual([first.change_set_id]);
+  });
+});
+
 describe("cancel_change_set on a comment set", () => {
   it("refuses and points to ❌ on the proposal or the dashboard's comments card, in the owner's language; nothing changes", async () => {
     const t = await setup();

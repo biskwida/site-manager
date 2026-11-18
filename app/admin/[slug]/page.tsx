@@ -5,6 +5,7 @@ import { DICTS } from "@/src/i18n/dicts";
 import { adminOverview } from "@/src/server/admin";
 import { authorizeAdminAccess } from "@/src/server/admin-auth";
 import { getServerDeps } from "@/src/server/deps";
+import { googleAvailability } from "@/src/server/google-connect";
 import { socialAvailability } from "@/src/server/social-connect";
 import { AdminPanel } from "./components/AdminPanel";
 import { InvalidKey } from "./components/InvalidKey";
@@ -31,7 +32,7 @@ export default async function Page(props: PageProps<"/admin/[slug]">) {
       <LangProvider defaultLang="bg"><InvalidKey /></LangProvider>
     );
   }
-  const overview = await adminOverview(deps.store, venue, new Date(), deps.config.publicBaseUrl, { hosted: deps.deployer === null, social: socialAvailability(deps.config, deps.destinationSecretKey) });
+  const overview = await adminOverview(deps.store, venue, new Date(), deps.config.publicBaseUrl, { hosted: deps.deployer === null, social: socialAvailability(deps.config, deps.destinationSecretKey), google: googleAvailability(deps.config, deps.destinationSecretKey) });
   // Until an owner account is linked, offer "log in with your email next time".
   // A failing lookup hides the banner: the legacy page never breaks over it.
   const hasAccount = await deps.store.hasOwnerAccount(venue.id).catch(() => true);

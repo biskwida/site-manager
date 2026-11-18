@@ -1,7 +1,7 @@
 // src/domain/comment-preview.ts
 // Preview lines for social_reply and social_moderate rows (replies and moderation of customer comments on the venue's
-// Facebook Page / Instagram account), and the set_comment_mode label. Pure; both languages; undo-safe (an inverted row has
-// after = null).
+// Facebook Page / Instagram account, and replies to its Google reviews), the review stars, and the set_comment_mode label. Pure
+// (the dashboard's client component imports it); both languages; undo-safe (an inverted row has after = null).
 import { keep, quote, tr } from "./format";
 import { NETWORK_NAMES, type Change, type Lang, type Row } from "./types";
 
@@ -14,6 +14,13 @@ export function excerpt(text: string, max = EXCERPT_MAX): string {
   const chars = Array.from(line);
   const cut = line.length < all.length || chars.length > max;
   return cut ? `${chars.slice(0, max - 1).join("")}…` : line;
+}
+
+/** "★★★★☆" for 4 stars; "" without a rating. */
+export function reviewStars(rating: number | null): string {
+  if (rating === null || !Number.isFinite(rating)) return "";
+  const n = Math.min(5, Math.max(0, Math.round(rating)));
+  return "★".repeat(n) + "☆".repeat(5 - n);
 }
 
 /** "при всеки" / "веднъж дневно в 10:00" / "изключени" for a venue's comment_mode + comment_digest_hour. */
@@ -36,6 +43,13 @@ export function commentPreviewLines(c: Change, lang: Lang): string[] {
   // The customer's name and words, and the reply drafted for them, stay as written in any language (kept).
   const author = keep(str(row.author_name)) || tr(lang, "клиент", "a customer");
   const text = quote(keep(excerpt(str(row.comment_text))), lang);
+  if (c.entity === "social_reply" && network === "google") {
+    const stars = reviewStars(typeof row.rating === "number" ? row.rating : null);
+    const s = stars ? ` ${stars}` : "";
+    if (c.after === null) return [`• ${tr(lang, `Изтрива отговора на отзива в Google от ${author}`, `Deletes the reply to ${author}'s Google review`)}`];
+    const said = str(row.comment_text).trim() ? text : tr(lang, "(само оценка, без текст)", "(rating only, no text)");
+    return [`• ${tr(lang, `Отговор на отзива в Google от ${author}${s}`, `Reply to ${author}'s Google review${s}`)}: ${said} → ${quote(keep(str(row.reply_text)), lang)}`];
+  }
   if (c.entity === "social_reply") {
     if (c.after === null) return [`• ${tr(lang, `Изтрива отговора на коментара от ${author}`, `Deletes the reply to ${author}'s comment`)} (${net})`];
     return [`• ${tr(lang, `Отговор на коментар от ${author}`, `Reply to a comment by ${author}`)} (${net}): ${text} → ${quote(keep(str(row.reply_text)), lang)}`];

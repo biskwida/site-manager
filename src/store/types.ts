@@ -428,9 +428,13 @@ export interface SocialComment {
   hold_attempts: number;
   /** When the last of those failed sends was (null when none). */
   held_at: string | null;
+  /** Stars, 1-5: Google reviews only (null for Meta comments). */
+  rating: number | null;
+  /** Google: when the reviewer last edited the review (null for Meta comments). */
+  review_updated_at: string | null;
 }
-export type NewSocialComment = Pick<SocialComment, "network" | "post_ref" | "comment_id" | "parent_id" | "author_id" | "author_name" | "text" | "created_at" | "seen_at" | "status" | "post_caption"> & { post_permalink?: string | null };
-export type SocialCommentPatch = Partial<Pick<SocialComment, "status" | "change_set_id" | "reply_id" | "replied_at" | "draft_text" | "draft_kind" | "deferred" | "hold_attempts" | "held_at">>;
+export type NewSocialComment = Pick<SocialComment, "network" | "post_ref" | "comment_id" | "parent_id" | "author_id" | "author_name" | "text" | "created_at" | "seen_at" | "status" | "post_caption"> & { post_permalink?: string | null; rating?: number | null; review_updated_at?: string | null };
+export type SocialCommentPatch = Partial<Pick<SocialComment, "status" | "change_set_id" | "reply_id" | "replied_at" | "draft_text" | "draft_kind" | "deferred" | "hold_attempts" | "held_at" | "text" | "author_name" | "rating" | "review_updated_at" | "created_at">>;
 export interface ListCommentsOpts {
   status?: CommentStatus[];
   limit?: number;
@@ -454,7 +458,7 @@ export interface Store {
   purgeComments(before: string): Promise<number>;
   /**
    * The 30-day rule for the rows themselves: blanks text, author_name and author_id (the commenter's Meta id) of every venue's rows with created_at < before that
-   * still hold any (the row, its status and replied_at stay for the monthly comment count). Returns how many it blanked.
+   * still hold any (Google rows also lose draft_text, which can hold a reply read from Google) (the row, its status and replied_at stay for the monthly comment count). Returns how many it blanked.
    */
   redactComments(before: string): Promise<number>;
   /**

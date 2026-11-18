@@ -3,6 +3,9 @@ import { betaZodTool } from "@anthropic-ai/sdk/helpers/beta/zod";
 import { z } from "zod";
 import type { Messenger } from "../bot/messenger";
 import type { WordPressClient } from "../destinations/wordpress-client";
+import { isHoursChange } from "../destinations/google";
+import type { GoogleConfig } from "../destinations/google-api";
+import { formatGooglePeriods } from "../destinations/google-hours";
 import { allergenName, allergenWarnings, suggestAllergens } from "../domain/allergens";
 import { invertChanges, isIso, planChanges, type PlanContext } from "../domain/changes";
 import { isSoldOut, visibleItems } from "../domain/effective";
@@ -43,8 +46,8 @@ export interface AgentDeps {
   source?: ChangeSource;
   /** The venue's WordPress site, when connected (Task 6 registers the wp_* tools). */
   wordpress?: WordPressClient | null;
-  /** Networks connected for posting (registers social_post when either is true). */
-  social?: { facebook: boolean; instagram: boolean } | null;
+  /** Connected networks (socialConnections): Facebook or Instagram registers social_post; any of the three registers the comment tools. `google` absent = not connected. */
+  social?: { facebook: boolean; instagram: boolean; google?: boolean } | null;
   /** Reads Instagram and Facebook comments right now (list_comments runs it first); absent = list_comments answers from the saved comments only. */
   liveComments?: LiveComments | null;
   /** The venue's Instagram account for propose_boost's follower and post numbers; absent, null or resolving null = those inputs are missing. */
@@ -123,12 +126,13 @@ export function resolveTokens(ops: ProposeInput["changes"], site: SiteState, now
  */
 export type ProposeInput = Omit<z.infer<typeof ProposeSchema>, "changes"> & { changes: (ChangeInput | Extract<ChangeOp, { op: "set_comment_mode" }>)[] };
 
-/** The Telegram message for a proposal: preview, optional schedule line, and the question ("save" for an ad plan). */
-export function proposalText(preview: string, lang: Lang, applyAt: string | null, tz: string, opts: { save?: boolean } = {}): string {
+/** The Telegram message for a proposal: preview, optional extra line (where else it goes), optional schedule line, and the question ("save" for an ad plan). */
+export function proposalText(preview: string, lang: Lang, applyAt: string | null, tz: string, opts: { save?: boolean; extra?: string } = {}): string {
+  const also = opts.extra ? `\n\n${opts.extra}` : "";
   const when = applyAt ? `\n\n${tr(lang, "⏰ Ще се приложи на", "⏰ Will be applied on")} ${formatDateTime(applyAt, lang, tz)}` : "";
   // A saved ad plan (propose_boost) is saved, not applied.
   const question = opts.save ? tr(lang, "Да запазя ли плана?", "Save the plan?") : tr(lang, "Да приложа ли?", "Apply this?");
-  return `${preview}${when}\n\n${question}`;
+  return `${preview}${also}${when}\n\n${question}`;
 }
 
 const NEXT_STEP: Record<ChangeSet["status"], string> = {
@@ -244,6 +248,9 @@ export function makeTools(deps: AgentDeps) {
     throw new Error(`Monthly change limit reached (${u.used}/${u.limit} this month): nothing was proposed. Do not retry, split or rephrase this request; reply to the owner with exactly this line: "${line}" Undo still works.`);
   };
 
+  /** The venue's Google listing destination, if it has one (any status). */
+  const googleDestination = async () => (await d.store.listDestinations(d.venueId)).find((x) => x.kind === "google") ?? null;
+
   /** Shared by propose_changes and schedule_changes. */
   const propose = async (input: ProposeInput, applyAt: string | null) => {
     // The plan and payment gate first: a set made only of set_comment_mode rows is a comments feature, anything else is a site change.
@@ -274,20 +281,26 @@ export function makeTools(deps: AgentDeps) {
       const first = ops[0] as Extract<ChangeOp, { op: "set_sold_out" }>;
       return { change_set_id: cs.id, status: "applied", preview: mine(p), sold_out_until: first.until };
     }
-    const messageRef = await d.messenger.sendProposal(d.chatRef, proposalText(mine(p), lang, applyAt, s.venue.tz), cs.id, lang);
+    // Hours and holidays also go to a connected Google listing after ✅ (src/destinations/google.ts); the owner sees that here.
+    const toGoogle = changes.some(isHoursChange) && (await googleDestination())?.status === "connected";
+    const extra = toGoogle ? tr(lang, "Отива и в: Google профил", "Also goes to: Google listing") : undefined;
+    const messageRef = await d.messenger.sendProposal(d.chatRef, proposalText(mine(p), lang, applyAt, s.venue.tz, { extra }), cs.id, lang);
     if (messageRef !== null) await d.store.updateChangeSet(cs.id, { message_ref: messageRef });
     return { change_set_id: cs.id, status: "proposed", preview: mine(p), apply_at: applyAt, next: "The owner decides with the buttons. Reply with at most one short sentence, or nothing." };
   };
 
   const getSite = betaZodTool({
     name: "get_site",
-    description: "The venue's texts, hours, today's status, holidays, announcements, theme, images, the current time with its UTC offset, the member's language and role, and any pending proposal. Call this first when the request touches anything but the menu.",
+    description: "The venue's texts, hours, today's status, holidays, announcements, theme, images, the current time with its UTC offset, the member's language and role, any pending proposal, and the connected destinations (a Google listing: connected, and while hours_conflict Google's own hours in google_hours). Call this first when the request touches anything but the menu.",
     inputSchema: z.object({}),
     run: () =>
       attempt(async () => {
         const s = await site();
         const now = d.now();
         const pending = await d.store.findProposed(d.venueId, d.chatRef);
+        const google = await googleDestination();
+        const gc = (google?.config ?? {}) as Partial<GoogleConfig>;
+        const conflict = gc.hours_conflict === true && Array.isArray(gc.google_hours);
         return {
           venue: {
             name: s.venue.name, slug: s.venue.slug, tz: s.venue.tz, default_lang: s.venue.default_lang,
@@ -308,6 +321,9 @@ export function makeTools(deps: AgentDeps) {
           member_role: d.member.role,
           public_url: `${d.baseUrl}/${s.venue.slug}`,
           pending_proposal: pending ? { id: pending.id, summary: lang === "bg" ? pending.summary_bg : pending.summary_en, apply_at: pending.apply_at } : null,
+          destinations: google
+            ? [{ kind: "google" as const, title: gc.title ?? "", connected: google.status === "connected", ...(conflict ? { hours_conflict: true as const, google_hours: formatGooglePeriods(gc.google_hours!, "en") } : {}) }]
+            : [],
         };
       }),
   });

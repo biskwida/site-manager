@@ -9,6 +9,7 @@ import { adminOverview } from "@/src/server/admin";
 import { authorizeAdminAccess } from "@/src/server/admin-auth";
 import { getServerDeps } from "@/src/server/deps";
 import { getSessionUser } from "@/src/server/session";
+import { googleAvailability } from "@/src/server/google-connect";
 import { socialAvailability } from "@/src/server/social-connect";
 
 export const dynamic = "force-dynamic";
@@ -24,7 +25,7 @@ export default async function Page(props: PageProps<"/dashboard/[slug]">) {
   // Signed in but not an owner of this slug: the same not-found page as for a slug that does not exist.
   const access = await authorizeAdminAccess(null, slug, { store: deps.store, sessionUser: async () => user }); // the user fetched above: no second getUser
   if (!access) notFound();
-  const overview = await adminOverview(deps.store, access.venue, new Date(), deps.config.publicBaseUrl, { hosted: deps.deployer === null, social: socialAvailability(deps.config, deps.destinationSecretKey), billing: Boolean(deps.config.billingEnabled) });
+  const overview = await adminOverview(deps.store, access.venue, new Date(), deps.config.publicBaseUrl, { hosted: deps.deployer === null, social: socialAvailability(deps.config, deps.destinationSecretKey), google: googleAvailability(deps.config, deps.destinationSecretKey), billing: Boolean(deps.config.billingEnabled) });
   return (
     <LangProvider defaultLang={access.venue.default_lang}>
       <AdminPanel slug={slug} initial={overview} billingJustPaid={deps.config.billingEnabled && (Array.isArray(sp.billing) ? sp.billing[0] : sp.billing) === "success"} />

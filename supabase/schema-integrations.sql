@@ -55,7 +55,7 @@ alter table public.destination_syncs add column if not exists leased_until times
 create table if not exists public.social_comments (
   id uuid primary key default gen_random_uuid(),
   venue_id uuid not null references public.venues(id) on delete cascade,
-  network text not null check (network in ('facebook', 'instagram')),
+  network text not null check (network in ('facebook', 'instagram', 'google')),
   post_ref text not null,
   comment_id text not null unique,
   parent_id text,
@@ -74,10 +74,17 @@ create table if not exists public.social_comments (
   draft_kind text,
   deferred boolean not null default false,
   hold_attempts integer not null default 0,
-  held_at timestamptz
+  held_at timestamptz,
+  rating smallint check (rating is null or rating between 1 and 5),
+  review_updated_at timestamptz
 );
 -- Proposal sends that reached no owner (2026-10-15 fix wave): after 5 the comment waits until an owner writes.
 alter table public.social_comments add column if not exists hold_attempts integer not null default 0;
 alter table public.social_comments add column if not exists held_at timestamptz;
+-- Google reviews (2026-10-31 fix wave): the third network, a star rating and the reviewer's last edit time.
+alter table public.social_comments drop constraint if exists social_comments_network_check;
+alter table public.social_comments add constraint social_comments_network_check check (network in ('facebook', 'instagram', 'google'));
+alter table public.social_comments add column if not exists rating smallint check (rating is null or rating between 1 and 5);
+alter table public.social_comments add column if not exists review_updated_at timestamptz;
 create index if not exists social_comments_venue_status_idx on public.social_comments (venue_id, status);
 create index if not exists social_comments_created_idx on public.social_comments (created_at);

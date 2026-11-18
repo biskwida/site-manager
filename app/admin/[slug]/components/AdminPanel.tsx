@@ -10,6 +10,7 @@ import { CommentsCard } from "./CommentsCard";
 import { Empty, Section } from "./bits";
 import { PendingList, ScheduledList } from "./Decisions";
 import { DomainCard } from "./DomainCard";
+import { GoogleCard } from "./GoogleCard";
 import { InvalidKey } from "./InvalidKey";
 import { LockedCard } from "./LockedCard";
 import { LogList } from "./LogList";
@@ -23,7 +24,7 @@ import { SocialCard } from "./SocialCard";
  * The owner's dashboard, on a legacy admin key (`adminKey`, sent as ?key=) or on the signed-in account (no `adminKey`: the session cookie
  * goes with every same-origin request). `showAccountBanner` adds the "log in with your email" note on the key page. `billingJustPaid` is the
  * ?billing=success return from Stripe Checkout.
- * The dashboard: the site (status, template switch), the optional custom domain, decisions, schedule, sold-out items, change log with undo, connected apps, QR and links. Client-polled every 3 s. */
+ * The dashboard: the site (status, template switch), the optional custom domain, decisions, schedule, sold-out items, change log with undo, connected apps, Facebook/Instagram, the Google listing, comments and reviews, QR and links. Client-polled every 3 s. */
 export function AdminPanel({ slug, adminKey, initial, showAccountBanner = false, billingJustPaid = false }: { slug: string; adminKey?: string; initial: AdminOverview; showAccountBanner?: boolean; billingJustPaid?: boolean }) {
   const { lang, t } = useLang();
   const { overview: o, unauthorized, decide, post, refresh } = useAdminOverview(initial, slug, adminKey);
@@ -65,6 +66,8 @@ export function AdminPanel({ slug, adminKey, initial, showAccountBanner = false,
         <WordPressCard overview={o.wordpress ?? null} slug={slug} adminKey={adminKey} baseUrl={o.public_url.replace(new RegExp(`/${slug}$`), "")} tz={tz} />
         {/* A feature outside the plan is shown, not hidden: a locked card with the upgrade link (billing on only). */}
         {o.billing?.locked?.includes("social") ? <LockedCard id="social" title="admin.social.title" plan={o.billing.plan} slug={slug} /> : <SocialCard overview={o.social ?? null} slug={slug} adminKey={adminKey} tz={tz} />}
+        {/* Not plan-locked: hours and holidays on Google are site changes. */}
+        <GoogleCard overview={o.google ?? null} slug={slug} adminKey={adminKey} tz={tz} />
         {o.billing?.locked?.includes("comments") ? <LockedCard id="comments" title="admin.comments.title" plan={o.billing.plan} slug={slug} /> : <CommentsCard overview={o.comments ?? null} post={post} tz={tz} />}
         {/* Hosted mode (no deployer on this server), an own site or no website: there is no provider project of ours to attach a domain to. */}
         {!o.hosted && !o.own_site && o.site_mode !== "none" && <DomainCard overview={o} post={post} />}

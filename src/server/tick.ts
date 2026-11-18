@@ -12,9 +12,9 @@ import type { SessionUser } from "./session";
 /**
  * Auth: x-tick-secret header, Authorization: Bearer <TICK_SECRET> (Vercel Cron with CRON_SECRET), ?key=<admin token> (one venue), or
  * ?slug=<venue> with the signed-in owner's session (the account dashboard's deploy nudge; a POST then needs a same-host Origin/Referer).
- * A ?key= that does not match is refused even when a session exists.
+ * A ?key= that does not match is refused even when a session exists. `baseUrl` (default config.publicBaseUrl) is the dashboard link of the Google notices.
  */
-export async function handleTickRequest(req: Request, deps: { config: { tickSecret: string }; store: Store; messenger: Messenger; deployer?: Deployer | null; sync?: SyncDeps | null; comments?: { draft: DraftFn } | null; billing?: TrialBilling | null; sessionUser?: () => Promise<Pick<SessionUser, "id"> | null> }, now = new Date()): Promise<Response> {
+export async function handleTickRequest(req: Request, deps: { config: { tickSecret: string; publicBaseUrl?: string }; store: Store; messenger: Messenger; deployer?: Deployer | null; sync?: SyncDeps | null; comments?: { draft: DraftFn } | null; billing?: TrialBilling | null; baseUrl?: string; sessionUser?: () => Promise<Pick<SessionUser, "id"> | null> }, now = new Date()): Promise<Response> {
   const url = new URL(req.url);
   const secret = deps.config.tickSecret;
   const bearer = req.headers.get("authorization")?.replace(/^Bearer\s+/i, "");
@@ -33,6 +33,6 @@ export async function handleTickRequest(req: Request, deps: { config: { tickSecr
     if (!venue) return new Response("unauthorized", { status: 401 });
     venueId = venue.id;
   }
-  const report = await runTick({ store: deps.store, messenger: deps.messenger, now, venueId, deployer: deps.deployer ?? null, sync: deps.sync ?? null, comments: deps.comments ?? null, billing: deps.billing ?? null });
+  const report = await runTick({ store: deps.store, messenger: deps.messenger, now, venueId, deployer: deps.deployer ?? null, sync: deps.sync ?? null, comments: deps.comments ?? null, billing: deps.billing ?? null, baseUrl: deps.baseUrl ?? deps.config.publicBaseUrl });
   return Response.json({ ok: true, at: now.toISOString(), ...report });
 }

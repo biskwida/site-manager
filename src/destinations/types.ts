@@ -1,6 +1,7 @@
 // src/destinations/types.ts
-import type { Change, ChangeSet, Venue } from "../domain/types";
+import type { Change, ChangeSet, SiteState, Venue } from "../domain/types";
 import type { Destination, DestinationKind } from "../store/types";
+import type { GoogleCreds } from "./google-api";
 
 export interface PushContext {
   venue: Venue;
@@ -18,10 +19,19 @@ export interface PushContext {
   resultsOf?: (changeSetId: string) => Promise<Record<string, unknown>[]>;
   /** Replaces the destination's config and secrets (encrypted by the caller), e.g. after a token refresh. Keeps its status. */
   saveConnection?: (config: Record<string, unknown>, secrets: Record<string, string>) => Promise<void>;
+  /**
+   * Re-reads the destination and writes `set` (and removes `remove`) onto its current config, keeping every other key and the
+   * secrets as they are now. Does nothing when the destination is gone or disconnected meanwhile. Used by Google.
+   */
+  patchConfig?: (set: Record<string, unknown>, remove?: readonly string[]) => Promise<void>;
   /** Waits between polls (Instagram containers); tests pass a fake. */
   sleep?: (ms: number) => Promise<void>;
   /** Stores a partial result on the sync row right away (before a call whose answer might be lost). */
   checkpoint?: (partial: Record<string, unknown>) => Promise<void>;
+  /** The venue's site as stored now (after the apply that queued this push). */
+  loadSite?: () => Promise<SiteState>;
+  /** Claudia's Google OAuth client; null when GOOGLE_CLIENT_ID / GOOGLE_CLIENT_SECRET are not set. */
+  google?: GoogleCreds | null;
 }
 export type PushResult =
   | { ok: true; result: Record<string, unknown>; line: { bg: string; en: string } }

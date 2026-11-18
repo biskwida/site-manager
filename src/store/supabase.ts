@@ -777,13 +777,24 @@ export class SupabaseStore implements Store {
   async upsertComments(venueId: string, rows: NewSocialComment[]) {
     if (rows.length === 0 || badVenue(venueId)) return [];
     // ON CONFLICT (comment_id) DO NOTHING; RETURNING gives only the rows that were inserted.
-    const { data, error } = await this.db
-      .from("social_comments")
-      .upsert(rows.map((r) => ({ venue_id: venueId, ...r, post_permalink: r.post_permalink ?? null })), { onConflict: "comment_id", ignoreDuplicates: true })
-      .select("*");
-    if (error) throw new Error(`upsertComments: ${error.message}`);
+    // rating and review_updated_at go on Google rows only: Facebook and Instagram rows keep the key set they had before the
+    // Google migration, so they insert even where it is not applied yet. A bulk upsert needs one key set per request.
+    const google = rows.filter((r) => r.network === "google").map((r) => ({ venue_id: venueId, ...r, post_permalink: r.post_permalink ?? null, rating: r.rating ?? null, review_updated_at: r.review_updated_at ?? null }));
+    const meta = rows.filter((r) => r.network !== "google").map((r) => {
+      const row: Record<string, unknown> = { venue_id: venueId, ...r, post_permalink: r.post_permalink ?? null };
+      delete row.rating;
+      delete row.review_updated_at;
+      return row;
+    });
+    const inserted: Record<string, unknown>[] = [];
+    for (const batch of [meta, google]) {
+      if (batch.length === 0) continue;
+      const { data, error } = await this.db.from("social_comments").upsert(batch, { onConflict: "comment_id", ignoreDuplicates: true }).select("*");
+      if (error) throw new Error(`upsertComments: ${error.message}`);
+      inserted.push(...(data ?? []));
+    }
     const order = (c: SocialComment) => rows.findIndex((r) => r.comment_id === c.comment_id);
-    return (data ?? []).map(toComment).sort((a, b) => order(a) - order(b));
+    return inserted.map(toComment).sort((a, b) => order(a) - order(b));
   }
   async listComments(venueId: string, opts: ListCommentsOpts = {}) {
     if (badVenue(venueId) || (opts.changeSetId !== undefined && !UUID.test(opts.changeSetId))) return [];
@@ -820,8 +831,12 @@ export class SupabaseStore implements Store {
     return (data ?? []).length;
   }
   async redactComments(before: string) {
+    // Google rows first: they also hold the reply text read from Google in draft_text (Google data is kept 30 days at most), so a
+    // Google row with a draft left is blanked whole here and not matched again below.
+    const google = await this.db.from("social_comments").update({ text: "", author_name: "", author_id: "", draft_text: null }).eq("network", "google").lt("created_at", before).not("draft_text", "is", null).select("id");
+    if (google.error) throw new Error(`redactComments: ${google.error.message}`);
+    let n = (google.data ?? []).length;
     // Plain filters instead of an or(): rows with text left, then rows with only an author name or id left (none after the first).
-    let n = 0;
     for (const column of ["text", "author_name", "author_id"] as const) {
       const { data, error } = await this.db.from("social_comments").update({ text: "", author_name: "", author_id: "" }).lt("created_at", before).neq(column, "").select("id");
       if (error) throw new Error(`redactComments: ${error.message}`);
@@ -993,5 +1008,7 @@ export function toComment(r: Row): SocialComment {
     deferred: Boolean(r.deferred),
     hold_attempts: num(r.hold_attempts ?? 0),
     held_at: isoOrNull(r.held_at),
+    rating: r.rating == null ? null : num(r.rating),
+    review_updated_at: isoOrNull(r.review_updated_at),
   };
 }

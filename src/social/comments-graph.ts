@@ -8,7 +8,7 @@
 // still gets its comments read): Instagram GET /{ig-user}/media (no time filter, stories marked media_product_type STORY),
 // Facebook GET /{page}/posts (feed posts by the Page, since in unix seconds). One page of 25 each.
 import { GraphClient, MetaApiError, metaTime } from "../destinations/meta-graph";
-import type { CommentNetwork, ModerateAction } from "../domain/types";
+import type { MetaNetwork, ModerateAction } from "../domain/types";
 
 export const COMMENTS_PER_CALL = 50;
 /** One page of the account's posts per poll: more than a venue posts in the 14-day window. */
@@ -20,7 +20,7 @@ const FB_FIELDS = encodeURIComponent("id,message,from,created_time,parent");
 
 /** One comment as both networks are normalised to: Meta ids as strings, the author's platform id and display name, ISO time. */
 export interface IncomingComment {
-  network: CommentNetwork;
+  network: MetaNetwork;
   post_ref: string;
   comment_id: string;
   parent_id: string | null;
@@ -146,7 +146,7 @@ const OWN_REPLY_FIELDS = { instagram: encodeURIComponent("id,text,from,username"
  * account (`ownId` = the Instagram user id / Page id) with the same text, or null when there is none. Instagram reads
  * GET /{comment-id}/replies, Facebook GET /{comment-id}/comments (newest first). Errors propagate (a gone comment is notFound).
  */
-export async function findOwnReply(client: GraphClient, network: CommentNetwork, commentId: string, ownId: string, message: string): Promise<string | null> {
+export async function findOwnReply(client: GraphClient, network: MetaNetwork, commentId: string, ownId: string, message: string): Promise<string | null> {
   const path = network === "instagram"
     ? `/${enc(commentId)}/replies?fields=${OWN_REPLY_FIELDS.instagram}&limit=${COMMENTS_PER_CALL}`
     : `/${enc(commentId)}/comments?fields=${OWN_REPLY_FIELDS.facebook}&order=reverse_chronological&limit=${COMMENTS_PER_CALL}`;

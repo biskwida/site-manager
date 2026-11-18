@@ -425,9 +425,11 @@ export function isExternalEntity(e: string): e is WpEntity | SocialEntity {
 }
 
 // --- Comment replies (2026-10-15) ---
-export type CommentNetwork = "facebook" | "instagram";
+export type CommentNetwork = "facebook" | "instagram" | "google";
+/** The networks that Meta's Graph API serves: the functions that talk to Meta take this, so the compiler decides what Google does there. */
+export type MetaNetwork = "facebook" | "instagram";
 /** The one display name per network (previews, sync lines, dashboard). */
-export const NETWORK_NAMES: Readonly<Record<CommentNetwork, string>> = { facebook: "Facebook", instagram: "Instagram" };
+export const NETWORK_NAMES: Readonly<Record<CommentNetwork, string>> = { facebook: "Facebook", instagram: "Instagram", google: "Google" };
 /** How the owner hears about new comments: one proposal each, one digest a day, or only on the dashboard. */
 export type CommentMode = "each" | "digest" | "off";
 export const COMMENT_MODES: readonly CommentMode[] = ["each", "digest", "off"];
@@ -441,6 +443,8 @@ export interface SocialReplyRow {
   comment_text: string;
   reply_text: string;
   permalink?: string;
+  /** Stars, 1-5: Google review rows only. */
+  rating?: number;
 }
 /** `after` of a social_moderate row (entity_id = Meta's comment id). Undo of hide un-hides; a delete cannot be undone. */
 export interface SocialModerateRow {
