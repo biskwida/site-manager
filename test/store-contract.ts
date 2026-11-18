@@ -211,6 +211,17 @@ export function storeContract(
       expect(await s.findMediaByPath(`${v.id}/cutouts/p1.png`)).toEqual(m);
     });
 
+    it("lists media under a path prefix, and answers [] (not an error) when there is none", async () => {
+      const s = await make();
+      const v = await s.createVenue({ slug: "t8p", name: "Test" });
+      // Seen live 2026-10-24: the Supabase store threw "not found" on an empty result, so every first restyle failed.
+      expect(await s.listMediaByPathPrefix(v.id, "restyle/")).toEqual([]);
+      const m = await s.saveMedia(v.id, new Uint8Array([1]), "image/jpeg", { name: "restyle/src/1.jpg" });
+      await s.saveMedia(v.id, new Uint8Array([2]), "image/jpeg");
+      expect((await s.listMediaByPathPrefix(v.id, "restyle/")).map((x) => x.id)).toEqual([m.id]);
+      expect(await s.listMediaByPathPrefix(v.id, "restyle/other/")).toEqual([]);
+    });
+
     it("stores media and conversations", async () => {
       const s = await make();
       const v = await s.createVenue({ slug: "t8", name: "Test" });
