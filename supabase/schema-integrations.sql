@@ -38,13 +38,13 @@ create index if not exists destination_syncs_venue_idx on public.destination_syn
 -- One constraint for all: a second add with a narrower list would fail on a database that already has those rows.
 alter table public.changes drop constraint if exists changes_entity_check;
 alter table public.changes add constraint changes_entity_check
-  check (entity in ('venue', 'category', 'item', 'holiday', 'announcement', 'media', 'site_text', 'wp_page', 'wp_media', 'wp_option', 'wp_menu', 'wp_product', 'social_post', 'social_reply', 'social_moderate', 'boost_plan'));
+  check (entity in ('venue', 'category', 'item', 'holiday', 'announcement', 'media', 'site_text', 'wp_page', 'wp_media', 'wp_option', 'wp_menu', 'wp_product', 'shopify_product', 'shopify_page', 'social_post', 'social_reply', 'social_moderate', 'boost_plan'));
 
 -- Social posting (2026-10-11): the venue's Facebook Page and Instagram account as destinations (the social_post entity is in
 -- changes_entity_check above). Apply only this file live: npm run db:apply -- schema-integrations.sql
 alter table public.venue_destinations drop constraint if exists venue_destinations_kind_check;
 alter table public.venue_destinations add constraint venue_destinations_kind_check
-  check (kind in ('wordpress', 'google', 'github', 'facebook', 'instagram'));
+  check (kind in ('wordpress', 'google', 'github', 'facebook', 'instagram', 'shopify'));
 
 -- One push per sync row at a time (claimSync): a run sets leased_until before pushing and clears it after; a row whose lease
 -- ended (a crashed run) can be taken again. Social track, 2026-10-11.

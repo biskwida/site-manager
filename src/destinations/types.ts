@@ -2,6 +2,7 @@
 import type { Change, ChangeSet, SiteState, Venue } from "../domain/types";
 import type { Destination, DestinationKind } from "../store/types";
 import type { GoogleCreds } from "./google-api";
+import type { ShopifyCreds } from "./shopify-client";
 
 export interface PushContext {
   venue: Venue;
@@ -32,6 +33,8 @@ export interface PushContext {
   loadSite?: () => Promise<SiteState>;
   /** Claudia's Google OAuth client; null when GOOGLE_CLIENT_ID / GOOGLE_CLIENT_SECRET are not set. */
   google?: GoogleCreds | null;
+  /** Claudia's Shopify app credentials (token refresh); null when SHOPIFY_CLIENT_ID / SHOPIFY_CLIENT_SECRET are not set. */
+  shopify?: ShopifyCreds | null;
 }
 export type PushResult =
   | { ok: true; result: Record<string, unknown>; line: { bg: string; en: string } }

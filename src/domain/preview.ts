@@ -5,6 +5,7 @@ import { colorName, inkFor, INK_LIGHT } from "./color";
 import { commentModeLabel, commentPreviewLines } from "./comment-preview";
 import { categoryName, formatPrice, itemName, keep, quote, tr, weekdayLabel } from "./format";
 import { socialPreviewLines } from "./social-preview";
+import { shopifyPreviewLines } from "./shopify-preview";
 import { wpPreviewLines } from "./wp-preview";
 import { MONO_TEXT_KEYS, WEEKDAYS, type Change, type Item, type Lang, type Row, type SiteState, type TextKey, type Theme, type WeekHours } from "./types";
 
@@ -219,6 +220,10 @@ export function renderPreview(s: SiteState, changes: Change[], lang: Lang, tz: s
       case "wp_edit_menu":
       case "wp_edit_product":
         lines.push(...wpPreviewLines(c, lang));
+        break;
+      case "shopify_edit_product":
+      case "shopify_edit_page":
+        lines.push(...shopifyPreviewLines(c, lang));
         break;
       case "social_post":
         lines.push(...socialPreviewLines(c, lang));

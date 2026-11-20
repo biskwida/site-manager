@@ -308,7 +308,7 @@ export const OP_NAMES: readonly OpName[] = [
   "set_text", "set_theme", "set_comment_mode",
 ];
 
-export type Entity = "venue" | "category" | "item" | "holiday" | "announcement" | "media" | "site_text" | WpEntity | SocialEntity | BoostEntity;
+export type Entity = "venue" | "category" | "item" | "holiday" | "announcement" | "media" | "site_text" | WpEntity | ShopifyEntity | SocialEntity | BoostEntity;
 export type Row = Record<string, unknown>;
 
 /**
@@ -318,7 +318,7 @@ export type Row = Record<string, unknown>;
  */
 export interface Change {
   position: number;
-  op: OpName | WpOpName | SocialOpName | BoostOpName;
+  op: OpName | WpOpName | ShopifyOpName | SocialOpName | BoostOpName;
   entity: Entity;
   entity_id: string;
   before: Row | null;
@@ -394,6 +394,17 @@ export function isWpEntity(e: string): e is WpEntity {
   return (WP_ENTITIES as readonly string[]).includes(e);
 }
 
+// --- Shopify write channel (appended 2026-11-20) ---
+/** Ops produced by the Shopify tools (src/agent/shopify-tools.ts) from live store data; never by planChange. */
+export type ShopifyOpName = "shopify_edit_product" | "shopify_edit_page";
+export const SHOPIFY_OP_NAMES: readonly ShopifyOpName[] = ["shopify_edit_product", "shopify_edit_page"];
+/** Entities that live in the owner's Shopify store: the store applies them as no-ops and the destination push writes them. entity_id is Shopify's global id (gid://shopify/Product/1). */
+export type ShopifyEntity = "shopify_product" | "shopify_page";
+export const SHOPIFY_ENTITIES: readonly ShopifyEntity[] = ["shopify_product", "shopify_page"];
+export function isShopifyEntity(e: string): e is ShopifyEntity {
+  return (SHOPIFY_ENTITIES as readonly string[]).includes(e);
+}
+
 // --- Social posting (social track, appended 2026-10-11) and comment replies (2026-10-15) ---
 /** Ops produced by the social tools (src/agent/social-tools.ts, src/agent/comment-tools.ts) and the comment poller; never by planChange. */
 export type SocialOpName = "social_post" | "social_reply" | "social_moderate";
@@ -419,9 +430,9 @@ export interface SocialPostRow {
   /** True only for a restyled picture (storage path under `/restyle/`) of a venue with `ai_label` on: Instagram then gets `is_ai_generated: true`, and the caption already carries the "made with AI" suffix. Absent otherwise. */
   ai_generated?: boolean;
 }
-/** Entities that live outside our database (the owner's WordPress site, Facebook, Instagram): applied as no-ops, written by destination pushes. */
-export function isExternalEntity(e: string): e is WpEntity | SocialEntity {
-  return isWpEntity(e) || isSocialEntity(e);
+/** Entities that live outside our database (the owner's WordPress site, Shopify store, Facebook, Instagram): applied as no-ops, written by destination pushes. */
+export function isExternalEntity(e: string): e is WpEntity | ShopifyEntity | SocialEntity {
+  return isWpEntity(e) || isShopifyEntity(e) || isSocialEntity(e);
 }
 
 // --- Comment replies (2026-10-15) ---

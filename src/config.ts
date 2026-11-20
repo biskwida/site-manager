@@ -69,6 +69,9 @@ export interface Config {
   /** Google OAuth client (Business Profile connect); the feature is off unless both are set. */
   googleClientId: string | null;
   googleClientSecret: string | null;
+  /** Claudia's Shopify app (client id and secret from the Shopify Dev Dashboard); the Shopify token refresh is off unless both are set. */
+  shopifyClientId: string | null;
+  shopifyClientSecret: string | null;
   /**
    * CHANNELS_ENABLED (default false): the wizard and dashboard offer Messenger, Instagram and WhatsApp owner links only when
    * true AND that channel's token is configured (META_PAGE_TOKEN / WHATSAPP_TOKEN), so a link never points at an app this
@@ -206,6 +209,8 @@ export function loadConfig(env: Env = process.env, opts: { lenient?: boolean } =
     instagramAppSecret: optional("INSTAGRAM_APP_SECRET"),
     googleClientId: optional("GOOGLE_CLIENT_ID"),
     googleClientSecret: optional("GOOGLE_CLIENT_SECRET"),
+    shopifyClientId: optional("SHOPIFY_CLIENT_ID"),
+    shopifyClientSecret: optional("SHOPIFY_CLIENT_SECRET"),
     messengerPageHandle: parseHandle(optional("MESSENGER_PAGE_HANDLE"), ["m.me"]),
     instagramUsername: parseHandle(optional("INSTAGRAM_USERNAME"), ["instagram.com", "www.instagram.com"]),
     whatsappNumber: optional("WHATSAPP_NUMBER")?.replace(/\D/g, "") || null,
