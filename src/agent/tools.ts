@@ -2,6 +2,7 @@
 import { betaZodTool } from "@anthropic-ai/sdk/helpers/beta/zod";
 import { z } from "zod";
 import type { Messenger } from "../bot/messenger";
+import type { ShopifyClient } from "../destinations/shopify-client";
 import type { WordPressClient } from "../destinations/wordpress-client";
 import { isHoursChange } from "../destinations/google";
 import type { GoogleConfig } from "../destinations/google-api";
@@ -29,6 +30,7 @@ import { socialTools } from "./social-tools";
 import { visualTools } from "./visual-tools";
 import type { LiveComments } from "../social/comments-poll";
 import type { VisualClient } from "../visual/client";
+import { shopifyTools } from "./shopify-tools";
 import { wpTools } from "./wp-tools";
 
 export interface AgentDeps {
@@ -46,6 +48,8 @@ export interface AgentDeps {
   source?: ChangeSource;
   /** The venue's WordPress site, when connected (Task 6 registers the wp_* tools). */
   wordpress?: WordPressClient | null;
+  /** The venue's Shopify store, when connected (registers the shopify_* tools). */
+  shopify?: ShopifyClient | null;
   /** Connected networks (socialConnections): Facebook or Instagram registers social_post; any of the three registers the comment tools. `google` absent = not connected. */
   social?: { facebook: boolean; instagram: boolean; google?: boolean } | null;
   /** Reads Instagram and Facebook comments right now (list_comments runs it first); absent = list_comments answers from the saved comments only. */
@@ -395,7 +399,7 @@ export function makeTools(deps: AgentDeps) {
 
   // Task 11 appends schedule_changes, propose_bulk_price_change, check_allergens, undo here.
   const kit: ToolKit = { attempt, site, ctx, previews, mine, propose, getSet, ensureNoPending, ensureWithinLimit, ensureEntitled, cancelledThisTurn, lang };
-  return [getSite, getMenu, proposeChanges, cancelChangeSet, listChanges, ...extraTools(d, kit), ...wpTools(d, kit), ...socialTools(d, kit), ...commentTools(d, kit), ...visualTools(d, kit), ...boostTools(d, kit)];
+  return [getSite, getMenu, proposeChanges, cancelChangeSet, listChanges, ...extraTools(d, kit), ...wpTools(d, kit), ...shopifyTools(d, kit), ...socialTools(d, kit), ...commentTools(d, kit), ...visualTools(d, kit), ...boostTools(d, kit)];
 }
 
 /** What the shared helpers of makeTools expose to the second group of tools. */

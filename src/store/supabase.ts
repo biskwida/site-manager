@@ -2,7 +2,7 @@
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import type { BillingConfig } from "../billing/entitlements";
 import { COMMENT_LIMIT_DEFAULT, countsTowardLimit } from "../domain/limits";
-import { BILLING_STATUSES, isChatLang, isExternalEntity, isRecordOnlyEntity, PLAN_IDS, SITE_PLATFORMS, type BillingStatus, type BoostEntity, type CommentMode, type SocialEntity, type WpEntity } from "../domain/types";
+import { BILLING_STATUSES, isChatLang, isExternalEntity, isRecordOnlyEntity, PLAN_IDS, SITE_PLATFORMS, type BillingStatus, type BoostEntity, type CommentMode, type ShopifyEntity, type SocialEntity, type WpEntity } from "../domain/types";
 import type { Announcement, BusinessType, Category, Change, ChangeSet, ChatLang, Conversation, DeployInfo, DeployStatus, Holiday, InstagramImport, Item, Lang, Media, Member, Plan, Role, SitePlatform, SiteState, SiteText, SiteTextKey, TemplateId, TrialReminder, Venue, VenueStatus } from "../domain/types";
 import type { Place } from "../geo/osm";
 import type { WizardDraft } from "../wizard/schema";
@@ -164,7 +164,7 @@ const SET_SELECT = "*, changes(*)";
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 /** A venue filter that is not a uuid can match nothing (and Postgres would reject it). */
 const badVenue = (venueId?: string) => Boolean(venueId) && !UUID.test(venueId as string);
-const TABLE: Record<Exclude<Change["entity"], WpEntity | SocialEntity | BoostEntity>, string> = { venue: "venues", category: "categories", item: "items", holiday: "holidays", announcement: "announcements", media: "media", site_text: "site_texts" };
+const TABLE: Record<Exclude<Change["entity"], WpEntity | ShopifyEntity | SocialEntity | BoostEntity>, string> = { venue: "venues", category: "categories", item: "items", holiday: "holidays", announcement: "announcements", media: "media", site_text: "site_texts" };
 
 export class SupabaseStore implements Store {
   private db: SupabaseClient;

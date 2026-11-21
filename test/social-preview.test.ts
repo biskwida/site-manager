@@ -203,7 +203,7 @@ describe("schema and destination kinds", () => {
   it("the integrations SQL allows the facebook/instagram destinations and the social_post entity, idempotently", async () => {
     const { readFileSync } = await import("node:fs");
     const sql = readFileSync("supabase/schema-integrations.sql", "utf8");
-    expect(sql).toMatch(/drop constraint if exists venue_destinations_kind_check;\s*alter table public\.venue_destinations add constraint venue_destinations_kind_check\s*check \(kind in \('wordpress', 'google', 'github', 'facebook', 'instagram'\)\);/);
+    expect(sql).toMatch(/drop constraint if exists venue_destinations_kind_check;\s*alter table public\.venue_destinations add constraint venue_destinations_kind_check\s*check \(kind in \('wordpress', 'google', 'github', 'facebook', 'instagram', 'shopify'\)\);/);
     const entity = sql.match(/add constraint changes_entity_check\s*check \(entity in \(([^)]*)\)\);/g) ?? [];
     expect(entity.at(-1)).toContain("'social_post'");
     expect(entity.at(-1)).toContain("'wp_product'");

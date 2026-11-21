@@ -29,9 +29,11 @@ const LABELS: Record<string, [string, string]> = {
 };
 const WORDPRESS: [string, string] = ["🌐 Работя по WordPress сайта…", "🌐 Working on the WordPress site…"];
 
+const SHOPIFY: [string, string] = ["🛍️ Работя по Shopify магазина…", "🛍️ Working on the Shopify store…"];
+
 /** The status line for a tool step, or null for a tool without one (the status stays as it is). */
 export function progressLabel(tool: string, lang: Lang): string | null {
-  const pair = LABELS[tool] ?? (tool.startsWith("wp_") ? WORDPRESS : null);
+  const pair = LABELS[tool] ?? (tool.startsWith("wp_") ? WORDPRESS : tool.startsWith("shopify_") ? SHOPIFY : null);
   return pair ? pair[lang === "bg" ? 0 : 1] : null;
 }
 

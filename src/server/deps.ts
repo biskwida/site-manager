@@ -32,6 +32,7 @@ import type { SyncDeps } from "../destinations/sync";
 import { draftReply, type DraftFn } from "../social/comments-draft";
 import { makeLiveComments } from "../social/comments-poll";
 import { connectWordPress, wordPressClientFor } from "../destinations/connect";
+import { shopifyClientFor } from "../destinations/shopify-connect";
 import { instagramAccess } from "../agent/boost-tools";
 import { socialConnections } from "../agent/social-tools";
 import { httpVisualClient } from "../visual/client";
@@ -130,7 +131,8 @@ export async function makeServerDeps(o: DepsOptions): Promise<ServerDeps> {
   if (billing) s.billingConfig = billing.config;
   const destinationSecretKey = resolveSecretKey(config.destinationSecretKey, isMemory, log);
   const google = config.googleClientId && config.googleClientSecret ? { clientId: config.googleClientId, clientSecret: config.googleClientSecret } : null;
-  const sync: SyncDeps | null = destinationSecretKey ? { store: s, secretKey: destinationSecretKey, log, google } : null;
+  const shopify = config.shopifyClientId && config.shopifyClientSecret ? { clientId: config.shopifyClientId, clientSecret: config.shopifyClientSecret } : null;
+  const sync: SyncDeps | null = destinationSecretKey ? { store: s, secretKey: destinationSecretKey, log, google, shopify } : null;
   // Every apply (bot button, dashboard, tick, agent) goes through store2 so wp_* rows reach the site right after the apply.
   const store2: Store = sync ? withDestinationSync(s, sync) : s;
   // One classifier names the language of the owner's longer Latin-script words (botDeps) and of a customer's comment (the reply
@@ -198,10 +200,11 @@ export async function makeServerDeps(o: DepsOptions): Promise<ServerDeps> {
       console.error("[tick] per-webhook tick failed:", e instanceof Error ? e.message : e);
     }
     const wp = sync ? await wordPressClientFor({ store: s, secretKey: destinationSecretKey }, r.venueId).catch(() => null) : null;
+    const shop = sync ? await shopifyClientFor({ store: s, secretKey: destinationSecretKey, creds: shopify, fetch: o.fetch }, r.venueId).catch(() => null) : null;
     const social = sync ? await socialConnections(s, r.venueId).catch(() => null) : null;
     try {
       await runTurn(
-        { store: store2, venueId: r.venueId, chatRef: r.chatRef, member: r.member, messenger, now: () => new Date(), baseUrl: config.publicBaseUrl, wordpress: wp?.client ?? null, social, visual, liveComments: sync ? makeLiveComments(sync, () => new Date()) : null, instagramInsights: sync ? (venueId) => instagramAccess(sync, venueId) : null },
+        { store: store2, venueId: r.venueId, chatRef: r.chatRef, member: r.member, messenger, now: () => new Date(), baseUrl: config.publicBaseUrl, wordpress: wp?.client ?? null, shopify: shop, social, visual, liveComments: sync ? makeLiveComments(sync, () => new Date()) : null, instagramInsights: sync ? (venueId) => instagramAccess(sync, venueId) : null },
         { text: r.text, source: r.source, image: r.image, mediaId: r.mediaId, replyTo: r.replyTo },
         { model: config.agentModel, effort: config.agentEffort, apiKey: config.anthropicApiKey || undefined },
         o.client,
