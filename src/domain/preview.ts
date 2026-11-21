@@ -223,6 +223,7 @@ export function renderPreview(s: SiteState, changes: Change[], lang: Lang, tz: s
         break;
       case "shopify_edit_product":
       case "shopify_edit_page":
+      case "shopify_add_product":
         lines.push(...shopifyPreviewLines(c, lang));
         break;
       case "social_post":

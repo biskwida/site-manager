@@ -34,7 +34,7 @@ describe("shopify tools availability", () => {
     const { tools } = await setup({ shopify: null });
     expect(tools.map((t) => t.name).filter((n) => n.startsWith("shopify_"))).toEqual([]);
     const { tools: withShop } = await setup();
-    expect(withShop.map((t) => t.name).filter((n) => n.startsWith("shopify_"))).toEqual(["shopify_list_store", "shopify_read_product", "shopify_read_page", "shopify_edit_products", "shopify_edit_page"]);
+    expect(withShop.map((t) => t.name).filter((n) => n.startsWith("shopify_"))).toEqual(["shopify_list_store", "shopify_read_product", "shopify_read_page", "shopify_edit_products", "shopify_add_product", "shopify_edit_page"]);
   });
   it("refreshes an expired access token before the first read and stores the new pair", async () => {
     const { tools, shop, store, venue } = await setup({}, { expired: true });
@@ -169,5 +169,54 @@ describe("shopify_edit_page", () => {
     expect((await call(tools, "shopify_edit_page", { ...S, page_id: about.id, replacements: [{ find: "croissant", replace: "x" }] })).error).toMatch(/occurs 0 times/);
     expect((await call(tools, "shopify_edit_page", { ...S, page_id: about.id, body: "<p>x</p>", replacements: [{ find: "a", replace: "b" }] })).error).toMatch(/either body or replacements/);
     expect((await call(tools, "shopify_edit_page", { ...S, page_id: about.id, title: "About" })).error).toMatch(/Nothing would change/);
+  });
+});
+
+describe("shopify_add_product", () => {
+  const candle = { ...S, title: "Soy candle", description_html: "<p>Burns for 40 hours.</p>", price: "24" };
+  it("creates the product as a draft only after ✅, and undo deletes the draft", async () => {
+    const { tools, shop, apply } = await setup();
+    const r = await call(tools, "shopify_add_product", candle);
+    expect(r.preview).toBe("• Shopify: нов продукт (чернова) „Soy candle“\n  цена: 24.00 EUR\n  описание: „Burns for 40 hours.“\n  Остава скрит, докато не го активирате.");
+    expect(shop.products).toHaveLength(2); // nothing created yet
+    const decision = await apply(r.change_set_id as string);
+    expect(decision.edit?.full).toContain("Shopify: обновено ✅");
+    const made = shop.products.find((p) => p.title === "Soy candle");
+    expect(made).toMatchObject({ status: "DRAFT", descriptionHtml: "<p>Burns for 40 hours.</p>" });
+    expect(made?.variants[0].price).toBe("24.00");
+    const undo = await call(tools, "undo", { change_set_id: "last" });
+    expect(undo.preview).toBe("• Shopify: изтрива черновата на продукт „Soy candle“");
+    await apply(undo.change_set_id as string);
+    expect(shop.products.map((p) => p.title)).toEqual(["Linen shirt", "Blue mug"]);
+  });
+  it("undo leaves a product the owner has activated since", async () => {
+    const { tools, shop, apply } = await setup();
+    const r = await call(tools, "shopify_add_product", candle);
+    await apply(r.change_set_id as string);
+    shop.products.find((p) => p.title === "Soy candle")!.status = "ACTIVE";
+    const undo = await call(tools, "undo", { change_set_id: "last" });
+    const decision = await apply(undo.change_set_id as string);
+    expect(decision.edit?.full).toContain("Shopify: грешка: продуктът вече не е чернова и не е изтрит");
+    expect(shop.products).toHaveLength(3);
+  });
+  it("a retry after a failed price write prices the same product instead of creating a second one", async () => {
+    const { tools, shop, store, deps, apply } = await setup();
+    const r = await call(tools, "shopify_add_product", candle);
+    shop.failNext({ status: 503, root: "productVariantsBulkUpdate" }); // the product is created, then the price write hits an outage
+    await apply(r.change_set_id as string);
+    expect(shop.products.filter((p) => p.title === "Soy candle")).toHaveLength(1);
+    expect(shop.products.find((p) => p.title === "Soy candle")?.variants[0].price).toBe("0.00");
+    const row = (await store.listSyncs({ changeSetId: r.change_set_id as string }))[0];
+    expect(row.status).toBe("pending");
+    const { runDestinationQueue } = await import("@/src/destinations/sync");
+    await runDestinationQueue({ store: deps.store, secretKey: KEY, fetch: shop.fetch, log: () => undefined }, row.destination_id, T0, { force: true, venueId: deps.venueId });
+    expect(shop.products.filter((p) => p.title === "Soy candle")).toHaveLength(1);
+    expect(shop.products.find((p) => p.title === "Soy candle")?.variants[0].price).toBe("24.00");
+    expect((await store.getSync(row.id)).status).toBe("done");
+  });
+  it("refuses a name the store already has and a compare-at price that is not higher", async () => {
+    const { tools } = await setup();
+    expect((await call(tools, "shopify_add_product", { ...S, title: "blue mug", price: "10" })).error).toMatch(/already has a product named "Blue mug"/);
+    expect((await call(tools, "shopify_add_product", { ...S, title: "Vase", price: "10", compare_at_price: "9" })).error).toMatch(/must be higher than the price/);
   });
 });

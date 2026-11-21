@@ -12,11 +12,11 @@ export interface FakeVariant { id: string; title: string; price: string; compare
 export interface FakeProduct { id: string; title: string; handle: string; status: string; descriptionHtml: string; updatedAt: string; variants: FakeVariant[] }
 export interface FakePage { id: string; title: string; handle: string; isPublished: boolean; body: string; updatedAt: string }
 export interface FakeShopifyCall { path: string; root: string; variables: Record<string, unknown> }
-export type FakeShopifyFailure = { status: number } | { graphql: string } | { userError: string };
+export type FakeShopifyFailure = ({ status: number } | { graphql: string } | { userError: string }) & { /** Only a call of this root field fails; others pass and the failure waits. */ root?: string };
 
 type Json = Record<string, unknown>;
 const tok = (p: string) => `${p}${randomBytes(12).toString("hex")}`;
-const ROOTS = ["productVariantsBulkUpdate", "productUpdate", "pageUpdate", "products", "product", "pages", "page", "shop"] as const;
+const ROOTS = ["productVariantsBulkUpdate", "productUpdate", "productCreate", "productDelete", "pageUpdate", "products", "product", "pages", "page", "shop"] as const;
 
 export class FakeShopify {
   readonly shop = "smoke-shop.myshopify.com";
@@ -76,7 +76,7 @@ export class FakeShopify {
   }
 
   writes(): FakeShopifyCall[] {
-    return this.calls.filter((c) => /Update$/.test(c.root));
+    return this.calls.filter((c) => /(Update|Create|Delete)$/.test(c.root));
   }
 
   fetch: typeof fetch = async (input, init) => {
@@ -91,7 +91,7 @@ export class FakeShopify {
     const variables = (body.variables ?? {}) as Json;
     const root = ROOTS.find((r) => new RegExp(`[{\\s]${r}\\s*[({]`).test(query)) ?? "unknown";
     this.calls.push({ path: url.pathname, root, variables });
-    const failure = this.failures.shift();
+    const failure = this.failures[0] && (this.failures[0].root === undefined || this.failures[0].root === root) ? this.failures.shift() : undefined;
     if (failure && "status" in failure) return new Response("", { status: failure.status });
     if (failure && "graphql" in failure) return Response.json({ errors: [{ message: failure.graphql, extensions: { code: failure.graphql } }] });
     const userErrors = failure && "userError" in failure ? [{ field: ["input"], message: failure.userError }] : [];
@@ -139,6 +139,19 @@ export class FakeShopify {
           p.updatedAt = this.stamp();
         }
         return { productUpdate: { product: failed ? null : { id: p.id }, userErrors } };
+      }
+      case "productCreate": {
+        const input = (v.product ?? {}) as Json;
+        if (failed || typeof input.title !== "string" || !input.title) return { productCreate: { product: null, userErrors: failed ? userErrors : [{ field: ["title"], message: "Title can't be blank" }] } };
+        const p = this.addProduct({ title: input.title, descriptionHtml: typeof input.descriptionHtml === "string" ? input.descriptionHtml : "", status: typeof input.status === "string" ? input.status : "ACTIVE", variants: [{ title: "Default Title", price: "0.00" }] });
+        return { productCreate: { product: { id: p.id, variants: { nodes: p.variants.map((x) => ({ id: x.id })) } }, userErrors: [] } };
+      }
+      case "productDelete": {
+        const id = ((v.input ?? {}) as Json).id;
+        const i = this.products.findIndex((x) => x.id === id);
+        if (i < 0) return { productDelete: { deletedProductId: null, userErrors: [{ field: ["id"], message: "Product does not exist" }] } };
+        if (!failed) this.products.splice(i, 1);
+        return { productDelete: { deletedProductId: failed ? null : id, userErrors } };
       }
       case "productVariantsBulkUpdate": {
         const p = this.products.find((x) => x.id === v.productId);

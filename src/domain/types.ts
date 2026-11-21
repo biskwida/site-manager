@@ -396,9 +396,9 @@ export function isWpEntity(e: string): e is WpEntity {
 
 // --- Shopify write channel (appended 2026-11-20) ---
 /** Ops produced by the Shopify tools (src/agent/shopify-tools.ts) from live store data; never by planChange. */
-export type ShopifyOpName = "shopify_edit_product" | "shopify_edit_page";
-export const SHOPIFY_OP_NAMES: readonly ShopifyOpName[] = ["shopify_edit_product", "shopify_edit_page"];
-/** Entities that live in the owner's Shopify store: the store applies them as no-ops and the destination push writes them. entity_id is Shopify's global id (gid://shopify/Product/1). */
+export type ShopifyOpName = "shopify_edit_product" | "shopify_edit_page" | "shopify_add_product";
+export const SHOPIFY_OP_NAMES: readonly ShopifyOpName[] = ["shopify_edit_product", "shopify_edit_page", "shopify_add_product"];
+/** Entities that live in the owner's Shopify store: the store applies them as no-ops and the destination push writes them. entity_id is Shopify's global id (gid://shopify/Product/1); a product that does not exist yet (shopify_add_product) has a local id "new:<uuid>" and its Shopify id is in the push result. */
 export type ShopifyEntity = "shopify_product" | "shopify_page";
 export const SHOPIFY_ENTITIES: readonly ShopifyEntity[] = ["shopify_product", "shopify_page"];
 export function isShopifyEntity(e: string): e is ShopifyEntity {

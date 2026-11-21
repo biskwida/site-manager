@@ -65,6 +65,47 @@ async function pushProduct(client: ShopifyClient, c: Change): Promise<Record<str
   return { entity: "shopify_product", id: c.entity_id, fields: Object.keys(fields), variants: prices.length };
 }
 
+type Pushed = { entity?: unknown; source_id?: unknown; id?: unknown; variant_id?: unknown; priced?: unknown; deleted?: unknown };
+/** The entries earlier pushes stored for a locally-named new product (results are `{ pushed: [...] }`). */
+function createdIn(results: Record<string, unknown>[], sourceId: string): Pushed | null {
+  for (const r of results) for (const p of (Array.isArray(r.pushed) ? r.pushed : []) as Pushed[]) if (p.source_id === sourceId && typeof p.id === "string") return p;
+  return null;
+}
+
+/**
+ * A new product, always as a draft. The Shopify id is stored on the sync row right after the create (checkpoint), so a
+ * retry after a lost answer or a failed price write continues with the same product and never makes a second one.
+ */
+async function addProduct(client: ShopifyClient, c: Change, ctx: PushContext, pushed: Record<string, unknown>[]): Promise<Record<string, unknown>> {
+  const a = c.after ?? {};
+  let made = createdIn(ctx.prior ?? [], c.entity_id);
+  if (!made) {
+    const r = await client.createProduct({ title: String(a.title ?? ""), description_html: typeof a.description_html === "string" ? a.description_html : undefined, status: "DRAFT" });
+    made = { entity: "shopify_product", source_id: c.entity_id, id: r.id, variant_id: r.variant_id, priced: false };
+    await ctx.checkpoint?.({ pushed: [...pushed, made] });
+  }
+  if (made.priced !== true && typeof made.variant_id === "string" && typeof a.price === "string") {
+    await client.updateVariantPrices(String(made.id), [{ id: made.variant_id, price: a.price, ...(typeof a.compare_at_price === "string" ? { compare_at_price: a.compare_at_price } : {}) }]);
+  }
+  return { ...made, priced: true };
+}
+
+/** Undo of a new product: deletes it, but only while it is still the draft Claudia made. A product the owner has published since stays. */
+async function removeAddedProduct(client: ShopifyClient, c: Change, ctx: PushContext): Promise<Record<string, unknown>> {
+  const original = ctx.changeSet.undoes_id && ctx.resultsOf ? createdIn(await ctx.resultsOf(ctx.changeSet.undoes_id), c.entity_id) : null;
+  if (!original) return { entity: "shopify_product", source_id: c.entity_id, deleted: false }; // it was never created
+  let current;
+  try {
+    current = await client.product(String(original.id));
+  } catch (e) {
+    if (e instanceof ShopifyApiError && e.code === "sm_shopify_missing") return { entity: "shopify_product", source_id: c.entity_id, deleted: false }; // already gone
+    throw e;
+  }
+  if (current.status !== "DRAFT") throw new ShopifyApiError(409, "sm_shopify_published", `"${current.title}" is no longer a draft, so it was not deleted.`, { retry: false });
+  await client.deleteProduct(current.id);
+  return { entity: "shopify_product", source_id: c.entity_id, deleted: true };
+}
+
 async function pushPage(client: ShopifyClient, c: Change): Promise<Record<string, unknown>> {
   const a = c.after ?? {};
   const b = c.before ?? {};
@@ -97,6 +138,10 @@ export const shopifyAdapter: DestinationAdapter = {
       }
       const client = new ShopifyClient({ shop, accessToken: secrets.access_token, fetch: ctx.fetch });
       for (const c of ctx.changes) {
+        if (c.op === "shopify_add_product") {
+          pushed.push(c.after ? await addProduct(client, c, ctx, pushed) : await removeAddedProduct(client, c, ctx));
+          continue;
+        }
         if (!c.after) continue;
         if (c.entity === "shopify_product") pushed.push(await pushProduct(client, c));
         else if (c.entity === "shopify_page") pushed.push(await pushPage(client, c));

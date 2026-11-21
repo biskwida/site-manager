@@ -205,6 +205,30 @@ export class ShopifyClient {
     ShopifyClient.check(d.productUpdate?.userErrors);
   }
 
+  /** Creates a product (use status DRAFT so nothing shows in the shop yet). Returns its id and the id of its single default variant. */
+  async createProduct(fields: { title: string; description_html?: string; status: string }): Promise<{ id: string; variant_id: string | null }> {
+    const product: Record<string, unknown> = { title: fields.title, status: fields.status };
+    if (fields.description_html !== undefined) product.descriptionHtml = fields.description_html;
+    const d = await this.gql<{ productCreate: { product: { id: string; variants: { nodes: { id: string }[] } } | null; userErrors: unknown } | null }>(
+      "mutation($product: ProductCreateInput!) { productCreate(product: $product) { product { id variants(first: 1) { nodes { id } } } userErrors { field message } } }",
+      { product },
+    );
+    ShopifyClient.check(d.productCreate?.userErrors);
+    const made = d.productCreate?.product;
+    if (!made) throw new ShopifyApiError(422, "sm_shopify_invalid", "Shopify did not create the product.");
+    return { id: made.id, variant_id: made.variants.nodes[0]?.id ?? null };
+  }
+
+  /** Deletes a product for good. True when it existed. */
+  async deleteProduct(id: string): Promise<boolean> {
+    const d = await this.gql<{ productDelete: { deletedProductId: string | null; userErrors: unknown } | null }>(
+      "mutation($input: ProductDeleteInput!) { productDelete(input: $input) { deletedProductId userErrors { field message } } }",
+      { input: { id } },
+    );
+    ShopifyClient.check(d.productDelete?.userErrors);
+    return Boolean(d.productDelete?.deletedProductId);
+  }
+
   async updateVariantPrices(productId: string, variants: ShopifyVariantPrice[]): Promise<void> {
     const input = variants.map((v) => {
       const row: Record<string, unknown> = { id: v.id };

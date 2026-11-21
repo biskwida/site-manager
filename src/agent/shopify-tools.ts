@@ -1,6 +1,7 @@
 // src/agent/shopify-tools.ts
 // Agent tools for a connected Shopify store. Every write becomes a change set with shopify_* rows built from the
 // store's live values; the push to Shopify happens only after the owner approves (src/destinations/store-hook.ts).
+import { randomUUID } from "node:crypto";
 import { betaZodTool } from "@anthropic-ai/sdk/helpers/beta/zod";
 import { z } from "zod";
 import { sameMoney } from "../destinations/shopify";
@@ -39,6 +40,13 @@ export const ShopifyEditProductsSchema = z.object({
     .min(1)
     .max(50)
     .describe("Every product this request changes, in ONE call: a second call would be a second proposal."),
+});
+export const ShopifyAddProductSchema = z.object({
+  ...Summary,
+  title: z.string().min(1).max(255).describe("Product name, in the language of the store's other products"),
+  description_html: z.string().optional().describe("Description as simple HTML (<p>, <ul>, <strong>)"),
+  price: Price,
+  compare_at_price: Price.optional().describe("Only for a product that starts on sale: the crossed-out old price"),
 });
 export const ShopifyEditPageSchema = z.object({
   ...Summary,
@@ -179,6 +187,25 @@ export function shopifyTools(d: AgentDeps, k: ToolKit) {
       }),
   });
 
+  const addProduct = betaZodTool({
+    name: "shopify_add_product",
+    description: "Propose a new Shopify product with one price. After ✅ it is created as a DRAFT (hidden from the shop); the owner activates it by asking you to set its status to ACTIVE, or in the Shopify admin. Photos, options (size, colour) and stock are added in the Shopify admin for now: say so in one sentence.",
+    inputSchema: ShopifyAddProductSchema,
+    run: (input) =>
+      k.attempt(async () => {
+        requireOwner();
+        const title = input.title.trim();
+        if (input.compare_at_price !== undefined && Number(input.compare_at_price) <= Number(input.price)) throw new Error(`The compare-at price (${input.compare_at_price}) must be higher than the price (${input.price}); it is the crossed-out old price of a sale.`);
+        const [info, existing] = await api(() => Promise.all([shop.shop(), shop.listProducts(50, title)]));
+        const twin = existing.products.find((p) => p.title.trim().toLowerCase() === title.toLowerCase());
+        if (twin) throw new Error(`The store already has a product named "${twin.title}" (${twin.id}); change that one with shopify_edit_products, or ask the owner whether they want a second one under another name.`);
+        const after: Row = { title, price: input.price, currency: info.currency, status: "DRAFT" };
+        if (input.description_html) after.description_html = input.description_html;
+        if (input.compare_at_price !== undefined) after.compare_at_price = input.compare_at_price;
+        return propose(input.summary_bg, input.summary_en, [{ position: 0, op: "shopify_add_product", entity: "shopify_product", entity_id: `new:${randomUUID()}`, before: null, after }]);
+      }),
+  });
+
   const editPage = betaZodTool({
     name: "shopify_edit_page",
     description: "Propose a Shopify page edit: a new title, exact text replacements (preferred) or a full new body. Nothing changes in the store until the owner taps ✅.",
@@ -206,5 +233,5 @@ export function shopifyTools(d: AgentDeps, k: ToolKit) {
       }),
   });
 
-  return [listStore, readProduct, readPage, editProducts, editPage];
+  return [listStore, readProduct, readPage, editProducts, addProduct, editPage];
 }

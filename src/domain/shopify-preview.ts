@@ -45,6 +45,15 @@ export function shopifyPreviewLines(c: Change, lang: Lang): string[] {
       }
       return lines;
     }
+    case "shopify_add_product": {
+      const row = c.after ?? c.before ?? {};
+      if (c.after === null) return [`• Shopify: ${tr(lang, "изтрива черновата на продукт", "deletes the draft product")} ${named(str(row.title))}`];
+      const lines = [`• Shopify: ${tr(lang, "нов продукт (чернова)", "new product (draft)")} ${named(str(row.title))}`, `  ${tr(lang, "цена", "price")}: ${money(row.price, str(row.currency))}`];
+      if (row.compare_at_price) lines.push(`  ${tr(lang, "стара цена (зачеркната)", "compare-at price")}: ${money(row.compare_at_price, str(row.currency))}`);
+      if (row.description_html) lines.push(`  ${tr(lang, "описание", "description")}: ${q(strip(str(row.description_html)))}`);
+      lines.push(`  ${tr(lang, "Остава скрит, докато не го активирате.", "It stays hidden until you activate it.")}`);
+      return lines;
+    }
     case "shopify_edit_page": {
       const name = str(b.page_title) || str(a.page_title) || c.entity_id;
       const lines = [`• Shopify: ${tr(lang, "страница", "page")} ${named(name)}`];
