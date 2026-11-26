@@ -7,6 +7,43 @@ import type { Changed } from "./types";
 const POLL_MS = 5000;
 const CLOCK_MS = 15000;
 
+/** The bits of `document` and `window` that whileVisible uses, so tests can pass fakes. */
+export interface VisibilityEnv {
+  doc: Pick<Document, "visibilityState" | "addEventListener" | "removeEventListener">;
+  win: Pick<Window, "setInterval" | "clearInterval">;
+}
+
+/**
+ * Runs `tick` every `ms` while the tab is visible, and returns a function that stops it. A tab left open in the background
+ * (a café screen, a forgotten browser tab) would otherwise call the feed every 5 s around the clock. When the tab becomes
+ * visible again `tick` runs at once, so the page is never more than one request stale.
+ */
+export function whileVisible(tick: () => void, ms: number, env: VisibilityEnv = { doc: document, win: window }): () => void {
+  const { doc, win } = env;
+  let timer: number | undefined;
+  const start = () => {
+    if (timer === undefined) timer = win.setInterval(tick, ms);
+  };
+  const pause = () => {
+    if (timer !== undefined) win.clearInterval(timer);
+    timer = undefined;
+  };
+  const onVisibility = () => {
+    if (doc.visibilityState === "hidden") {
+      pause();
+    } else if (timer === undefined) {
+      tick();
+      start();
+    }
+  };
+  if (doc.visibilityState !== "hidden") start();
+  doc.addEventListener("visibilitychange", onVisibility);
+  return () => {
+    pause();
+    doc.removeEventListener("visibilitychange", onVisibility);
+  };
+}
+
 function signature(s: SiteState): Map<string, string> {
   const m = new Map<string, string>();
   for (const i of s.items) m.set(i.id, JSON.stringify([i.name_bg, i.name_en, i.desc_bg, i.desc_en, i.price_eur, i.allergens, i.image_media_id, i.sold_out_until, i.is_special, i.special_expires_at, i.active]));
@@ -15,7 +52,7 @@ function signature(s: SiteState): Map<string, string> {
 }
 
 /**
- * Polls `feedUrl` (the public feed: `{ state: SiteState }`) every 5 s while `live`. `changed` maps ids whose content just
+ * Polls `feedUrl` (the public feed: `{ state: SiteState }`) every 5 s while `live` and the tab is visible. `changed` maps ids whose content just
  * changed to the change time, for the flash. No realtime: this hook also runs inside deployed venue sites that have no Supabase keys.
  * While not live (draft previews, the wizard preview) the rendered state follows `initial`, so the wizard can type into it.
  */
@@ -47,10 +84,10 @@ export function useLiveSite(initial: SiteState, feedUrl: string, live: boolean):
         // keep the last good state; the next poll retries
       }
     };
-    const poll = window.setInterval(() => void load(), POLL_MS);
+    const cancel = whileVisible(() => void load(), POLL_MS);
     return () => {
       stop = true;
-      window.clearInterval(poll);
+      cancel();
     };
     // `initial` only seeds the first signature; the page remounts the template (keyed) when the server state source changes.
     // eslint-disable-next-line react-hooks/exhaustive-deps
